@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" font-family="Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <!-- Thesis -->
+  <text x="1000" y="64" text-anchor="middle" fill="#c0caf5" font-size="34" font-weight="bold">frontend utils::is_non_blank delegates to shared::strings</text>
+
+  <!-- BEFORE / AFTER labels -->
+  <text x="500" y="126" text-anchor="middle" fill="#f7768e" font-size="26" font-weight="bold" letter-spacing="4">BEFORE</text>
+  <text x="1500" y="126" text-anchor="middle" fill="#9ece6a" font-size="26" font-weight="bold" letter-spacing="4">AFTER</text>
+  <line x1="1000" y1="96" x2="1000" y2="1140" stroke="#565f89" stroke-width="2" stroke-dasharray="8 8"/>
+
+  <!-- BEFORE -->
+  <g>
+    <text x="180" y="200" fill="#a9b1d6" font-size="19" font-weight="bold">frontend/src/utils.rs: own body</text>
+
+    <rect x="180" y="230" width="640" height="150" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="200" y="262" fill="#565f89" font-size="13">same two lines as shared, again</text>
+    <text x="200" y="294" fill="#e6e9f5" font-size="15" font-family="monospace">pub fn is_non_blank(s: &amp;str) -&gt; bool {</text>
+    <text x="220" y="320" fill="#e6e9f5" font-size="15" font-family="monospace">!s.trim().is_empty()</text>
+    <text x="200" y="346" fill="#e6e9f5" font-size="15" font-family="monospace">}</text>
+
+    <rect x="180" y="400" width="640" height="120" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="200" y="432" fill="#565f89" font-size="13">~30 call sites hang off the local name</text>
+    <text x="200" y="464" fill="#e6e9f5" font-size="15" font-family="monospace">utils::is_non_blank(...) in guards,</text>
+    <text x="200" y="490" fill="#565f89" font-size="13" font-family="monospace">disabled= flags, filter closures</text>
+
+    <rect x="180" y="540" width="640" height="96" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="200" y="572" fill="#565f89" font-size="13">non_blank / owned_non_blank build on it</text>
+    <text x="200" y="602" fill="#e6e9f5" font-size="15" font-family="monospace">is_non_blank(s).then(|| s.trim())</text>
+
+    <rect x="150" y="680" width="700" height="220" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="180" y="718" fill="#f7768e" font-size="19" font-weight="bold">Last duplicate of the series:</text>
+    <text x="180" y="754" fill="#c0caf5" font-size="16">- #1940/#1941 moved backend + claude-lib</text>
+    <text x="180" y="782" fill="#c0caf5" font-size="16">- frontend still re-spelled the body</text>
+    <text x="180" y="810" fill="#c0caf5" font-size="16">- a behavior fix would need both edits</text>
+  </g>
+
+  <!-- AFTER -->
+  <g>
+    <text x="1180" y="200" fill="#a9b1d6" font-size="19" font-weight="bold">One delegation, zero call-site churn:</text>
+
+    <rect x="1180" y="230" width="640" height="150" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1200" y="262" fill="#9ece6a" font-size="13">frontend/src/utils.rs (now)</text>
+    <text x="1200" y="294" fill="#e6e9f5" font-size="15" font-family="monospace">shared::strings::is_non_blank(s)</text>
+    <text x="1200" y="324" fill="#565f89" font-size="13" font-family="monospace">+4 / -3, name + tests unchanged</text>
+    <text x="1200" y="350" fill="#565f89" font-size="13" font-family="monospace">same file already re-exports shared::fmt</text>
+
+    <rect x="1180" y="400" width="640" height="120" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="1200" y="432" fill="#565f89" font-size="13">all call sites untouched</text>
+    <text x="1200" y="464" fill="#e6e9f5" font-size="15" font-family="monospace">utils::is_non_blank(...) resolves same</text>
+    <text x="1200" y="490" fill="#565f89" font-size="13" font-family="monospace">non_blank chain flows through shared</text>
+
+    <rect x="1180" y="540" width="640" height="96" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="1200" y="572" fill="#565f89" font-size="13">Cargo.toml already had it (line 12)</text>
+    <text x="1200" y="602" fill="#e6e9f5" font-size="15" font-family="monospace">shared = { path = "../shared" }</text>
+
+    <rect x="1150" y="680" width="700" height="220" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1180" y="718" fill="#9ece6a" font-size="19" font-weight="bold">Same behavior, single spelling:</text>
+    <text x="1180" y="754" fill="#c0caf5" font-size="16">- one body for every blank check</text>
+    <text x="1180" y="782" fill="#c0caf5" font-size="16">- no new dependency, no WASM risk</text>
+    <text x="1180" y="810" fill="#c0caf5" font-size="16">- archive-format copy stays: no shared dep</text>
+  </g>
+
+  <!-- bottom strip -->
+  <text x="500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">PR #1942 - no behavior change, DRY only</text>
+  <text x="1500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">frontend utils 8 passed, clippy clean</text>
+</svg>
