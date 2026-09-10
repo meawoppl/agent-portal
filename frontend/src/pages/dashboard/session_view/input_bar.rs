@@ -1171,7 +1171,7 @@ mod tests {
         // The bar's only normalisation is `.trim()` — see
         // `dispatch_text_send`. We mirror it here so the test is a real
         // contract pin and not a tautology.
-        !s.trim().is_empty()
+        crate::utils::is_non_blank(s)
     }
 
     #[test]

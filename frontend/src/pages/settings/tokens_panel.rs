@@ -303,7 +303,7 @@ pub fn tokens_panel(props: &TokensPanelProps) -> Html {
             let created_token = created_token.clone();
             let fetch_tokens = fetch_tokens.clone();
 
-            if form_data.name.trim().is_empty() {
+            if !utils::is_non_blank(&form_data.name) {
                 return;
             }
 

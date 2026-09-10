@@ -103,7 +103,7 @@ impl Component for ShareDialog {
                 true
             }
             ShareDialogMsg::AddMember => {
-                if self.email_input.trim().is_empty() {
+                if !utils::is_non_blank(&self.email_input) {
                     return false;
                 }
                 let session_id = ctx.props().session_id;

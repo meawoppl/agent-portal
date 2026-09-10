@@ -11,6 +11,7 @@
 //! compact attachment chips instead of the prose. They live in one module with
 //! a round-trip test so the builder and parser cannot drift.
 
+use crate::utils;
 use shared::fmt::format_file_size;
 
 /// The fixed header line of the agent-facing notice. The wire format is
@@ -71,7 +72,7 @@ pub fn split_upload_notice(text: &str) -> Option<UploadNotice<'_>> {
         return None;
     }
     Some(UploadNotice {
-        user_text: user_text.filter(|t| !t.trim().is_empty()),
+        user_text: user_text.filter(|t| utils::is_non_blank(t)),
         files,
     })
 }

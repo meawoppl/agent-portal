@@ -9,6 +9,7 @@ use crate::components::copy_button::CopyButton;
 use crate::components::expandable::ExpandableText;
 use crate::components::markdown::render_markdown_for_session;
 use crate::components::tool_renderers::render_tool_use;
+use crate::utils;
 use shared::{AssistantMessage, AssistantUsage as UsageInfo};
 use shared::{Citation, ContentBlock, ToolResultContent};
 use uuid::Uuid;
@@ -291,7 +292,7 @@ fn render_block(block: &ContentBlock, session_id: Uuid) -> Option<Html> {
             html! {
                 <div class="thinking-block">
                     <span class="thinking-label" title={sig_title}>{ "thinking" }</span>
-                    if th.thinking.trim().is_empty() {
+                    if !utils::is_non_blank(&th.thinking) {
                         <div class="thinking-content muted" title="Thinking text was omitted by the model; the encrypted signature is preserved in the raw message.">
                             { "thinking omitted" }
                         </div>

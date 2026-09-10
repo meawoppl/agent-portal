@@ -1,5 +1,6 @@
 use super::tool_card::tool_card;
 use crate::components::diff::{DiffCard, DiffSource};
+use crate::utils;
 use codex_codes::io::items::{FileChangeItem, FileUpdateChange, PatchApplyStatus, PatchChangeKind};
 use yew::prelude::*;
 
@@ -49,7 +50,7 @@ pub(super) fn render_file_change_patch(changes: Option<&[FileUpdateChange]>) -> 
     let changes = changes.unwrap_or(&[]);
     let cards: Vec<Html> = changes
         .iter()
-        .filter(|c| !c.diff.trim().is_empty())
+        .filter(|c| utils::is_non_blank(&c.diff))
         .map(render_diff_card)
         .collect();
     if cards.is_empty() {
@@ -71,7 +72,7 @@ pub(super) fn render_file_change_patch(changes: Option<&[FileUpdateChange]>) -> 
 fn render_diff_card(c: &FileUpdateChange) -> Html {
     let kind_css = AttrValue::from(patch_kind_css(&c.kind));
     let path = AttrValue::from(c.path.clone());
-    if c.diff.trim().is_empty() {
+    if !utils::is_non_blank(&c.diff) {
         return html! {
             <div class="diff-card">
                 <div class="diff-card-header">

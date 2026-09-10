@@ -6,6 +6,7 @@
 
 use super::super::expandable::ExpandableText;
 use crate::components::markdown::linkify_urls;
+use crate::utils;
 use yew::prelude::*;
 
 /// How much output to show before the `ExpandableText` toggle collapses it —
@@ -37,7 +38,7 @@ pub fn command_result_card(props: &CommandResultCardProps) -> Html {
 
     html! {
         <div class={card_class}>
-            if let Some(desc) = props.description.as_ref().filter(|d| !d.trim().is_empty()) {
+            if let Some(desc) = props.description.as_ref().filter(|d| utils::is_non_blank(d)) {
                 <div class="command-result-intent">{ desc }</div>
             }
             <div class="command-result-command">

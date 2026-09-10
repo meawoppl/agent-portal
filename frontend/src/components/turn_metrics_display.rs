@@ -1,5 +1,6 @@
 //! Shared display helpers for turn-metrics UI surfaces.
 
+use crate::utils;
 use shared::AgentType;
 
 /// Compact integer for `"2.1k in / 547 out"` chips.
@@ -40,7 +41,7 @@ pub(crate) fn compact_model_label(model: &str) -> String {
 }
 
 pub(crate) fn is_displayable_model(model: &str) -> bool {
-    !model.trim().is_empty() && model != "<synthetic>"
+    utils::is_non_blank(model) && model != "<synthetic>"
 }
 
 /// Build the compact dashboard label for a model/tier pair.

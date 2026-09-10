@@ -11,6 +11,7 @@ use shared::api::{HistorySessionSummary, HistorySessionsResponse, DEFAULT_HISTOR
 use super::fetch::{fetch_json, Load};
 use super::filters::SessionFilter;
 use crate::components::turn_metrics_display::is_displayable_model;
+use crate::utils;
 use crate::Route;
 
 /// Rows requested per page. Must not exceed `MAX_HISTORY_PAGE_SIZE`, which the
@@ -139,7 +140,7 @@ fn stats_strip(resp: &HistorySessionsResponse, filter: &UseStateHandle<SessionFi
     // `owners` covers every filter *except* `user`, so when a user is selected
     // narrow it here — that keeps the tiles agreeing with the table while the
     // dropdown above still lists everyone.
-    let selected = filter.user_id.as_deref().filter(|s| !s.trim().is_empty());
+    let selected = filter.user_id.as_deref().filter(|s| utils::is_non_blank(s));
     let user_tiles = if resp.is_admin {
         resp.owners
             .iter()

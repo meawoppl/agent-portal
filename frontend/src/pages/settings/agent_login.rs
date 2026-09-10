@@ -292,7 +292,7 @@ impl AgentLoginModal {
                             <button
                                 class="agent-login-submit"
                                 onclick={on_submit}
-                                disabled={self.submitting || self.code_input.trim().is_empty()}
+                                disabled={self.submitting || !utils::is_non_blank(&self.code_input)}
                             >
                                 { if self.submitting { "Signing in…" } else { "Submit" } }
                             </button>
@@ -339,7 +339,7 @@ fn outcome_status(outcome: &AgentLoginOutcome) -> (&'static str, String) {
         let detail = outcome
             .message
             .as_deref()
-            .filter(|m| !m.trim().is_empty())
+            .filter(|m| utils::is_non_blank(m))
             .unwrap_or("sign-in did not complete");
         ("error", format!("Sign-in failed: {detail}"))
     }

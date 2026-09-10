@@ -123,7 +123,7 @@ pub async fn send_json(
 pub async fn error_body(resp: gloo_net::http::Response) -> String {
     let status = resp.status();
     match resp.text().await {
-        Ok(t) if !t.trim().is_empty() => t,
+        Ok(t) if is_non_blank(&t) => t,
         _ => format!("HTTP {status}"),
     }
 }
@@ -226,13 +226,22 @@ pub fn non_empty(opt: Option<&str>) -> Option<&str> {
     opt.map(str::trim).filter(|s| !s.is_empty())
 }
 
+/// True when `s` holds non-whitespace text.
+///
+/// Bool counterpart to [`non_blank`] for `if` guards, `disabled=` flags, and
+/// `filter` closures that only need the check, sparing them the repeated
+/// `!s.trim().is_empty()` shape.
+pub fn is_non_blank(s: &str) -> bool {
+    !s.trim().is_empty()
+}
+
 /// Keep a borrowed string only when it is non-blank.
 ///
 /// Borrowed counterpart to [`non_empty`] for call sites that already hold a
 /// `&str`/`String` instead of an `Option`. Trims before checking so
 /// whitespace-only input is treated as absent.
 pub fn non_blank(s: &str) -> Option<&str> {
-    non_empty(Some(s))
+    is_non_blank(s).then(|| s.trim())
 }
 
 /// Keep a trimmed owned copy of `s` only when it is non-blank.
@@ -286,6 +295,13 @@ mod tests {
         assert_eq!(non_empty(Some("")), None);
         assert_eq!(non_empty(Some("   ")), None);
         assert_eq!(non_empty(Some("  hi  ")), Some("hi"));
+    }
+
+    #[test]
+    fn is_non_blank_rejects_empty_and_whitespace_only() {
+        assert!(!is_non_blank(""));
+        assert!(!is_non_blank("   "));
+        assert!(is_non_blank("  hi  "));
     }
 
     #[test]
