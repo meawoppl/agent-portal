@@ -39,6 +39,7 @@
 
 pub mod scan;
 pub mod store;
+pub mod strings;
 pub use store::*;
 
 use chrono::NaiveDateTime;
@@ -366,7 +367,7 @@ pub fn merge_transcript_lines(
 pub fn parse_transcript_ndjson(ndjson: &[u8]) -> std::io::Result<Vec<ArchiveMessageLine>> {
     String::from_utf8_lossy(ndjson)
         .lines()
-        .filter(|l| !l.trim().is_empty())
+        .filter(|l| strings::is_non_blank(l))
         .map(|l| {
             serde_json::from_str(l).map_err(|e| {
                 std::io::Error::new(std::io::ErrorKind::InvalidData, format!("bad line: {e}"))
