@@ -16,6 +16,7 @@ pub mod io_task;
 pub mod login;
 pub mod proxy_session;
 mod spawn;
+pub mod strings;
 pub mod transcript;
 
 pub use agent::ClaudeAgent;
