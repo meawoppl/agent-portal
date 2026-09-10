@@ -77,8 +77,8 @@ pub fn fork_dialog(props: &ForkDialogProps) -> Html {
                 directory_mode: *mode,
                 working_directory: (*mode == ForkDirectoryMode::Other)
                     .then(|| other_directory.trim().to_string()),
-                model: (!model.trim().is_empty()).then(|| (*model).clone()),
-                divergence_prompt: (!prompt.trim().is_empty()).then(|| prompt.trim().to_string()),
+                model: utils::owned_non_blank(&model),
+                divergence_prompt: utils::owned_non_blank(&prompt),
                 fork_point_turn_id: None,
             };
             submitting.set(true);
