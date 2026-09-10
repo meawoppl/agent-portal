@@ -23,6 +23,7 @@ pub use transport::{LogTransport, PushError, PushTransport, SendOutcome};
 pub use webpush::WebPushTransport;
 
 use crate::models::PushSubscription;
+use crate::strings::is_non_blank;
 use shared::api::{NotificationContentDetail, NotificationPrefs, PushPlatform};
 use std::path::PathBuf;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -253,7 +254,7 @@ impl NotificationEvent {
                 NotificationContentDetail::Generic => "Permission needed".to_string(),
                 NotificationContentDetail::ToolName => format!("Permission needed: {tool_name}"),
                 NotificationContentDetail::Snippet => match input_snippet {
-                    Some(snippet) if !snippet.trim().is_empty() => cap_snippet(&format!(
+                    Some(snippet) if is_non_blank(&snippet) => cap_snippet(&format!(
                         "Permission needed: {tool_name} — {}",
                         snippet.trim()
                     )),

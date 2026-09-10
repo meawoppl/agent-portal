@@ -34,6 +34,7 @@ use tracing::{info, warn};
 
 use crate::db::DbConnection;
 use crate::models::{NewUser, NewUserIdentity, User, UserIdentity};
+use crate::strings::is_non_blank;
 
 /// Provider key for Google logins, as stored in `user_identities.provider`.
 pub const PROVIDER_GOOGLE: &str = "google";
@@ -91,7 +92,7 @@ pub fn resolve_user(
 
     // Everything below needs a trustworthy address.
     let email = match (&identity.email, identity.email_verified) {
-        (Some(email), true) if !email.trim().is_empty() => email.trim().to_string(),
+        (Some(email), true) if is_non_blank(email) => email.trim().to_string(),
         _ => {
             warn!(
                 target: "auth_audit",

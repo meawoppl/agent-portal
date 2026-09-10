@@ -48,6 +48,7 @@ use crate::auth::extract_user;
 use crate::errors::AppError;
 use crate::handlers::media_store::{parse_range, RangeOutcome};
 use crate::models::User;
+use crate::strings::is_non_blank;
 use crate::AppState;
 
 fn archive_runtime(app_state: &AppState) -> Result<Arc<ArchiveRuntime>, AppError> {
@@ -510,7 +511,7 @@ pub async fn get_history_media(
     // last resort for bytes we don't recognize.
     let content_type = meta
         .map(|m| m.content_type)
-        .filter(|ct| !ct.trim().is_empty())
+        .filter(|ct| is_non_blank(ct))
         .or_else(|| shared::media::sniff_content_type(&bytes).map(str::to_string))
         .unwrap_or_else(|| "application/octet-stream".to_string());
 

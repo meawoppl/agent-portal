@@ -22,6 +22,7 @@ use crate::errors::AppError;
 use crate::handlers::responses::EmptyResponse;
 use crate::handlers::websocket::SessionManager;
 use crate::models::{jsonb_string_vec, NewSessionMember, NewSessionWithId};
+use crate::strings::is_non_blank;
 use crate::AppState;
 
 /// GET /api/launchers - List connected launchers for the current user
@@ -305,7 +306,7 @@ pub async fn fork_session(
         ForkDirectoryMode::Worktree | ForkDirectoryMode::Same => source.working_directory.clone(),
         ForkDirectoryMode::Other => req
             .working_directory
-            .filter(|path| !path.trim().is_empty())
+            .filter(|path| is_non_blank(path))
             .ok_or(AppError::BadRequest(
                 "working_directory is required for other-directory forks",
             ))?,
@@ -313,7 +314,7 @@ pub async fn fork_session(
     let name = normalize_custom_name(Some(&req.name))
         .unwrap_or_else(|| format!("{} (fork)", source.session_name));
     let mut claude_args: Vec<String> = jsonb_string_vec(&source.claude_args);
-    if let Some(model) = req.model.filter(|model| !model.trim().is_empty()) {
+    if let Some(model) = req.model.filter(|model| is_non_blank(model)) {
         claude_args = apply_model_override(claude_args, agent_type, model);
     }
 

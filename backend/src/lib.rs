@@ -18,6 +18,7 @@ pub mod models;
 pub mod push;
 pub mod routes;
 pub mod schema;
+pub mod strings;
 
 // Visible to the crate's own `#[cfg(test)]` modules AND to the separate
 // integration-test binaries (e.g. `tests/harness.rs`), which link the lib
