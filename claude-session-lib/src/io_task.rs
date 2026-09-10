@@ -24,6 +24,8 @@ use shared::PortalMessage;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
+use crate::strings::is_non_blank;
+
 /// Build a Claude `ControlResponse` from a neutral [`PermissionDecision`].
 ///
 /// Mirrors the allow/deny/remember mapping the generic `Session` used to do
@@ -196,7 +198,7 @@ fn plain_input_text(input: &ClaudeInput) -> Option<String> {
 }
 
 fn should_suppress_synthetic_user_echo(text: &str) -> bool {
-    text.trim().is_empty() || is_system_reminder_text(text)
+    !is_non_blank(text) || is_system_reminder_text(text)
 }
 
 fn is_system_reminder_text(text: &str) -> bool {
@@ -454,7 +456,7 @@ impl ClaudeIoState {
             return true;
         }
 
-        if echoed_text.trim().is_empty() {
+        if !is_non_blank(&echoed_text) {
             tracing::debug!("Dropping empty user echo from transcript");
             return true;
         }
