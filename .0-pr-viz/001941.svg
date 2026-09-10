@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" font-family="Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <!-- Thesis -->
+  <text x="1000" y="64" text-anchor="middle" fill="#c0caf5" font-size="34" font-weight="bold">claude-session-lib drops its local blank check for shared::strings</text>
+
+  <!-- BEFORE / AFTER labels -->
+  <text x="500" y="126" text-anchor="middle" fill="#f7768e" font-size="26" font-weight="bold" letter-spacing="4">BEFORE</text>
+  <text x="1500" y="126" text-anchor="middle" fill="#9ece6a" font-size="26" font-weight="bold" letter-spacing="4">AFTER</text>
+  <line x1="1000" y1="96" x2="1000" y2="1140" stroke="#565f89" stroke-width="2" stroke-dasharray="8 8"/>
+
+  <!-- BEFORE -->
+  <g>
+    <text x="180" y="200" fill="#a9b1d6" font-size="19" font-weight="bold">claude-session-lib/src/strings.rs: local copy</text>
+
+    <rect x="180" y="230" width="640" height="150" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="200" y="262" fill="#565f89" font-size="13">duplicates shared/src/strings.rs line-for-line</text>
+    <text x="200" y="294" fill="#e6e9f5" font-size="15" font-family="monospace">pub fn is_non_blank(s: &amp;str) -&gt; bool {</text>
+    <text x="220" y="320" fill="#e6e9f5" font-size="15" font-family="monospace">!s.trim().is_empty()</text>
+    <text x="200" y="346" fill="#e6e9f5" font-size="15" font-family="monospace">} + local unit test</text>
+
+    <rect x="180" y="400" width="640" height="120" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="200" y="432" fill="#565f89" font-size="13">stale doc comment on the copy</text>
+    <text x="200" y="462" fill="#e6e9f5" font-size="15" font-family="monospace">none is linkable from here ...</text>
+    <text x="200" y="488" fill="#565f89" font-size="13" font-family="monospace">but shared is already a dependency</text>
+
+    <rect x="180" y="540" width="640" height="96" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="200" y="572" fill="#565f89" font-size="13">io_task.rs:27 - sole consumer</text>
+    <text x="200" y="602" fill="#e6e9f5" font-size="15" font-family="monospace">use crate::strings::is_non_blank;</text>
+
+    <rect x="150" y="680" width="700" height="220" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="180" y="718" fill="#f7768e" font-size="19" font-weight="bold">One more copy, one stale claim:</text>
+    <text x="180" y="754" fill="#c0caf5" font-size="16">- same two-line body lives in two crates</text>
+    <text x="180" y="782" fill="#c0caf5" font-size="16">- comment denies what Cargo.toml allows</text>
+    <text x="180" y="810" fill="#c0caf5" font-size="16">- a behavior fix would need both edits</text>
+  </g>
+
+  <!-- AFTER -->
+  <g>
+    <text x="1180" y="200" fill="#a9b1d6" font-size="19" font-weight="bold">One re-export, zero call-site churn:</text>
+
+    <rect x="1180" y="230" width="640" height="150" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1200" y="262" fill="#9ece6a" font-size="13">claude-session-lib/src/strings.rs (now)</text>
+    <text x="1200" y="294" fill="#e6e9f5" font-size="15" font-family="monospace">pub use shared::strings::is_non_blank;</text>
+    <text x="1200" y="324" fill="#565f89" font-size="13" font-family="monospace">+4 / -25, tests live in shared</text>
+    <text x="1200" y="350" fill="#565f89" font-size="13" font-family="monospace">crate::strings path keeps working</text>
+
+    <rect x="1180" y="400" width="640" height="120" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="1200" y="432" fill="#565f89" font-size="13">io_task.rs untouched</text>
+    <text x="1200" y="464" fill="#e6e9f5" font-size="15" font-family="monospace">use crate::strings::is_non_blank;</text>
+    <text x="1200" y="490" fill="#565f89" font-size="13" font-family="monospace">echo + synthetic-suppress guards same</text>
+
+    <rect x="1180" y="540" width="640" height="96" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="1200" y="572" fill="#565f89" font-size="13">Cargo.toml already had it (line 10)</text>
+    <text x="1200" y="602" fill="#e6e9f5" font-size="15" font-family="monospace">shared = { path = "../shared" }</text>
+
+    <rect x="1150" y="680" width="700" height="220" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1180" y="718" fill="#9ece6a" font-size="19" font-weight="bold">Same behavior, smaller surface:</text>
+    <text x="1180" y="754" fill="#c0caf5" font-size="16">- one spelling of the blank check</text>
+    <text x="1180" y="782" fill="#c0caf5" font-size="16">- no new dependency, no call-site diff</text>
+    <text x="1180" y="810" fill="#c0caf5" font-size="16">- next guard reuses the shared name</text>
+  </g>
+
+  <!-- bottom strip -->
+  <text x="500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">PR #1941 - no behavior change, DRY only</text>
+  <text x="1500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">claude-session-lib + shared pass, clippy clean</text>
+</svg>
