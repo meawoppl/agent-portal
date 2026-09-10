@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" font-family="Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <!-- Thesis -->
+  <text x="1000" y="64" text-anchor="middle" fill="#c0caf5" font-size="34" font-weight="bold">Nine inline blank checks share one shared::strings home</text>
+
+  <!-- BEFORE / AFTER labels -->
+  <text x="500" y="126" text-anchor="middle" fill="#f7768e" font-size="26" font-weight="bold" letter-spacing="4">BEFORE</text>
+  <text x="1500" y="126" text-anchor="middle" fill="#9ece6a" font-size="26" font-weight="bold" letter-spacing="4">AFTER</text>
+  <line x1="1000" y1="96" x2="1000" y2="1140" stroke="#565f89" stroke-width="2" stroke-dasharray="8 8"/>
+
+  <!-- BEFORE -->
+  <g>
+    <text x="180" y="200" fill="#a9b1d6" font-size="19" font-weight="bold">backend: the same shape seven times</text>
+
+    <rect x="180" y="230" width="640" height="96" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="200" y="262" fill="#565f89" font-size="13">push/mod.rs - permission snippet guard</text>
+    <text x="200" y="292" fill="#e6e9f5" font-size="15" font-family="monospace">Some(snippet) if !snippet.trim()...</text>
+
+    <rect x="180" y="346" width="640" height="96" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="200" y="378" fill="#565f89" font-size="13">config.rs / identity.rs - env + email guards</text>
+    <text x="200" y="408" fill="#e6e9f5" font-size="15" font-family="monospace">Ok(v) if !v.trim().is_empty()</text>
+
+    <rect x="180" y="462" width="640" height="96" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="200" y="494" fill="#565f89" font-size="13">files / launchers / history - filter closures</text>
+    <text x="200" y="524" fill="#e6e9f5" font-size="15" font-family="monospace">.filter(|s| !s.trim().is_empty())</text>
+
+    <rect x="150" y="600" width="700" height="250" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="180" y="638" fill="#f7768e" font-size="19" font-weight="bold">Same shape, no shared home:</text>
+    <text x="180" y="674" fill="#c0caf5" font-size="16">- each site re-spells !s.trim().is_empty()</text>
+    <text x="180" y="702" fill="#c0caf5" font-size="16">- frontend / archive-format / claude-lib</text>
+    <text x="180" y="730" fill="#c0caf5" font-size="16">  already deduped (#1929-#1939) - backend</text>
+    <text x="180" y="758" fill="#c0caf5" font-size="16">  lagged behind with seven inline copies</text>
+    <text x="180" y="786" fill="#c0caf5" font-size="16">- the next blank check would copy it again</text>
+  </g>
+
+  <!-- AFTER -->
+  <g>
+    <text x="1180" y="200" fill="#a9b1d6" font-size="19" font-weight="bold">One two-line helper, nine call sites:</text>
+
+    <rect x="1180" y="230" width="640" height="180" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1200" y="262" fill="#9ece6a" font-size="13">shared/src/strings.rs (new, WASM-safe)</text>
+    <text x="1200" y="294" fill="#e6e9f5" font-size="15" font-family="monospace">pub fn is_non_blank(s: &amp;str) -&gt; bool {</text>
+    <text x="1220" y="320" fill="#e6e9f5" font-size="15" font-family="monospace">!s.trim().is_empty()</text>
+    <text x="1200" y="346" fill="#e6e9f5" font-size="15" font-family="monospace">}</text>
+    <text x="1200" y="376" fill="#565f89" font-size="13" font-family="monospace">// + unit test: "", "   ", "  hi  "</text>
+
+    <rect x="1180" y="430" width="640" height="150" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="1200" y="462" fill="#565f89" font-size="13">the nine call sites now</text>
+    <text x="1200" y="494" fill="#e6e9f5" font-size="15" font-family="monospace">shared::strings::is_non_blank(...)</text>
+    <text x="1200" y="520" fill="#565f89" font-size="13" font-family="monospace">guards, filters, and match arms unchanged</text>
+
+    <rect x="1150" y="620" width="700" height="230" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1180" y="658" fill="#9ece6a" font-size="19" font-weight="bold">Same behavior, single spelling:</text>
+    <text x="1180" y="694" fill="#c0caf5" font-size="16">- backend reuses shared (already a dep),</text>
+    <text x="1180" y="722" fill="#c0caf5" font-size="16">  no dependency surface grows</text>
+    <text x="1180" y="750" fill="#c0caf5" font-size="16">- shared-internal sites use crate::strings</text>
+    <text x="1180" y="778" fill="#c0caf5" font-size="16">- the next blank check reuses the name</text>
+  </g>
+
+  <!-- bottom strip -->
+  <text x="500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">PR #1940 - no behavior change, DRY only</text>
+  <text x="1500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">shared 203 passed, clippy + WASM clean</text>
+</svg>
