@@ -253,10 +253,12 @@ impl NotificationEvent {
                 NotificationContentDetail::Generic => "Permission needed".to_string(),
                 NotificationContentDetail::ToolName => format!("Permission needed: {tool_name}"),
                 NotificationContentDetail::Snippet => match input_snippet {
-                    Some(snippet) if !snippet.trim().is_empty() => cap_snippet(&format!(
-                        "Permission needed: {tool_name} — {}",
-                        snippet.trim()
-                    )),
+                    Some(snippet) if shared::strings::is_non_blank(snippet.as_str()) => {
+                        cap_snippet(&format!(
+                            "Permission needed: {tool_name} — {}",
+                            snippet.trim()
+                        ))
+                    }
                     // No excerpt available: degrade to the tool-name body
                     // rather than an empty tease.
                     _ => format!("Permission needed: {tool_name}"),

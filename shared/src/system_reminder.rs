@@ -85,7 +85,7 @@ pub fn split_collapsible_notices(text: &str) -> Vec<Segment> {
 /// whitespace-only run between blocks adds no segment, while the whitespace
 /// inside a kept segment is preserved verbatim.
 fn push_text_segment(segments: &mut Vec<Segment>, s: &str) {
-    if !s.trim().is_empty() {
+    if crate::strings::is_non_blank(s) {
         segments.push(Segment::Text(s.to_string()));
     }
 }

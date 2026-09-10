@@ -491,7 +491,7 @@ impl ServerConfig {
         // read by the Web Push sender, never by this endpoint. Unset = push
         // disabled (the vapid-key endpoint 404s).
         let vapid_public_key = match env::var("PORTAL_VAPID_PUBLIC_KEY") {
-            Ok(v) if !v.trim().is_empty() => {
+            Ok(v) if shared::strings::is_non_blank(&v) => {
                 log_source("PORTAL_VAPID_PUBLIC_KEY", true);
                 Some(v)
             }
