@@ -51,11 +51,26 @@ use tracing::{info, warn};
 
 use crate::AppState;
 
+/// Message/frame size ceiling for the proxy session socket.
+///
+/// `FileDownloadResponse` carries a whole file as ONE base64 text message
+/// (`claude-session-lib read_download_file`), and tokio-tungstenite does not
+/// fragment on send — so the receiver's frame limit is the effective file-size
+/// ceiling. The defaults (16 MiB frame / 64 MiB message) silently closed the
+/// socket for downloads over ~12 MiB on disk while `files::MAX_PULL_BYTES`
+/// advertised 25 MiB; from the user's side the session appeared to crash.
+/// 48 MiB covers the 25 MiB cap after base64 (~33.4 MiB) plus JSON envelope
+/// with room to spare. A unit test in `handlers::files` pins the invariant so
+/// the two constants cannot drift apart again.
+pub const SESSION_WS_MAX_MESSAGE_BYTES: usize = 48 * 1024 * 1024;
+
 pub async fn handle_session_websocket(
     ws: WebSocketUpgrade,
     State(app_state): State<Arc<AppState>>,
 ) -> Response {
-    ws.on_upgrade(|socket| proxy_socket::handle_session_socket(socket, app_state))
+    ws.max_frame_size(SESSION_WS_MAX_MESSAGE_BYTES)
+        .max_message_size(SESSION_WS_MAX_MESSAGE_BYTES)
+        .on_upgrade(|socket| proxy_socket::handle_session_socket(socket, app_state))
 }
 
 /// Upgrade for the dedicated binary port-forward data plane (#1506).
