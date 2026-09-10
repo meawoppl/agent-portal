@@ -79,6 +79,17 @@ pub fn split_collapsible_notices(text: &str) -> Vec<Segment> {
     split_notices(text, true)
 }
 
+/// Push `s` as a prose segment unless it is blank.
+///
+/// Both ends of the split gate on the trimmed text but keep the original: a
+/// whitespace-only run between blocks adds no segment, while the whitespace
+/// inside a kept segment is preserved verbatim.
+fn push_text_segment(segments: &mut Vec<Segment>, s: &str) {
+    if !s.trim().is_empty() {
+        segments.push(Segment::Text(s.to_string()));
+    }
+}
+
 fn split_notices(text: &str, include_task_notifications: bool) -> Vec<Segment> {
     let mut segments = Vec::new();
     let mut rest = text;
@@ -92,16 +103,12 @@ fn split_notices(text: &str, include_task_notifications: bool) -> Vec<Segment> {
         let close = after_open + close_rel;
 
         let before = &rest[..open];
-        if !before.trim().is_empty() {
-            segments.push(Segment::Text(before.to_string()));
-        }
+        push_text_segment(&mut segments, before);
         segments.push(kind.segment(rest[after_open..close].trim().to_string()));
         rest = &rest[close + close_tag.len()..];
     }
 
-    if !rest.trim().is_empty() {
-        segments.push(Segment::Text(rest.to_string()));
-    }
+    push_text_segment(&mut segments, rest);
     segments
 }
 
