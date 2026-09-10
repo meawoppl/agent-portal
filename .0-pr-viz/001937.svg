@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" font-family="Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <!-- Thesis -->
+  <text x="1000" y="64" text-anchor="middle" fill="#c0caf5" font-size="34" font-weight="bold">Two blank-gated Text pushes in split_notices share one helper</text>
+
+  <!-- BEFORE / AFTER labels -->
+  <text x="500" y="126" text-anchor="middle" fill="#f7768e" font-size="26" font-weight="bold" letter-spacing="4">BEFORE</text>
+  <text x="1500" y="126" text-anchor="middle" fill="#9ece6a" font-size="26" font-weight="bold" letter-spacing="4">AFTER</text>
+  <line x1="1000" y1="96" x2="1000" y2="1140" stroke="#565f89" stroke-width="2" stroke-dasharray="8 8"/>
+
+  <!-- BEFORE -->
+  <g>
+    <text x="180" y="200" fill="#a9b1d6" font-size="19" font-weight="bold">shared: the same gate twice in one function</text>
+
+    <rect x="180" y="230" width="640" height="120" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="200" y="262" fill="#565f89" font-size="13">system_reminder.rs - gap-before push</text>
+    <text x="200" y="292" fill="#e6e9f5" font-size="15" font-family="monospace">if !before.trim().is_empty() {</text>
+    <text x="200" y="318" fill="#e6e9f5" font-size="15" font-family="monospace">segments.push(Segment::Text(before.to_string()));</text>
+
+    <rect x="180" y="370" width="640" height="120" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="200" y="402" fill="#565f89" font-size="13">system_reminder.rs - trailing push</text>
+    <text x="200" y="432" fill="#e6e9f5" font-size="15" font-family="monospace">if !rest.trim().is_empty() {</text>
+    <text x="200" y="458" fill="#e6e9f5" font-size="15" font-family="monospace">segments.push(Segment::Text(rest.to_string()));</text>
+
+    <rect x="150" y="530" width="700" height="250" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="180" y="568" fill="#f7768e" font-size="19" font-weight="bold">Same rule, spelled twice:</text>
+    <text x="180" y="604" fill="#c0caf5" font-size="16">- both ends gate on trimmed, keep original</text>
+    <text x="180" y="632" fill="#c0caf5" font-size="16">- the rule lives in two if-blocks that must</text>
+    <text x="180" y="660" fill="#c0caf5" font-size="16">  stay in sync by inspection alone</text>
+    <text x="180" y="688" fill="#c0caf5" font-size="16">- a third push site would copy the gate</text>
+    <text x="180" y="716" fill="#c0caf5" font-size="16">  a third time instead of reusing a name</text>
+  </g>
+
+  <!-- AFTER -->
+  <g>
+    <text x="1180" y="200" fill="#a9b1d6" font-size="19" font-weight="bold">One helper owns the rule, called twice:</text>
+
+    <rect x="1180" y="230" width="640" height="210" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1200" y="262" fill="#9ece6a" font-size="13">system_reminder.rs (private fn)</text>
+    <text x="1200" y="292" fill="#e6e9f5" font-size="15" font-family="monospace">fn push_text_segment(segments: &amp;mut Vec&lt;Segment&gt;, s: &amp;str) {</text>
+    <text x="1220" y="318" fill="#e6e9f5" font-size="15" font-family="monospace">if !s.trim().is_empty() {</text>
+    <text x="1220" y="344" fill="#e6e9f5" font-size="15" font-family="monospace">segments.push(Segment::Text(s.to_string()));</text>
+    <text x="1220" y="370" fill="#e6e9f5" font-size="15" font-family="monospace">}</text>
+    <text x="1220" y="396" fill="#e6e9f5" font-size="15" font-family="monospace">}</text>
+
+    <rect x="1180" y="460" width="640" height="130" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="1200" y="492" fill="#565f89" font-size="13">the two call sites now</text>
+    <text x="1200" y="522" fill="#e6e9f5" font-size="15" font-family="monospace">push_text_segment(&amp;mut segments, before);</text>
+    <text x="1200" y="548" fill="#e6e9f5" font-size="15" font-family="monospace">push_text_segment(&amp;mut segments, rest);</text>
+
+    <rect x="1150" y="620" width="700" height="230" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1180" y="658" fill="#9ece6a" font-size="19" font-weight="bold">Same behavior, single spelling:</text>
+    <text x="1180" y="694" fill="#c0caf5" font-size="16">- gate-on-trimmed, keep-original in one place</text>
+    <text x="1180" y="722" fill="#c0caf5" font-size="16">- call sites read as intent, not mechanics</text>
+    <text x="1180" y="750" fill="#c0caf5" font-size="16">- blank-gap contract still pinned by the</text>
+    <text x="1180" y="778" fill="#c0caf5" font-size="16">  existing reminder-only test</text>
+  </g>
+
+  <!-- bottom strip -->
+  <text x="500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">PR #1937 - no behavior change, DRY only</text>
+  <text x="1500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">cargo test -p shared: 202 passed</text>
+
+  <!-- Footer limitation -->
+  <text x="1000" y="1190" text-anchor="middle" fill="#565f89" font-size="15" font-style="italic">Limitation: user_messages.rs keeps its own strip-then-check - value already trimmed, is_empty is the precise test.</text>
+</svg>
