@@ -69,7 +69,7 @@ fn blocks_text(content: &serde_json::Value) -> String {
 /// task-complete `<task-notification>`, a standalone `<system-reminder>`)
 /// is not a user message in any sense the history viewer cares about.
 pub fn is_substantive_user_text(text: &str) -> bool {
-    !strip_collapsible_notices(text).trim().is_empty()
+    crate::strings::is_non_blank(&strip_collapsible_notices(text))
 }
 
 /// [`user_visible_text`] + [`is_substantive_user_text`] over a stored record.

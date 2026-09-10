@@ -510,7 +510,7 @@ pub async fn get_history_media(
     // last resort for bytes we don't recognize.
     let content_type = meta
         .map(|m| m.content_type)
-        .filter(|ct| !ct.trim().is_empty())
+        .filter(|ct| shared::strings::is_non_blank(ct))
         .or_else(|| shared::media::sniff_content_type(&bytes).map(str::to_string))
         .unwrap_or_else(|| "application/octet-stream".to_string());
 

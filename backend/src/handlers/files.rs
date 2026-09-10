@@ -33,7 +33,7 @@ pub async fn pull_session_file(
     Path(session_id): Path<Uuid>,
     Query(query): Query<PullFileQuery>,
 ) -> Result<impl IntoResponse, AppError> {
-    if query.path.trim().is_empty() {
+    if !shared::strings::is_non_blank(&query.path) {
         return Err(AppError::BadRequest("path is required"));
     }
 
@@ -90,7 +90,7 @@ pub async fn pull_session_file(
         .unwrap_or_else(|| "download".to_string());
     let content_type = response
         .media_type
-        .filter(|s| !s.trim().is_empty())
+        .filter(|s| shared::strings::is_non_blank(s))
         .unwrap_or_else(|| "application/octet-stream".to_string());
 
     Ok((

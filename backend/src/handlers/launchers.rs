@@ -305,7 +305,7 @@ pub async fn fork_session(
         ForkDirectoryMode::Worktree | ForkDirectoryMode::Same => source.working_directory.clone(),
         ForkDirectoryMode::Other => req
             .working_directory
-            .filter(|path| !path.trim().is_empty())
+            .filter(|path| shared::strings::is_non_blank(path))
             .ok_or(AppError::BadRequest(
                 "working_directory is required for other-directory forks",
             ))?,
@@ -313,7 +313,10 @@ pub async fn fork_session(
     let name = normalize_custom_name(Some(&req.name))
         .unwrap_or_else(|| format!("{} (fork)", source.session_name));
     let mut claude_args: Vec<String> = jsonb_string_vec(&source.claude_args);
-    if let Some(model) = req.model.filter(|model| !model.trim().is_empty()) {
+    if let Some(model) = req
+        .model
+        .filter(|model| shared::strings::is_non_blank(model))
+    {
         claude_args = apply_model_override(claude_args, agent_type, model);
     }
 

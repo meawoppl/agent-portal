@@ -127,6 +127,9 @@ pub mod protocol;
 // String/number formatting helpers shared between frontend and native crates
 pub mod fmt;
 
+// Blank-string guard shared between frontend and native crates
+pub mod strings;
+
 // Timezone canonicalization (abbreviation -> IANA) shared across crates
 pub mod timezone;
 
