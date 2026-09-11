@@ -228,12 +228,10 @@ pub fn non_empty(opt: Option<&str>) -> Option<&str> {
 
 /// True when `s` holds non-whitespace text.
 ///
-/// Bool counterpart to [`non_blank`] for `if` guards, `disabled=` flags, and
-/// `filter` closures that only need the check, sparing them the repeated
-/// `!s.trim().is_empty()` shape.
-pub fn is_non_blank(s: &str) -> bool {
-    !s.trim().is_empty()
-}
+/// Re-export of the shared blank-string guard so `if` guards, `disabled=`
+/// flags, and `filter` closures keep calling `utils::is_non_blank` without a
+/// second copy of the check to drift.
+pub use shared::strings::is_non_blank;
 
 /// Keep a borrowed string only when it is non-blank.
 ///
