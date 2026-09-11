@@ -551,6 +551,9 @@ mod tests {
             user_message_uuids: Vec::new(),
             queued_turn_count: None,
             runner_exit: None,
+            resume_reason: None,
+            result_index: None,
+            local_command: None,
             fast_mode_disabled_reason: None,
         }
     }
