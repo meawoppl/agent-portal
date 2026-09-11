@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" font-family="Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <!-- Thesis -->
+  <text x="1000" y="64" text-anchor="middle" fill="#c0caf5" font-size="34" font-weight="bold">Codex resume stops requesting history it never reads - deprecation notice silenced</text>
+
+  <!-- BEFORE / AFTER labels -->
+  <text x="500" y="126" text-anchor="middle" fill="#f7768e" font-size="26" font-weight="bold" letter-spacing="4">BEFORE</text>
+  <text x="1500" y="126" text-anchor="middle" fill="#9ece6a" font-size="26" font-weight="bold" letter-spacing="4">AFTER</text>
+  <line x1="1000" y1="96" x2="1000" y2="1140" stroke="#565f89" stroke-width="2" stroke-dasharray="8 8"/>
+
+  <!-- BEFORE -->
+  <g>
+    <text x="180" y="200" fill="#a9b1d6" font-size="19" font-weight="bold">Every codex session resume:</text>
+
+    <rect x="180" y="240" width="180" height="60" rx="10" fill="#1e202e" stroke="#7aa2f7" stroke-width="2"/>
+    <text x="270" y="276" text-anchor="middle" fill="#7aa2f7" font-size="16">proxy</text>
+    <line x1="360" y1="270" x2="530" y2="270" stroke="#565f89" stroke-width="2.5"/>
+    <polygon points="530,270 514,263 514,277" fill="#565f89"/>
+    <text x="445" y="252" text-anchor="middle" fill="#a9b1d6" font-size="14">thread/resume</text>
+    <rect x="530" y="240" width="200" height="60" rx="10" fill="#1e202e" stroke="#e0af68" stroke-width="2"/>
+    <text x="630" y="268" text-anchor="middle" fill="#e0af68" font-size="16">codex app-server</text>
+    <text x="630" y="290" text-anchor="middle" fill="#565f89" font-size="12">hydrates FULL history back</text>
+
+    <rect x="180" y="340" width="640" height="76" rx="8" fill="#1e202e" stroke="#e0af68" stroke-width="1.5"/>
+    <text x="200" y="368" fill="#e0af68" font-size="13" font-family="monospace">Full-history hydration is deprecated for paginated</text>
+    <text x="200" y="392" fill="#e0af68" font-size="13" font-family="monospace">threads; use excludeTurns: true, then page with ...</text>
+
+    <rect x="150" y="470" width="700" height="240" rx="12" fill="#1e202e" stroke="#565f89" stroke-width="1.5"/>
+    <text x="180" y="508" fill="#f7768e" font-size="19" font-weight="bold">The wasted part: we never read the history</text>
+    <text x="180" y="544" fill="#c0caf5" font-size="16">- the resume response is consumed for exactly two fields:</text>
+    <text x="180" y="572" fill="#c0caf5" font-size="16">  thread.id and model - thread.turns was dead weight</text>
+    <text x="180" y="600" fill="#c0caf5" font-size="16">- the portal transcript rehydrates from the backend's own</text>
+    <text x="180" y="628" fill="#c0caf5" font-size="16">  message-replay path, always has (the code comment says so)</text>
+    <text x="180" y="656" fill="#c0caf5" font-size="16">- upstream historically removes deprecated paths in weeks</text>
+  </g>
+
+  <!-- AFTER -->
+  <g>
+    <text x="1180" y="200" fill="#a9b1d6" font-size="19" font-weight="bold">Same resume, two words different:</text>
+
+    <rect x="1180" y="240" width="180" height="60" rx="10" fill="#1e202e" stroke="#7aa2f7" stroke-width="2"/>
+    <text x="1270" y="276" text-anchor="middle" fill="#7aa2f7" font-size="16">proxy</text>
+    <line x1="1360" y1="270" x2="1530" y2="270" stroke="#9ece6a" stroke-width="2.5"/>
+    <polygon points="1530,270 1514,263 1514,277" fill="#9ece6a"/>
+    <text x="1445" y="252" text-anchor="middle" fill="#9ece6a" font-size="13" font-family="monospace">excludeTurns: true</text>
+    <rect x="1530" y="240" width="200" height="60" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1630" y="268" text-anchor="middle" fill="#9ece6a" font-size="16">codex app-server</text>
+    <text x="1630" y="290" text-anchor="middle" fill="#565f89" font-size="12">returns id + model + cursors</text>
+
+    <rect x="1180" y="340" width="640" height="76" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="1200" y="368" fill="#9ece6a" font-size="13" font-family="monospace">exclude_turns: Some(true)  // ThreadResumeParams</text>
+    <text x="1200" y="392" fill="#9ece6a" font-size="13" font-family="monospace">exclude_turns: Some(true)  // ThreadForkParams too</text>
+
+    <rect x="1150" y="470" width="700" height="240" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1180" y="508" fill="#9ece6a" font-size="19" font-weight="bold">Details that matter:</text>
+    <text x="1180" y="544" fill="#c0caf5" font-size="16">- fork still copies history server-side; excludeTurns only</text>
+    <text x="1180" y="572" fill="#c0caf5" font-size="16">  trims the response echo, not the forked thread's content</text>
+    <text x="1180" y="600" fill="#c0caf5" font-size="16">- codex-codes 0.153.4 (current pin) already carries the field</text>
+    <text x="1180" y="628" fill="#c0caf5" font-size="16">  and typed thread/turns/list helpers - no SDK bump needed</text>
+    <text x="1180" y="656" fill="#c0caf5" font-size="16">- backwards cursors noted in-code should paging ever be wanted</text>
+  </g>
+
+  <!-- bottom strip -->
+  <text x="500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">Diagnosed by the SDK session (5cc5c1ed) via inter-agent message</text>
+  <text x="1500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">Ahead of upstream removing the legacy hydration path</text>
+
+  <!-- Footer limitation -->
+  <text x="1000" y="1190" text-anchor="middle" fill="#565f89" font-size="15" font-style="italic">Limitation: untested against a live codex resume in this change - validated by types + unit tests; the first real resume on 0.153.x confirms the notice is gone.</text>
+</svg>
