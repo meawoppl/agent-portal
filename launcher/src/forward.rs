@@ -191,7 +191,7 @@ pub async fn open(port: u16) -> Result<()> {
     let status = resp.status();
     if !status.is_success() {
         let body = resp.text().await.unwrap_or_default();
-        return Err(anyhow!("backend returned {}: {}", status, body.trim()));
+        return Err(crate::message::backend_http_error(status, &body));
     }
     let data: CreateForwardResponse = resp.json().await.context("malformed response")?;
 
@@ -263,7 +263,7 @@ pub async fn close() -> Result<()> {
     }
     if !status.is_success() {
         let body = resp.text().await.unwrap_or_default();
-        return Err(anyhow!("backend returned {}: {}", status, body.trim()));
+        return Err(crate::message::backend_http_error(status, &body));
     }
     println!("Forward closed.");
     Ok(())

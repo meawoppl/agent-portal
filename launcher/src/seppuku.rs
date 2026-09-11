@@ -22,7 +22,7 @@ pub async fn run() -> Result<()> {
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        anyhow::bail!("backend returned {status}: {}", body.trim());
+        return Err(crate::message::backend_http_error(status, &body));
     }
 
     println!("Session termination requested.");
