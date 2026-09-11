@@ -647,11 +647,10 @@ fn mobile_app_links_config_from_env() -> MobileAppLinksConfig {
 
 fn optional_non_empty(name: &str) -> Option<String> {
     env::var(name).ok().and_then(|value| {
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            None
+        if shared::strings::is_non_blank(&value) {
+            Some(value.trim().to_string())
         } else {
-            Some(trimmed.to_string())
+            None
         }
     })
 }
