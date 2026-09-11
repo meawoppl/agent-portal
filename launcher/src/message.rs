@@ -172,6 +172,12 @@ fn jitter_ms(max: u64) -> u64 {
     nanos % (max + 1)
 }
 
+/// User-facing error for a non-success backend HTTP response: the status plus
+/// the trimmed response body.
+pub(crate) fn backend_http_error(status: reqwest::StatusCode, body: &str) -> anyhow::Error {
+    anyhow!("backend returned {status}: {}", body.trim())
+}
+
 /// Turn a permanent (non-retried) HTTP status into a user-facing error, with
 /// login/permission guidance for auth failures.
 fn permanent_error(status: reqwest::StatusCode, body: &str) -> anyhow::Error {
@@ -180,7 +186,7 @@ fn permanent_error(status: reqwest::StatusCode, body: &str) -> anyhow::Error {
         StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => anyhow!(
             "not authorized ({status}) — run `agent-portal login`, or check you own the target session"
         ),
-        _ => anyhow!("backend returned {status}: {}", body.trim()),
+        _ => backend_http_error(status, body),
     }
 }
 
@@ -700,6 +706,15 @@ mod tests {
         assert!(session_is_connected(&old_wire));
         old_wire.status = "disconnected".to_string();
         assert!(!session_is_connected(&old_wire));
+    }
+
+    #[test]
+    fn backend_http_error_reports_status_with_trimmed_body() {
+        let err = backend_http_error(reqwest::StatusCode::INTERNAL_SERVER_ERROR, "  boom\n");
+        assert_eq!(
+            err.to_string(),
+            "backend returned 500 Internal Server Error: boom"
+        );
     }
 
     #[test]
