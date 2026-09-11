@@ -43,6 +43,12 @@ fn codex_fork_params(config: &SessionConfig) -> Option<ThreadForkParams> {
         // A fork commonly launches in a newly-created git worktree. Unlike a
         // resume, it must not inherit the source thread's checkout.
         cwd: Some(config.working_directory.to_string_lossy().into_owned()),
+        // Skip echoing the copied history back in the response: we only read
+        // `thread.id` and `model` from it (the portal transcript rehydrates
+        // from the backend's own replay path), and codex 0.153.x deprecates
+        // full-history hydration for paginated threads. The fork still
+        // carries its history server-side; this only trims the response.
+        exclude_turns: Some(true),
         ..ThreadForkParams::default()
     })
 }
@@ -350,6 +356,15 @@ pub(crate) async fn codex_io_task(
                 // Leave cwd as None on resume — the app-server stored the
                 // thread's working directory at first launch and we don't
                 // want to override it from the launcher's POV.
+                //
+                // Skip full-history hydration: codex 0.153.x deprecates it
+                // for paginated threads (upstream plans to remove the legacy
+                // path), and we never read `thread.turns` — only `thread.id`
+                // and `model`. The portal transcript rehydrates from the
+                // backend's message-replay path independently. Should turn
+                // paging ever be needed, the response carries
+                // `turns_backwards_cursor` for `thread/turns/list`.
+                exclude_turns: Some(true),
                 ..ThreadResumeParams::default()
             };
             match client.thread_resume(&resume_params).await {
