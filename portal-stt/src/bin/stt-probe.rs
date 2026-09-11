@@ -24,7 +24,7 @@ async fn main() -> std::process::ExitCode {
     let audio_path = args.next();
 
     let backend = match std::env::var("PORTAL_STT_BACKEND") {
-        Ok(value) if !value.trim().is_empty() => value.trim().to_ascii_lowercase(),
+        Ok(value) if shared::strings::is_non_blank(&value) => value.trim().to_ascii_lowercase(),
         _ => {
             eprintln!(
                 "set PORTAL_STT_BACKEND to one of: {}\n\
