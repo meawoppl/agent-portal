@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" font-family="Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <!-- Thesis -->
+  <text x="1000" y="64" text-anchor="middle" fill="#c0caf5" font-size="34" font-weight="bold">launcher backend errors share one helper</text>
+
+  <!-- BEFORE / AFTER labels -->
+  <text x="500" y="126" text-anchor="middle" fill="#f7768e" font-size="26" font-weight="bold" letter-spacing="4">BEFORE</text>
+  <text x="1500" y="126" text-anchor="middle" fill="#9ece6a" font-size="26" font-weight="bold" letter-spacing="4">AFTER</text>
+  <line x1="1000" y1="96" x2="1000" y2="1140" stroke="#565f89" stroke-width="2" stroke-dasharray="8 8"/>
+
+  <!-- BEFORE -->
+  <g>
+    <text x="180" y="200" fill="#a9b1d6" font-size="19" font-weight="bold">five copies of one format string</text>
+
+    <rect x="180" y="230" width="640" height="180" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="200" y="262" fill="#565f89" font-size="13">message.rs:183 / forward.rs:194,266</text>
+    <text x="200" y="294" fill="#565f89" font-size="13">media.rs:184 / seppuku.rs:25</text>
+    <text x="200" y="326" fill="#e6e9f5" font-size="15" font-family="monospace">anyhow!("backend returned</text>
+    <text x="200" y="352" fill="#e6e9f5" font-size="15" font-family="monospace">  {status}: {}", body.trim())</text>
+
+    <rect x="180" y="430" width="640" height="150" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="200" y="462" fill="#565f89" font-size="13">two more look-alikes, intentionally kept</text>
+    <text x="200" y="494" fill="#e6e9f5" font-size="15" font-family="monospace">...after {attempt} attempts: ...</text>
+    <text x="200" y="520" fill="#e6e9f5" font-size="15" font-family="monospace">"backend returned {}" (no body)</text>
+    <text x="200" y="546" fill="#565f89" font-size="13" font-family="monospace">different shapes: out of scope</text>
+
+    <rect x="150" y="640" width="700" height="250" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="180" y="678" fill="#f7768e" font-size="19" font-weight="bold">One crate, five spellings:</text>
+    <text x="180" y="714" fill="#c0caf5" font-size="16">- same message typed out five times</text>
+    <text x="180" y="742" fill="#c0caf5" font-size="16">- mixed {} vs {status} capture styles</text>
+    <text x="180" y="770" fill="#c0caf5" font-size="16">- a wording tweak needs five edits</text>
+    <text x="180" y="798" fill="#c0caf5" font-size="16">- next site copies whichever it saw</text>
+  </g>
+
+  <!-- AFTER -->
+  <g>
+    <text x="1180" y="200" fill="#a9b1d6" font-size="19" font-weight="bold">One helper, five callers:</text>
+
+    <rect x="1180" y="230" width="640" height="180" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1200" y="262" fill="#9ece6a" font-size="13">message.rs: backend_http_error</text>
+    <text x="1200" y="294" fill="#e6e9f5" font-size="15" font-family="monospace">pub(crate) fn backend_http_error(</text>
+    <text x="1200" y="320" fill="#e6e9f5" font-size="15" font-family="monospace">  status, body) -&gt; anyhow::Error</text>
+    <text x="1200" y="346" fill="#565f89" font-size="13" font-family="monospace">permanent_error falls through to it</text>
+    <text x="1200" y="372" fill="#565f89" font-size="13" font-family="monospace">forward x2, media, seppuku call it</text>
+
+    <rect x="1180" y="430" width="640" height="150" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="1200" y="462" fill="#565f89" font-size="13">format locked by a unit test</text>
+    <text x="1200" y="494" fill="#e6e9f5" font-size="15" font-family="monospace">backend_http_error_reports_</text>
+    <text x="1200" y="520" fill="#e6e9f5" font-size="15" font-family="monospace">  status_with_trimmed_body</text>
+    <text x="1200" y="546" fill="#565f89" font-size="13" font-family="monospace">rendered strings byte-identical</text>
+
+    <rect x="1150" y="640" width="700" height="250" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1180" y="678" fill="#9ece6a" font-size="19" font-weight="bold">Same behavior, single spelling:</text>
+    <text x="1180" y="714" fill="#c0caf5" font-size="16">- every backend HTTP error reads</text>
+    <text x="1180" y="742" fill="#c0caf5" font-size="16">  backend_http_error, one edit point</text>
+    <text x="1180" y="770" fill="#c0caf5" font-size="16">- odd-shaped variants left alone</text>
+    <text x="1180" y="798" fill="#c0caf5" font-size="16">- the next site copies one name</text>
+  </g>
+
+  <!-- bottom strip -->
+  <text x="500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">PR #1953 - no behavior change, DRY only</text>
+  <text x="1500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">agent-portal 86 passed, clippy + fmt clean</text>
+</svg>
