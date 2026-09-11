@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" font-family="Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <!-- Thesis -->
+  <text x="1000" y="64" text-anchor="middle" fill="#c0caf5" font-size="34" font-weight="bold">forward.rs reuses message::api_base()</text>
+
+  <!-- BEFORE / AFTER labels -->
+  <text x="500" y="126" text-anchor="middle" fill="#f7768e" font-size="26" font-weight="bold" letter-spacing="4">BEFORE</text>
+  <text x="1500" y="126" text-anchor="middle" fill="#9ece6a" font-size="26" font-weight="bold" letter-spacing="4">AFTER</text>
+  <line x1="1000" y1="96" x2="1000" y2="1140" stroke="#565f89" stroke-width="2" stroke-dasharray="8 8"/>
+
+  <!-- BEFORE -->
+  <g>
+    <text x="180" y="200" fill="#a9b1d6" font-size="19" font-weight="bold">private copy, verbatim duplicate</text>
+
+    <rect x="180" y="230" width="640" height="210" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="200" y="262" fill="#565f89" font-size="13">launcher/src/forward.rs:14 api_base()</text>
+    <text x="200" y="294" fill="#e6e9f5" font-size="15" font-family="monospace">fn api_base() -&gt; Result&lt;(String,</text>
+    <text x="200" y="320" fill="#e6e9f5" font-size="15" font-family="monospace">  String)&gt; {</text>
+    <text x="200" y="346" fill="#e6e9f5" font-size="15" font-family="monospace">  load_config / token guard /</text>
+    <text x="200" y="372" fill="#e6e9f5" font-size="15" font-family="monospace">  ws-&gt;http rewrite ... }</text>
+    <text x="200" y="398" fill="#565f89" font-size="13" font-family="monospace">identical body to message::api_base</text>
+
+    <rect x="180" y="460" width="640" height="150" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="200" y="492" fill="#565f89" font-size="13">three local call sites</text>
+    <text x="200" y="524" fill="#e6e9f5" font-size="15" font-family="monospace">open / list / close:</text>
+    <text x="200" y="550" fill="#e6e9f5" font-size="15" font-family="monospace">  api_base()?</text>
+    <text x="200" y="576" fill="#565f89" font-size="13" font-family="monospace">media.rs + seppuku.rs already shared</text>
+
+    <rect x="150" y="650" width="700" height="250" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="180" y="688" fill="#f7768e" font-size="19" font-weight="bold">Two spellings, one resolver:</text>
+    <text x="180" y="724" fill="#c0caf5" font-size="16">- same config load, same auth guard</text>
+    <text x="180" y="752" fill="#c0caf5" font-size="16">- same wss/ws to https/http rewrite</text>
+    <text x="180" y="780" fill="#c0caf5" font-size="16">- drift risk: fix one, miss the other</text>
+    <text x="180" y="808" fill="#c0caf5" font-size="16">- comment even said shared with message</text>
+  </g>
+
+  <!-- AFTER -->
+  <g>
+    <text x="1180" y="200" fill="#a9b1d6" font-size="19" font-weight="bold">single home in message.rs</text>
+
+    <rect x="1180" y="230" width="640" height="210" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1200" y="262" fill="#9ece6a" font-size="13">launcher/src/message.rs:110 api_base()</text>
+    <text x="1200" y="294" fill="#e6e9f5" font-size="15" font-family="monospace">pub(crate) fn api_base()</text>
+    <text x="1200" y="320" fill="#e6e9f5" font-size="15" font-family="monospace">  -&gt; Result&lt;(String, String)&gt;</text>
+    <text x="1200" y="346" fill="#565f89" font-size="13" font-family="monospace">unchanged; now the only copy</text>
+    <text x="1200" y="372" fill="#565f89" font-size="13" font-family="monospace">open/list/close + media + seppuku</text>
+
+    <rect x="1180" y="460" width="640" height="150" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="1200" y="492" fill="#565f89" font-size="13">forward.rs: open / list / close</text>
+    <text x="1200" y="524" fill="#e6e9f5" font-size="15" font-family="monospace">crate::message::api_base()?</text>
+    <text x="1200" y="550" fill="#565f89" font-size="13" font-family="monospace">private duplicate deleted (-20/+3)</text>
+
+    <rect x="1150" y="650" width="700" height="250" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1180" y="688" fill="#9ece6a" font-size="19" font-weight="bold">Launcher converged:</text>
+    <text x="1180" y="724" fill="#c0caf5" font-size="16">- one resolver for every subcommand</text>
+    <text x="1180" y="752" fill="#c0caf5" font-size="16">- auth + URL rewrite fix in one place</text>
+    <text x="1180" y="780" fill="#c0caf5" font-size="16">- no behavior change, pure DRY</text>
+  </g>
+
+  <!-- bottom strip -->
+  <text x="500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">PR #1956 - share api_base, delete the copy</text>
+  <text x="1500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">agent-portal tests passed, clippy + fmt clean</text>
+</svg>
