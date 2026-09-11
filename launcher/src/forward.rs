@@ -9,23 +9,6 @@ use anyhow::{anyhow, Context, Result};
 
 use shared::api::{CreateForwardRequest, CreateForwardResponse, SessionForwardsResponse};
 
-/// Resolve the API base URL and auth token from launcher config (shared with
-/// `message`).
-fn api_base() -> Result<(String, String)> {
-    let config = crate::config::load_config();
-    let token = config
-        .auth_token
-        .filter(|t| !t.is_empty())
-        .ok_or_else(|| anyhow!("Not authenticated — run `agent-portal login` first"))?;
-    let ws_url = config
-        .backend_url
-        .unwrap_or_else(|| shared::default_backend_url().to_string());
-    let http = ws_url
-        .replacen("wss://", "https://", 1)
-        .replacen("ws://", "http://", 1);
-    Ok((http.trim_end_matches('/').to_string(), token))
-}
-
 /// The calling agent's own portal session id (reuses `message`'s resolver, so
 /// Claude / Codex / explicit-override all work).
 async fn session_id(client: &reqwest::Client, base: &str, token: &str) -> Result<String> {
@@ -173,7 +156,7 @@ pub async fn open(port: u16) -> Result<()> {
     if port == 0 {
         return Err(anyhow!("port must be 1-65535"));
     }
-    let (base, token) = api_base()?;
+    let (base, token) = crate::message::api_base()?;
     let client = reqwest::Client::new();
     let session = session_id(&client, &base, &token).await?;
 
@@ -213,7 +196,7 @@ pub async fn open(port: u16) -> Result<()> {
 
 /// `agent-portal forward list` — active forwards for this session.
 pub async fn list() -> Result<()> {
-    let (base, token) = api_base()?;
+    let (base, token) = crate::message::api_base()?;
     let client = reqwest::Client::new();
     let session = session_id(&client, &base, &token).await?;
 
@@ -249,7 +232,7 @@ pub async fn list() -> Result<()> {
 
 /// `agent-portal forward close` — revoke the session's forward.
 pub async fn close() -> Result<()> {
-    let (base, token) = api_base()?;
+    let (base, token) = crate::message::api_base()?;
     let client = reqwest::Client::new();
     let session = session_id(&client, &base, &token).await?;
 
