@@ -29,7 +29,7 @@ fn load(name: &str) -> Vec<MuseRecord> {
     std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("{}: {e}", path.display()))
         .lines()
-        .filter(|l| !l.trim().is_empty())
+        .filter(|l| shared::strings::is_non_blank(l))
         .map(|l| match serde_json::from_str(l) {
             Ok(r) => r,
             Err(e) => panic!("{name}: captured line failed to parse: {e}\n{l}"),
