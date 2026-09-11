@@ -257,6 +257,7 @@ dependencies = [
  "object_store",
  "serde",
  "serde_json",
+ "shared",
  "tempfile",
  "tokio",
  "uuid",

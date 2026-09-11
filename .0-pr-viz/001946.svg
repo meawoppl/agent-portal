@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="arr-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+  </defs>
+
+  <!-- Header -->
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #1946 · Reuse shared blank-string guard in archive-format</text>
+
+  <!-- Thesis -->
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">archive-format kept its own copy of the blank check;</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">now it re-exports shared::strings::is_non_blank.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+  <!-- Panel labels + center divider -->
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <!-- ==================== BEFORE ==================== -->
+  <g>
+    <rect x="80" y="250" width="860" height="150" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="290" font-size="26" fill="#7aa2f7">archive-format/src/strings.rs</text>
+    <text x="104" y="330" font-size="23" fill="#a9b1d6">pub fn is_non_blank(s: &amp;str) -&gt; bool</text>
+    <text x="104" y="366" font-size="22" fill="#565f89">local copy + duplicated unit test</text>
+  </g>
+
+  <line x1="500" y1="400" x2="500" y2="490" stroke="#565f89" stroke-width="1.5" marker-end="url(#arr-dim)"/>
+  <text x="516" y="450" font-size="22" fill="#565f89">stale rationale</text>
+
+  <g>
+    <rect x="80" y="510" width="860" height="150" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="550" font-size="26" fill="#7aa2f7">"unlinkable without growing deps"</text>
+    <text x="104" y="590" font-size="23" fill="#a9b1d6">but chrono/serde/uuid already linked</text>
+    <text x="104" y="626" font-size="22" fill="#565f89">a path dep on shared costs nothing</text>
+  </g>
+
+  <line x1="440" y1="720" x2="560" y2="720" stroke="#f7768e" stroke-width="3"/>
+  <text x="500" y="760" font-size="23" fill="#f7768e" text-anchor="middle">one check, two homes</text>
+  <text x="500" y="792" font-size="22" fill="#565f89" text-anchor="middle">a fix must land twice to stay in sync</text>
+
+  <g>
+    <rect x="80" y="960" width="860" height="120" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="1006" font-size="26" fill="#c0caf5">last duplicated guard module</text>
+    <text x="104" y="1046" font-size="23" fill="#f7768e">drift risk on every future edit</text>
+  </g>
+
+  <!-- ==================== AFTER ==================== -->
+  <g>
+    <rect x="1065" y="250" width="860" height="150" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="1089" y="290" font-size="26" fill="#7aa2f7">strings.rs becomes a re-export</text>
+    <text x="1089" y="330" font-size="23" fill="#a9b1d6">pub use shared::strings::is_non_blank;</text>
+    <text x="1089" y="366" font-size="22" fill="#565f89">matches session-lib + claude-session-lib</text>
+  </g>
+
+  <line x1="1495" y1="400" x2="1495" y2="490" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+
+  <g>
+    <rect x="1065" y="510" width="860" height="160" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1089" y="550" font-size="26" fill="#9ece6a">call sites untouched</text>
+    <text x="1089" y="590" font-size="23" fill="#a9b1d6">lib.rs + store.rs keep strings:: paths</text>
+    <text x="1089" y="626" font-size="22" fill="#565f89">one Cargo.toml line: shared path dep</text>
+  </g>
+
+  <g>
+    <rect x="1065" y="700" width="860" height="100" fill="#1e202e" stroke="#e0af68" stroke-width="1.5"/>
+    <text x="1089" y="740" font-size="24" fill="#e0af68">clippy clean, 220 tests pass</text>
+    <text x="1089" y="776" font-size="22" fill="#a9b1d6">archive-format + shared, backend checks too</text>
+  </g>
+
+  <g>
+    <rect x="1065" y="960" width="860" height="120" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1089" y="1006" font-size="26" fill="#c0caf5">one spelling of the check</text>
+    <text x="1089" y="1046" font-size="23" fill="#9ece6a">same behavior, DRY only</text>
+  </g>
+
+  <!-- Footer -->
+  <text x="55" y="1172" font-size="22" fill="#565f89">No behavior change. Continues the blank-guard dedupe streak (#1930-#1945).</text>
+</svg>
