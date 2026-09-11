@@ -148,10 +148,10 @@ fn collect_logs() -> String {
             .output()
             .map(|o| {
                 let stdout = String::from_utf8_lossy(&o.stdout);
-                if stdout.trim().is_empty() {
-                    "No journal entries found for agent-portal.".into()
-                } else {
+                if shared::strings::is_non_blank(&stdout) {
                     stdout.to_string()
+                } else {
+                    "No journal entries found for agent-portal.".into()
                 }
             })
             .unwrap_or_else(|e| format!("Failed to read journalctl: {}", e))
