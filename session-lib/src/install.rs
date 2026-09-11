@@ -58,7 +58,7 @@ fn failure_detail(output: &std::process::Output) -> String {
         stderr
     };
     let trimmed = body.trim();
-    if trimmed.is_empty() {
+    if !is_non_blank(trimmed) {
         return format!("install command exited with {}", output.status);
     }
     tail(trimmed, MESSAGE_TAIL)
