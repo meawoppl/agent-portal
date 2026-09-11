@@ -51,7 +51,7 @@ pub fn probe_agent(agent: AgentType) -> ProbeResult {
         Ok(output) if output.status.success() => {
             let raw = String::from_utf8_lossy(&output.stdout);
             let trimmed = raw.trim();
-            if trimmed.is_empty() {
+            if !is_non_blank(trimmed) {
                 None
             } else {
                 Some(trimmed.to_string())
