@@ -1,27 +1,6 @@
-//! Small string guards shared across archive-format checks.
+//! Blank-string guard re-exported from `shared`.
 //!
-//! Format-crate counterpart to the `is_non_blank` helpers in `backend` and
-//! the frontend utils (neither is linkable from here without growing this
-//! crate's dependency surface for a two-line check, so it lives in each
-//! place instead).
+//! This crate already depends on `shared`, so the check lives there instead
+//! of in a local copy (covered by `shared::strings` tests).
 
-/// True when `s` holds non-whitespace text.
-///
-/// Single home for the repeated `!s.trim().is_empty()` shape in `if` guards
-/// and `filter` closures.
-pub fn is_non_blank(s: &str) -> bool {
-    !s.trim().is_empty()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn is_non_blank_rejects_empty_and_whitespace_only() {
-        assert!(!is_non_blank(""));
-        assert!(!is_non_blank("   "));
-        assert!(!is_non_blank("\t\n "));
-        assert!(is_non_blank("  hi  "));
-    }
-}
+pub use shared::strings::is_non_blank;
