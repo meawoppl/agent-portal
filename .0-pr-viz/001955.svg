@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" font-family="Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <!-- Thesis -->
+  <text x="1000" y="64" text-anchor="middle" fill="#c0caf5" font-size="34" font-weight="bold">forward list stops swallowing the error body</text>
+
+  <!-- BEFORE / AFTER labels -->
+  <text x="500" y="126" text-anchor="middle" fill="#f7768e" font-size="26" font-weight="bold" letter-spacing="4">BEFORE</text>
+  <text x="1500" y="126" text-anchor="middle" fill="#9ece6a" font-size="26" font-weight="bold" letter-spacing="4">AFTER</text>
+  <line x1="1000" y1="96" x2="1000" y2="1140" stroke="#565f89" stroke-width="2" stroke-dasharray="8 8"/>
+
+  <!-- BEFORE -->
+  <g>
+    <text x="180" y="200" fill="#a9b1d6" font-size="19" font-weight="bold">last call site outside the helper</text>
+
+    <rect x="180" y="230" width="640" height="180" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="200" y="262" fill="#565f89" font-size="13">forward.rs: list() (open/close converted in #1953)</text>
+    <text x="200" y="294" fill="#e6e9f5" font-size="15" font-family="monospace">if !resp.status().is_success() {</text>
+    <text x="200" y="320" fill="#e6e9f5" font-size="15" font-family="monospace">  return Err(anyhow!(</text>
+    <text x="200" y="346" fill="#e6e9f5" font-size="15" font-family="monospace">    "backend returned {}",</text>
+    <text x="200" y="372" fill="#e6e9f5" font-size="15" font-family="monospace">    resp.status()));</text>
+
+    <rect x="180" y="430" width="640" height="150" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="200" y="462" fill="#565f89" font-size="13">failure output, e.g. a 500 with a reason</text>
+    <text x="200" y="494" fill="#e6e9f5" font-size="15" font-family="monospace">backend returned</text>
+    <text x="200" y="520" fill="#e6e9f5" font-size="15" font-family="monospace">  500 Internal Server Error</text>
+    <text x="200" y="546" fill="#565f89" font-size="13" font-family="monospace">body never read: reason lost</text>
+
+    <rect x="150" y="640" width="700" height="250" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="180" y="678" fill="#f7768e" font-size="19" font-weight="bold">One subcommand, thinner errors:</text>
+    <text x="180" y="714" fill="#c0caf5" font-size="16">- list failed with status only</text>
+    <text x="180" y="742" fill="#c0caf5" font-size="16">- open/close/seppuku already</text>
+    <text x="180" y="770" fill="#c0caf5" font-size="16">  included the trimmed body</text>
+    <text x="180" y="798" fill="#c0caf5" font-size="16">- same outage, less to go on</text>
+  </g>
+
+  <!-- AFTER -->
+  <g>
+    <text x="1180" y="200" fill="#a9b1d6" font-size="19" font-weight="bold">Same three lines as its siblings:</text>
+
+    <rect x="1180" y="230" width="640" height="180" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1200" y="262" fill="#9ece6a" font-size="13">forward.rs: list()</text>
+    <text x="1200" y="294" fill="#e6e9f5" font-size="15" font-family="monospace">let status = resp.status();</text>
+    <text x="1200" y="320" fill="#e6e9f5" font-size="15" font-family="monospace">let body = resp.text().await</text>
+    <text x="1200" y="346" fill="#e6e9f5" font-size="15" font-family="monospace">  .unwrap_or_default();</text>
+    <text x="1200" y="372" fill="#e6e9f5" font-size="15" font-family="monospace">backend_http_error(status, &amp;body)</text>
+
+    <rect x="1180" y="430" width="640" height="150" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="1200" y="462" fill="#565f89" font-size="13">failure output now</text>
+    <text x="1200" y="494" fill="#e6e9f5" font-size="15" font-family="monospace">backend returned 500</text>
+    <text x="1200" y="520" fill="#e6e9f5" font-size="15" font-family="monospace">  Internal Server Error: boom</text>
+    <text x="1200" y="546" fill="#565f89" font-size="13" font-family="monospace">format locked by the helper unit test</text>
+
+    <rect x="1150" y="640" width="700" height="250" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1180" y="678" fill="#9ece6a" font-size="19" font-weight="bold">Every launcher site converged:</text>
+    <text x="1180" y="714" fill="#c0caf5" font-size="16">- no remaining backend call site</text>
+    <text x="1180" y="742" fill="#c0caf5" font-size="16">  formats this error by hand</text>
+    <text x="1180" y="770" fill="#c0caf5" font-size="16">- retry-count and dpaste shapes</text>
+    <text x="1180" y="798" fill="#c0caf5" font-size="16">  intentionally untouched</text>
+  </g>
+
+  <!-- bottom strip -->
+  <text x="500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">PR #1955 - richer list errors, DRY finish</text>
+  <text x="1500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">agent-portal helper test passed, clippy + fmt clean</text>
+</svg>
