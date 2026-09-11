@@ -2,6 +2,7 @@
 //! the launcher can spawn. Used at launcher startup (sent in the register
 //! envelope) and on demand (refreshed when the user opens the launch dialog).
 
+use crate::strings::is_non_blank;
 use shared::AgentType;
 use std::path::PathBuf;
 use std::process::Command;
@@ -126,7 +127,7 @@ pub fn probe_muse_sandbox() -> Option<bool> {
 /// label instead of a name, annotated when the credential comes from the
 /// environment rather than the saved file.
 pub fn probe_muse_login() -> shared::AgentLoginStatus {
-    let via_env = std::env::var("META_API_KEY").is_ok_and(|v| !v.trim().is_empty());
+    let via_env = std::env::var("META_API_KEY").is_ok_and(|v| is_non_blank(&v));
     if via_env {
         return shared::AgentLoginStatus::LoggedIn {
             label: Some("meta".to_string()),
