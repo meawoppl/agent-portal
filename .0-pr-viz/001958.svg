@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" font-family="Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <!-- Thesis -->
+  <text x="1000" y="64" text-anchor="middle" fill="#c0caf5" font-size="34" font-weight="bold">optional_non_empty reuses shared::strings::is_non_blank</text>
+
+  <!-- BEFORE / AFTER labels -->
+  <text x="500" y="126" text-anchor="middle" fill="#f7768e" font-size="26" font-weight="bold" letter-spacing="4">BEFORE</text>
+  <text x="1500" y="126" text-anchor="middle" fill="#9ece6a" font-size="26" font-weight="bold" letter-spacing="4">AFTER</text>
+  <line x1="1000" y1="96" x2="1000" y2="1140" stroke="#565f89" stroke-width="2" stroke-dasharray="8 8"/>
+
+  <!-- BEFORE -->
+  <g>
+    <text x="180" y="200" fill="#a9b1d6" font-size="19" font-weight="bold">hand-rolled blank check in config.rs</text>
+
+    <rect x="180" y="230" width="640" height="250" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="200" y="262" fill="#565f89" font-size="13">backend/src/config.rs:648 optional_non_empty()</text>
+    <text x="200" y="294" fill="#e6e9f5" font-size="15" font-family="monospace">env::var(name).ok()</text>
+    <text x="200" y="320" fill="#e6e9f5" font-size="15" font-family="monospace">  .and_then(|value| {</text>
+    <text x="200" y="346" fill="#e6e9f5" font-size="15" font-family="monospace">  let trimmed = value.trim();</text>
+    <text x="200" y="372" fill="#e6e9f5" font-size="15" font-family="monospace">  if trimmed.is_empty() {</text>
+    <text x="200" y="398" fill="#e6e9f5" font-size="15" font-family="monospace">    None } else { ... } })</text>
+    <text x="200" y="428" fill="#565f89" font-size="13" font-family="monospace">feeds PORTAL_APNS_* / PORTAL_FCM_* lookups</text>
+    <text x="200" y="454" fill="#565f89" font-size="13" font-family="monospace">blank env values must read as unset</text>
+
+    <rect x="180" y="500" width="640" height="120" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="200" y="532" fill="#565f89" font-size="13">meanwhile, in the same file</text>
+    <text x="200" y="564" fill="#e6e9f5" font-size="15" font-family="monospace">config.rs:494</text>
+    <text x="200" y="590" fill="#e6e9f5" font-size="15" font-family="monospace">shared::strings::is_non_blank(&amp;v)</text>
+
+    <rect x="150" y="660" width="700" height="250" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="180" y="698" fill="#f7768e" font-size="19" font-weight="bold">Two spellings, one check:</text>
+    <text x="180" y="734" fill="#c0caf5" font-size="16">- same trim, same empty test</text>
+    <text x="180" y="762" fill="#c0caf5" font-size="16">- same file already calls the guard</text>
+    <text x="180" y="790" fill="#c0caf5" font-size="16">- drift risk: fix one, miss the other</text>
+    <text x="180" y="818" fill="#c0caf5" font-size="16">- guard lives in shared/src/strings.rs</text>
+  </g>
+
+  <!-- AFTER -->
+  <g>
+    <text x="1180" y="200" fill="#a9b1d6" font-size="19" font-weight="bold">single guard for every blank check</text>
+
+    <rect x="1180" y="230" width="640" height="250" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1200" y="262" fill="#9ece6a" font-size="13">backend/src/config.rs:648 optional_non_empty()</text>
+    <text x="1200" y="294" fill="#e6e9f5" font-size="15" font-family="monospace">env::var(name).ok()</text>
+    <text x="1200" y="320" fill="#e6e9f5" font-size="15" font-family="monospace">  .and_then(|value| {</text>
+    <text x="1200" y="346" fill="#e6e9f5" font-size="15" font-family="monospace">  if shared::strings::</text>
+    <text x="1200" y="372" fill="#e6e9f5" font-size="15" font-family="monospace">    is_non_blank(&amp;value) {</text>
+    <text x="1200" y="398" fill="#e6e9f5" font-size="15" font-family="monospace">    Some(value.trim().to_string())</text>
+    <text x="1200" y="424" fill="#e6e9f5" font-size="15" font-family="monospace">  } else { None } })</text>
+    <text x="1200" y="454" fill="#565f89" font-size="13" font-family="monospace">same behavior; one spelling (-4/+3)</text>
+
+    <rect x="1180" y="500" width="640" height="120" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="1200" y="532" fill="#565f89" font-size="13">matches the neighboring call sites</text>
+    <text x="1200" y="564" fill="#e6e9f5" font-size="15" font-family="monospace">config.rs:494, files.rs,</text>
+    <text x="1200" y="590" fill="#e6e9f5" font-size="15" font-family="monospace">launchers.rs, history.rs</text>
+
+    <rect x="1150" y="660" width="700" height="250" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1180" y="698" fill="#9ece6a" font-size="19" font-weight="bold">Config converged:</text>
+    <text x="1180" y="734" fill="#c0caf5" font-size="16">- trim + empty test live in shared</text>
+    <text x="1180" y="762" fill="#c0caf5" font-size="16">- whitespace-only values still read as unset</text>
+    <text x="1180" y="790" fill="#c0caf5" font-size="16">- no behavior change, pure DRY</text>
+  </g>
+
+  <!-- bottom strip -->
+  <text x="500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">PR #1958 - share is_non_blank, drop the copy</text>
+  <text x="1500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">turn_metrics.rs still hand-rolls two trim checks</text>
+</svg>
