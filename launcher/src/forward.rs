@@ -224,7 +224,9 @@ pub async fn list() -> Result<()> {
         .await
         .context("request to backend failed")?;
     if !resp.status().is_success() {
-        return Err(anyhow!("backend returned {}", resp.status()));
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(crate::message::backend_http_error(status, &body));
     }
     let data: SessionForwardsResponse = resp.json().await.context("malformed response")?;
     if data.forwards.is_empty() {
