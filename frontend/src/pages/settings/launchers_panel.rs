@@ -745,7 +745,7 @@ pub fn launchers_panel() -> Html {
             spawn_local(async move {
                 let url = utils::api_url(&format!("/api/launchers/{launcher_id}/{endpoint}"));
                 let failure = match Request::post(&url).send().await {
-                    Ok(resp) if resp.status() == 200 => None,
+                    Ok(resp) if resp.ok() => None,
                     Ok(resp) => {
                         let text = resp.text().await.unwrap_or_default();
                         Some(format!("{verb} failed: {} {}", resp.status(), text))
