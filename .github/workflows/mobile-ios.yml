@@ -75,6 +75,10 @@ jobs:
         working-directory: mobile
         run: npx tauri ios init --ci
 
+      - name: Clean generated iOS build output
+        working-directory: mobile
+        run: rm -rf src-tauri/gen/apple/build
+
       - name: Build simulator app
         working-directory: mobile
         run: npx tauri ios build --debug --target "$TAURI_IOS_TARGET" --no-sign

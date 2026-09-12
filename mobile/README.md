@@ -300,7 +300,8 @@ What the iOS lane does, in order:
 3. Runs `cargo check -p agent-portal-mobile --target <ios-simulator-triple>` as
    a fast-fail Rust/iOS gate.
 4. Runs `npx tauri ios init --ci` to generate `gen/apple`.
-5. Runs `npx tauri ios build --debug --target <simulator-target> --no-sign`.
+5. Clears `src-tauri/gen/apple/build` so reruns don't trip over a stale archive.
+6. Runs `npx tauri ios build --debug --target <simulator-target> --no-sign`.
 
 The iOS lane intentionally stops at an unsigned simulator build. Device
 installation, APNs entitlements, archive export, and TestFlight upload need the
@@ -340,6 +341,14 @@ Manual run inputs:
 - `upload_testflight`: when true, runs `xcrun altool --upload-app` after the
   signed IPA artifact is collected. Leave this off until the first signed IPA is
   known-good and the App Store Connect app record exists.
+
+The app uses a custom XcodeGen template at
+[`src-tauri/templates/ios/project.yml`](src-tauri/templates/ios/project.yml)
+rather than Tauri's built-in iOS template. The only intentional difference is
+that `Externals` is not listed as a target source: `libapp.a` is still linked
+through the template's dependency entry, but it is not copied into
+`Agent Portal.app` as a resource. App Store Connect rejects bundles containing
+that standalone static library.
 
 Before the first TestFlight upload, confirm in Apple Developer/App Store
 Connect that:
