@@ -294,7 +294,7 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                 };
 
                 match result {
-                    Ok(resp) if resp.status() >= 200 && resp.status() < 300 => {
+                    Ok(resp) if resp.ok() => {
                         form_mode.set(None);
                         reload_tasks.emit(());
                     }
