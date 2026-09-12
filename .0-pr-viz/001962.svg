@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" font-family="Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <!-- Thesis -->
+  <text x="1000" y="64" text-anchor="middle" fill="#c0caf5" font-size="34" font-weight="bold">fork dialog reuses owned_non_blank for working directory</text>
+
+  <!-- BEFORE / AFTER labels -->
+  <text x="500" y="126" text-anchor="middle" fill="#f7768e" font-size="26" font-weight="bold" letter-spacing="4">BEFORE</text>
+  <text x="1500" y="126" text-anchor="middle" fill="#9ece6a" font-size="26" font-weight="bold" letter-spacing="4">AFTER</text>
+  <line x1="1000" y1="96" x2="1000" y2="1140" stroke="#565f89" stroke-width="2" stroke-dasharray="8 8"/>
+
+  <!-- BEFORE -->
+  <g>
+    <text x="180" y="200" fill="#a9b1d6" font-size="19" font-weight="bold">one hand-rolled trim among helpers</text>
+
+    <rect x="180" y="230" width="640" height="280" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="200" y="262" fill="#565f89" font-size="13">fork_dialog.rs:75-82 - ForkSessionRequest</text>
+    <text x="200" y="294" fill="#e6e9f5" font-size="15" font-family="monospace">working_directory:</text>
+    <text x="200" y="320" fill="#e6e9f5" font-size="15" font-family="monospace"> (...Other).then(||</text>
+    <text x="200" y="346" fill="#e6e9f5" font-size="15" font-family="monospace">  other_directory</text>
+    <text x="200" y="372" fill="#e6e9f5" font-size="15" font-family="monospace">  .trim().to_string()),</text>
+    <text x="200" y="402" fill="#7dcfff" font-size="15" font-family="monospace">model: owned_non_blank(&amp;model),</text>
+    <text x="200" y="428" fill="#7dcfff" font-size="15" font-family="monospace">divergence_prompt: owned_...(&amp;prompt),</text>
+    <text x="200" y="458" fill="#565f89" font-size="13" font-family="monospace">same struct, two spellings of one trim</text>
+    <text x="200" y="484" fill="#565f89" font-size="13" font-family="monospace">helper exists two lines below, unused</text>
+
+    <rect x="180" y="530" width="640" height="120" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="200" y="562" fill="#565f89" font-size="13">the helper, in frontend/src/utils.rs</text>
+    <text x="200" y="594" fill="#e6e9f5" font-size="15" font-family="monospace">pub fn owned_non_blank(s: &amp;str)</text>
+    <text x="200" y="620" fill="#e6e9f5" font-size="15" font-family="monospace">  -&gt; Option&lt;String&gt;</text>
+
+    <rect x="150" y="690" width="700" height="250" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="180" y="728" fill="#f7768e" font-size="19" font-weight="bold">Three optional fields, two idioms:</text>
+    <text x="180" y="764" fill="#c0caf5" font-size="16">- working_directory trims by hand</text>
+    <text x="180" y="792" fill="#c0caf5" font-size="16">- model + prompt use the helper</text>
+    <text x="180" y="820" fill="#c0caf5" font-size="16">- drift risk: one arm trims, one clones</text>
+    <text x="180" y="848" fill="#c0caf5" font-size="16">- helper docs name this exact shape</text>
+  </g>
+
+  <!-- AFTER -->
+  <g>
+    <text x="1180" y="200" fill="#a9b1d6" font-size="19" font-weight="bold">all three fields through one trim path</text>
+
+    <rect x="1180" y="230" width="640" height="280" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1200" y="262" fill="#9ece6a" font-size="13">fork_dialog.rs:75-82 - ForkSessionRequest</text>
+    <text x="1200" y="294" fill="#e6e9f5" font-size="15" font-family="monospace">working_directory:</text>
+    <text x="1200" y="320" fill="#e6e9f5" font-size="15" font-family="monospace"> (...Other)</text>
+    <text x="1200" y="346" fill="#e6e9f5" font-size="15" font-family="monospace"> .then(|| owned_non_blank(</text>
+    <text x="1200" y="372" fill="#e6e9f5" font-size="15" font-family="monospace">   &amp;other_directory))</text>
+    <text x="1200" y="398" fill="#e6e9f5" font-size="15" font-family="monospace"> .flatten(),</text>
+    <text x="1200" y="428" fill="#565f89" font-size="13" font-family="monospace">identical behavior; blank rejected above</text>
+    <text x="1200" y="454" fill="#565f89" font-size="13" font-family="monospace">1 file, 2 insertions, 1 deletion</text>
+    <text x="1200" y="484" fill="#565f89" font-size="13" font-family="monospace">bool.then(|| Option).flatten() shape</text>
+
+    <rect x="1180" y="530" width="640" height="120" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="1200" y="562" fill="#565f89" font-size="13">matches its struct neighbors</text>
+    <text x="1200" y="594" fill="#e6e9f5" font-size="15" font-family="monospace">model, divergence_prompt already</text>
+    <text x="1200" y="620" fill="#e6e9f5" font-size="15" font-family="monospace">use owned_non_blank</text>
+
+    <rect x="1150" y="690" width="700" height="250" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1180" y="728" fill="#9ece6a" font-size="19" font-weight="bold">Fork dialog converged:</text>
+    <text x="1180" y="764" fill="#c0caf5" font-size="16">- no hand-rolled trim().to_string() left</text>
+    <text x="1180" y="792" fill="#c0caf5" font-size="16">- blank-directory guard path untouched</text>
+    <text x="1180" y="820" fill="#c0caf5" font-size="16">- 699 frontend tests green, fmt clean</text>
+  </g>
+
+  <!-- bottom strip -->
+  <text x="500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">PR #1962 - fork working_directory via owned_non_blank</text>
+  <text x="1500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">same vein as #1940-#1961, frontend edition</text>
+</svg>
