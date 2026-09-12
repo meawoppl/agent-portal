@@ -42,6 +42,25 @@ pub fn preferred_name(nickname: Option<&str>, name: Option<&str>) -> Option<Stri
         .map(str::to_string)
 }
 
+/// Minimal HTML escape for server-rendered pages: escapes the five text-node
+/// and attribute metacharacters in a single pass. Single source for the
+/// device-flow forms and the privacy page so a new interpolation site can't
+/// fall behind on quoting (the privacy page previously skipped `'`).
+pub fn escape_html_text(input: &str) -> String {
+    let mut escaped = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&#39;"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
 /// [`preferred_name`] falling back to the email when neither is set — used by
 /// attribution surfaces that render a single name string (message bubbles).
 pub fn display_name(nickname: Option<&str>, name: Option<&str>, email: &str) -> String {
@@ -326,5 +345,16 @@ mod tests {
     fn parse_iso_cursor_rejects_garbage() {
         assert!(parse_iso_cursor("not-a-timestamp").is_none());
         assert!(parse_iso_cursor("").is_none());
+    }
+
+    #[test]
+    fn escape_html_text_escapes_all_metacharacters() {
+        assert_eq!(escape_html_text(r#"<>&"'"#), "&lt;&gt;&amp;&quot;&#39;");
+    }
+
+    #[test]
+    fn escape_html_text_leaves_plain_text_untouched() {
+        assert_eq!(escape_html_text("Agent Portal"), "Agent Portal");
+        assert_eq!(escape_html_text(""), "");
     }
 }
