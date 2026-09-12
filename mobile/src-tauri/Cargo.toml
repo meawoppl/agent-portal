@@ -9,6 +9,7 @@ name = "agent_portal_mobile_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
+plist = "1"
 serde = { workspace = true, features = ["derive"] }
 tauri-build = { version = "2", features = [] }
 tauri-plugin = { version = "2.5", features = ["build"] }

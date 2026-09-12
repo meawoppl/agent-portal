@@ -46,14 +46,18 @@ fn configure_ios_entitlements() {
 }
 
 #[cfg(target_os = "macos")]
-fn ios_associated_domains() -> Vec<String> {
+fn ios_associated_domains() -> Vec<plist::Value> {
     tauri_plugin::plugin_config::<DeepLinkConfig>("deep-link")
         .map(|config| {
             config
                 .mobile
                 .into_iter()
                 .filter(|domain| domain.is_app_link())
-                .filter_map(|domain| domain.host.map(|host| format!("applinks:{host}")))
+                .filter_map(|domain| {
+                    domain
+                        .host
+                        .map(|host| plist::Value::from(format!("applinks:{host}")))
+                })
                 .collect()
         })
         .unwrap_or_default()
