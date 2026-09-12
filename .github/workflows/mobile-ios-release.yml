@@ -128,6 +128,10 @@ jobs:
         working-directory: mobile
         run: npx tauri ios init --ci
 
+      - name: Clean generated iOS build output
+        working-directory: mobile
+        run: rm -rf src-tauri/gen/apple/build
+
       - name: Build signed IPA
         working-directory: mobile
         env:

@@ -609,7 +609,7 @@ tab suppresses the same push.
 | ID | Deliverable | Files | Size | Depends on |
 |---|---|---|---|---|
 | F1 | Android CI lane: SDK/NDK setup, `tauri android build` on PRs touching `mobile/`, debug APK artifact | `.github/workflows/` | S–M | E1 |
-| F2 | iOS CI lanes: PR simulator build, plus manual signed device IPA export with optional TestFlight upload once Apple secrets are configured | `.github/workflows/` | M | E1, F3 |
+| F2 | iOS CI lanes: PR simulator build, plus manual signed device IPA export with optional TestFlight upload once Apple secrets are configured; custom XcodeGen template keeps `libapp.a` out of the `.app` bundle | `.github/workflows/`, `mobile/src-tauri/templates/ios/` | M | E1, F3 |
 | F3 | **Ops, not code**: Play Console + App Store Connect accounts, bundle IDs, keystore + fastlane match cert repo, APNs p8 key, FCM service account, GH secrets | — | S (elapsed days) | — |
 
 ### Track G / H — launch prerequisites

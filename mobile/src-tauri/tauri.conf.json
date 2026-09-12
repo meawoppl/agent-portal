@@ -39,6 +39,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all"
+    "targets": "all",
+    "iOS": {
+      "template": "templates/ios/project.yml"
+    }
   }
 }
