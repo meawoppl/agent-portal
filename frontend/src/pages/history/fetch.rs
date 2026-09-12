@@ -29,8 +29,9 @@ impl std::fmt::Display for FetchError {
 /// `None` = in flight; `Some(Ok/Err)` = settled.
 pub type Load<T> = Option<Result<T, FetchError>>;
 
-/// GET a path and decode a JSON body into `T`.
-pub async fn fetch_json<T: serde::de::DeserializeOwned>(path: &str) -> Result<T, FetchError> {
+/// GET a path and return the response, mapping transport failures and
+/// rejecting non-2xx statuses so callers only decode success bodies.
+async fn get(path: &str) -> Result<gloo_net::http::Response, FetchError> {
     let response = gloo_net::http::Request::get(path)
         .send()
         .await
@@ -38,7 +39,13 @@ pub async fn fetch_json<T: serde::de::DeserializeOwned>(path: &str) -> Result<T,
     if !response.ok() {
         return Err(FetchError::Status(response.status()));
     }
-    response
+    Ok(response)
+}
+
+/// GET a path and decode a JSON body into `T`.
+pub async fn fetch_json<T: serde::de::DeserializeOwned>(path: &str) -> Result<T, FetchError> {
+    get(path)
+        .await?
         .json::<T>()
         .await
         .map_err(|e| FetchError::Decode(e.to_string()))
@@ -52,14 +59,8 @@ pub async fn fetch_messages(
     session: &str,
 ) -> Result<Vec<HistoryMessageLine>, FetchError> {
     let path = format!("/api/history/sessions/{user}/{session}/messages");
-    let response = gloo_net::http::Request::get(&path)
-        .send()
-        .await
-        .map_err(|e| FetchError::Network(e.to_string()))?;
-    if !response.ok() {
-        return Err(FetchError::Status(response.status()));
-    }
-    let body = response
+    let body = get(&path)
+        .await?
         .text()
         .await
         .map_err(|e| FetchError::Decode(e.to_string()))?;
