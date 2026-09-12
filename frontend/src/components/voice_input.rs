@@ -383,6 +383,11 @@ pub struct VoiceInput {
     hold_open_progress: usize,
     /// Consecutive restarts that added no transcript.
     no_progress_restarts: u8,
+    /// Last browser-recognition preview shown to the user. Some Web Speech
+    /// implementations do not promote an interim segment to final text when
+    /// `stop()` is called; if the user saw words and tapped stop, use this as
+    /// the teardown fallback rather than dropping the visible dictation.
+    latest_preview: String,
 }
 
 impl Component for VoiceInput {
@@ -410,6 +415,7 @@ impl Component for VoiceInput {
             carryover: String::new(),
             hold_open_progress: 0,
             no_progress_restarts: 0,
+            latest_preview: String::new(),
         }
     }
 
@@ -453,6 +459,7 @@ impl Component for VoiceInput {
                     self.carryover.clear();
                     self.hold_open_progress = 0;
                     self.no_progress_restarts = 0;
+                    self.latest_preview.clear();
                     let hold_open = self.hold_open;
                     spawn_local(async move {
                         match start_session_async(link.clone(), String::new(), hold_open).await {
@@ -476,7 +483,7 @@ impl Component for VoiceInput {
                     // deliver any keep-alive carryover rather than losing
                     // dictation to the race.
                     drop(session);
-                    self.flush_carryover(ctx);
+                    self.flush_pending_browser_text(ctx);
                     return true;
                 }
                 self.capture = Some(Capture::Browser(session));
@@ -546,7 +553,7 @@ impl Component for VoiceInput {
                 ctx.props().on_recording_change.emit(false);
                 // A failed keep-alive restart must not lose what was already
                 // dictated: deliver the accumulated text as the message.
-                self.flush_carryover(ctx);
+                self.flush_pending_browser_text(ctx);
                 match failure {
                     StartFailure::PermissionDenied => {
                         self.show_hint(ctx, MIC_DENIED_HINT);
@@ -568,10 +575,12 @@ impl Component for VoiceInput {
                     if let Some(cb) = ctx.props().on_interim_transcription.as_ref() {
                         cb.emit(text.clone());
                     }
+                    self.latest_preview = text.clone();
                     self.carryover = text;
                     return false;
                 }
                 self.carryover.clear();
+                self.latest_preview.clear();
                 let trimmed = text.trim();
                 if !trimmed.is_empty() {
                     ctx.props().on_transcription.emit(trimmed.to_string());
@@ -579,6 +588,7 @@ impl Component for VoiceInput {
                 false
             }
             VoiceInputMsg::Interim(text) => {
+                self.latest_preview = text.clone();
                 if let Some(cb) = ctx.props().on_interim_transcription.as_ref() {
                     cb.emit(text);
                 }
@@ -660,7 +670,7 @@ impl Component for VoiceInput {
 
                 self.max_duration_timer = None;
                 // Give-up (or default-mode end): deliver whatever accumulated.
-                self.flush_carryover(ctx);
+                self.flush_pending_browser_text(ctx);
                 if self.is_recording {
                     self.is_recording = false;
                     ctx.props().on_recording_change.emit(false);
@@ -693,6 +703,7 @@ impl Component for VoiceInput {
                     self.pending_stop = false;
                     self.capture = None;
                     self.max_duration_timer = None;
+                    self.flush_pending_browser_text(ctx);
                     true
                 } else {
                     false
@@ -807,12 +818,18 @@ impl VoiceInput {
                     link.send_message(VoiceInputMsg::StopWatchdog);
                 }));
             }
-            // Browser path: the recognizer's `onend` clears `pending_stop`.
-            // iOS sometimes never fires it, hence the watchdog.
-            other => {
-                if let Some(Capture::Browser(session)) = &other {
-                    session.request_stop();
-                }
+            Some(Capture::Browser(session)) => {
+                // Ask for the final result and put the session back: the
+                // recognizer still has to fire `onend`, and dropping now would
+                // detach the handler that emits `Final`.
+                session.request_stop();
+                self.capture = Some(Capture::Browser(session));
+                self.pending_stop = true;
+                self.stop_watchdog = Some(Timeout::new(STOP_WATCHDOG_MS, move || {
+                    link.send_message(VoiceInputMsg::StopWatchdog);
+                }));
+            }
+            None => {
                 self.pending_stop = true;
                 self.stop_watchdog = Some(Timeout::new(STOP_WATCHDOG_MS, move || {
                     link.send_message(VoiceInputMsg::StopWatchdog);
@@ -824,10 +841,17 @@ impl VoiceInput {
         ctx.props().on_recording_change.emit(false);
     }
 
-    /// Deliver (and clear) any keep-alive carryover as the final transcription.
+    /// Deliver (and clear) any pending browser-recognition text as the final
+    /// transcription.
     /// No-op when empty, so it is safe to call on every teardown path.
-    fn flush_carryover(&mut self, ctx: &Context<Self>) {
-        let text = std::mem::take(&mut self.carryover);
+    fn flush_pending_browser_text(&mut self, ctx: &Context<Self>) {
+        let text = if utils::is_non_blank(&self.carryover) {
+            std::mem::take(&mut self.carryover)
+        } else {
+            std::mem::take(&mut self.latest_preview)
+        };
+        self.carryover.clear();
+        self.latest_preview.clear();
         let trimmed = text.trim();
         if !trimmed.is_empty() {
             ctx.props().on_transcription.emit(trimmed.to_string());
