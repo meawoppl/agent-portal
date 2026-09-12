@@ -41,6 +41,8 @@ pub fn contains_case_insensitive(haystack: &str, needle: &str) -> bool {
     haystack
         .to_ascii_lowercase()
         .contains(&needle.to_ascii_lowercase())
+}
+
 /// The trimmed text when `value` holds non-whitespace text; `None` when it is
 /// absent or blank. Single home for the repeated
 /// `.map(str::trim).filter(|s| !s.is_empty())` chain on optional inputs.
@@ -82,6 +84,8 @@ mod tests {
     #[test]
     fn contains_case_insensitive_empty_needle_matches_everything() {
         assert!(contains_case_insensitive("anything", ""));
+    }
+
     #[test]
     fn trimmed_non_blank_trims_or_rejects() {
         assert_eq!(
