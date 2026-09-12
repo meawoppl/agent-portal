@@ -1,8 +1,10 @@
+use crate::errors::AppError;
 use crate::models::{Message, NewDeletedSessionCosts, Session};
 use crate::schema::{
     deleted_session_costs, messages, pending_inputs, pending_permission_requests, session_members,
     sessions, users,
 };
+use axum::http::{header, HeaderMap};
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, PooledConnection};
@@ -40,6 +42,38 @@ pub fn preferred_name(nickname: Option<&str>, name: Option<&str>) -> Option<Stri
         .map(str::trim)
         .find(|s| !s.is_empty())
         .map(str::to_string)
+}
+
+/// Minimal HTML escape for server-rendered pages: escapes the five text-node
+/// and attribute metacharacters in a single pass. Single source for the
+/// device-flow forms and the privacy page so a new interpolation site can't
+/// fall behind on quoting (the privacy page previously skipped `'`).
+pub fn escape_html_text(input: &str) -> String {
+    let mut escaped = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&#39;"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
+/// Declared `Content-Type` of a raw-body upload, minus any `; …` parameters.
+/// Single source for the raw-body endpoints (`show_media`, STT transcription)
+/// so a new upload endpoint can't fall behind on parameter-stripping.
+/// Rejects a missing, non-UTF8, or blank header with `400`.
+pub fn request_content_type(headers: &HeaderMap) -> Result<&str, AppError> {
+    headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.split(';').next().unwrap_or(s).trim())
+        .filter(|s| !s.is_empty())
+        .ok_or(AppError::BadRequest("missing Content-Type header"))
 }
 
 /// [`preferred_name`] falling back to the email when neither is set — used by
@@ -258,6 +292,7 @@ pub fn delete_user_sessions(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::http::HeaderValue;
 
     #[test]
     fn nickname_is_preferred_then_name_then_email() {
@@ -326,5 +361,58 @@ mod tests {
     fn parse_iso_cursor_rejects_garbage() {
         assert!(parse_iso_cursor("not-a-timestamp").is_none());
         assert!(parse_iso_cursor("").is_none());
+    }
+
+    #[test]
+    fn escape_html_text_escapes_all_metacharacters() {
+        assert_eq!(escape_html_text(r#"<>&"'"#), "&lt;&gt;&amp;&quot;&#39;");
+    }
+
+    #[test]
+    fn escape_html_text_leaves_plain_text_untouched() {
+        assert_eq!(escape_html_text("Agent Portal"), "Agent Portal");
+        assert_eq!(escape_html_text(""), "");
+    }
+
+    fn headers_with_content_type(value: &HeaderValue) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::CONTENT_TYPE, value.clone());
+        headers
+    }
+
+    #[test]
+    fn request_content_type_passes_plain_value_through() {
+        let headers = headers_with_content_type(&HeaderValue::from_static("audio/webm"));
+        assert_eq!(request_content_type(&headers).unwrap(), "audio/webm");
+    }
+
+    #[test]
+    fn request_content_type_strips_parameters_and_trims() {
+        let headers =
+            headers_with_content_type(&HeaderValue::from_static("audio/webm;codecs=opus"));
+        assert_eq!(request_content_type(&headers).unwrap(), "audio/webm");
+        let headers =
+            headers_with_content_type(&HeaderValue::from_static("  text/html ; charset=utf-8 "));
+        assert_eq!(request_content_type(&headers).unwrap(), "text/html");
+    }
+
+    #[test]
+    fn request_content_type_rejects_missing_blank_and_non_utf8() {
+        assert!(matches!(
+            request_content_type(&HeaderMap::new()),
+            Err(AppError::BadRequest(_))
+        ));
+        let headers = headers_with_content_type(&HeaderValue::from_static("   "));
+        assert!(matches!(
+            request_content_type(&headers),
+            Err(AppError::BadRequest(_))
+        ));
+        let headers = headers_with_content_type(
+            &HeaderValue::from_bytes(&[0xff]).expect("obs-text is a valid header byte"),
+        );
+        assert!(matches!(
+            request_content_type(&headers),
+            Err(AppError::BadRequest(_))
+        ));
     }
 }

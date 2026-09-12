@@ -7,17 +7,10 @@
 //! from what the server actually does; when the config changes, the page
 //! changes with it.
 
+use crate::handlers::helpers::escape_html_text;
 use crate::AppState;
 use axum::{extract::State, response::Html};
 use std::sync::Arc;
-
-/// Minimal HTML escape for config-sourced strings interpolated into the page.
-fn escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-}
 
 /// GET /privacy — how this deployment handles user data.
 pub async fn privacy_policy(State(app_state): State<Arc<AppState>>) -> Html<String> {
@@ -39,7 +32,7 @@ fn render(
     session_max_age_days: u32,
     archive_enabled: bool,
 ) -> String {
-    let title = escape(app_title);
+    let title = escape_html_text(app_title);
 
     let message_age_clause = if message_retention_days > 0 {
         format!(

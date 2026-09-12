@@ -9,7 +9,7 @@
 use axum::{
     body::Bytes,
     extract::{Query, State},
-    http::{header, HeaderMap},
+    http::HeaderMap,
     Json,
 };
 use diesel::prelude::*;
@@ -21,6 +21,7 @@ use uuid::Uuid;
 
 use crate::auth::CurrentUserId;
 use crate::errors::AppError;
+use crate::handlers::helpers::request_content_type;
 use crate::AppState;
 use portal_stt::{session_keyterms, TranscribeRequest};
 
@@ -47,12 +48,7 @@ pub async fn transcribe(
         "Speech-to-text is not configured",
     ))?;
 
-    let content_type = headers
-        .get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .ok_or(AppError::BadRequest("missing Content-Type header"))?;
+    let content_type = request_content_type(&headers)?;
     if !content_type.starts_with("audio/") {
         return Err(AppError::BadRequest("Content-Type must be an audio type"));
     }

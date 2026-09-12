@@ -896,7 +896,7 @@ mod tests {
     #[test]
     fn escape_html_text_escapes_text_node_metacharacters() {
         assert_eq!(
-            render::escape_html_text(r#"<>&"'"#),
+            crate::handlers::helpers::escape_html_text(r#"<>&"'"#),
             "&lt;&gt;&amp;&quot;&#39;"
         );
     }

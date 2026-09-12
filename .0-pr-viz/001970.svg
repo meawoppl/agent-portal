@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-labelledby="title desc">
+  <title id="title">PR 1970 shared Content-Type parsing for upload endpoints</title>
+  <desc id="desc">Before, show_media and transcribe each hand-rolled the same Content-Type header parse. After, one helpers::request_content_type owns it and both callers are one line, with unit tests.</desc>
+  <rect width="2000" height="1200" fill="#16161e"/>
+
+  <text x="55" y="70" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24" letter-spacing="1">PR #1970 · Share Content-Type parsing across upload endpoints</text>
+  <text x="55" y="124" fill="#e6e9f5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700">show_media and transcribe each hand-rolled the same Content-Type parse;</text>
+  <text x="55" y="166" fill="#e6e9f5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700">now one helpers::request_content_type() owns it, with unit tests.</text>
+  <line x1="55" y1="190" x2="1945" y2="190" stroke="#3d4666" stroke-width="2"/>
+  <line x1="1000" y1="225" x2="1000" y2="1090" stroke="#3d4666" stroke-width="2" stroke-dasharray="12 14"/>
+
+  <text x="70" y="260" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" letter-spacing="4">BEFORE</text>
+  <text x="1070" y="260" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" letter-spacing="4">AFTER</text>
+
+  <rect x="70" y="295" width="820" height="275" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="105" y="345" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">Same header parse, twice</text>
+  <text x="105" y="395" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">.get(header::CONTENT_TYPE)</text>
+  <text x="105" y="435" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">.and_then(to_str) ... .filter(!empty)</text>
+  <text x="105" y="475" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">.ok_or("missing Content-Type header")</text>
+  <text x="105" y="518" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">agent_comms.rs show_media and stt.rs transcribe</text>
+  <text x="105" y="550" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">in backend/src/handlers/</text>
+
+  <rect x="70" y="600" width="820" height="260" rx="8" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+  <text x="105" y="650" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">Only the tail differs</text>
+  <text x="105" y="700" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">show_media strips ";" params + to_string(), while</text>
+  <text x="105" y="734" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">transcribe only trims and keeps the params - so a</text>
+  <text x="105" y="768" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">param-handling fix must land twice, and each</text>
+  <text x="105" y="802" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">provider sees a different content shape.</text>
+
+  <rect x="1110" y="295" width="820" height="275" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="1145" y="345" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">One helper owns the parse</text>
+  <text x="1145" y="395" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">helpers::request_content_type(&amp;headers)</text>
+  <text x="1145" y="435" fill="#9ece6a" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">-&gt; Result&lt;&amp;str, AppError&gt;</text>
+  <text x="1145" y="475" fill="#9ece6a" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">get + utf8 + strip ";" + trim + blank-reject</text>
+  <text x="1145" y="518" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">single owner in handlers/helpers.rs; both 400s</text>
+  <text x="1145" y="550" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">keep the same "missing Content-Type" message.</text>
+
+  <rect x="1110" y="600" width="820" height="260" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1145" y="650" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">Callers go one line each</text>
+  <text x="1145" y="700" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">request_content_type(&amp;headers)?.to_string()</text>
+  <text x="1145" y="734" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">request_content_type(&amp;headers)?</text>
+  <text x="1145" y="786" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">3 files, +64/-14, plus 3 helper unit tests;</text>
+  <text x="1145" y="820" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">334 backend tests green, fmt and clippy clean.</text>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">Scope: raw-body uploads only; per-kind 413 size-limit messages stay per-endpoint prose.</text>
+</svg>
