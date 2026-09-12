@@ -436,12 +436,8 @@ pub async fn show_media(
         .first(&mut conn)
         .map_err(|_| AppError::NotFound("session"))?;
 
-    let mut filename = query
-        .filename
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string);
+    let mut filename =
+        shared::strings::trimmed_non_blank(query.filename.as_deref()).map(str::to_string);
     let mut body = body;
     if content_type == shared::media::PORTABLE_FIGURE_HTML_TYPE {
         (body, filename) = unwrap_portable_figure_html(body, filename)?;

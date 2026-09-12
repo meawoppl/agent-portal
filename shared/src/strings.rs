@@ -10,6 +10,14 @@ pub fn is_non_blank(s: &str) -> bool {
     !s.trim().is_empty()
 }
 
+/// The trimmed text when `value` holds non-whitespace text; `None` when it is
+/// absent or blank. Single home for the repeated
+/// `.map(str::trim).filter(|s| !s.is_empty())` chain on optional inputs.
+#[must_use]
+pub fn trimmed_non_blank(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|s| !s.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -20,5 +28,17 @@ mod tests {
         assert!(!is_non_blank("   "));
         assert!(!is_non_blank("\t\n "));
         assert!(is_non_blank("  hi  "));
+    }
+
+    #[test]
+    fn trimmed_non_blank_trims_or_rejects() {
+        assert_eq!(
+            trimmed_non_blank(Some("  api-refactor  ")),
+            Some("api-refactor")
+        );
+        assert_eq!(trimmed_non_blank(Some("hi")), Some("hi"));
+        assert_eq!(trimmed_non_blank(Some("   ")), None);
+        assert_eq!(trimmed_non_blank(Some("")), None);
+        assert_eq!(trimmed_non_blank(None), None);
     }
 }
