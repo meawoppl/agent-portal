@@ -28,6 +28,11 @@ Install the local CLI dependencies from this directory:
 npm install
 ```
 
+The Tauri iOS subcommand is only compiled into the CLI on macOS. On Linux,
+`npm run ios:init` / `cargo tauri ios ...` will report that `ios` is not a
+recognized subcommand even when the same Tauri version is installed; use a Mac
+with Xcode or the macOS CI lane below for the full iOS build.
+
 ## Remote URL
 
 Two config keys are in play, and they do **different** jobs — conflating them
@@ -252,16 +257,19 @@ the whole set from a single source PNG rather than hand-editing individual sizes
 ## CI
 
 `.github/workflows/mobile-android.yml` (job **Android Debug APK**) builds an
-unsigned debug APK. It runs on:
+unsigned debug APK. `.github/workflows/mobile-ios.yml` (job **iOS Simulator
+App**) builds an unsigned iOS simulator app on a macOS runner. They run on:
 
 - **Pull requests** that touch `mobile/**` or the workflow file itself.
-- **Manual dispatch** (Actions tab → "Mobile Android" → "Run workflow").
+- **Manual dispatch** (Actions tab → "Mobile Android" or "Mobile iOS" → "Run
+  workflow").
 
-It is an **additive, non-required** lane: it is deliberately kept out of the
-`pr-to-main` branch-protection ruleset, so a mobile build failure never blocks a
-merge (and, conversely, do not rename its job into a required lane — see #1217).
+Both lanes are **additive, non-required** lanes: they are deliberately kept out
+of the `pr-to-main` branch-protection ruleset, so a mobile build failure never
+blocks a merge (and, conversely, do not rename their jobs into a required lane —
+see #1217).
 
-What the lane does, in order:
+What the Android lane does, in order:
 
 1. Installs the pinned Rust toolchain with the `aarch64-linux-android` target,
    Java 17 (Temurin), and the Android SDK cmdline-tools + a pinned NDK (26.x).
@@ -276,3 +284,19 @@ What the lane does, in order:
 `agent-portal-android-debug`. It contains the unsigned `*-debug.apk`, installable
 on a device or emulator with `adb install <file>.apk` (developer mode / unknown
 sources enabled).
+
+What the iOS lane does, in order:
+
+1. Runs on `macos-latest`, installs the pinned Rust toolchain plus iOS device
+   and simulator targets, and uses the npm-provided Tauri CLI from
+   `@tauri-apps/cli`.
+2. Chooses the simulator target from the runner architecture: `aarch64-sim` on
+   Apple Silicon, `x86_64` on Intel.
+3. Runs `cargo check -p agent-portal-mobile --target <ios-simulator-triple>` as
+   a fast-fail Rust/iOS gate.
+4. Runs `npx tauri ios init --ci` to generate `gen/apple`.
+5. Runs `npx tauri ios build --debug --target <simulator-target> --no-sign`.
+
+The iOS lane intentionally stops at an unsigned simulator build. Device
+installation, APNs entitlements, archive export, and TestFlight upload need the
+signing/cert/profile work from the release track before they can run in CI.

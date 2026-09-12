@@ -1,0 +1,80 @@
+# Additive, NON-required workflow: builds the Tauri iOS simulator app on PRs
+# that touch mobile/. It is intentionally NOT part of the `pr-to-main` ruleset's
+# required job set. The lane gives us macOS/Xcode coverage without making normal
+# product PRs depend on Apple runner availability.
+name: Mobile iOS
+
+on:
+  pull_request:
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/mobile-ios.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ios-simulator-build:
+    name: iOS Simulator App
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history so build.rs commit-count version is real (#1096)
+
+      - name: Select iOS simulator target
+        run: |
+          if [ "$(uname -m)" = "arm64" ]; then
+            echo "TAURI_IOS_TARGET=aarch64-sim" >> "$GITHUB_ENV"
+            echo "IOS_RUST_TARGET=aarch64-apple-ios-sim" >> "$GITHUB_ENV"
+          else
+            echo "TAURI_IOS_TARGET=x86_64" >> "$GITHUB_ENV"
+            echo "IOS_RUST_TARGET=x86_64-apple-ios" >> "$GITHUB_ENV"
+          fi
+
+      - name: Install Rust (iOS simulator)
+        uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: mobile-ios
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install mobile npm dependencies
+        working-directory: mobile
+        run: npm ci
+
+      - name: Verify tauri-cli iOS support
+        working-directory: mobile
+        run: |
+          npx tauri --version
+          npx tauri --help | grep -q 'ios'
+
+      # Fast-fail on the mobile crate before generating and archiving the
+      # Xcode project. This catches Rust/iOS target regressions with cleaner
+      # logs than xcodebuild's wrapper output.
+      - name: Check mobile crate (iOS simulator)
+        run: cargo check -p agent-portal-mobile --target "$IOS_RUST_TARGET"
+
+      - name: Initialize iOS project
+        working-directory: mobile
+        run: npx tauri ios init --ci
+
+      - name: Build simulator app
+        working-directory: mobile
+        run: npx tauri ios build --debug --target "$TAURI_IOS_TARGET" --no-sign
