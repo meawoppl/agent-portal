@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-labelledby="title desc">
+  <title id="title">PR 1967 history fetch GET preamble dedup</title>
+  <desc id="desc">Before, fetch_json and fetch_messages each hand-rolled the same GET plus status check. After, one private get() helper owns the preamble and both callers only decode.</desc>
+  <rect width="2000" height="1200" fill="#16161e"/>
+
+  <text x="55" y="70" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24" letter-spacing="1">PR #1967 · Deduplicate history fetch GET preamble</text>
+  <text x="55" y="124" fill="#e6e9f5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700">fetch_json and fetch_messages each hand-rolled the same GET preamble;</text>
+  <text x="55" y="166" fill="#e6e9f5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700">now one private get() owns it and both callers only decode.</text>
+  <line x1="55" y1="190" x2="1945" y2="190" stroke="#3d4666" stroke-width="2"/>
+  <line x1="1000" y1="225" x2="1000" y2="1088" stroke="#3d4666" stroke-width="2" stroke-dasharray="12 14"/>
+
+  <text x="70" y="260" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" letter-spacing="4">BEFORE</text>
+  <text x="1070" y="260" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" letter-spacing="4">AFTER</text>
+
+  <rect x="70" y="310" width="820" height="250" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="105" y="360" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">Identical preamble, twice</text>
+  <text x="105" y="412" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">Request::get(path).send().await</text>
+  <text x="105" y="454" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">if !response.ok() { Status(status) }</text>
+  <text x="105" y="506" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">fetch_json (:33) and fetch_messages (:55) in</text>
+  <text x="105" y="540" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">frontend/src/pages/history/fetch.rs</text>
+
+  <rect x="70" y="610" width="820" height="250" rx="8" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+  <text x="105" y="660" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">Only the tail differs</text>
+  <text x="105" y="712" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">one decodes .json(), the other .text() plus</text>
+  <text x="105" y="746" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">NDJSON parse - yet the 5-line setup above</text>
+  <text x="105" y="780" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">is copied: a status-mapping fix must land twice.</text>
+
+  <rect x="1110" y="310" width="820" height="250" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="1145" y="360" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">One private get() helper</text>
+  <text x="1145" y="412" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">async fn get(path) -&gt; Response</text>
+  <text x="1145" y="454" fill="#9ece6a" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">send + Network map + ok() check</text>
+  <text x="1145" y="506" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">single owner for the GET plus non-2xx reject;</text>
+  <text x="1145" y="540" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">callers only see success bodies.</text>
+
+  <rect x="1110" y="610" width="820" height="250" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1145" y="660" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">Callers only decode</text>
+  <text x="1145" y="712" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">get(path)?.json()  /  get(&amp;path)?.text()</text>
+  <text x="1145" y="764" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">1 file, +12/-11, behavior identical;</text>
+  <text x="1145" y="798" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">15 history tests green, fmt and clippy clean.</text>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">Scope: history/fetch.rs only; utils.rs fetch_json keeps its own copy (different FetchError type).</text>
+</svg>
