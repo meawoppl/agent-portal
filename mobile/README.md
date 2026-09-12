@@ -288,13 +288,14 @@ sources enabled).
 What the iOS lane does, in order:
 
 1. Runs on `macos-latest`, installs the pinned Rust toolchain plus iOS device
-   and simulator targets, and installs the pinned `cargo-tauri` CLI.
+   and simulator targets, and uses the npm-provided Tauri CLI from
+   `@tauri-apps/cli`.
 2. Chooses the simulator target from the runner architecture: `aarch64-sim` on
    Apple Silicon, `x86_64` on Intel.
 3. Runs `cargo check -p agent-portal-mobile --target <ios-simulator-triple>` as
    a fast-fail Rust/iOS gate.
-4. Runs `cargo tauri ios init --ci` to generate `gen/apple`.
-5. Runs `cargo tauri ios build --debug --target <simulator-target> --no-sign`.
+4. Runs `npx tauri ios init --ci` to generate `gen/apple`.
+5. Runs `npx tauri ios build --debug --target <simulator-target> --no-sign`.
 
 The iOS lane intentionally stops at an unsigned simulator build. Device
 installation, APNs entitlements, archive export, and TestFlight upload need the

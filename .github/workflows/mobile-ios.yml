@@ -17,7 +17,6 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  TAURI_CLI_VERSION: '2.11.4'
 
 jobs:
   ios-simulator-build:
@@ -60,21 +59,11 @@ jobs:
         working-directory: mobile
         run: npm ci
 
-      - name: Cache tauri-cli binary
-        id: cache-tauri-cli
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin/cargo-tauri
-          key: ${{ runner.os }}-cargo-tauri-${{ env.TAURI_CLI_VERSION }}
-
-      - name: Install tauri-cli v2
-        if: steps.cache-tauri-cli.outputs.cache-hit != 'true'
-        run: cargo install tauri-cli --version "${{ env.TAURI_CLI_VERSION }}" --locked
-
       - name: Verify tauri-cli iOS support
+        working-directory: mobile
         run: |
-          cargo tauri --version
-          cargo tauri --help | grep -q 'ios'
+          npx tauri --version
+          npx tauri --help | grep -q 'ios'
 
       # Fast-fail on the mobile crate before generating and archiving the
       # Xcode project. This catches Rust/iOS target regressions with cleaner
@@ -84,8 +73,8 @@ jobs:
 
       - name: Initialize iOS project
         working-directory: mobile
-        run: cargo tauri ios init --ci
+        run: npx tauri ios init --ci
 
       - name: Build simulator app
         working-directory: mobile
-        run: cargo tauri ios build --debug --target "$TAURI_IOS_TARGET" --no-sign
+        run: npx tauri ios build --debug --target "$TAURI_IOS_TARGET" --no-sign
