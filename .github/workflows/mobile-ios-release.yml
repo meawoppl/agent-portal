@@ -82,6 +82,8 @@ jobs:
           key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY}.p8"
           printf '%s' "$APPLE_API_KEY_P8" > "$key_path"
           chmod 600 "$key_path"
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          cp "$key_path" "$HOME/.appstoreconnect/private_keys/"
           echo "APPLE_API_KEY_PATH=$key_path" >> "$GITHUB_ENV"
 
       - name: Select build number
@@ -149,6 +151,17 @@ jobs:
             --target aarch64 \
             --export-method "${{ inputs.export_method }}" \
             --build-number "$IOS_BUILD_NUMBER"
+
+      - name: Verify iOS entitlements
+        working-directory: mobile
+        run: |
+          entitlements="$(find src-tauri/gen/apple -name '*_iOS.entitlements' -print -quit)"
+          if [ -z "$entitlements" ]; then
+            echo "No generated iOS entitlements file found" >&2
+            exit 1
+          fi
+          /usr/libexec/PlistBuddy -c 'Print :aps-environment' "$entitlements" | grep -qx 'production'
+          /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.associated-domains:0' "$entitlements" | grep -qx 'applinks:txcl.io'
 
       - name: Collect IPA
         run: |

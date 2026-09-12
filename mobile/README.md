@@ -220,9 +220,11 @@ The APNs registration bridge lives in [`ios/`](ios/) —
 Xcode project when wiring push (requires the Push Notifications entitlement
 and, in CI, the F2/F3 signing prerequisites).
 
-`mobile/src-tauri/build.rs` injects the `aps-environment` entitlement during
-iOS builds so it survives `gen/apple` regeneration. Local/debug builds default
-to `development`; the signed release workflow sets
+`mobile/src-tauri/build.rs` refreshes generated iOS entitlements during every
+iOS app build so they survive `gen/apple` regeneration and Cargo dependency
+build-script caching. It writes `aps-environment` and mirrors the configured
+deep-link app links into `com.apple.developer.associated-domains`.
+Local/debug builds default to `development`; the signed release workflow sets
 `PORTAL_IOS_APS_ENVIRONMENT=production`.
 
 ## Development
@@ -349,6 +351,10 @@ that `Externals` is not listed as a target source: `libapp.a` is still linked
 through the template's dependency entry, but it is not copied into
 `Agent Portal.app` as a resource. App Store Connect rejects bundles containing
 that standalone static library.
+
+Tauri resolves the template path relative to the command's current working
+directory, not relative to `tauri.conf.json`. The committed path expects the
+usual `mobile/` working directory used by npm scripts and CI.
 
 Before the first TestFlight upload, confirm in Apple Developer/App Store
 Connect that:
