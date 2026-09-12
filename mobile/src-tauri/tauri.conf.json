@@ -39,6 +39,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all"
+    "targets": "all",
+    "iOS": {
+      "template": "src-tauri/templates/ios/project.yml"
+    }
   }
 }

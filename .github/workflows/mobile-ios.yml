@@ -75,6 +75,21 @@ jobs:
         working-directory: mobile
         run: npx tauri ios init --ci
 
+      - name: Clean generated iOS build output
+        working-directory: mobile
+        run: rm -rf src-tauri/gen/apple/build
+
       - name: Build simulator app
         working-directory: mobile
         run: npx tauri ios build --debug --target "$TAURI_IOS_TARGET" --no-sign
+
+      - name: Verify iOS entitlements
+        working-directory: mobile
+        run: |
+          entitlements="$(find src-tauri/gen/apple -name '*_iOS.entitlements' -print -quit)"
+          if [ -z "$entitlements" ]; then
+            echo "No generated iOS entitlements file found" >&2
+            exit 1
+          fi
+          /usr/libexec/PlistBuddy -c 'Print :aps-environment' "$entitlements"
+          /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.associated-domains:0' "$entitlements" | grep -qx 'applinks:txcl.io'

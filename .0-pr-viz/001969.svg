@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-labelledby="title desc">
+  <title id="title">PR 1969 signed iOS release lane</title>
+  <desc id="desc">Before, iOS CI stopped at an unsigned simulator build. After, a manual signed IPA workflow validates Apple credentials, builds a device IPA, and can upload to TestFlight.</desc>
+  <rect width="2000" height="1200" fill="#16161e"/>
+
+  <text x="55" y="70" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24" letter-spacing="1">PR #1969 · Add signed iOS release lane</text>
+  <text x="55" y="124" fill="#e6e9f5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700">iOS simulator builds are green;</text>
+  <text x="55" y="166" fill="#e6e9f5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700">this adds the signed device/TestFlight path.</text>
+  <line x1="55" y1="190" x2="1945" y2="190" stroke="#3d4666" stroke-width="2"/>
+  <line x1="1000" y1="225" x2="1000" y2="1088" stroke="#3d4666" stroke-width="2" stroke-dasharray="12 14"/>
+
+  <text x="70" y="260" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" letter-spacing="4">BEFORE</text>
+  <text x="1070" y="260" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" letter-spacing="4">AFTER</text>
+
+  <rect x="80" y="320" width="820" height="260" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="120" y="372" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">CI release surface</text>
+  <text x="120" y="426" fill="#7aa2f7" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">mobile-ios.yml</text>
+  <text x="120" y="474" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">macOS runner built only the simulator app.</text>
+  <text x="120" y="518" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">No signed IPA artifact or TestFlight switch.</text>
+
+  <rect x="1100" y="320" width="820" height="260" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="1140" y="372" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">Manual release workflow</text>
+  <text x="1140" y="426" fill="#7aa2f7" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">mobile-ios-release.yml</text>
+  <text x="1140" y="474" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">Validates Apple secrets before Xcode work.</text>
+  <text x="1140" y="518" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">Exports a signed device IPA artifact.</text>
+
+  <rect x="130" y="660" width="720" height="265" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="170" y="712" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">Generated project gap</text>
+  <text x="170" y="768" fill="#f7768e" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">gen/apple/*.entitlements</text>
+  <path d="M180 815 H800" stroke="#3d4666" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="230" cy="815" r="25" fill="#7aa2f7"/>
+  <circle cx="490" cy="815" r="25" fill="#e0af68"/>
+  <circle cx="750" cy="815" r="25" fill="#f7768e"/>
+  <text x="178" y="875" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="21">init</text>
+  <text x="420" y="875" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="21">empty file</text>
+  <text x="682" y="875" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="21">manual risk</text>
+
+  <rect x="1150" y="660" width="720" height="265" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="1190" y="712" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">Regeneration-safe hook</text>
+  <text x="1190" y="768" fill="#9ece6a" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">build.rs injects aps-environment</text>
+  <path d="M1200 815 H1820" stroke="#3d4666" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="1250" cy="815" r="25" fill="#7aa2f7"/>
+  <circle cx="1510" cy="815" r="25" fill="#e0af68"/>
+  <circle cx="1770" cy="815" r="25" fill="#9ece6a"/>
+  <text x="1198" y="875" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="21">build</text>
+  <text x="1440" y="875" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="21">APNs entitlement</text>
+  <text x="1700" y="875" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="21">signed IPA</text>
+
+  <rect x="1060" y="990" width="850" height="76" rx="8" fill="#1e202e" stroke="#e0af68" stroke-width="2"/>
+  <text x="1102" y="1038" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">TestFlight upload is opt-in on manual dispatch.</text>
+
+  <text x="55" y="1172" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22">Scope: release machinery and docs; Apple account, certificate, provisioning profile, and APNs key secrets still gate the first signed run.</text>
+</svg>

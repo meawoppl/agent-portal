@@ -220,6 +220,13 @@ The APNs registration bridge lives in [`ios/`](ios/) —
 Xcode project when wiring push (requires the Push Notifications entitlement
 and, in CI, the F2/F3 signing prerequisites).
 
+`mobile/src-tauri/build.rs` refreshes generated iOS entitlements during every
+iOS app build so they survive `gen/apple` regeneration and Cargo dependency
+build-script caching. It writes `aps-environment` and mirrors the configured
+deep-link app links into `com.apple.developer.associated-domains`.
+Local/debug builds default to `development`; the signed release workflow sets
+`PORTAL_IOS_APS_ENVIRONMENT=production`.
+
 ## Development
 
 Start the backend first (see [Remote URL](#remote-url) — `*:dev` waits on
@@ -295,8 +302,71 @@ What the iOS lane does, in order:
 3. Runs `cargo check -p agent-portal-mobile --target <ios-simulator-triple>` as
    a fast-fail Rust/iOS gate.
 4. Runs `npx tauri ios init --ci` to generate `gen/apple`.
-5. Runs `npx tauri ios build --debug --target <simulator-target> --no-sign`.
+5. Clears `src-tauri/gen/apple/build` so reruns don't trip over a stale archive.
+6. Runs `npx tauri ios build --debug --target <simulator-target> --no-sign`.
 
 The iOS lane intentionally stops at an unsigned simulator build. Device
 installation, APNs entitlements, archive export, and TestFlight upload need the
 signing/cert/profile work from the release track before they can run in CI.
+
+## iOS release lane
+
+`.github/workflows/mobile-ios-release.yml` (job **Signed iOS IPA**) is a manual
+workflow for the signed device/App Store path. It does not run on PRs because it
+requires Apple credentials and provisioning. It builds `aarch64-apple-ios`,
+exports a signed IPA, and uploads that IPA as the
+`agent-portal-ios-signed-ipa` workflow artifact. When `upload_testflight` is
+enabled on the manual dispatch, it also uploads the IPA to App Store Connect for
+TestFlight processing.
+
+Required GitHub Actions secrets:
+
+| Secret | Purpose |
+|---|---|
+| `APPLE_API_KEY` | App Store Connect API key id, passed to Tauri/Xcode as `APPLE_API_KEY`. |
+| `APPLE_API_ISSUER` | App Store Connect issuer id, passed as `APPLE_API_ISSUER`. |
+| `APPLE_API_KEY_P8` | Raw `.p8` App Store Connect API key contents; CI writes it to `APPLE_API_KEY_PATH`. |
+| `APPLE_DEVELOPMENT_TEAM` | Apple Developer Team ID for generated Xcode signing settings. |
+| `IOS_CERTIFICATE` | Base64 distribution signing certificate consumed by Tauri's iOS signing support. |
+| `IOS_CERTIFICATE_PASSWORD` | Password for `IOS_CERTIFICATE`. |
+| `IOS_MOBILE_PROVISION` | Base64 mobile provisioning profile for `io.txcl.agentportal`. |
+
+Manual run inputs:
+
+- `export_method`: `app-store-connect` for App Store/TestFlight export,
+  `release-testing` for ad-hoc distribution, or `debugging` for development
+  signing.
+- `shell_url`: portal origin baked into the shell via `PORTAL_SHELL_URL`
+  (defaults to `https://txcl.io`).
+- `build_number`: optional `CFBundleVersion` suffix; when blank, CI uses the
+  workflow run number.
+- `upload_testflight`: when true, runs `xcrun altool --upload-app` after the
+  signed IPA artifact is collected. Leave this off until the first signed IPA is
+  known-good and the App Store Connect app record exists.
+
+The app uses a custom XcodeGen template at
+[`src-tauri/templates/ios/project.yml`](src-tauri/templates/ios/project.yml)
+rather than Tauri's built-in iOS template. The only intentional difference is
+that `Externals` is not listed as a target source: `libapp.a` is still linked
+through the template's dependency entry, but it is not copied into
+`Agent Portal.app` as a resource. App Store Connect rejects bundles containing
+that standalone static library.
+
+Tauri resolves the template path relative to the command's current working
+directory, not relative to `tauri.conf.json`. The committed path expects the
+usual `mobile/` working directory used by npm scripts and CI.
+
+Before the first TestFlight upload, confirm in Apple Developer/App Store
+Connect that:
+
+1. Bundle ID `io.txcl.agentportal` exists.
+2. The provisioning profile includes the Push Notifications and Associated
+   Domains capabilities used by the mobile shell.
+3. App Store Connect has an app record for the bundle ID.
+4. Backend env is set for link verification and APNs delivery:
+   `PORTAL_MOBILE_APPLE_TEAM_ID`, `PORTAL_MOBILE_BUNDLE_ID`,
+   `PORTAL_APNS_KEY_P8_PATH`, `PORTAL_APNS_KEY_ID`, `PORTAL_APNS_TEAM_ID`, and
+   `PORTAL_APNS_BUNDLE_ID`.
+
+The APNs Swift bridge still has to be added to the generated Xcode project and
+connected to the shell's mobile JWT before iOS push registration is live.
