@@ -206,8 +206,8 @@ pub async fn list() -> Result<()> {
         .send()
         .await
         .context("request to backend failed")?;
-    if !resp.status().is_success() {
-        let status = resp.status();
+    let status = resp.status();
+    if !status.is_success() {
         let body = resp.text().await.unwrap_or_default();
         return Err(crate::message::backend_http_error(status, &body));
     }

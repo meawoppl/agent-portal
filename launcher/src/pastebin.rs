@@ -212,8 +212,8 @@ async fn upload_to_dpaste(content: &str) -> Result<String> {
         .await
         .context("Failed to upload to dpaste.org")?;
 
-    if !resp.status().is_success() {
-        let status = resp.status();
+    let status = resp.status();
+    if !status.is_success() {
         let body = resp.text().await.unwrap_or_default();
         anyhow::bail!("dpaste.org returned {}: {}", status, body);
     }
