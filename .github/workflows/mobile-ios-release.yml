@@ -1,0 +1,179 @@
+# Manual, signed iOS release lane. This is intentionally separate from the
+# additive PR simulator lane: it needs Apple credentials, provisioning, and a
+# real device/App Store Connect signing target.
+name: Mobile iOS Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      export_method:
+        description: "Xcode export method"
+        required: true
+        default: "app-store-connect"
+        type: choice
+        options:
+          - app-store-connect
+          - release-testing
+          - debugging
+      shell_url:
+        description: "Portal URL baked into the mobile shell"
+        required: true
+        default: "https://txcl.io"
+      build_number:
+        description: "CFBundleVersion suffix; defaults to the workflow run number"
+        required: false
+      upload_testflight:
+        description: "Upload the signed IPA to App Store Connect for TestFlight"
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  signed-ipa:
+    name: Signed iOS IPA
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate Apple signing secrets
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_DEVELOPMENT_TEAM }}
+          IOS_CERTIFICATE: ${{ secrets.IOS_CERTIFICATE }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_MOBILE_PROVISION: ${{ secrets.IOS_MOBILE_PROVISION }}
+        run: |
+          missing=()
+          for name in \
+            APPLE_API_KEY \
+            APPLE_API_ISSUER \
+            APPLE_API_KEY_P8 \
+            APPLE_DEVELOPMENT_TEAM \
+            IOS_CERTIFICATE \
+            IOS_CERTIFICATE_PASSWORD \
+            IOS_MOBILE_PROVISION
+          do
+            if [ -z "${!name}" ]; then
+              missing+=("$name")
+            fi
+          done
+          if [ "${#missing[@]}" -ne 0 ]; then
+            printf 'Missing required signing secret(s): %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
+
+      - name: Prepare App Store Connect API key
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY}.p8"
+          printf '%s' "$APPLE_API_KEY_P8" > "$key_path"
+          chmod 600 "$key_path"
+          echo "APPLE_API_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+
+      - name: Select build number
+        env:
+          REQUESTED_BUILD_NUMBER: ${{ inputs.build_number }}
+        run: |
+          if [ -n "$REQUESTED_BUILD_NUMBER" ]; then
+            echo "IOS_BUILD_NUMBER=$REQUESTED_BUILD_NUMBER" >> "$GITHUB_ENV"
+          else
+            echo "IOS_BUILD_NUMBER=$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+          fi
+
+      - name: Install Rust (iOS device)
+        uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          targets: aarch64-apple-ios
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: mobile-ios-release
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install mobile npm dependencies
+        working-directory: mobile
+        run: npm ci
+
+      - name: Verify tauri-cli iOS support
+        working-directory: mobile
+        run: |
+          npx tauri --version
+          npx tauri --help | grep -q 'ios'
+
+      - name: Check mobile crate (iOS device)
+        run: cargo check -p agent-portal-mobile --target aarch64-apple-ios
+
+      - name: Initialize iOS project
+        working-directory: mobile
+        run: npx tauri ios init --ci
+
+      - name: Build signed IPA
+        working-directory: mobile
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_DEVELOPMENT_TEAM }}
+          IOS_CERTIFICATE: ${{ secrets.IOS_CERTIFICATE }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_MOBILE_PROVISION: ${{ secrets.IOS_MOBILE_PROVISION }}
+          PORTAL_SHELL_URL: ${{ inputs.shell_url }}
+          PORTAL_IOS_APS_ENVIRONMENT: production
+        run: |
+          npx tauri ios build \
+            --ci \
+            --target aarch64 \
+            --export-method "${{ inputs.export_method }}" \
+            --build-number "$IOS_BUILD_NUMBER"
+
+      - name: Collect IPA
+        run: |
+          mkdir -p artifacts/ios
+          ipa="$(find mobile/src-tauri/gen/apple -name '*.ipa' -print -quit)"
+          if [ -z "$ipa" ]; then
+            echo "No IPA produced under mobile/src-tauri/gen/apple" >&2
+            find mobile/src-tauri/gen/apple -maxdepth 6 -type f >&2 || true
+            exit 1
+          fi
+          cp "$ipa" artifacts/ios/
+          echo "IPA_PATH=artifacts/ios/$(basename "$ipa")" >> "$GITHUB_ENV"
+
+      - name: Upload signed IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-portal-ios-signed-ipa
+          path: ${{ env.IPA_PATH }}
+          if-no-files-found: error
+
+      - name: Upload to App Store Connect
+        if: inputs.upload_testflight
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          xcrun altool \
+            --upload-app \
+            --type ios \
+            --file "$IPA_PATH" \
+            --apiKey "$APPLE_API_KEY" \
+            --apiIssuer "$APPLE_API_ISSUER"
