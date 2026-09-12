@@ -37,7 +37,7 @@ jobs:
           path: pr-head
           sparse-checkout: .0-pr-viz
 
-      - uses: meawoppl/visual-pr@v3
+      - uses: meawoppl/visual-pr@v3.0.0
         with:
           head-path: pr-head
           style: .github/visual-pr/style.json
