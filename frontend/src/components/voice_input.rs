@@ -208,6 +208,12 @@ const MAX_SESSION_MS: u32 = 60_000;
 /// through long pauses — still bounded, just generously.
 const MAX_SESSION_HOLD_OPEN_MS: u32 = 300_000;
 
+/// Consecutive hold-open restarts allowed without any new transcript before
+/// giving up. iOS Safari force-ends recognition sessions even with
+/// `continuous = true`; the keep-alive restart absorbs that, but a recognizer
+/// that ends repeatedly while hearing nothing is wedged, not paused.
+const MAX_NO_PROGRESS_RESTARTS: u8 = 5;
+
 /// Storage key for the "hold the mic open across pauses" preference.
 const VOICE_HOLD_OPEN_STORAGE_KEY: &str = "claude-portal-voice-hold-open";
 
@@ -231,9 +237,10 @@ pub fn save_voice_hold_open(enabled: bool) {
     );
 }
 
-/// The active session ceiling under the current hold-open preference.
-fn max_session_ms() -> u32 {
-    if load_voice_hold_open() {
+/// The active browser-recognition ceiling for the mode captured when recording
+/// began.
+fn browser_max_session_ms(hold_open: bool) -> u32 {
+    if hold_open {
         MAX_SESSION_HOLD_OPEN_MS
     } else {
         MAX_SESSION_MS
@@ -362,6 +369,20 @@ pub struct VoiceInput {
     /// Max-duration timer set when a session is established. Triggers
     /// `MaxDurationReached` after `MAX_SESSION_MS`. Cleared on `Ended`.
     max_duration_timer: Option<Timeout>,
+    /// Hold-open pref, captured once per recording so a mid-dictation settings
+    /// change can't split one recording across two behaviors.
+    hold_open: bool,
+    /// Transcript accumulated across hold-open keep-alive restarts. iOS Safari
+    /// force-ends recognition even with `continuous = true`; when a session
+    /// ends without the user tapping stop, its final text is stashed here and
+    /// seeded into the replacement session instead of being auto-sent as a
+    /// fragment. Emitted (and cleared) on genuine stop, give-up, or failure.
+    carryover: String,
+    /// `carryover` length at the last restart — the progress watermark for
+    /// `MAX_NO_PROGRESS_RESTARTS`.
+    hold_open_progress: usize,
+    /// Consecutive restarts that added no transcript.
+    no_progress_restarts: u8,
 }
 
 impl Component for VoiceInput {
@@ -385,6 +406,10 @@ impl Component for VoiceInput {
             hint_timer: None,
             stop_watchdog: None,
             max_duration_timer: None,
+            hold_open: false,
+            carryover: String::new(),
+            hold_open_progress: 0,
+            no_progress_restarts: 0,
         }
     }
 
@@ -424,8 +449,13 @@ impl Component for VoiceInput {
                         }
                     });
                 } else {
+                    self.hold_open = load_voice_hold_open();
+                    self.carryover.clear();
+                    self.hold_open_progress = 0;
+                    self.no_progress_restarts = 0;
+                    let hold_open = self.hold_open;
                     spawn_local(async move {
-                        match start_session_async(link.clone()).await {
+                        match start_session_async(link.clone(), String::new(), hold_open).await {
                             Ok(session) => {
                                 link.send_message(VoiceInputMsg::SessionStarted(session));
                             }
@@ -442,12 +472,20 @@ impl Component for VoiceInput {
                 if !self.is_recording {
                     // The user toggled off (or hit an error) while we were
                     // waiting on the permission primer. Drop the session we
-                    // just built so we don't leak a stray recognizer.
+                    // just built so we don't leak a stray recognizer — but
+                    // deliver any keep-alive carryover rather than losing
+                    // dictation to the race.
                     drop(session);
+                    self.flush_carryover(ctx);
                     return true;
                 }
                 self.capture = Some(Capture::Browser(session));
-                self.arm_max_duration(ctx);
+                // A keep-alive restart continues the same recording: the
+                // original max-duration ceiling keeps running rather than
+                // resetting per restart.
+                if self.max_duration_timer.is_none() {
+                    self.arm_max_duration(ctx);
+                }
                 true
             }
             VoiceInputMsg::RecordingStarted(recording) => {
@@ -504,7 +542,11 @@ impl Component for VoiceInput {
             VoiceInputMsg::StartFailed(failure) => {
                 self.is_starting = false;
                 self.is_recording = false;
+                self.max_duration_timer = None;
                 ctx.props().on_recording_change.emit(false);
+                // A failed keep-alive restart must not lose what was already
+                // dictated: deliver the accumulated text as the message.
+                self.flush_carryover(ctx);
                 match failure {
                     StartFailure::PermissionDenied => {
                         self.show_hint(ctx, MIC_DENIED_HINT);
@@ -516,6 +558,20 @@ impl Component for VoiceInput {
                 true
             }
             VoiceInputMsg::Final(text) => {
+                // Hold-open keep-alive: a Final arriving while the user is
+                // still recording (no stop requested) means the browser ended
+                // the session on its own — iOS does this even with
+                // `continuous = true`. Stash the text (it already includes any
+                // seeded carryover) and let the following `Ended` restart the
+                // recognizer instead of auto-sending a fragment.
+                if self.hold_open && self.is_recording && !self.pending_stop {
+                    if let Some(cb) = ctx.props().on_interim_transcription.as_ref() {
+                        cb.emit(text.clone());
+                    }
+                    self.carryover = text;
+                    return false;
+                }
+                self.carryover.clear();
                 let trimmed = text.trim();
                 if !trimmed.is_empty() {
                     ctx.props().on_transcription.emit(trimmed.to_string());
@@ -539,10 +595,19 @@ impl Component for VoiceInput {
                 } else if is_permission {
                     self.show_hint(ctx, MIC_DENIED_HINT);
                 } else if !is_silent_benign {
-                    ctx.props().on_error.emit(kind);
+                    ctx.props().on_error.emit(kind.clone());
                 }
 
-                // Any error tears down the session — fall through to the
+                // Hold-open: `no-speech` just means the recognizer gave up on
+                // a quiet stretch — the session's `onend` follows, and the
+                // keep-alive in `Ended` restarts it. Don't tear down state
+                // here or the restart would be suppressed.
+                if self.hold_open && self.is_recording && !self.pending_stop && kind == "no-speech"
+                {
+                    return false;
+                }
+
+                // Any other error tears down the session — fall through to the
                 // same cleanup as Ended.
                 self.capture = None;
                 if self.is_recording {
@@ -554,9 +619,48 @@ impl Component for VoiceInput {
             }
             VoiceInputMsg::Ended => {
                 self.capture = None;
-                self.pending_stop = false;
                 self.stop_watchdog = None;
+                let unexpected = self.is_recording && !self.pending_stop;
+                self.pending_stop = false;
+
+                // Hold-open keep-alive: the browser ended the session but the
+                // user never tapped stop. Restart the recognizer, seeding it
+                // with everything dictated so far, unless it has repeatedly
+                // ended without hearing anything new (a wedged recognizer,
+                // not a pause).
+                if unexpected && self.hold_open {
+                    if self.carryover.len() > self.hold_open_progress {
+                        self.no_progress_restarts = 0;
+                    } else {
+                        self.no_progress_restarts += 1;
+                    }
+                    if self.no_progress_restarts < MAX_NO_PROGRESS_RESTARTS {
+                        self.hold_open_progress = self.carryover.len();
+                        self.is_starting = true;
+                        let seed = self.carryover.clone();
+                        let hold_open = self.hold_open;
+                        let link = ctx.link().clone();
+                        spawn_local(async move {
+                            match start_session_async(link.clone(), seed, hold_open).await {
+                                Ok(session) => {
+                                    link.send_message(VoiceInputMsg::SessionStarted(session));
+                                }
+                                Err(failure) => {
+                                    link.send_message(VoiceInputMsg::StartFailed(failure));
+                                }
+                            }
+                        });
+                        return true;
+                    }
+                    log::warn!(
+                        "Hold-open recognizer ended {} times with no new speech — giving up",
+                        MAX_NO_PROGRESS_RESTARTS
+                    );
+                }
+
                 self.max_duration_timer = None;
+                // Give-up (or default-mode end): deliver whatever accumulated.
+                self.flush_carryover(ctx);
                 if self.is_recording {
                     self.is_recording = false;
                     ctx.props().on_recording_change.emit(false);
@@ -599,7 +703,7 @@ impl Component for VoiceInput {
                 if self.capture.is_some() {
                     log::warn!(
                         "Voice session exceeded {}ms — auto-stopping",
-                        max_session_ms()
+                        self.max_duration_ms(ctx)
                     );
                     self.stop_capture(ctx);
                     true
@@ -720,12 +824,30 @@ impl VoiceInput {
         ctx.props().on_recording_change.emit(false);
     }
 
+    /// Deliver (and clear) any keep-alive carryover as the final transcription.
+    /// No-op when empty, so it is safe to call on every teardown path.
+    fn flush_carryover(&mut self, ctx: &Context<Self>) {
+        let text = std::mem::take(&mut self.carryover);
+        let trimmed = text.trim();
+        if !trimmed.is_empty() {
+            ctx.props().on_transcription.emit(trimmed.to_string());
+        }
+    }
+
     /// Arm the safety stop that keeps a wedged capture from holding the mic.
     fn arm_max_duration(&mut self, ctx: &Context<Self>) {
         let link = ctx.link().clone();
-        self.max_duration_timer = Some(Timeout::new(max_session_ms(), move || {
+        self.max_duration_timer = Some(Timeout::new(self.max_duration_ms(ctx), move || {
             link.send_message(VoiceInputMsg::MaxDurationReached);
         }));
+    }
+
+    fn max_duration_ms(&self, ctx: &Context<Self>) -> u32 {
+        if ctx.props().server_stt {
+            MAX_SESSION_MS
+        } else {
+            browser_max_session_ms(self.hold_open)
+        }
     }
 
     fn show_hint(&mut self, ctx: &Context<Self>, message: &'static str) {
@@ -953,8 +1075,13 @@ fn document_language() -> Option<String> {
 /// and `.start()` the recognizer. Holding the primer `MediaStream` open until
 /// the session is dropped keeps iOS from re-racing the permission prompt
 /// against the recognizer.
+/// `seed` pre-fills the final-text accumulator — used by the hold-open
+/// keep-alive restart so the replacement session continues the same dictation
+/// (previews and the eventual Final include everything said so far).
 async fn start_session_async(
     link: yew::html::Scope<VoiceInput>,
+    seed: String,
+    hold_open: bool,
 ) -> Result<ActiveSession, StartFailure> {
     // 1. Permission primer. iOS shows its prompt here, *before* SpeechRecognition
     //    is even constructed — eliminates the prompt-vs-start race.
@@ -991,7 +1118,7 @@ async fn start_session_async(
     // stays open across pauses — accumulating final results — until they
     // tap again (iOS Safari never auto-ends in continuous mode, which is
     // exactly the behavior wanted here).
-    set_bool("continuous", load_voice_hold_open());
+    set_bool("continuous", hold_open);
     set_bool("interimResults", true);
 
     let lang = document_language().unwrap_or_else(|| "en-US".to_string());
@@ -1001,7 +1128,7 @@ async fn start_session_async(
         &JsValue::from_str(&lang),
     );
 
-    let final_acc: std::rc::Rc<std::cell::RefCell<String>> = Default::default();
+    let final_acc = std::rc::Rc::new(std::cell::RefCell::new(seed));
 
     let link_for_result = link.clone();
     let final_for_result = final_acc.clone();
