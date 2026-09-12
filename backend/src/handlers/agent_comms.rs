@@ -11,7 +11,7 @@ use std::sync::Arc;
 use axum::{
     body::Bytes,
     extract::{Path, Query, State},
-    http::{header, HeaderMap},
+    http::HeaderMap,
     Json,
 };
 use diesel::prelude::*;
@@ -28,6 +28,7 @@ use shared::media::MediaKind;
 use shared::{AgentType, PortalContent, PortalMessage, ServerToClient, SessionStatus};
 
 use crate::errors::AppError;
+use crate::handlers::helpers::request_content_type;
 use crate::models::Session;
 use crate::AppState;
 
@@ -392,12 +393,7 @@ pub async fn show_media(
     let user_id = resolve_user(&app_state, &headers, &cookies)?;
 
     // Declared content type, minus any `; charset=` suffix.
-    let mut content_type = headers
-        .get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.split(';').next().unwrap_or(s).trim().to_string())
-        .filter(|s| !s.is_empty())
-        .ok_or(AppError::BadRequest("missing Content-Type header"))?;
+    let mut content_type = request_content_type(&headers)?.to_string();
 
     let kind = shared::media::media_kind(&content_type)
         .ok_or(AppError::BadRequest("unsupported media type"))?;
