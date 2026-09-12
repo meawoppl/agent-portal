@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" font-family="Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <!-- Thesis -->
+  <text x="1000" y="64" text-anchor="middle" fill="#c0caf5" font-size="34" font-weight="bold">schedule dialog save adopts Response::ok()</text>
+
+  <!-- BEFORE / AFTER labels -->
+  <text x="500" y="126" text-anchor="middle" fill="#f7768e" font-size="26" font-weight="bold" letter-spacing="4">BEFORE</text>
+  <text x="1500" y="126" text-anchor="middle" fill="#9ece6a" font-size="26" font-weight="bold" letter-spacing="4">AFTER</text>
+  <line x1="1000" y1="96" x2="1000" y2="1140" stroke="#565f89" stroke-width="2" stroke-dasharray="8 8"/>
+
+  <!-- BEFORE -->
+  <g>
+    <text x="180" y="200" fill="#a9b1d6" font-size="19" font-weight="bold">hand-rolled 2xx range in schedule_dialog.rs</text>
+
+    <rect x="180" y="230" width="640" height="250" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="200" y="262" fill="#565f89" font-size="13">frontend/src/components/schedule_dialog.rs:297</text>
+    <text x="200" y="294" fill="#e6e9f5" font-size="15" font-family="monospace">match result {</text>
+    <text x="200" y="320" fill="#e6e9f5" font-size="15" font-family="monospace">  Ok(resp)</text>
+    <text x="200" y="346" fill="#e6e9f5" font-size="15" font-family="monospace">    if resp.status() &gt;= 200</text>
+    <text x="200" y="372" fill="#e6e9f5" font-size="15" font-family="monospace">    &amp;&amp; resp.status() &lt; 300 =&gt; {</text>
+    <text x="200" y="398" fill="#e6e9f5" font-size="15" font-family="monospace">    form_mode.set(None); ... }</text>
+    <text x="200" y="428" fill="#565f89" font-size="13" font-family="monospace">save task: PATCH /api/scheduled-tasks/:id</text>
+    <text x="200" y="454" fill="#565f89" font-size="13" font-family="monospace">two status() calls to say one thing</text>
+
+    <rect x="180" y="500" width="640" height="120" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="200" y="532" fill="#565f89" font-size="13">meanwhile, one file over (#1957)</text>
+    <text x="200" y="564" fill="#e6e9f5" font-size="15" font-family="monospace">launchers_panel.rs:747</text>
+    <text x="200" y="590" fill="#e6e9f5" font-size="15" font-family="monospace">Ok(resp) if resp.ok() =&gt; None,</text>
+
+    <rect x="150" y="660" width="700" height="250" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="180" y="698" fill="#f7768e" font-size="19" font-weight="bold">Two spellings, one check:</text>
+    <text x="180" y="734" fill="#c0caf5" font-size="16">- same 200-299 success test</text>
+    <text x="180" y="762" fill="#c0caf5" font-size="16">- last hand-rolled range in frontend</text>
+    <text x="180" y="790" fill="#c0caf5" font-size="16">- drift risk: tweak one, miss the other</text>
+    <text x="180" y="818" fill="#c0caf5" font-size="16">- gloo Response::ok() says it in one call</text>
+  </g>
+
+  <!-- AFTER -->
+  <g>
+    <text x="1180" y="200" fill="#a9b1d6" font-size="19" font-weight="bold">one idiom for every success check</text>
+
+    <rect x="1180" y="230" width="640" height="250" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1200" y="262" fill="#9ece6a" font-size="13">frontend/src/components/schedule_dialog.rs:297</text>
+    <text x="1200" y="294" fill="#e6e9f5" font-size="15" font-family="monospace">match result {</text>
+    <text x="1200" y="320" fill="#e6e9f5" font-size="15" font-family="monospace">  Ok(resp) if resp.ok() =&gt; {</text>
+    <text x="1200" y="346" fill="#e6e9f5" font-size="15" font-family="monospace">    form_mode.set(None);</text>
+    <text x="1200" y="372" fill="#e6e9f5" font-size="15" font-family="monospace">    reload_tasks.emit(()); }</text>
+    <text x="1200" y="398" fill="#e6e9f5" font-size="15" font-family="monospace">  Ok(resp) =&gt; { /* error path */ }</text>
+    <text x="1200" y="428" fill="#565f89" font-size="13" font-family="monospace">ok() is fetch-spec 200-299, same meaning</text>
+    <text x="1200" y="454" fill="#565f89" font-size="13" font-family="monospace">same behavior; one line (-1/+1)</text>
+
+    <rect x="1180" y="500" width="640" height="120" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="1"/>
+    <text x="1200" y="532" fill="#565f89" font-size="13">matches the neighboring call sites</text>
+    <text x="1200" y="564" fill="#e6e9f5" font-size="15" font-family="monospace">launchers_panel.rs, agent_login.rs,</text>
+    <text x="1200" y="590" fill="#e6e9f5" font-size="15" font-family="monospace">agent_install.rs, utils::fetch_json</text>
+
+    <rect x="1150" y="660" width="700" height="250" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1180" y="698" fill="#9ece6a" font-size="19" font-weight="bold">Frontend converged:</text>
+    <text x="1180" y="734" fill="#c0caf5" font-size="16">- no hand-rolled 2xx ranges left</text>
+    <text x="1180" y="762" fill="#c0caf5" font-size="16">- error + 404 paths untouched</text>
+    <text x="1180" y="790" fill="#c0caf5" font-size="16">- 699 frontend tests green, clippy clean</text>
+  </g>
+
+  <!-- bottom strip -->
+  <text x="500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">PR #1959 - use resp.ok(), drop the range</text>
+  <text x="1500" y="1160" text-anchor="middle" fill="#a9b1d6" font-size="16">follow-up to #1957, same one-line vein</text>
+</svg>
