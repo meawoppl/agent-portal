@@ -19,8 +19,8 @@ pub async fn run() -> Result<()> {
         .await
         .context("could not reach the portal backend")?;
 
-    if !response.status().is_success() {
-        let status = response.status();
+    let status = response.status();
+    if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
         return Err(crate::message::backend_http_error(status, &body));
     }
