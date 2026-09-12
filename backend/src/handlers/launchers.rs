@@ -151,9 +151,7 @@ pub async fn launch_session(
 /// Trim a caller-supplied session name, returning `None` when it is absent or
 /// blank so callers fall back to the directory-basename default.
 fn normalize_custom_name(name: Option<&str>) -> Option<String> {
-    name.map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
+    shared::strings::trimmed_non_blank(name).map(str::to_string)
 }
 
 /// Timestamped default branch/name for an unnamed worktree launch. Built from
@@ -430,9 +428,7 @@ fn fork_child_notice(
     source_id: Uuid,
     divergence_prompt: Option<&str>,
 ) -> String {
-    let direction = divergence_prompt
-        .map(str::trim)
-        .filter(|prompt| !prompt.is_empty())
+    let direction = shared::strings::trimmed_non_blank(divergence_prompt)
         .unwrap_or("Please await new directions from the user.");
     format!(
         "This session was forked from Agent Portal session \"{source_name}\" ({source_id}). \

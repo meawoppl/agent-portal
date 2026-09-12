@@ -26,12 +26,7 @@ pub async fn update_profile(
 ) -> Result<EmptyResponse, AppError> {
     // Trim and treat blank as "clear" — a whitespace-only nickname would render
     // as an invisible label, which is worse than falling back to the name.
-    let nickname = body
-        .nickname
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string);
+    let nickname = shared::strings::trimmed_non_blank(body.nickname.as_deref()).map(str::to_string);
 
     if let Some(ref n) = nickname {
         if n.chars().count() > MAX_NICKNAME_LEN {

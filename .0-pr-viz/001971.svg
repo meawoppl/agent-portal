@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-labelledby="title desc">
+  <title id="title">PR 1971 shared trimmed-non-blank helper for optional inputs</title>
+  <desc id="desc">Before, four call sites each hand-rolled the same trim-and-reject-blank chain on optional inputs. After, one shared::strings::trimmed_non_blank owns it and the callers shrink to one line.</desc>
+  <rect width="2000" height="1200" fill="#16161e"/>
+
+  <text x="55" y="70" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24" letter-spacing="1">PR #1971 · Share trimmed-non-blank helper for optional inputs</text>
+  <text x="55" y="124" fill="#e6e9f5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700">Four call sites hand-rolled the same trim-and-reject-blank chain;</text>
+  <text x="55" y="166" fill="#e6e9f5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700">now shared::strings::trimmed_non_blank() owns it, still borrowed.</text>
+  <line x1="55" y1="190" x2="1945" y2="190" stroke="#3d4666" stroke-width="2"/>
+  <line x1="1000" y1="225" x2="1000" y2="1090" stroke="#3d4666" stroke-width="2" stroke-dasharray="12 14"/>
+
+  <text x="70" y="260" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" letter-spacing="4">BEFORE</text>
+  <text x="1070" y="260" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" letter-spacing="4">AFTER</text>
+
+  <rect x="70" y="295" width="820" height="275" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="105" y="345" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">Same chain, four times</text>
+  <text x="105" y="395" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">.map(str::trim)</text>
+  <text x="105" y="435" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">.filter(|s| !s.is_empty())</text>
+  <text x="105" y="475" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">.map(str::to_string) / .unwrap_or(...)</text>
+  <text x="105" y="518" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">profile nickname, show_media filename,</text>
+  <text x="105" y="550" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">normalize_custom_name, fork direction</text>
+
+  <rect x="70" y="600" width="820" height="260" rx="8" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+  <text x="105" y="650" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">Only the tail differs</text>
+  <text x="105" y="700" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">three sites map to owned String, one falls back</text>
+  <text x="105" y="734" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">to a default - yet the trim/filter pair above</text>
+  <text x="105" y="768" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">is copied each time: a whitespace-rule fix</text>
+  <text x="105" y="802" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">must land in four places at once.</text>
+
+  <rect x="1110" y="295" width="820" height="275" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="1145" y="345" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">One helper owns the chain</text>
+  <text x="1145" y="395" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">strings::trimmed_non_blank(value)</text>
+  <text x="1145" y="435" fill="#9ece6a" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">-&gt; Option&lt;&amp;str&gt;</text>
+  <text x="1145" y="475" fill="#9ece6a" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">trim + reject blank, still borrowed</text>
+  <text x="1145" y="518" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">std-only in shared/strings.rs, next to</text>
+  <text x="1145" y="550" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">is_non_blank; ships its own unit test.</text>
+
+  <rect x="1110" y="600" width="820" height="260" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1145" y="650" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">Callers shrink to one line</text>
+  <text x="1145" y="700" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">trimmed_non_blank(x).map(str::to_string)</text>
+  <text x="1145" y="734" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">trimmed_non_blank(x).unwrap_or(default)</text>
+  <text x="1145" y="786" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">4 files, +25/-18, behavior identical;</text>
+  <text x="1145" y="820" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">334 backend tests green, clippy clean.</text>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">Scope: split-iterator adapters (config fingerprints, forward_proxy filters) keep their own inline chains.</text>
+</svg>
