@@ -426,13 +426,13 @@ impl Component for VoiceInput {
                     self.show_hint(ctx, UNSUPPORTED_HINT);
                     return true;
                 }
-                if self.pending_stop || self.is_starting || self.transcribing {
-                    self.show_hint(ctx, BUSY_HINT);
+                if self.is_recording {
+                    self.stop_capture(ctx);
                     return true;
                 }
 
-                if self.is_recording {
-                    self.stop_capture(ctx);
+                if self.pending_stop || self.is_starting || self.transcribing {
+                    self.show_hint(ctx, BUSY_HINT);
                     return true;
                 }
 
@@ -837,6 +837,7 @@ impl VoiceInput {
             }
         }
         self.is_recording = false;
+        self.is_starting = false;
         self.max_duration_timer = None;
         ctx.props().on_recording_change.emit(false);
     }

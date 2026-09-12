@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-labelledby="title desc">
+  <title id="title">PR 1964 hold-open voice stop hotfix</title>
+  <desc id="desc">Before, ToggleRecording checked busy state before recording state, so a hold-open restart rejected stop taps. After, recording state stops first and clears is_starting.</desc>
+  <rect width="2000" height="1200" fill="#16161e"/>
+
+  <text x="55" y="70" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24" letter-spacing="1">PR #1964 · Let hold-open voice stop during restart</text>
+  <text x="55" y="124" fill="#e6e9f5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700">A stop tap during a hold-open restart used to hit the busy guard;</text>
+  <text x="55" y="166" fill="#e6e9f5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700">now recording state wins first, so the tap stops the session.</text>
+  <line x1="55" y1="190" x2="1945" y2="190" stroke="#3d4666" stroke-width="2"/>
+  <line x1="1000" y1="225" x2="1000" y2="1088" stroke="#3d4666" stroke-width="2" stroke-dasharray="12 14"/>
+
+  <text x="70" y="260" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" letter-spacing="4">BEFORE</text>
+  <text x="1070" y="260" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" letter-spacing="4">AFTER</text>
+
+  <rect x="70" y="310" width="820" height="190" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="105" y="360" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">ToggleRecording order</text>
+  <text x="105" y="410" fill="#f7768e" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">pending_stop || is_starting || transcribing</text>
+  <text x="105" y="452" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">runs before the is_recording stop branch.</text>
+
+  <rect x="1110" y="310" width="820" height="190" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="1145" y="360" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">ToggleRecording order</text>
+  <text x="1145" y="410" fill="#9ece6a" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">if self.is_recording { stop_capture(ctx); }</text>
+  <text x="1145" y="452" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">runs before the transient busy guard.</text>
+
+  <rect x="120" y="570" width="720" height="250" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="155" y="620" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">Hold-open restart window</text>
+  <path d="M210 700 H730" stroke="#3d4666" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="210" cy="700" r="26" fill="#7aa2f7"/>
+  <circle cx="470" cy="700" r="26" fill="#e0af68"/>
+  <circle cx="730" cy="700" r="26" fill="#f7768e"/>
+  <text x="170" y="762" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="21">recording</text>
+  <text x="408" y="762" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="21">is_starting</text>
+  <text x="680" y="762" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="21">tap stop</text>
+  <path d="M730 725 V785" stroke="#f7768e" stroke-width="5" stroke-linecap="round"/>
+  <path d="M712 767 L730 785 L748 767" stroke="#f7768e" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <rect x="1160" y="570" width="720" height="250" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="1195" y="620" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">Stop path owns teardown</text>
+  <path d="M1250 700 H1770" stroke="#3d4666" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="1250" cy="700" r="26" fill="#7aa2f7"/>
+  <circle cx="1510" cy="700" r="26" fill="#e0af68"/>
+  <circle cx="1770" cy="700" r="26" fill="#9ece6a"/>
+  <text x="1210" y="762" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="21">recording</text>
+  <text x="1448" y="762" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="21">is_starting</text>
+  <text x="1716" y="762" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="21">tap stop</text>
+  <path d="M1770 725 V785" stroke="#9ece6a" stroke-width="5" stroke-linecap="round"/>
+  <path d="M1752 767 L1770 785 L1788 767" stroke="#9ece6a" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <rect x="190" y="900" width="600" height="94" rx="8" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+  <text x="225" y="957" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">Stop tap shows BUSY_HINT; mic keeps going.</text>
+
+  <rect x="1210" y="900" width="600" height="94" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1245" y="957" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">stop_capture clears is_starting and records off.</text>
+
+  <text x="55" y="1172" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22">Scope: browser hold-open state machine only; server STT and transcription provider behavior are unchanged.</text>
+</svg>
