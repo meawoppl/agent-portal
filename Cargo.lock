@@ -4533,9 +4533,9 @@ dependencies = [
 
 [[package]]
 name = "muse-codes"
-version = "1.1.1"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "159b7bb012640e31720c9c836c947bda31e53e75a5e820572afe6147e10190d3"
+checksum = "09c86000e839a2f6823c1d7ed828bea81fb9f1302674d1b450429da6ce3bc74b"
 dependencies = [
  "log",
  "serde",
