@@ -49,24 +49,24 @@ pub fn media_security_headers(content_type: &str) -> HeaderMap {
     headers
 }
 
+/// Base content type of a served blob: the part before any `; …` parameters,
+/// trimmed. Single source for the document-media `match` sites below so a new
+/// format arm can't fall behind on parameter-stripping.
+fn media_base(content_type: &str) -> &str {
+    content_type.split(';').next().unwrap_or_default().trim()
+}
+
 /// Is this an SVG content type, ignoring any `; charset=...` parameters?
 fn is_svg(content_type: &str) -> bool {
-    content_type
-        .split(';')
-        .next()
-        .unwrap_or_default()
-        .trim()
-        .eq_ignore_ascii_case("image/svg+xml")
+    media_base(content_type).eq_ignore_ascii_case("image/svg+xml")
+}
+
+fn is_portable_figure(content_type: &str) -> bool {
+    media_base(content_type).eq_ignore_ascii_case(shared::media::PORTABLE_FIGURE_TYPE)
 }
 
 fn is_document_media(content_type: &str) -> bool {
-    is_svg(content_type)
-        || content_type
-            .split(';')
-            .next()
-            .unwrap_or_default()
-            .trim()
-            .eq_ignore_ascii_case(shared::media::PORTABLE_FIGURE_TYPE)
+    is_svg(content_type) || is_portable_figure(content_type)
 }
 
 #[cfg(test)]
@@ -120,6 +120,20 @@ mod tests {
             "nosniff"
         );
         assert!(headers.contains_key(header::CONTENT_SECURITY_POLICY));
+    }
+
+    #[test]
+    fn media_base_strips_parameters_and_trims() {
+        assert_eq!(media_base("image/svg+xml; charset=utf-8"), "image/svg+xml");
+        assert_eq!(
+            media_base(&format!(
+                "{}; version=2",
+                shared::media::PORTABLE_FIGURE_TYPE
+            )),
+            shared::media::PORTABLE_FIGURE_TYPE
+        );
+        assert_eq!(media_base("image/png"), "image/png");
+        assert_eq!(media_base(""), "");
     }
 
     #[test]
