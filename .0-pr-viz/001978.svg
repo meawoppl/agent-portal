@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-labelledby="title desc">
+  <title id="title">PR 1978 remove unreachable fallback in media cap</title>
+  <desc id="desc">Before, cap_bytes in launcher media.rs checked the Figure kind twice with an unreachable match arm bridging them. After, the Figure arm returns its fixed cap directly, so the match is exhaustive with no fallback, plus a unit test pinning both figure caps.</desc>
+  <rect width="2000" height="1200" fill="#16161e"/>
+
+  <text x="55" y="70" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24" letter-spacing="1">PR #1978 · Remove unreachable fallback in media cap</text>
+  <text x="55" y="124" fill="#e6e9f5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700">cap_bytes() checked the Figure kind twice, then swore</text>
+  <text x="55" y="166" fill="#e6e9f5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700">the third arm unreachable; now Figure returns directly.</text>
+  <line x1="55" y1="190" x2="1945" y2="190" stroke="#3d4666" stroke-width="2"/>
+  <line x1="1000" y1="225" x2="1000" y2="1090" stroke="#3d4666" stroke-width="2" stroke-dasharray="12 14"/>
+
+  <text x="70" y="260" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" letter-spacing="4">BEFORE</text>
+  <text x="1070" y="260" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" letter-spacing="4">AFTER</text>
+
+  <rect x="70" y="295" width="820" height="275" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="105" y="345" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">Figure checked twice</text>
+  <text x="105" y="395" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">if kind == Figure { return ... }</text>
+  <text x="105" y="435" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">match kind {</text>
+  <text x="105" y="475" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">Figure =&gt; unreachable!(...)</text>
+  <text x="105" y="518" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">cap_bytes in launcher/src/media.rs: one</text>
+  <text x="105" y="550" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">early return, then a match that denies it.</text>
+
+  <rect x="70" y="600" width="820" height="260" rx="8" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+  <text x="105" y="650" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">One more panic to audit</text>
+  <text x="105" y="700" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">unreachable!() is a panic with a proof</text>
+  <text x="105" y="734" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">obligation attached - every future reader</text>
+  <text x="105" y="768" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">must re-verify the early return above it.</text>
+
+  <rect x="1110" y="295" width="820" height="275" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="1145" y="345" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">Figure returns in the match</text>
+  <text x="1145" y="395" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">match kind {</text>
+  <text x="1145" y="435" fill="#9ece6a" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">Figure =&gt; return FIGURE_MAX,</text>
+  <text x="1145" y="475" fill="#9ece6a" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">Image / Video =&gt; env-tunable ...</text>
+  <text x="1145" y="518" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">exhaustive by construction; image/video</text>
+  <text x="1145" y="550" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">env handling byte-identical.</text>
+
+  <rect x="1110" y="600" width="820" height="260" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1145" y="650" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">Caps pinned by test</text>
+  <text x="1145" y="700" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">new figure_caps_are_fixed_regardless_of_env</text>
+  <text x="1145" y="734" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">pins both fixed figure caps; 10 launcher</text>
+  <text x="1145" y="768" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">media tests green, fmt + clippy clean,</text>
+  <text x="1145" y="820" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">behavior unchanged.</text>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">Scope: cap_bytes only; HTML-carrier and env-tunable arms behave exactly as before.</text>
+
+</svg>

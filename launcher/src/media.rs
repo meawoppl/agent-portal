@@ -81,13 +81,12 @@ fn cap_bytes(content_type: &str, kind: MediaKind) -> u64 {
     if content_type == PORTABLE_FIGURE_HTML_TYPE {
         return PORTABLE_FIGURE_HTML_MAX_BYTES as u64;
     }
-    if kind == MediaKind::Figure {
-        return PORTABLE_FIGURE_MAX_BYTES as u64;
-    }
     let (var, default) = match kind {
         MediaKind::Image => ("PORTAL_MAX_IMAGE_MB", 10),
         MediaKind::Video => ("PORTAL_MAX_VIDEO_MB", 100),
-        MediaKind::Figure => unreachable!("portable-figure cap returned above"),
+        // Fixed cap, not env-tunable: returning here keeps the match
+        // exhaustive without an unreachable fallback.
+        MediaKind::Figure => return PORTABLE_FIGURE_MAX_BYTES as u64,
     };
     std::env::var(var)
         .ok()
@@ -304,5 +303,19 @@ mod tests {
         assert_eq!(human_size(512), "512 B");
         assert_eq!(human_size(1536), "1.5 KB");
         assert_eq!(human_size(1024 * 1024 + 512 * 1024), "1.5 MB");
+    }
+
+    #[test]
+    fn figure_caps_are_fixed_regardless_of_env() {
+        // The env-tunable image/video arms read PORTAL_MAX_*_MB, so only
+        // the fixed figure arms are pinned here.
+        assert_eq!(
+            cap_bytes(PORTABLE_FIGURE_TYPE, MediaKind::Figure),
+            PORTABLE_FIGURE_MAX_BYTES as u64
+        );
+        assert_eq!(
+            cap_bytes(PORTABLE_FIGURE_HTML_TYPE, MediaKind::Figure),
+            PORTABLE_FIGURE_HTML_MAX_BYTES as u64
+        );
     }
 }
