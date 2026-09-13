@@ -161,54 +161,20 @@ fn scroll_focused_transcript_to_top() {
     }
 }
 
-/// True when there is a live text selection the user is likely trying to copy —
-/// either a document selection (e.g. highlighted transcript text) or a range
-/// inside the focused textarea/input (their selection is separate from the
-/// document selection in most browsers). Terminal-style `Ctrl+C` defers to the
-/// browser's copy in that case instead of firing the interrupt.
-fn has_text_selection() -> bool {
-    let Some(win) = web_sys::window() else {
-        return false;
-    };
-    // Document-level selection (highlighted transcript / page text).
-    if let Ok(Some(sel)) = win.get_selection() {
-        if sel.to_string().length() > 0 {
-            return true;
-        }
-    }
-    // Selection inside the focused textarea/input.
-    let Some(active) = win.document().and_then(|d| d.active_element()) else {
-        return false;
-    };
-    if let Some(ta) = active.dyn_ref::<web_sys::HtmlTextAreaElement>() {
-        if let (Ok(Some(s)), Ok(Some(e))) = (ta.selection_start(), ta.selection_end()) {
-            return s != e;
-        }
-    }
-    if let Some(input) = active.dyn_ref::<web_sys::HtmlInputElement>() {
-        if let (Ok(Some(s)), Ok(Some(e))) = (input.selection_start(), input.selection_end()) {
-            return s != e;
-        }
-    }
-    false
-}
-
 /// Attach a window-level, capture-phase `keydown` listener that fires
-/// `on_interrupt` on `Ctrl+C`, in **every** mode — edit, nav, and vim
+/// `on_interrupt` on `Ctrl+Z`, in **every** mode — edit, nav, and vim
 /// NORMAL/INSERT.
 ///
 /// Capture phase is essential: it runs before the composer's and vim's own key
-/// handlers, so vim's `c` (the change operator) can't swallow the press and no
-/// mode can shadow the interrupt. Bound to Ctrl specifically (not Cmd) so macOS
-/// `Cmd+C` stays copy, and it defers to the browser's copy whenever there is an
-/// active text selection (so copying transcript/composer text still works).
+/// handlers, so no mode can shadow the interrupt. Bound to Ctrl specifically
+/// (not Cmd), leaving the platform undo shortcut (`Cmd+Z` on macOS) untouched.
 #[hook]
 pub fn use_interrupt_hotkey(on_interrupt: Callback<()>) {
     // Hold the latest callback in a ref, refreshed every render, so the
     // once-registered listener always invokes the *current* one. Without this,
     // `use_effect_with((), …)` runs a single time and captures the first
     // render's `on_interrupt` forever — and that callback's `interrupt_signal`
-    // handle is pinned to its initial value (0). Every Ctrl+C would then set the
+    // handle is pinned to its initial value (0). Every Ctrl+Z would then set the
     // signal to the same number (1), so only the first press registers as a
     // change and every later interrupt is silently dropped.
     let latest = use_mut_ref(|| on_interrupt.clone());
@@ -227,11 +193,7 @@ pub fn use_interrupt_hotkey(on_interrupt: Callback<()>) {
                 let Some(ke) = event.dyn_ref::<KeyboardEvent>() else {
                     return;
                 };
-                if ke.ctrl_key() && !ke.meta_key() && ke.key().eq_ignore_ascii_case("c") {
-                    // Let the browser copy when there's a selection.
-                    if has_text_selection() {
-                        return;
-                    }
+                if ke.ctrl_key() && !ke.meta_key() && ke.key().eq_ignore_ascii_case("z") {
                     ke.prevent_default();
                     ke.stop_propagation();
                     latest.borrow().emit(());
@@ -264,7 +226,7 @@ pub struct KeyboardNavConfig {
     /// and resume live tailing (nav-mode `G`).
     pub on_jump_to_latest: Callback<()>,
     /// Callback to interrupt the focused session's running agent (nav-mode
-    /// `x`). Same action as `Ctrl+C`, exposed as a single nav-mode key (#1330).
+    /// `x`). Same action as `Ctrl+Z`, exposed as a single nav-mode key (#1330).
     pub on_interrupt: Callback<()>,
     /// Callback to collapse (hide) / expand (show) a session, given its id
     /// (nav-mode `c` on the focused session). Reuses the rail's Hide toggle, so
@@ -310,7 +272,7 @@ pub struct UseKeyboardNav {
 /// message textarea (i.e. in nav mode, or in edit mode with a non-text element
 /// focused).
 ///
-/// Interrupt (`Ctrl+C`) is handled separately by [`use_interrupt_hotkey`], which
+/// Interrupt (`Ctrl+Z`) is handled separately by [`use_interrupt_hotkey`], which
 /// uses a window capture-phase listener so it fires in every mode.
 #[hook]
 pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
@@ -524,7 +486,7 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                     }
                     "x" => {
                         // Interrupt the focused session's running agent — the
-                        // same action as Ctrl+C, as a single nav-mode key
+                        // same action as Ctrl+Z, as a single nav-mode key
                         // (#1330). Non-destructive (the transcript/session stay);
                         // `d` remains the destructive close-with-confirm. Stays
                         // in nav mode like the other action keys.

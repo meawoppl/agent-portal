@@ -43,8 +43,8 @@ const GROUPS: &[ShortcutGroup] = &[
                 description: "Toggle nav mode (enter / leave)",
             },
             Shortcut {
-                keys: &["Ctrl", "C"],
-                description: "Interrupt the running agent (copies if text is selected)",
+                keys: &["Ctrl", "Z"],
+                description: "Interrupt the running agent",
             },
         ],
     },
