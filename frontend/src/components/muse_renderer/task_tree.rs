@@ -345,15 +345,13 @@ impl TaskTree {
         let id = task_id.into();
         if !self.nodes.contains_key(&id) {
             self.order.push(id.clone());
-            self.nodes.insert(
-                id.clone(),
-                TaskNode {
-                    task_id: id.clone(),
-                    ..Default::default()
-                },
-            );
         }
-        self.nodes.get_mut(&id).unwrap_or_else(|| unreachable!())
+        // Single lookup: the node is present after this whether it was just
+        // created or already existed, so no `unreachable!()` fallback.
+        self.nodes.entry(id.clone()).or_insert_with(|| TaskNode {
+            task_id: id,
+            ..Default::default()
+        })
     }
 }
 

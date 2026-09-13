@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-labelledby="title desc">
+  <title id="title">PR 1977 entry API in TaskTree node lookup</title>
+  <desc id="desc">Before, TaskTree::node_mut in task_tree.rs probed the node map three times (contains_key, insert, get_mut) with an unreachable fallback. After, one BTreeMap entry call creates-or-returns the node, so no fallback exists to maintain.</desc>
+  <rect width="2000" height="1200" fill="#16161e"/>
+
+  <text x="55" y="70" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24" letter-spacing="1">PR #1977 · entry API in TaskTree node lookup</text>
+  <text x="55" y="124" fill="#e6e9f5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700">TaskTree::node_mut probed the node map three times;</text>
+  <text x="55" y="166" fill="#e6e9f5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700">now one entry() call creates-or-returns the node.</text>
+  <line x1="55" y1="190" x2="1945" y2="190" stroke="#3d4666" stroke-width="2"/>
+  <line x1="1000" y1="225" x2="1000" y2="1090" stroke="#3d4666" stroke-width="2" stroke-dasharray="12 14"/>
+
+  <text x="70" y="260" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" letter-spacing="4">BEFORE</text>
+  <text x="1070" y="260" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" letter-spacing="4">AFTER</text>
+
+  <rect x="70" y="295" width="820" height="275" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="105" y="345" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">Three lookups, one fallback</text>
+  <text x="105" y="395" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">if !nodes.contains_key(&amp;id)</text>
+  <text x="105" y="435" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">nodes.insert(id, ...)</text>
+  <text x="105" y="475" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">get_mut(&amp;id).unwrap_or_else(unreachable!())</text>
+  <text x="105" y="518" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">node_mut in task_tree.rs checked, inserted,</text>
+  <text x="105" y="550" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">then fetched the node a third time.</text>
+
+  <rect x="70" y="600" width="820" height="260" rx="8" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+  <text x="105" y="650" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">The fallback is unprovable</text>
+  <text x="105" y="700" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">unreachable!() holds only because the lines</text>
+  <text x="105" y="734" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">above never early-return - a future edit</text>
+  <text x="105" y="768" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">could silently turn it into a live panic.</text>
+
+  <rect x="1110" y="295" width="820" height="275" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="1145" y="345" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">One entry() call</text>
+  <text x="1145" y="395" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">nodes.entry(id)</text>
+  <text x="1145" y="435" fill="#9ece6a" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">.or_insert_with(|| TaskNode { ... })</text>
+  <text x="1145" y="475" fill="#9ece6a" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">TaskNode { task_id: id, .. }</text>
+  <text x="1145" y="518" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">present-after-this by construction;</text>
+  <text x="1145" y="550" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">order.push stays exactly as before.</text>
+
+  <rect x="1110" y="600" width="820" height="260" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1145" y="650" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">Nothing left to drift</text>
+  <text x="1145" y="700" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">15 task_tree tests green - node creation</text>
+  <text x="1145" y="734" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">is covered through apply, so the single</text>
+  <text x="1145" y="768" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">lookup is proven, not just plausible.</text>
+  <text x="1145" y="820" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">fmt + clippy clean, behavior unchanged.</text>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">Scope: node_mut only; map keying, order, and TaskNode shape unchanged.</text>
+
+</svg>
