@@ -306,7 +306,7 @@ pub fn dashboard_page() -> Html {
         on_toggle_hidden: on_toggle_hidden.clone(),
     });
 
-    // Ctrl+C interrupt: a window capture-phase listener so it fires in every
+    // Ctrl+Z interrupt: a window capture-phase listener so it fires in every
     // mode (edit, nav, vim NORMAL/INSERT) and can't be swallowed by vim's `c`.
     use_interrupt_hotkey(focus.on_interrupt.clone());
 
@@ -898,6 +898,7 @@ pub fn dashboard_page() -> Html {
                                             <span>{ "w = next waiting" }</span>
                                             <span>{ "n = new" }</span>
                                             <span>{ "x = interrupt" }</span>
+                                            <span>{ "Ctrl+Z = interrupt" }</span>
                                             <span>{ "Enter or Ctrl/Cmd+K = edit mode" }</span>
                                             <span>{ "? = shortcuts" }</span>
                                         </>
@@ -908,6 +909,7 @@ pub fn dashboard_page() -> Html {
                                             <span>{ "Ctrl/Cmd+K = nav mode" }</span>
                                             <span>{ "Shift+Tab = next active" }</span>
                                             <span>{ "Ctrl+M = voice" }</span>
+                                            <span>{ "Ctrl+Z = interrupt" }</span>
                                             <span>{ "Enter = send" }</span>
                                             <span>{ "? = shortcuts" }</span>
                                         </>
