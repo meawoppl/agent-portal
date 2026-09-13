@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::{resolve_language, Field, SttEnv};
 use crate::http::{decode, ensure_ok, transport};
-use crate::{SttError, TranscribeRequest};
+use crate::{mime_base, SttError, TranscribeRequest};
 
 const ENDPOINT: &str = "https://speech.googleapis.com/v1/speech:recognize";
 const SCOPE: &str = "https://www.googleapis.com/auth/cloud-platform";
@@ -237,7 +237,7 @@ impl GoogleStt {
 /// headers already describe the stream are left unset, which is what the API
 /// documents as the safe default.
 fn encoding_for(content_type: &str) -> Option<&'static str> {
-    match content_type.split(';').next().unwrap_or("").trim() {
+    match mime_base(content_type) {
         "audio/webm" => Some("WEBM_OPUS"),
         "audio/ogg" => Some("OGG_OPUS"),
         "audio/mpeg" => Some("MP3"),

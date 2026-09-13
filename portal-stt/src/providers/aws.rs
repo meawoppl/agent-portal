@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::{resolve_language, Field, SttEnv};
 use crate::http::{decode, ensure_ok, transport};
 use crate::poll::{poll_job, JobState, DEFAULT_TIMEOUT};
-use crate::{extension_for, SttError, TranscribeRequest};
+use crate::{extension_for, mime_base, SttError, TranscribeRequest};
 
 const DEFAULT_LANGUAGE: &str = "en-US";
 const JSON_1_1: &str = "application/x-amz-json-1.1";
@@ -324,7 +324,7 @@ impl AwsStt {
 /// Transcribe wants the container named. Unknown types are left unset so it can
 /// infer, rather than being told something wrong.
 fn media_format_for(content_type: &str) -> Option<&'static str> {
-    match content_type.split(';').next().unwrap_or("").trim() {
+    match mime_base(content_type) {
         "audio/webm" => Some("webm"),
         "audio/ogg" => Some("ogg"),
         "audio/mpeg" => Some("mp3"),

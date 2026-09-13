@@ -217,11 +217,19 @@ impl SttProvider {
     }
 }
 
+/// Base MIME type of a recording's `Content-Type`: the part before any `; …`
+/// parameters, trimmed. Single source for the MIME `match` sites (extension,
+/// Transcribe media format, Google encoding) so a new format arm can't fall
+/// behind on parameter-stripping.
+pub(crate) fn mime_base(content_type: &str) -> &str {
+    content_type.split(';').next().unwrap_or("").trim()
+}
+
 /// Map a recording's MIME type to the filename extension providers expect when
 /// the audio is uploaded as a file. Unknown types fall back to `webm`, which is
 /// what every browser `MediaRecorder` we target produces.
 pub(crate) fn extension_for(content_type: &str) -> &'static str {
-    match content_type.split(';').next().unwrap_or("").trim() {
+    match mime_base(content_type) {
         "audio/mp4" | "audio/x-m4a" => "mp4",
         "audio/mpeg" => "mp3",
         "audio/wav" | "audio/x-wav" => "wav",
@@ -330,6 +338,14 @@ mod tests {
         let message = err.to_string();
         assert!(message.contains("openai"), "{message}");
         assert!(message.contains("deepgram"), "{message}");
+    }
+
+    #[test]
+    fn mime_base_strips_parameters_and_trims() {
+        assert_eq!(mime_base("audio/webm;codecs=opus"), "audio/webm");
+        assert_eq!(mime_base("  audio/mp4 ; codecs=mp4a.40.2 "), "audio/mp4");
+        assert_eq!(mime_base("audio/ogg"), "audio/ogg");
+        assert_eq!(mime_base(""), "");
     }
 
     #[test]
