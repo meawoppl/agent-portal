@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
 use crate::models::PushSubscription;
-use crate::push::transport::{PushError, PushTransport, SendOutcome};
+use crate::push::transport::{is_dead_endpoint, PushError, PushTransport, SendOutcome};
 use crate::push::{FcmTransportConfig, PushPayload};
 use shared::api::PushPlatform;
 
@@ -234,10 +234,7 @@ impl FcmTransport {
     fn map_send_response(status: StatusCode, body: &str) -> Result<SendOutcome, PushError> {
         if status.is_success() {
             Ok(SendOutcome::Delivered)
-        } else if status == StatusCode::NOT_FOUND
-            || status == StatusCode::GONE
-            || body.contains("UNREGISTERED")
-        {
+        } else if is_dead_endpoint(status) || body.contains("UNREGISTERED") {
             Ok(SendOutcome::GoneDeadEndpoint)
         } else {
             Err(PushError::Transport(format!(
