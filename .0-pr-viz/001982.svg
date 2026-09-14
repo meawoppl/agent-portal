@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-labelledby="title desc">
+  <title id="title">PR 1982 repair stale mobile caches before WASM startup</title>
+  <desc id="desc">Before, service-worker repair depended on WASM starting and production embedded a debug frontend. After, a static bootstrap updates and repairs the worker before WASM while the container embeds a release build.</desc>
+  <rect width="2000" height="1200" fill="#16161e"/>
+  <text x="55" y="70" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24" letter-spacing="1">PR #1982 · Repair stale mobile caches before WASM startup</text>
+  <text x="55" y="124" fill="#e6e9f5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700">A broken cached app could not reach its own repair code;</text>
+  <text x="55" y="166" fill="#e6e9f5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700">now recovery runs before WASM and production ships the release artifact.</text>
+  <line x1="55" y1="190" x2="1945" y2="190" stroke="#3d4666" stroke-width="2"/>
+  <line x1="1000" y1="225" x2="1000" y2="1090" stroke="#3d4666" stroke-width="2" stroke-dasharray="12 14"/>
+  <text x="70" y="260" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" letter-spacing="4">BEFORE</text>
+  <text x="1070" y="260" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" letter-spacing="4">AFTER</text>
+  <rect x="70" y="295" width="820" height="610" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="105" y="350" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="27" font-weight="700">WASM-owned recovery</text>
+  <text x="105" y="415" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">frontend WASM starts</text>
+  <text x="105" y="465" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">register_service_worker()</text>
+  <line x1="330" y1="500" x2="330" y2="565" stroke="#f7768e" stroke-width="5"/>
+  <text x="105" y="620" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25" font-weight="700">Dead end when stale state blocks startup</text>
+  <text x="105" y="700" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">Container ran trunk build without --release.</text>
+  <text x="105" y="755" fill="#e0af68" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="27">22,022,758 bytes raw</text>
+  <text x="105" y="835" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">Only reinstalling Chrome reliably cleared</text>
+  <text x="105" y="875" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">the persistent worker/profile state.</text>
+  <rect x="1070" y="295" width="820" height="610" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="1105" y="350" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="27" font-weight="700">Static pre-WASM recovery</text>
+  <text x="1105" y="415" fill="#7aa2f7" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">serviceWorker.register()</text>
+  <text x="1105" y="465" fill="#7aa2f7" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">registration.update()</text>
+  <text x="1105" y="515" fill="#7dcfff" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">portal-startup Performance marks</text>
+  <text x="1105" y="565" fill="#9ece6a" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">Repair cached app</text>
+  <text x="1105" y="635" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">Unregister worker + delete agent-portal caches</text>
+  <text x="1105" y="675" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">+ reload once, guarded by sessionStorage.</text>
+  <text x="1105" y="755" fill="#9ece6a" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="27">3,887,507 bytes raw</text>
+  <text x="1105" y="810" fill="#9ece6a" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="27">1,334,549 bytes gzip</text>
+  <text x="1105" y="875" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">Container and CI both run trunk build --release.</text>
+  <text x="55" y="1160" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22">Scope: repair removes this origin's service-worker registration and agent-portal caches; users may need to re-enable push notifications.</text>
+</svg>
