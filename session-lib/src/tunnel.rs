@@ -217,15 +217,7 @@ impl TunnelManager {
             .await
             .retain(|port, _| ports.contains(port));
         for port in ports {
-            let (listening, error) = match connect_loopback(port, PROBE_DIAL_BUDGET).await {
-                Ok(_) => (true, None),
-                Err(e) => (false, Some(e.to_string())),
-            };
-            let process = if listening {
-                process_on_port(port).await
-            } else {
-                None
-            };
+            let (listening, error, process) = probe_port(port).await;
             // Re-check the allowlist after the dial: a `ForwardClose` that
             // raced this tick must not resurrect the port with a stale
             // status (codex review on #1257).
@@ -265,15 +257,7 @@ impl TunnelManager {
                 let mgr = self.clone();
                 let port = f.port;
                 tokio::spawn(async move {
-                    let (listening, error) = match connect_loopback(port, PROBE_DIAL_BUDGET).await {
-                        Ok(_) => (true, None),
-                        Err(e) => (false, Some(e.to_string())),
-                    };
-                    let process = if listening {
-                        process_on_port(port).await
-                    } else {
-                        None
-                    };
+                    let (listening, error, process) = probe_port(port).await;
                     // A `ForwardClose` may have raced the dial — don't emit a
                     // stale status for a port that's no longer forwarded.
                     if !mgr.allowed.lock().await.contains(&port) {
@@ -838,6 +822,25 @@ async fn connect_loopback(port: u16, budget: Duration) -> std::io::Result<TcpStr
     }
 }
 
+/// One forward-health probe: dial the port, then resolve the owning process
+/// when something is listening. Returns `(listening, error, process)`.
+///
+/// Shared by the registration-time probe (`ForwardOpen`) and the background
+/// [`TunnelManager::probe_tick`] so the two can never disagree on what "up"
+/// means — same dial, same budget, same process lookup.
+async fn probe_port(port: u16) -> (bool, Option<String>, Option<String>) {
+    let (listening, error) = match connect_loopback(port, PROBE_DIAL_BUDGET).await {
+        Ok(_) => (true, None),
+        Err(e) => (false, Some(e.to_string())),
+    };
+    let process = if listening {
+        process_on_port(port).await
+    } else {
+        None
+    };
+    (listening, error, process)
+}
+
 /// Name of the process listening on `port`, best effort. `listeners` scans
 /// the OS socket tables (`/proc` on Linux, libproc on macOS) — a same-user
 /// lookup that can take a few ms on a busy box, hence `spawn_blocking`.
@@ -1052,6 +1055,30 @@ mod tests {
         let stream = connect_loopback(port, STREAM_DIAL_RETRY_BUDGET).await;
         assert!(stream.is_ok(), "expected immediate connect, got {stream:?}");
         let _ = accept.await;
+    }
+
+    /// The shared probe reports listening with no error when the port is up,
+    /// and not-listening with an error (and no process lookup) when refused.
+    #[tokio::test]
+    async fn probe_port_reports_listening_and_refused() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let accept = tokio::spawn(async move {
+            let _ = listener.accept().await;
+        });
+        let (listening, error, _) = probe_port(port).await;
+        assert!(listening, "expected listening, got error {error:?}");
+        assert!(error.is_none());
+        let _ = accept.await;
+
+        // A port nothing listens on: refused, with an error and no process.
+        let probe = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let dead = probe.local_addr().unwrap().port();
+        drop(probe);
+        let (listening, error, process) = probe_port(dead).await;
+        assert!(!listening, "expected refused for a dead port");
+        assert!(error.is_some());
+        assert!(process.is_none());
     }
 
     /// The dial retries across a brief outage: the listener comes up only after

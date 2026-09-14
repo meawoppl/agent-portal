@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-labelledby="title desc">
+  <title id="title">PR 1981 share forward-health probe across tunnel paths</title>
+  <desc id="desc">Before, the ForwardOpen spawn and probe_tick each inlined the same connect_loopback plus process_on_port probe. After, one probe_port helper in session-lib tunnel owns it, plus a unit test.</desc>
+  <rect width="2000" height="1200" fill="#16161e"/>
+
+  <text x="55" y="70" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24" letter-spacing="1">PR #1981 · Share forward-health probe across tunnel paths</text>
+  <text x="55" y="124" fill="#e6e9f5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700">ForwardOpen and probe_tick inlined the same dial-plus-process probe;</text>
+  <text x="55" y="166" fill="#e6e9f5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700">now one probe_port() owns it, so the two paths cannot disagree.</text>
+  <line x1="55" y1="190" x2="1945" y2="190" stroke="#3d4666" stroke-width="2"/>
+  <line x1="1000" y1="225" x2="1000" y2="1090" stroke="#3d4666" stroke-width="2" stroke-dasharray="12 14"/>
+
+  <text x="70" y="260" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" letter-spacing="4">BEFORE</text>
+  <text x="1070" y="260" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" letter-spacing="4">AFTER</text>
+
+  <rect x="70" y="295" width="820" height="275" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="105" y="345" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">Same probe, twice in tunnel.rs</text>
+  <text x="105" y="395" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">connect_loopback(port,</text>
+  <text x="105" y="435" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">  PROBE_DIAL_BUDGET)</text>
+  <text x="105" y="475" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">+ process_on_port(port)</text>
+  <text x="105" y="515" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">x2: ForwardOpen + probe_tick</text>
+  <text x="105" y="555" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">each inline in its own task body.</text>
+
+  <rect x="70" y="600" width="820" height="260" rx="8" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+  <text x="105" y="650" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">Copies drift apart silently</text>
+  <text x="105" y="700" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">a budget tweak in one leaves the other</text>
+  <text x="105" y="734" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">stale, so the chip and the tick can</text>
+  <text x="105" y="768" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">disagree on whether a port is up -</text>
+  <text x="105" y="802" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">two truths for one loopback dial.</text>
+
+  <rect x="1110" y="295" width="820" height="275" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="1145" y="345" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">One helper owns the probe</text>
+  <text x="1145" y="395" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">probe_port(port)</text>
+  <text x="1145" y="435" fill="#9ece6a" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">-&gt; (listening, error, process)</text>
+  <text x="1145" y="475" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">lives in session-lib tunnel.rs next to</text>
+  <text x="1145" y="509" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">connect_loopback, used by both call sites.</text>
+
+  <rect x="1110" y="600" width="820" height="260" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1145" y="650" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">Call sites go one line each</text>
+  <text x="1145" y="700" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">probe_port(port).await</text>
+  <text x="1145" y="744" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">1 new test: up is listening, dead port</text>
+  <text x="1145" y="778" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">refused with error; 7 tunnel tests total.</text>
+  <text x="1145" y="822" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">No behavior change, fmt/clippy clean.</text>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">Scope: probe paths only; stream dials keep their own retry budget in connect_loopback.</text>
+
+</svg>
