@@ -83,7 +83,9 @@ jobs:
           trunk: "true"
 
       - name: Build frontend
-        run: cd frontend && trunk build
+        # Exercise the same optimized artifact pipeline that production embeds,
+        # including wasm-opt feature compatibility and the startup bootstrap.
+        run: cd frontend && trunk build --release
 
   clippy:
     name: Clippy

@@ -57,6 +57,23 @@
             font-size: 0.95rem;
             gap: 1.2rem;
         }
+        #startup-recovery {
+            display: none;
+            max-width: 32rem;
+            padding: 0 1.5rem;
+            text-align: center;
+            line-height: 1.5;
+        }
+        #startup-recovery button {
+            margin-top: 0.5rem;
+            border: 1px solid #7aa2f7;
+            border-radius: 0.45rem;
+            padding: 0.65rem 1rem;
+            background: #24283b;
+            color: #c0caf5;
+            font: inherit;
+            cursor: pointer;
+        }
         .spinner {
             width: 36px;
             height: 36px;
@@ -70,7 +87,134 @@
         }
     </style>
 
-    <link data-trunk rel="rust" data-wasm-opt="z" />
+    <!-- This bootstrap deliberately runs before the Trunk-generated module.
+         A service worker registered from WASM cannot repair a cached app whose
+         WASM never starts. Keep recovery independent of the application. -->
+    <script>
+        (function () {
+            "use strict";
+            var startedAt = performance.now();
+            var ready = false;
+            var watchdog;
+            var repairKey = "portal-cache-repair-attempted";
+
+            function repairWasAttempted() {
+                try { return sessionStorage.getItem(repairKey) === "1"; }
+                catch (_) { return false; }
+            }
+
+            function rememberRepair() {
+                try { sessionStorage.setItem(repairKey, "1"); } catch (_) {}
+            }
+
+            function forgetRepair() {
+                try { sessionStorage.removeItem(repairKey); } catch (_) {}
+            }
+
+            function mark(stage, level, detail) {
+                var elapsed = Math.round(performance.now() - startedAt);
+                try { performance.mark("portal:" + stage); } catch (_) {}
+                var message = "[portal-startup] " + stage + " elapsed_ms=" + elapsed;
+                if (detail) { message += " detail=" + String(detail); }
+                (console[level] || console.log).call(console, message);
+            }
+
+            function showRecovery(detail) {
+                if (ready) { return; }
+                mark("recovery_offered", "warn", detail);
+                var spinner = document.querySelector("#loading .spinner");
+                var loadingText = document.querySelector("#loading > p");
+                var recovery = document.getElementById("startup-recovery");
+                if (spinner) { spinner.style.display = "none"; }
+                if (loadingText) { loadingText.style.display = "none"; }
+                if (recovery) { recovery.style.display = "block"; }
+            }
+
+            async function repair() {
+                var status = document.getElementById("startup-recovery-status");
+                if (repairWasAttempted()) {
+                    mark("repair_loop_stopped", "error");
+                    if (status) {
+                        status.textContent = "The automatic repair already ran. Close this tab and try again, or use a private tab.";
+                    }
+                    return;
+                }
+                rememberRepair();
+                mark("repair_started", "warn");
+                if (status) { status.textContent = "Clearing the cached application…"; }
+                try {
+                    if ("serviceWorker" in navigator) {
+                        var registrations = await navigator.serviceWorker.getRegistrations();
+                        await Promise.all(registrations.map(function (registration) {
+                            return registration.unregister();
+                        }));
+                    }
+                    if ("caches" in window) {
+                        var keys = await caches.keys();
+                        await Promise.all(keys.filter(function (key) {
+                            return key.indexOf("agent-portal") === 0;
+                        }).map(function (key) { return caches.delete(key); }));
+                    }
+                    mark("repair_complete", "info");
+                    var url = new URL(window.location.href);
+                    url.searchParams.set("cache-repair", Date.now().toString());
+                    window.location.replace(url.toString());
+                } catch (error) {
+                    mark("repair_failed", "error", error && error.message);
+                    if (status) { status.textContent = "Repair failed. Close this tab and clear this site's browser data."; }
+                }
+            }
+
+            window.__portalShowStartupRecovery = showRecovery;
+            window.__portalRepairStartup = repair;
+            window.addEventListener("DOMContentLoaded", function () {
+                var repairButton = document.getElementById("startup-repair-button");
+                if (repairButton) { repairButton.addEventListener("click", repair); }
+            }, { once: true });
+            mark("bootstrap", "info");
+
+            window.addEventListener("error", function (event) {
+                if (!ready) { showRecovery(event.message || "module error"); }
+            });
+            window.addEventListener("unhandledrejection", function (event) {
+                if (!ready) {
+                    var reason = event.reason && (event.reason.message || event.reason);
+                    showRecovery(reason || "module promise rejected");
+                }
+            });
+            window.addEventListener("TrunkApplicationStarted", function () {
+                ready = true;
+                clearTimeout(watchdog);
+                forgetRepair();
+                mark("application_started", "info");
+            }, { once: true });
+
+            // Healthy mobile starts are snappy. Ten seconds is long enough to
+            // avoid transient network noise while turning a permanent spinner
+            // into an actionable recovery path.
+            watchdog = window.setTimeout(function () {
+                showRecovery("application start timed out");
+            }, 10000);
+
+            // Register and force an update before importing the WASM app. This
+            // remains able to replace a stale worker even when the app fails.
+            if ("serviceWorker" in navigator) {
+                navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" })
+                    .then(function (registration) {
+                        mark("worker_registered", "info");
+                        return registration.update();
+                    })
+                    .then(function () { mark("worker_updated", "info"); })
+                    .catch(function (error) {
+                        mark("worker_update_failed", "warn", error && error.message);
+                    });
+            } else {
+                mark("worker_unsupported", "info");
+            }
+        })();
+    </script>
+
+    <link data-trunk rel="rust" data-wasm-opt="z" data-wasm-opt-params="--enable-bulk-memory-opt --enable-nontrapping-float-to-int" />
     <!-- CSS files split for maintainability -->
     <link data-trunk rel="css" href="styles/base.css" />
     <link data-trunk rel="css" href="styles/splash.css" />
@@ -157,6 +301,12 @@
     <div id="loading">
         <div class="spinner"></div>
         <p>Loading&hellip;</p>
+        <div id="startup-recovery">
+            <strong>Agent Portal did not start.</strong>
+            <p>A stale offline cache can prevent the application from loading.</p>
+            <button id="startup-repair-button" type="button">Repair cached app</button>
+            <p id="startup-recovery-status" aria-live="polite"></p>
+        </div>
     </div>
 </body>
 </html>

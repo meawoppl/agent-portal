@@ -13,12 +13,11 @@
 // hit the network directly — caching them would break auth, WS upgrades, and
 // mutations.
 //
-// Cache versioning: the app registers this worker as `/sw.js?v=<shared::VERSION>`
-// (see frontend/src/lib.rs). The version travels in `self.location.search`, so a
-// new deploy => a new cache name => stale caches are dropped on `activate`. This
-// is the guard against serving stale WASM after a deploy (§12 of the mobile plan).
+// Hashed application assets are safe to retain across deploys. The app shell is
+// always fetched network-first with the HTTP cache bypassed, and activation
+// removes cache layouts created by older workers.
 
-const CACHE_NAME = "agent-portal" + self.location.search;
+const CACHE_NAME = "agent-portal-bootstrap-v2";
 const APP_SHELL = "/index.html";
 
 // Precache the app shell so navigations work offline right after install.
@@ -75,7 +74,7 @@ self.addEventListener("fetch", (event) => {
   // Navigations and the app shell: network-first, cache fallback.
   if (request.mode === "navigate" || url.pathname === APP_SHELL) {
     event.respondWith(
-      fetch(request)
+      fetch(new Request(request, { cache: "no-store" }))
         .then((response) => {
           const copy = response.clone();
           caches

@@ -36,7 +36,10 @@ jobs:
           trunk: "true"
 
       - name: Build frontend
-        run: cd frontend && trunk build
+        # These assets are embedded in the release backend below. A debug
+        # frontend is several times larger and was previously shipped by the
+        # production container even though the backend itself was optimized.
+        run: cd frontend && trunk build --release
 
       - name: Build backend (embeds frontend assets)
         run: cargo build --release -p backend

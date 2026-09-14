@@ -97,7 +97,7 @@ yew-router = "0.18"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 web-sys = "0.3"
-gloo = "0.11"
+gloo = { version = "0.11", default-features = false, features = ["console", "events", "timers", "utils"] }
 gloo-net = "0.6"
 
 # Time handling
