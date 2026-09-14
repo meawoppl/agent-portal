@@ -22,7 +22,7 @@ use web_push::{
 };
 
 use crate::models::PushSubscription;
-use crate::push::transport::{PushError, PushTransport, SendOutcome};
+use crate::push::transport::{is_dead_endpoint, PushError, PushTransport, SendOutcome};
 use crate::push::PushPayload;
 use shared::api::PushPlatform;
 
@@ -165,7 +165,7 @@ impl WebPushTransport {
         let status = response.status();
         if status.is_success() {
             Ok(SendOutcome::Delivered)
-        } else if status == reqwest::StatusCode::NOT_FOUND || status == reqwest::StatusCode::GONE {
+        } else if is_dead_endpoint(status) {
             Ok(SendOutcome::GoneDeadEndpoint)
         } else {
             let body = response.text().await.unwrap_or_default();
@@ -288,7 +288,7 @@ mod tests {
     fn classify(status: reqwest::StatusCode) -> Result<SendOutcome, ()> {
         if status.is_success() {
             Ok(SendOutcome::Delivered)
-        } else if status == reqwest::StatusCode::NOT_FOUND || status == reqwest::StatusCode::GONE {
+        } else if is_dead_endpoint(status) {
             Ok(SendOutcome::GoneDeadEndpoint)
         } else {
             Err(())

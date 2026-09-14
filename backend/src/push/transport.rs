@@ -9,6 +9,14 @@
 use crate::models::PushSubscription;
 use crate::push::PushPayload;
 
+/// A push-service status that means the subscription is permanently dead: the
+/// endpoint 404s or explicitly reports Gone (HTTP 410). Single home for the
+/// Web Push and FCM response mappings (and their tests) so a new dead-arm
+/// can't land in one transport and be missed in the other.
+pub fn is_dead_endpoint(status: reqwest::StatusCode) -> bool {
+    status == reqwest::StatusCode::NOT_FOUND || status == reqwest::StatusCode::GONE
+}
+
 /// Outcome of a single delivery attempt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SendOutcome {
@@ -67,5 +75,30 @@ impl PushTransport for LogTransport {
             payload.collapse_key,
         );
         Ok(SendOutcome::Delivered)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reqwest::StatusCode;
+
+    #[test]
+    fn dead_endpoint_covers_gone_and_missing_only() {
+        assert!(is_dead_endpoint(StatusCode::NOT_FOUND));
+        assert!(is_dead_endpoint(StatusCode::GONE));
+        for live in [StatusCode::OK, StatusCode::CREATED, StatusCode::ACCEPTED] {
+            assert!(!is_dead_endpoint(live), "{live} is a live endpoint");
+        }
+        for transient in [
+            StatusCode::BAD_REQUEST,
+            StatusCode::UNAUTHORIZED,
+            StatusCode::FORBIDDEN,
+            StatusCode::TOO_MANY_REQUESTS,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::SERVICE_UNAVAILABLE,
+        ] {
+            assert!(!is_dead_endpoint(transient), "{transient} is not dead");
+        }
     }
 }
