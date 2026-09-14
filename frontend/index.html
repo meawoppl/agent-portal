@@ -145,9 +145,16 @@
                 try {
                     if ("serviceWorker" in navigator) {
                         var registrations = await navigator.serviceWorker.getRegistrations();
-                        await Promise.all(registrations.map(function (registration) {
-                            return registration.unregister();
-                        }));
+                        await Promise.all(registrations.filter(function (registration) {
+                            try {
+                                var worker = registration.active || registration.waiting || registration.installing;
+                                if (!worker) { return false; }
+                                var script = new URL(worker.scriptURL);
+                                return script.origin === window.location.origin && script.pathname === "/sw.js";
+                            } catch (_) {
+                                return false;
+                            }
+                        }).map(function (registration) { return registration.unregister(); }));
                     }
                     if ("caches" in window) {
                         var keys = await caches.keys();
@@ -186,6 +193,11 @@
                 ready = true;
                 clearTimeout(watchdog);
                 forgetRepair();
+                var cleanUrl = new URL(window.location.href);
+                if (cleanUrl.searchParams.has("cache-repair")) {
+                    cleanUrl.searchParams.delete("cache-repair");
+                    window.history.replaceState(null, "", cleanUrl.toString());
+                }
                 mark("application_started", "info");
             }, { once: true });
 
