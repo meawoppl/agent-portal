@@ -272,6 +272,9 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
         ServerToClient::Ephemeral { payload } => {
             on_event.emit(WsEvent::Ephemeral(payload));
         }
+        // Spend screens hydrate through REST. This user-wide broadcast reaches
+        // every session socket too, but has no per-session UI consumer.
+        ServerToClient::UserSpendUpdate { .. } => {}
         unhandled => {
             // Variants we haven't wired a UI route for yet (e.g. new
             // server-pushed frames added since this branch was written).
