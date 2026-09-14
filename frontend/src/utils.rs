@@ -226,12 +226,11 @@ pub fn non_empty(opt: Option<&str>) -> Option<&str> {
     opt.map(str::trim).filter(|s| !s.is_empty())
 }
 
-/// True when `s` holds non-whitespace text.
-///
-/// Re-export of the shared blank-string guard so `if` guards, `disabled=`
-/// flags, and `filter` closures keep calling `utils::is_non_blank` without a
-/// second copy of the check to drift.
-pub use shared::strings::is_non_blank;
+/// Re-exports of the shared blank-string guards so `if` guards, `disabled=`
+/// flags, `filter` closures, and form-submit call sites keep calling
+/// `utils::is_non_blank` / `utils::owned_non_blank` without a second copy of
+/// the checks to drift.
+pub use shared::strings::{is_non_blank, owned_non_blank};
 
 /// Keep a borrowed string only when it is non-blank.
 ///
@@ -240,15 +239,6 @@ pub use shared::strings::is_non_blank;
 /// whitespace-only input is treated as absent.
 pub fn non_blank(s: &str) -> Option<&str> {
     is_non_blank(s).then(|| s.trim())
-}
-
-/// Keep a trimmed owned copy of `s` only when it is non-blank.
-///
-/// Covers the repeated `(!s.trim().is_empty()).then(|| s.trim().to_string())`
-/// shape at form-submit call sites so they cannot drift (e.g. one arm
-/// trimming while another clones the untrimmed value).
-pub fn owned_non_blank(s: &str) -> Option<String> {
-    non_blank(s).map(str::to_string)
 }
 
 /// Remove a key from browser localStorage, silently doing nothing when
