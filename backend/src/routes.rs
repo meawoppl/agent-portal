@@ -1,4 +1,8 @@
 use axum::{
+    extract::Request,
+    http::{header, HeaderValue},
+    middleware::Next,
+    response::Response,
     routing::{get, post, put},
     Json, Router,
 };
@@ -30,6 +34,20 @@ pub const AUTH_TOKEN_LOGIN: &str = "/api/auth/token-login";
 pub const AUTH_LOGOUT: &str = "/api/auth/logout";
 pub const AUTH_DEV_LOGIN: &str = "/api/auth/dev-login";
 pub const AUTH_DEVICE_LOGIN: &str = "/api/auth/device-login";
+
+/// The service-worker script is a stable URL whose bytes change across
+/// deploys. It must revalidate; marking it immutable can strand a browser on a
+/// worker that is responsible for choosing every subsequent cached asset.
+async fn service_worker_no_cache(request: Request, next: Next) -> Response {
+    let is_service_worker = request.uri().path() == "/sw.js";
+    let mut response = next.run(request).await;
+    if is_service_worker {
+        response
+            .headers_mut()
+            .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    }
+    response
+}
 
 pub const AUTH_DEVICE: &str = "/api/auth/device";
 pub const AUTH_DEVICE_CODE: &str = "/api/auth/device/code";
@@ -465,6 +483,7 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
                 .cache_control(memory_serve::CacheControl::Long)
                 .into_router(),
         )
+        .layer(axum::middleware::from_fn(service_worker_no_cache))
         // Add CORS and cookie management
         .layer(CookieManagerLayer::new())
         .layer(cors)
