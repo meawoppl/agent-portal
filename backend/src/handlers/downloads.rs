@@ -26,13 +26,11 @@ pub async fn install_script(
     State(app_state): State<Arc<AppState>>,
     Query(params): Query<InstallScriptParams>,
 ) -> Result<Response<Body>, AppError> {
-    // Use provided backend_url or derive from public_url
-    let backend_url = params.backend_url.unwrap_or_else(|| {
-        app_state
-            .public_url
-            .replace("https://", "wss://")
-            .replace("http://", "ws://")
-    });
+    // Use provided backend_url or derive from public_url (http->ws lives in
+    // shared::urls so every scheme swap stays identical).
+    let backend_url = params
+        .backend_url
+        .unwrap_or_else(|| shared::urls::http_to_ws(&app_state.public_url));
 
     let script = format!(
         r##"#!/bin/bash
