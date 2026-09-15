@@ -1,11 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
-  <rect width="2000" height="1200" fill="#1a1b26"/>
+  <rect width="2000" height="1200" fill="#16161e"/>
   <text x="55" y="58" fill="#565f89" font-family="Arial, sans-serif" font-size="24" letter-spacing="1">PR #1989 - Add agent session activity state</text>
   <text x="55" y="112" fill="#c0caf5" font-family="Arial, sans-serif" font-size="34">Peer sessions now expose an explicit live state: idle, busy, or throttled.</text>
   <text x="55" y="154" fill="#c0caf5" font-family="Arial, sans-serif" font-size="34">Agents can see rate-limited sessions without losing compatibility with the old busy flag.</text>
   <line x1="55" y1="185" x2="1945" y2="185" stroke="#565f89" stroke-width="2"/>
 
-  <rect x="90" y="250" width="510" height="180" rx="12" fill="#24283b" stroke="#565f89" stroke-width="3"/>
+  <rect x="90" y="250" width="510" height="180" rx="12" fill="#1e202e" stroke="#565f89" stroke-width="3"/>
   <text x="125" y="305" fill="#7aa2f7" font-family="Arial, sans-serif" font-size="28">Transcript Signal</text>
   <text x="125" y="352" fill="#c0caf5" font-family="Arial, sans-serif" font-size="23">latest durable event</text>
   <text x="125" y="390" fill="#a9b1d6" font-family="Arial, sans-serif" font-size="22">result, assistant, tool, error,</text>
@@ -14,7 +14,7 @@
   <line x1="600" y1="340" x2="735" y2="340" stroke="#7dcfff" stroke-width="5"/>
   <polygon points="760,340 728,322 728,358" fill="#7dcfff"/>
 
-  <rect x="760" y="250" width="510" height="180" rx="12" fill="#24283b" stroke="#7dcfff" stroke-width="4"/>
+  <rect x="760" y="250" width="510" height="180" rx="12" fill="#1e202e" stroke="#7dcfff" stroke-width="4"/>
   <text x="795" y="305" fill="#7dcfff" font-family="Arial, sans-serif" font-size="28">Backend Derivation</text>
   <text x="795" y="352" fill="#c0caf5" font-family="Arial, sans-serif" font-size="23">connected + latest event</text>
   <text x="795" y="390" fill="#a9b1d6" font-family="Arial, sans-serif" font-size="22">maps to SessionActivityState</text>
@@ -23,7 +23,7 @@
   <line x1="1270" y1="340" x2="1405" y2="340" stroke="#7dcfff" stroke-width="5"/>
   <polygon points="1430,340 1398,322 1398,358" fill="#7dcfff"/>
 
-  <rect x="1430" y="250" width="480" height="180" rx="12" fill="#24283b" stroke="#565f89" stroke-width="3"/>
+  <rect x="1430" y="250" width="480" height="180" rx="12" fill="#1e202e" stroke="#565f89" stroke-width="3"/>
   <text x="1465" y="305" fill="#bb9af7" font-family="Arial, sans-serif" font-size="28">Agent API + CLI</text>
   <text x="1465" y="352" fill="#c0caf5" font-family="Arial, sans-serif" font-size="23">GET /api/agent/sessions</text>
   <text x="1465" y="390" fill="#a9b1d6" font-family="Arial, sans-serif" font-size="22">message list and peek show</text>
@@ -31,22 +31,22 @@
 
   <text x="90" y="540" fill="#565f89" font-family="Arial, sans-serif" font-size="22" font-weight="bold" letter-spacing="4">STATE OUTPUT</text>
 
-  <rect x="130" y="595" width="470" height="185" rx="10" fill="#1f2335" stroke="#9ece6a" stroke-width="4"/>
+  <rect x="130" y="595" width="470" height="185" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="4"/>
   <text x="165" y="655" fill="#9ece6a" font-family="Arial, sans-serif" font-size="34">idle</text>
   <text x="165" y="708" fill="#c0caf5" font-family="Arial, sans-serif" font-size="24">connected but no active turn</text>
   <text x="165" y="750" fill="#a9b1d6" font-family="Arial, sans-serif" font-size="22">terminal events stay quiet</text>
 
-  <rect x="765" y="595" width="470" height="185" rx="10" fill="#1f2335" stroke="#e0af68" stroke-width="4"/>
+  <rect x="765" y="595" width="470" height="185" rx="10" fill="#1e202e" stroke="#e0af68" stroke-width="4"/>
   <text x="800" y="655" fill="#e0af68" font-family="Arial, sans-serif" font-size="34">busy</text>
   <text x="800" y="708" fill="#c0caf5" font-family="Arial, sans-serif" font-size="24">latest event is in-progress</text>
   <text x="800" y="750" fill="#a9b1d6" font-family="Arial, sans-serif" font-size="22">legacy busy remains true</text>
 
-  <rect x="1400" y="595" width="470" height="185" rx="10" fill="#1f2335" stroke="#f7768e" stroke-width="4"/>
+  <rect x="1400" y="595" width="470" height="185" rx="10" fill="#1e202e" stroke="#f7768e" stroke-width="4"/>
   <text x="1435" y="655" fill="#f7768e" font-family="Arial, sans-serif" font-size="34">throttled</text>
   <text x="1435" y="708" fill="#c0caf5" font-family="Arial, sans-serif" font-size="24">rate-limit frames are visible</text>
   <text x="1435" y="750" fill="#a9b1d6" font-family="Arial, sans-serif" font-size="22">legacy busy also remains true</text>
 
-  <rect x="195" y="880" width="1610" height="150" rx="12" fill="#24283b" stroke="#565f89" stroke-width="3"/>
+  <rect x="195" y="880" width="1610" height="150" rx="12" fill="#1e202e" stroke="#565f89" stroke-width="3"/>
   <text x="245" y="940" fill="#c0caf5" font-family="Arial, sans-serif" font-size="27">Wire compatibility</text>
   <text x="245" y="988" fill="#a9b1d6" font-family="Arial, sans-serif" font-size="23">The new state field is optional. New CLIs prefer it; old backends still render through busy.</text>
 
