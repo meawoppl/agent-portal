@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+  <rect width="2000" height="1200" fill="#16161e"/>
+  <text x="55" y="58" fill="#565f89" font-family="Arial, sans-serif" font-size="24" letter-spacing="1">PR #1987 · Keep draining Codex output between turns</text>
+  <text x="55" y="112" fill="#e6e9f5" font-family="Arial, sans-serif" font-size="34">Idle sessions waited only for command_rx; now tokio::select! keeps app-server output flowing,</text>
+  <text x="55" y="154" fill="#e6e9f5" font-family="Arial, sans-serif" font-size="34">so late Codex frames reach the transcript without another user prompt.</text>
+  <line x1="55" y1="180" x2="1945" y2="180" stroke="#3d4666" stroke-width="2"/>
+  <line x1="1000" y1="205" x2="1000" y2="1110" stroke="#3d4666" stroke-width="3" stroke-dasharray="14 14"/>
+
+  <text x="70" y="240" fill="#f7768e" font-family="Arial, sans-serif" font-size="22" font-weight="bold" letter-spacing="4">BEFORE</text>
+  <rect x="90" y="290" width="790" height="145" rx="18" fill="#1e202e" stroke="#3d4666" stroke-width="3"/>
+  <text x="125" y="342" fill="#7aa2f7" font-family="Arial, sans-serif" font-size="26">handle_codex_server_message</text>
+  <text x="125" y="388" fill="#a9b1d6" font-family="Arial, sans-serif" font-size="23">turn/completed makes state.turn_active() false</text>
+
+  <line x1="485" y1="435" x2="485" y2="520" stroke="#f7768e" stroke-width="5"/>
+  <polygon points="485,540 472,516 498,516" fill="#f7768e"/>
+
+  <rect x="90" y="540" width="790" height="150" rx="18" fill="#1e202e" stroke="#f7768e" stroke-width="4"/>
+  <text x="125" y="592" fill="#f7768e" font-family="Arial, sans-serif" font-size="26">else: command_rx.recv().await</text>
+  <text x="125" y="638" fill="#a9b1d6" font-family="Arial, sans-serif" font-size="23">client.next_message() is no longer polled</text>
+
+  <line x1="485" y1="690" x2="485" y2="775" stroke="#f7768e" stroke-width="5"/>
+  <polygon points="485,795 472,771 498,771" fill="#f7768e"/>
+
+  <rect x="90" y="795" width="790" height="180" rx="18" fill="#1e202e" stroke="#f7768e" stroke-width="4"/>
+  <text x="125" y="847" fill="#f7768e" font-family="Arial, sans-serif" font-size="26">Late AgentOutput::Visible waits</text>
+  <text x="125" y="893" fill="#a9b1d6" font-family="Arial, sans-serif" font-size="23">A new IoCommand::UserInput wakes the loop</text>
+  <text x="125" y="933" fill="#a9b1d6" font-family="Arial, sans-serif" font-size="23">and the missing frame appears immediately</text>
+
+  <text x="1070" y="240" fill="#9ece6a" font-family="Arial, sans-serif" font-size="22" font-weight="bold" letter-spacing="4">AFTER</text>
+  <rect x="1120" y="290" width="790" height="145" rx="18" fill="#1e202e" stroke="#3d4666" stroke-width="3"/>
+  <text x="1155" y="342" fill="#7aa2f7" font-family="Arial, sans-serif" font-size="26">handle_codex_server_message</text>
+  <text x="1155" y="388" fill="#a9b1d6" font-family="Arial, sans-serif" font-size="23">turn/completed makes state.turn_active() false</text>
+
+  <line x1="1515" y1="435" x2="1515" y2="520" stroke="#9ece6a" stroke-width="5"/>
+  <polygon points="1515,540 1502,516 1528,516" fill="#9ece6a"/>
+
+  <rect x="1120" y="540" width="790" height="190" rx="18" fill="#1e202e" stroke="#9ece6a" stroke-width="4"/>
+  <text x="1155" y="592" fill="#9ece6a" font-family="Arial, sans-serif" font-size="26">idle tokio::select!</text>
+  <text x="1155" y="638" fill="#a9b1d6" font-family="Arial, sans-serif" font-size="23">client.next_message() remains live</text>
+  <text x="1155" y="678" fill="#a9b1d6" font-family="Arial, sans-serif" font-size="23">command_rx.recv() remains live</text>
+
+  <line x1="1515" y1="730" x2="1515" y2="815" stroke="#9ece6a" stroke-width="5"/>
+  <polygon points="1515,835 1502,811 1528,811" fill="#9ece6a"/>
+
+  <rect x="1120" y="835" width="790" height="140" rx="18" fill="#1e202e" stroke="#9ece6a" stroke-width="4"/>
+  <text x="1155" y="887" fill="#9ece6a" font-family="Arial, sans-serif" font-size="26">SessionEvent::RawOutput arrives now</text>
+  <text x="1155" y="933" fill="#a9b1d6" font-family="Arial, sans-serif" font-size="23">No second prompt is required to drain Codex</text>
+
+  <line x1="55" y1="1125" x2="1945" y2="1125" stroke="#3d4666" stroke-width="2"/>
+  <text x="55" y="1170" fill="#565f89" font-family="Arial, sans-serif" font-size="22">Scope: this drains Codex app-server frames while idle; it does not reorder frames or add frontend polling.</text>
+</svg>
