@@ -362,10 +362,12 @@ pub async fn fork_session(
         &app_state.db_pool,
         &session_id.to_string(),
         session_id,
-        serde_json::Value::String(fork_notice),
-        None,
-        None,
-        None,
+        crate::handlers::websocket::EnqueueInput {
+            content: serde_json::Value::String(fork_notice),
+            send_mode: None,
+            reasoning_effort: None,
+            client_msg_id: None,
+        },
     );
     app_state
         .session_manager

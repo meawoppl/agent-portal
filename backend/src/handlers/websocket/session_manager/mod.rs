@@ -39,6 +39,7 @@ mod tunnel_client;
 use data_plane::DataPlaneMap;
 pub use data_plane::{DataPlaneConnection, DataPlaneSender, DATA_PLANE_CHANNEL_CAPACITY};
 pub(crate) use input_dedup::{DedupVerdict, InputDeliveryState};
+pub(crate) use input_queue::EnqueueInput;
 pub use launcher_registry::LauncherConnection;
 pub use liveness::{
     LAUNCHER_LIVENESS_DEADLINE_SECS, LIVENESS_SWEEP_INTERVAL_SECS, PROXY_LIVENESS_DEADLINE_SECS,

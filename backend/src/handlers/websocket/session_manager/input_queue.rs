@@ -36,6 +36,13 @@ pub(crate) struct EnqueueOutcome {
     pub persisted: bool,
 }
 
+pub(crate) struct EnqueueInput {
+    pub content: serde_json::Value,
+    pub send_mode: Option<SendMode>,
+    pub reasoning_effort: Option<ReasoningEffort>,
+    pub client_msg_id: Option<Uuid>,
+}
+
 impl SessionManager {
     /// Bump the session's input sequence, best-effort persist a pending-input
     /// row, and forward the message to the live proxy (queued if disconnected).
@@ -44,15 +51,16 @@ impl SessionManager {
         db_pool: &DbPool,
         session_key: &str,
         session_id: Uuid,
-        content: serde_json::Value,
-        send_mode: Option<SendMode>,
-        reasoning_effort: Option<ReasoningEffort>,
-        // Browser-assigned delivery-tracking id (#939); forwarded to the proxy
-        // on `SequencedInput` so it can echo per-stage `InputProgressAck`s.
-        // `None` for non-browser inputs (inter-agent, replay).
-        client_msg_id: Option<Uuid>,
+        input: EnqueueInput,
     ) -> EnqueueOutcome {
         use crate::schema::{pending_inputs, sessions};
+
+        let EnqueueInput {
+            content,
+            send_mode,
+            reasoning_effort,
+            client_msg_id,
+        } = input;
 
         let mut persisted = false;
         let seq = match db_pool.get() {

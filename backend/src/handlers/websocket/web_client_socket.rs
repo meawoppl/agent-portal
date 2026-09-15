@@ -1,5 +1,6 @@
 use super::permissions::{handle_permission_response, replay_pending_permission};
 use super::replay::replay_history;
+use super::session_manager::{DedupVerdict, EnqueueInput, InputDeliveryState};
 use super::uploads::{handle_file_upload_chunk, handle_file_upload_start, PendingUpload};
 use super::{SessionId, SessionManager, WebClientSender};
 use crate::handlers::session_access::is_session_mutator;
@@ -157,7 +158,6 @@ fn handle_web_client_message(
             // known in-flight → drop the duplicate (the original's acks will
             // arrive); new → recorded in-flight, proceed.
             if let (Some(id), Some(session_id)) = (client_msg_id, *verified_session_id) {
-                use super::session_manager::{DedupVerdict, InputDeliveryState};
                 let verdict = match session_manager.check_and_record_input(session_id, id) {
                     // The in-memory tracker is empty after a backend restart;
                     // a pending_inputs row with this id proves the original
@@ -202,11 +202,13 @@ fn handle_web_client_message(
                 ctx,
                 session_key,
                 *verified_session_id,
-                content,
-                send_mode,
-                reasoning_effort,
+                WebInput {
+                    content,
+                    send_mode,
+                    reasoning_effort,
+                    client_msg_id,
+                },
                 user_id,
-                client_msg_id,
             );
             false
         }
@@ -416,15 +418,19 @@ fn pending_input_exists(
     .unwrap_or(false)
 }
 
+struct WebInput {
+    content: serde_json::Value,
+    send_mode: Option<SendMode>,
+    reasoning_effort: Option<shared::ReasoningEffort>,
+    client_msg_id: Option<Uuid>,
+}
+
 fn handle_web_input(
     ctx: WebClientCtx<'_>,
     session_key: &Option<SessionId>,
     verified_session_id: Option<Uuid>,
-    content: serde_json::Value,
-    send_mode: Option<SendMode>,
-    reasoning_effort: Option<shared::ReasoningEffort>,
+    input: WebInput,
     user_id: Uuid,
-    client_msg_id: Option<Uuid>,
 ) {
     let WebClientCtx {
         session_manager,
@@ -450,7 +456,7 @@ fn handle_web_input(
     }
 
     // For slash commands, broadcast a portal message so the user sees feedback
-    if let serde_json::Value::String(text) = &content {
+    if let serde_json::Value::String(text) = &input.content {
         if text.starts_with('/') {
             let portal = PortalMessage::text(format!("`{}`", text));
 
@@ -517,10 +523,12 @@ fn handle_web_input(
         db_pool,
         key,
         session_id,
-        content,
-        send_mode,
-        reasoning_effort,
-        client_msg_id,
+        EnqueueInput {
+            content: input.content,
+            send_mode: input.send_mode,
+            reasoning_effort: input.reasoning_effort,
+            client_msg_id: input.client_msg_id,
+        },
     );
     if !outcome.delivered {
         warn!(
