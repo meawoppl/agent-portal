@@ -278,11 +278,7 @@ fn format_session_row(
         } else {
             "disconnected"
         },
-        if session.busy.unwrap_or(false) {
-            "busy"
-        } else {
-            "idle"
-        },
+        session_activity_label(session),
         session.hostname,
         session.session_name,
         session.working_directory,
@@ -299,6 +295,19 @@ fn full_agent_name(session: &shared::api::AgentSessionInfo) -> String {
     } else {
         format!("{}-{model}", session.agent_type)
     }
+}
+
+fn session_activity_label(session: &shared::api::AgentSessionInfo) -> &'static str {
+    session.state.map_or_else(
+        || {
+            if session.busy.unwrap_or(false) {
+                "busy"
+            } else {
+                "idle"
+            }
+        },
+        |state| state.as_str(),
+    )
 }
 
 /// New backends report live proxy presence explicitly. Falling back to the
@@ -427,11 +436,7 @@ fn format_peek(data: &PeekMessagesResponse, now: chrono::DateTime<chrono::Utc>) 
         } else {
             "disconnected"
         },
-        if s.busy.unwrap_or(false) {
-            "busy"
-        } else {
-            "idle"
-        },
+        session_activity_label(s),
         match data.pending_tool_name.as_deref() {
             Some(tool) => format!(" / awaiting permission: {tool}"),
             None if s.awaiting_permission => " / awaiting permission".to_string(),
@@ -549,7 +554,7 @@ fn normalize_session_id_prefix(input: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use shared::api::AgentSessionInfo;
+    use shared::api::{AgentSessionInfo, SessionActivityState};
     use uuid::Uuid;
 
     fn session(id: &str) -> AgentSessionInfo {
@@ -562,6 +567,7 @@ mod tests {
             hostname: "host".to_string(),
             model: None,
             connected: Some(true),
+            state: None,
             busy: Some(false),
             awaiting_permission: false,
             last_activity: String::new(),
@@ -604,6 +610,18 @@ mod tests {
         assert!(out.contains("Last 2 of 42 messages (oldest first):"));
         assert!(out.contains("[     5m] text        fix the bug"));
         assert!(out.contains("[    12s] tool_use    Bash: cargo test"));
+    }
+
+    #[test]
+    fn session_activity_prefers_explicit_state() {
+        let mut s = session("0c24805b-0000-0000-0000-000000000000");
+        s.state = Some(SessionActivityState::Throttled);
+        s.busy = Some(false);
+        assert_eq!(session_activity_label(&s), "throttled");
+
+        s.state = None;
+        s.busy = Some(true);
+        assert_eq!(session_activity_label(&s), "busy");
     }
 
     #[test]

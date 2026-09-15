@@ -22,7 +22,7 @@ use uuid::Uuid;
 use base64::Engine as _;
 use shared::api::{
     AgentSessionInfo, AgentSessionsResponse, SendAgentMessageRequest, SendAgentMessageResponse,
-    ShowMediaResponse,
+    SessionActivityState, ShowMediaResponse,
 };
 use shared::media::MediaKind;
 use shared::{AgentType, PortalContent, PortalMessage, ServerToClient, SessionStatus};
@@ -106,13 +106,14 @@ pub async fn list_agent_sessions(
             let connected = app_state
                 .session_manager
                 .is_proxy_connected(s.id.to_string().as_str());
-            let busy = connected
-                && latest_signals
-                    .get(&s.id)
-                    .is_some_and(|(agent_type, content)| turn_signal_is_busy(agent_type, content));
+            let state = live_session_activity_state(connected, latest_signals.get(&s.id));
             AgentSessionInfo {
                 connected: Some(connected),
-                busy: Some(busy),
+                state: Some(state),
+                busy: Some(matches!(
+                    state,
+                    SessionActivityState::Busy | SessionActivityState::Throttled
+                )),
                 id: s.id,
                 awaiting_permission: awaiting.contains(&s.id),
                 last_activity: s.last_activity.and_utc().to_rfc3339(),
@@ -133,10 +134,33 @@ pub async fn list_agent_sessions(
 /// protocols have different terminal vocabulary, but all three expose typed
 /// or stable top-level discriminators; malformed future frames fail safe to
 /// "busy" while connected instead of advertising an agent as idle mid-turn.
-fn turn_signal_is_busy(agent_type: &str, content: &str) -> bool {
+fn live_session_activity_state(
+    connected: bool,
+    latest_signal: Option<&(String, String)>,
+) -> SessionActivityState {
+    if !connected {
+        return SessionActivityState::Idle;
+    }
+    latest_signal.map_or(SessionActivityState::Idle, |(agent_type, content)| {
+        turn_signal_activity_state(agent_type, content)
+    })
+}
+
+fn turn_signal_activity_state(agent_type: &str, content: &str) -> SessionActivityState {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(content) else {
-        return true;
+        return SessionActivityState::Busy;
     };
+    if turn_signal_is_throttled(&value) {
+        return SessionActivityState::Throttled;
+    }
+    if turn_signal_value_is_busy(agent_type, &value) {
+        SessionActivityState::Busy
+    } else {
+        SessionActivityState::Idle
+    }
+}
+
+fn turn_signal_value_is_busy(agent_type: &str, value: &serde_json::Value) -> bool {
     let kind = value.get("type").and_then(|value| value.as_str());
     match agent_type {
         "claude" => kind != Some("result") && kind != Some("error"),
@@ -152,6 +176,25 @@ fn turn_signal_is_busy(agent_type: &str, content: &str) -> bool {
             kind,
             Some("result" | "turn.completed" | "turn.failed" | "error")
         ),
+    }
+}
+
+fn turn_signal_is_throttled(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Object(map) => {
+            let kind_is_throttled = map
+                .get("type")
+                .and_then(|value| value.as_str())
+                .is_some_and(|kind| kind == "rate_limit_event" || kind == "rate_limit_error");
+            let error_is_throttled = map
+                .get("error")
+                .and_then(|error| error.get("type"))
+                .and_then(|value| value.as_str())
+                .is_some_and(|kind| kind == "rate_limit_error");
+            kind_is_throttled || error_is_throttled || map.values().any(turn_signal_is_throttled)
+        }
+        serde_json::Value::Array(values) => values.iter().any(turn_signal_is_throttled),
+        _ => false,
     }
 }
 
@@ -245,9 +288,7 @@ pub async fn peek_agent_messages(
         .select((messages::agent_type, messages::content))
         .first(&mut conn)
         .optional()?;
-    let busy = connected
-        && latest_signal
-            .is_some_and(|(agent_type, content)| turn_signal_is_busy(&agent_type, &content));
+    let state = live_session_activity_state(connected, latest_signal.as_ref());
     let pending_tool_name = pending_permission_requests::table
         .filter(pending_permission_requests::session_id.eq(target_id))
         .order(pending_permission_requests::created_at.desc())
@@ -259,7 +300,11 @@ pub async fn peek_agent_messages(
     Ok(Json(shared::api::PeekMessagesResponse {
         session: AgentSessionInfo {
             connected: Some(connected),
-            busy: Some(busy),
+            state: Some(state),
+            busy: Some(matches!(
+                state,
+                SessionActivityState::Busy | SessionActivityState::Throttled
+            )),
             id: session.id,
             awaiting_permission,
             last_activity: session.last_activity.and_utc().to_rfc3339(),
@@ -671,8 +716,11 @@ fn pending_input_count(
 
 #[cfg(test)]
 mod tests {
-    use super::{portable_figure_controls, turn_signal_is_busy, unwrap_portable_figure_html};
+    use super::{
+        portable_figure_controls, turn_signal_activity_state, unwrap_portable_figure_html,
+    };
     use axum::body::Bytes;
+    use shared::api::SessionActivityState;
 
     #[test]
     fn riz_html_is_canonicalized_before_storage() {
@@ -726,29 +774,69 @@ mod tests {
 
     #[test]
     fn turn_state_covers_all_agent_terminal_shapes() {
-        assert!(turn_signal_is_busy("claude", r#"{"type":"assistant"}"#));
-        assert!(!turn_signal_is_busy("claude", r#"{"type":"result"}"#));
-        assert!(turn_signal_is_busy("codex", r#"{"type":"item.started"}"#));
-        assert!(!turn_signal_is_busy(
-            "codex",
-            r#"{"type":"thread.started"}"#
-        ));
-        assert!(!turn_signal_is_busy(
-            "codex",
-            r#"{"type":"turn.completed"}"#
-        ));
-        assert!(turn_signal_is_busy(
-            "muse",
-            r#"{"type":"muse_record","payload_type":"tool.result"}"#
-        ));
-        assert!(!turn_signal_is_busy(
-            "muse",
-            r#"{"type":"muse_record","payload_type":"run.terminal.completed"}"#
-        ));
+        assert_eq!(
+            turn_signal_activity_state("claude", r#"{"type":"assistant"}"#),
+            SessionActivityState::Busy
+        );
+        assert_eq!(
+            turn_signal_activity_state("claude", r#"{"type":"result"}"#),
+            SessionActivityState::Idle
+        );
+        assert_eq!(
+            turn_signal_activity_state("codex", r#"{"type":"item.started"}"#),
+            SessionActivityState::Busy
+        );
+        assert_eq!(
+            turn_signal_activity_state("codex", r#"{"type":"thread.started"}"#),
+            SessionActivityState::Idle
+        );
+        assert_eq!(
+            turn_signal_activity_state("codex", r#"{"type":"turn.completed"}"#),
+            SessionActivityState::Idle
+        );
+        assert_eq!(
+            turn_signal_activity_state(
+                "muse",
+                r#"{"type":"muse_record","payload_type":"tool.result"}"#
+            ),
+            SessionActivityState::Busy
+        );
+        assert_eq!(
+            turn_signal_activity_state(
+                "muse",
+                r#"{"type":"muse_record","payload_type":"run.terminal.completed"}"#
+            ),
+            SessionActivityState::Idle
+        );
     }
 
     #[test]
     fn malformed_in_progress_signal_fails_busy() {
-        assert!(turn_signal_is_busy("codex", "not-json"));
+        assert_eq!(
+            turn_signal_activity_state("codex", "not-json"),
+            SessionActivityState::Busy
+        );
+    }
+
+    #[test]
+    fn rate_limit_signals_are_throttled() {
+        assert_eq!(
+            turn_signal_activity_state("claude", r#"{"type":"rate_limit_event"}"#),
+            SessionActivityState::Throttled
+        );
+        assert_eq!(
+            turn_signal_activity_state(
+                "claude",
+                r#"{"type":"error","error":{"type":"rate_limit_error","message":"Too many requests"}}"#
+            ),
+            SessionActivityState::Throttled
+        );
+        assert_eq!(
+            turn_signal_activity_state(
+                "claude",
+                r#"{"type":"portal","payload":{"type":"rate_limit_event"}}"#
+            ),
+            SessionActivityState::Throttled
+        );
     }
 }
