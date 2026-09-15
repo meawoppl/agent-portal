@@ -99,6 +99,10 @@ pub fn replay_pending_inputs_from_db(
             seq: input.seq_num,
             content,
             send_mode: parse_send_mode(&input.send_mode),
+            reasoning_effort: input
+                .reasoning_effort
+                .as_deref()
+                .and_then(parse_reasoning_effort),
             // Persisted with the row (#1236) so replay keeps delivery
             // tracking: the proxy's InputProgressAck still resolves the
             // browser's outbox entry, and the idempotency gate keeps
@@ -130,6 +134,20 @@ fn parse_send_mode(value: &str) -> Option<SendMode> {
         "wiggum" => Some(SendMode::Wiggum),
         other => {
             warn!("Ignoring unknown pending input send_mode: {}", other);
+            None
+        }
+    }
+}
+
+fn parse_reasoning_effort(value: &str) -> Option<shared::ReasoningEffort> {
+    match value {
+        "minimal" => Some(shared::ReasoningEffort::Minimal),
+        "low" => Some(shared::ReasoningEffort::Low),
+        "medium" => Some(shared::ReasoningEffort::Medium),
+        "high" => Some(shared::ReasoningEffort::High),
+        "xhigh" => Some(shared::ReasoningEffort::Xhigh),
+        other => {
+            warn!("Ignoring unknown pending input reasoning_effort: {}", other);
             None
         }
     }
@@ -620,6 +638,31 @@ mod tests {
         assert_eq!(parse_send_mode("normal"), Some(SendMode::Normal));
         assert_eq!(parse_send_mode("wiggum"), Some(SendMode::Wiggum));
         assert_eq!(parse_send_mode("unknown"), None);
+    }
+
+    #[test]
+    fn parse_reasoning_effort_accepts_persisted_wire_values() {
+        assert_eq!(
+            parse_reasoning_effort("minimal"),
+            Some(shared::ReasoningEffort::Minimal)
+        );
+        assert_eq!(
+            parse_reasoning_effort("low"),
+            Some(shared::ReasoningEffort::Low)
+        );
+        assert_eq!(
+            parse_reasoning_effort("medium"),
+            Some(shared::ReasoningEffort::Medium)
+        );
+        assert_eq!(
+            parse_reasoning_effort("high"),
+            Some(shared::ReasoningEffort::High)
+        );
+        assert_eq!(
+            parse_reasoning_effort("xhigh"),
+            Some(shared::ReasoningEffort::Xhigh)
+        );
+        assert_eq!(parse_reasoning_effort("unknown"), None);
     }
 
     /// Guards the wire contract the sub-agent token fold relies on: a

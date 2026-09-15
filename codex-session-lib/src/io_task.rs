@@ -98,7 +98,12 @@ type DeliveryAck = oneshot::Sender<Result<(), String>>;
 /// display event). The display event — when present — is an inter-agent
 /// `PortalContent::AgentMessage` envelope the synthetic echo emits verbatim so
 /// it renders as the provenance card instead of a raw user bubble (#inter-agent).
-type QueuedPrompt = (String, Option<DeliveryAck>, Option<Box<serde_json::Value>>);
+type QueuedPrompt = (
+    String,
+    Option<DeliveryAck>,
+    Option<Box<serde_json::Value>>,
+    Option<shared::ReasoningEffort>,
+);
 
 /// How a fresh `IoCommand::UserInput` should be delivered, given the current
 /// turn state. Pure decision so the routing can be unit-tested without a live
@@ -662,7 +667,7 @@ pub(crate) async fn codex_io_task(
                             if turn_ended {
                                 // Turn ended: `on_turn_ended` marks the state
                                 // idle and drains at most one queued prompt.
-                                if let Some((prompt, delivered, display_event)) =
+                                if let Some((prompt, delivered, display_event, reasoning_effort)) =
                                     state.on_turn_ended()
                                 {
                                     turn_tracker
@@ -672,6 +677,7 @@ pub(crate) async fn codex_io_task(
                                         &thread_id,
                                         prompt,
                                         display_event,
+                                        reasoning_effort,
                                         delivered,
                                         &event_tx,
                                     )
@@ -791,6 +797,7 @@ pub(crate) async fn codex_io_task(
                         }
                         IoCommand::UserInput {
                             text,
+                            reasoning_effort,
                             delivered,
                             display_event,
                         } => {
@@ -856,6 +863,7 @@ pub(crate) async fn codex_io_task(
                                                     text,
                                                     delivered,
                                                     display_event,
+                                                    reasoning_effort,
                                                 ));
                                             }
                                         }
@@ -868,7 +876,12 @@ pub(crate) async fn codex_io_task(
                                             "Codex input during active turn without a known turn id; queueing ({} pending)",
                                             state.queued_len() + 1
                                         );
-                                        state.queue_prompt((text, delivered, display_event));
+                                        state.queue_prompt((
+                                            text,
+                                            delivered,
+                                            display_event,
+                                            reasoning_effort,
+                                        ));
                                     }
                                 }
                             }
@@ -954,6 +967,7 @@ pub(crate) async fn codex_io_task(
                 cmd = command_rx.recv() => match cmd {
                     Some(IoCommand::UserInput {
                         text,
+                        reasoning_effort,
                         delivered,
                         display_event,
                     }) => {
@@ -969,6 +983,7 @@ pub(crate) async fn codex_io_task(
                             &thread_id,
                             text,
                             display_event,
+                            reasoning_effort,
                             delivered,
                             &event_tx,
                         )
@@ -1004,6 +1019,7 @@ async fn start_codex_turn(
     thread_id: &str,
     prompt: String,
     display_event: Option<Box<serde_json::Value>>,
+    reasoning_effort: Option<shared::ReasoningEffort>,
     delivered: Option<DeliveryAck>,
     event_tx: &mpsc::UnboundedSender<IoEvent>,
 ) -> bool {
@@ -1011,7 +1027,15 @@ async fn start_codex_turn(
     // transcript entry before dispatching the turn. The agent always receives
     // `prompt` (the agent-facing text); only the *display* differs.
     emit_user_input_display(&prompt, display_event, event_tx);
-    start_codex_turn_request(client, thread_id, prompt, delivered, event_tx).await
+    start_codex_turn_request(
+        client,
+        thread_id,
+        prompt,
+        reasoning_effort,
+        delivered,
+        event_tx,
+    )
+    .await
 }
 
 /// Emit the transcript display for a user input — the synthetic echo (plain
@@ -1095,12 +1119,13 @@ async fn start_codex_turn_request(
     client: &mut CodexAsyncClient,
     thread_id: &str,
     prompt: String,
+    reasoning_effort: Option<shared::ReasoningEffort>,
     delivered: Option<DeliveryAck>,
     event_tx: &mpsc::UnboundedSender<IoEvent>,
 ) -> bool {
     tracing::info!("Starting Codex turn with {} chars", prompt.len());
 
-    let turn_params = turn_start_params(thread_id, prompt);
+    let turn_params = turn_start_params(thread_id, prompt, reasoning_effort);
     match client.turn_start(&turn_params).await {
         Ok(_) => {
             if let Some(delivered) = delivered {
@@ -1120,13 +1145,22 @@ async fn start_codex_turn_request(
     }
 }
 
-fn turn_start_params(thread_id: &str, prompt: String) -> TurnStartParams {
+fn codex_reasoning_effort(effort: shared::ReasoningEffort) -> codex_codes::ReasoningEffort {
+    codex_codes::ReasoningEffort(effort.as_str().to_string())
+}
+
+fn turn_start_params(
+    thread_id: &str,
+    prompt: String,
+    reasoning_effort: Option<shared::ReasoningEffort>,
+) -> TurnStartParams {
     TurnStartParams {
         input: vec![UserInput::Text {
             text: prompt,
             text_elements: None,
         }],
         thread_id: thread_id.to_string(),
+        effort: reasoning_effort.map(codex_reasoning_effort),
         ..TurnStartParams::default()
     }
 }
@@ -1493,6 +1527,24 @@ mod tests {
         assert!(configured_codex_model(&overrides, &trailing).is_none());
     }
 
+    #[test]
+    fn turn_start_params_omits_reasoning_effort_by_default() {
+        let params = turn_start_params("thread", "hello".to_string(), None);
+
+        assert!(params.effort.is_none());
+    }
+
+    #[test]
+    fn turn_start_params_maps_reasoning_effort() {
+        let params = turn_start_params(
+            "thread",
+            "hello".to_string(),
+            Some(shared::ReasoningEffort::Xhigh),
+        );
+
+        assert_eq!(params.effort.as_ref().map(|e| e.0.as_str()), Some("xhigh"));
+    }
+
     fn usage(
         total: i64,
         input: i64,
@@ -1596,7 +1648,7 @@ mod tests {
     }
 
     fn queued_prompt(text: &str) -> QueuedPrompt {
-        (text.to_string(), None, None)
+        (text.to_string(), None, None, None)
     }
 
     #[test]

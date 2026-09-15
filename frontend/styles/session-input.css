@@ -81,6 +81,25 @@
     cursor: pointer;
 }
 
+.reasoning-effort-select {
+    align-self: center;
+    flex: 0 0 auto;
+    width: 6.25rem;
+    height: 40px;
+    padding: 0 1.6rem 0 0.55rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.2);
+    color: var(--text-secondary);
+    font: 0.8rem var(--font-mono, monospace);
+    cursor: pointer;
+}
+
+.reasoning-effort-select:focus {
+    border-color: var(--accent);
+    outline: none;
+}
+
 /* Vim NORMAL-mode block cursor. vim.rs keeps a one-character selection at the
    cursor, painted below as a solid vim-style block. caret-color is the accent
    (not transparent): browsers hide the blinking caret while a selection is

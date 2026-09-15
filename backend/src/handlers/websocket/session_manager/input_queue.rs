@@ -14,7 +14,7 @@
 //! what matters, and persistence only governs replay if the proxy reconnects.
 
 use diesel::prelude::*;
-use shared::{SendMode, ServerToProxy};
+use shared::{ReasoningEffort, SendMode, ServerToProxy};
 use tracing::error;
 use uuid::Uuid;
 
@@ -36,6 +36,13 @@ pub(crate) struct EnqueueOutcome {
     pub persisted: bool,
 }
 
+pub(crate) struct EnqueueInput {
+    pub content: serde_json::Value,
+    pub send_mode: Option<SendMode>,
+    pub reasoning_effort: Option<ReasoningEffort>,
+    pub client_msg_id: Option<Uuid>,
+}
+
 impl SessionManager {
     /// Bump the session's input sequence, best-effort persist a pending-input
     /// row, and forward the message to the live proxy (queued if disconnected).
@@ -44,14 +51,16 @@ impl SessionManager {
         db_pool: &DbPool,
         session_key: &str,
         session_id: Uuid,
-        content: serde_json::Value,
-        send_mode: Option<SendMode>,
-        // Browser-assigned delivery-tracking id (#939); forwarded to the proxy
-        // on `SequencedInput` so it can echo per-stage `InputProgressAck`s.
-        // `None` for non-browser inputs (inter-agent, replay).
-        client_msg_id: Option<Uuid>,
+        input: EnqueueInput,
     ) -> EnqueueOutcome {
         use crate::schema::{pending_inputs, sessions};
+
+        let EnqueueInput {
+            content,
+            send_mode,
+            reasoning_effort,
+            client_msg_id,
+        } = input;
 
         let mut persisted = false;
         let seq = match db_pool.get() {
@@ -79,6 +88,7 @@ impl SessionManager {
                     content: serde_json::to_string(&content).unwrap_or_default(),
                     send_mode: send_mode.unwrap_or_default().as_str().to_string(),
                     client_msg_id,
+                    reasoning_effort: reasoning_effort.map(|effort| effort.as_str().to_string()),
                 };
                 match diesel::insert_into(pending_inputs::table)
                     .values(&new_input)
@@ -114,13 +124,18 @@ impl SessionManager {
                     seq,
                     content,
                     send_mode,
+                    reasoning_effort,
                     client_msg_id,
                 },
             )
         } else {
             self.send_to_session(
                 session_key,
-                ServerToProxy::AgentInput { content, send_mode },
+                ServerToProxy::AgentInput {
+                    content,
+                    send_mode,
+                    reasoning_effort,
+                },
             )
         };
 

@@ -320,6 +320,7 @@ mod tests {
             let msg = ClientToServer::AgentInput {
                 content: serde_json::Value::String(format!("msg-{i}")),
                 send_mode: None,
+                reasoning_effort: None,
                 client_msg_id: None,
             };
             send_message(&tx, msg);
@@ -383,6 +384,7 @@ mod tests {
                 ClientToServer::AgentInput {
                     content: serde_json::Value::String(format!("b-{i}")),
                     send_mode: None,
+                    reasoning_effort: None,
                     client_msg_id: None,
                 },
             );

@@ -409,6 +409,9 @@ pub struct PendingInput {
     /// keeps delivery tracking and resends can be deduplicated across a
     /// backend restart. `None` for non-browser inputs.
     pub client_msg_id: Option<Uuid>,
+    /// Optional per-turn effort override selected in the prompt bar. Persisted
+    /// with the pending input so reconnect replay preserves the turn settings.
+    pub reasoning_effort: Option<String>,
 }
 
 #[derive(Debug, Insertable)]
@@ -419,6 +422,7 @@ pub struct NewPendingInput {
     pub content: String,
     pub send_mode: String,
     pub client_msg_id: Option<Uuid>,
+    pub reasoning_effort: Option<String>,
 }
 
 // ============================================================================

@@ -342,10 +342,13 @@ pub async fn send_agent_message(
         &app_state.db_pool,
         &session.session_key,
         target_id,
-        content,
-        None,
-        // Inter-agent sends have no browser to track delivery for.
-        None,
+        crate::handlers::websocket::EnqueueInput {
+            content,
+            send_mode: None,
+            reasoning_effort: None,
+            // Inter-agent sends have no browser to track delivery for.
+            client_msg_id: None,
+        },
     );
 
     info!(
