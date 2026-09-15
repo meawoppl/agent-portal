@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-labelledby="title desc">
+  <title id="title">PR 1991 reasoning effort selector</title>
+  <desc id="desc">Visual summary of a prompt-bar reasoning effort selector flowing through durable input replay into Codex turn start.</desc>
+  <rect width="2000" height="1200" fill="#16161e"/>
+  <line x1="1000" y1="190" x2="1000" y2="1140" stroke="#3d4666" stroke-width="4"/>
+
+  <text x="80" y="110" fill="#c0caf5" font-family="Inter,Arial,sans-serif" font-size="56" font-weight="700">Prompt Effort Selector</text>
+  <text x="80" y="165" fill="#a9b1d6" font-family="Inter,Arial,sans-serif" font-size="28">Auto or explicit effort travels with each composer send</text>
+  <text x="1090" y="110" fill="#c0caf5" font-family="Inter,Arial,sans-serif" font-size="56" font-weight="700">Typed Delivery Path</text>
+  <text x="1090" y="165" fill="#a9b1d6" font-family="Inter,Arial,sans-serif" font-size="28">Replay-safe wire field, applied by Codex turn/start</text>
+
+  <rect x="90" y="250" width="820" height="190" rx="18" fill="#1e202e" stroke="#3d4666" stroke-width="3"/>
+  <text x="130" y="310" fill="#7dcfff" font-family="Inter,Arial,sans-serif" font-size="34" font-weight="700">Prompt bar</text>
+  <rect x="130" y="345" width="390" height="52" rx="10" fill="#16161e" stroke="#565f89" stroke-width="3"/>
+  <text x="155" y="380" fill="#a9b1d6" font-family="Inter,Arial,sans-serif" font-size="24">Type your message...</text>
+  <rect x="545" y="345" width="150" height="52" rx="10" fill="#16161e" stroke="#7aa2f7" stroke-width="3"/>
+  <text x="575" y="380" fill="#c0caf5" font-family="Inter,Arial,sans-serif" font-size="24">High</text>
+  <path d="M660 365 L674 365 L667 375 Z" fill="#7aa2f7"/>
+  <rect x="720" y="345" width="110" height="52" rx="10" fill="#7aa2f7"/>
+  <text x="748" y="380" fill="#16161e" font-family="Inter,Arial,sans-serif" font-size="24" font-weight="700">Send</text>
+
+  <rect x="90" y="500" width="820" height="210" rx="18" fill="#1e202e" stroke="#3d4666" stroke-width="3"/>
+  <text x="130" y="560" fill="#9ece6a" font-family="Inter,Arial,sans-serif" font-size="34" font-weight="700">Every composer path</text>
+  <text x="130" y="615" fill="#c0caf5" font-family="Inter,Arial,sans-serif" font-size="28">Text, voice transcript, attachments, and secret drops</text>
+  <text x="130" y="660" fill="#a9b1d6" font-family="Inter,Arial,sans-serif" font-size="24">all carry the same optional effort value.</text>
+
+  <rect x="90" y="770" width="820" height="210" rx="18" fill="#1e202e" stroke="#3d4666" stroke-width="3"/>
+  <text x="130" y="830" fill="#bb9af7" font-family="Inter,Arial,sans-serif" font-size="34" font-weight="700">Sticky but optional</text>
+  <text x="130" y="885" fill="#c0caf5" font-family="Inter,Arial,sans-serif" font-size="28">Auto omits the field. Explicit choices persist locally:</text>
+  <text x="130" y="930" fill="#a9b1d6" font-family="Inter,Arial,sans-serif" font-size="24">minimal, low, medium, high, xhigh.</text>
+
+  <rect x="1090" y="250" width="820" height="190" rx="18" fill="#1e202e" stroke="#3d4666" stroke-width="3"/>
+  <text x="1130" y="310" fill="#7aa2f7" font-family="Inter,Arial,sans-serif" font-size="34" font-weight="700">Shared wire</text>
+  <text x="1130" y="365" fill="#c0caf5" font-family="Inter,Arial,sans-serif" font-size="28">ClientToServer and ServerToProxy inputs gain</text>
+  <text x="1130" y="410" fill="#a9b1d6" font-family="Inter,Arial,sans-serif" font-size="24">optional reasoning_effort with legacy omission intact.</text>
+
+  <rect x="1090" y="500" width="820" height="210" rx="18" fill="#1e202e" stroke="#3d4666" stroke-width="3"/>
+  <text x="1130" y="560" fill="#e0af68" font-family="Inter,Arial,sans-serif" font-size="34" font-weight="700">Durable replay</text>
+  <text x="1130" y="615" fill="#c0caf5" font-family="Inter,Arial,sans-serif" font-size="28">pending_inputs stores the selected effort.</text>
+  <text x="1130" y="660" fill="#a9b1d6" font-family="Inter,Arial,sans-serif" font-size="24">Backend and proxy reconnects keep the same turn setting.</text>
+
+  <rect x="1090" y="770" width="820" height="210" rx="18" fill="#1e202e" stroke="#3d4666" stroke-width="3"/>
+  <text x="1130" y="830" fill="#f7768e" font-family="Inter,Arial,sans-serif" font-size="34" font-weight="700">Codex application</text>
+  <text x="1130" y="885" fill="#c0caf5" font-family="Inter,Arial,sans-serif" font-size="28">New turns map effort into TurnStartParams.effort.</text>
+  <text x="1130" y="930" fill="#a9b1d6" font-family="Inter,Arial,sans-serif" font-size="24">Active turn steering remains unchanged until SDK support exists.</text>
+
+  <path d="M500 450 L500 490" stroke="#565f89" stroke-width="5" fill="none"/>
+  <path d="M488 480 L500 500 L512 480" fill="#565f89"/>
+  <path d="M500 720 L500 760" stroke="#565f89" stroke-width="5" fill="none"/>
+  <path d="M488 750 L500 770 L512 750" fill="#565f89"/>
+
+  <path d="M1500 450 L1500 490" stroke="#565f89" stroke-width="5" fill="none"/>
+  <path d="M1488 480 L1500 500 L1512 480" fill="#565f89"/>
+  <path d="M1500 720 L1500 760" stroke="#565f89" stroke-width="5" fill="none"/>
+  <path d="M1488 750 L1500 770 L1512 750" fill="#565f89"/>
+</svg>
