@@ -906,11 +906,12 @@ pub(crate) async fn codex_io_task(
                             // An unsolicited turn start is not part of the
                             // normal request/response flow, but accepting it
                             // keeps the state machine honest if Codex emits one.
-                            if let ServerMessage::Notification(notif) = &msg {
-                                if let codex_codes::Notification::TurnStarted(p) = notif {
-                                    state.set_turn_active(true);
-                                    state.set_turn_id(&p.turn.id);
-                                }
+                            if let ServerMessage::Notification(
+                                codex_codes::Notification::TurnStarted(p),
+                            ) = &msg
+                            {
+                                state.set_turn_active(true);
+                                state.set_turn_id(&p.turn.id);
                             }
 
                             let (ok, turn_ended) =
