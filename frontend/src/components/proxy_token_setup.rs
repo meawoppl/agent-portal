@@ -3,6 +3,7 @@
 //! Displays instructions for setting up the proxy CLI with device flow authentication.
 
 use crate::components::CopyCommand;
+use crate::utils;
 use gloo::utils::window;
 use yew::prelude::*;
 
@@ -44,17 +45,12 @@ pub fn proxy_token_setup() -> Html {
     let detected = detect_platform();
     let selected_platform = use_state(|| detected);
 
-    // Get the base URL for the install script
-    let base_url = web_sys::window()
-        .and_then(|w| w.location().origin().ok())
-        .unwrap_or_else(|| "http://localhost:3000".to_string());
+    // Base URLs come from the shared location helpers so the origin
+    // fallback and the http->ws scheme swap live in one place.
+    let base_url = utils::get_base_url();
+    let ws_backend_url = utils::get_ws_url();
 
     let platforms = [Platform::Linux, Platform::MacOS, Platform::Windows];
-
-    // Derive WebSocket URL from current origin (http->ws, https->wss)
-    let ws_backend_url = base_url
-        .replace("https://", "wss://")
-        .replace("http://", "ws://");
 
     // URL-encode the backend URL for the query parameter
     let encoded_backend_url = js_sys::encode_uri_component(&ws_backend_url);
