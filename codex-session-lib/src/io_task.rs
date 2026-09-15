@@ -891,40 +891,107 @@ pub(crate) async fn codex_io_task(
                 }
             }
         } else {
-            // No active turn: wait for user input.
-            match command_rx.recv().await {
-                Some(IoCommand::UserInput {
-                    text,
-                    delivered,
-                    display_event,
-                }) => {
-                    if text.is_empty() {
-                        if let Some(delivered) = delivered {
-                            let _ = delivered.send(Ok(()));
+            // Keep draining app-server messages while idle. `turn/completed`
+            // ends the active state, but Codex may have already queued a final
+            // item/notice behind it. Waiting only on `command_rx` here strands
+            // that output until the next user prompt wakes the active loop.
+            tokio::select! {
+                result = client.next_message() => {
+                    match result {
+                        Ok(Some(msg)) => {
+                            if let Some((request_id, kind)) = approval_response_kind(&msg) {
+                                state.record_approval_request(request_id, kind);
+                            }
+
+                            // An unsolicited turn start is not part of the
+                            // normal request/response flow, but accepting it
+                            // keeps the state machine honest if Codex emits one.
+                            if let ServerMessage::Notification(notif) = &msg {
+                                if let codex_codes::Notification::TurnStarted(p) = notif {
+                                    state.set_turn_active(true);
+                                    state.set_turn_id(&p.turn.id);
+                                }
+                            }
+
+                            let (ok, turn_ended) =
+                                handle_codex_server_message(msg, &event_tx, None);
+                            if turn_ended {
+                                state.set_turn_active(false);
+                                state.clear_turn_id();
+                            }
+                            if !ok {
+                                break;
+                            }
                         }
-                        continue;
+                        Ok(None) => {
+                            let _ = event_tx.send(IoEvent::Exited { code: 0 });
+                            break;
+                        }
+                        Err(codex_codes::Error::Deserialization(parse_err)) => {
+                            // There is no active turn to interrupt, but the
+                            // malformed late frame must still be visible and
+                            // must not stop us draining later valid frames.
+                            tracing::warn!(
+                                "Idle Codex frame failed typed decode: {} (method={:?})",
+                                parse_err.error_message,
+                                parse_err.method
+                            );
+                            let event = TurnFailedEvent::new(format!(
+                                "Codex emitted a late frame this client could not parse ({}).",
+                                parse_err.error_message
+                            ));
+                            let _ = event_tx.send(IoEvent::RawOutput(to_raw_output(&event)));
+                        }
+                        Err(e) => {
+                            let _ = event_tx.send(IoEvent::Error(
+                                SessionError::CommunicationError(e.to_string()),
+                            ));
+                            break;
+                        }
                     }
-                    turn_tracker.start(Instant::now(), chrono::Utc::now());
-                    let started = start_codex_turn(
-                        &mut client,
-                        &thread_id,
+                }
+                cmd = command_rx.recv() => match cmd {
+                    Some(IoCommand::UserInput {
                         text,
-                        display_event,
                         delivered,
-                        &event_tx,
-                    )
-                    .await;
-                    state.set_turn_active(started);
-                }
-                Some(IoCommand::Permission { .. }) => {
-                    tracing::warn!("Codex approval response with no active turn");
-                }
-                Some(IoCommand::Interrupt) => {
-                    // No active turn — nothing to interrupt.
-                }
-                None => {
-                    let _ = event_tx.send(IoEvent::Exited { code: 0 });
-                    break;
+                        display_event,
+                    }) => {
+                        if text.is_empty() {
+                            if let Some(delivered) = delivered {
+                                let _ = delivered.send(Ok(()));
+                            }
+                            continue;
+                        }
+                        turn_tracker.start(Instant::now(), chrono::Utc::now());
+                        let started = start_codex_turn(
+                            &mut client,
+                            &thread_id,
+                            text,
+                            display_event,
+                            delivered,
+                            &event_tx,
+                        )
+                        .await;
+                        state.set_turn_active(started);
+                    }
+                    Some(IoCommand::Permission {
+                        request_id,
+                        decision,
+                    }) => {
+                        let rid = parse_request_id(&request_id);
+                        let kind = state.take_approval_kind(&request_id);
+                        let result = codex_approval_result(&decision, kind);
+                        if let Err(e) = client.respond(rid, &result).await {
+                            tracing::error!("Failed to send idle Codex approval: {}", e);
+                        }
+                    }
+                    Some(IoCommand::Interrupt) => {
+                        // No active turn — nothing to interrupt.
+                    }
+                    None => {
+                        let _ = event_tx.send(IoEvent::Exited { code: 0 });
+                        break;
+                    }
                 }
             }
         }
