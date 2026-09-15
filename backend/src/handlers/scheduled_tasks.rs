@@ -78,6 +78,15 @@ fn validate_cron_expression(cron_expression: &str) -> Result<(), AppError> {
     Ok(())
 }
 
+fn launcher_supports_task(launcher: &shared::LauncherInfo, task: &ScheduledTask) -> bool {
+    let has = |capability: &str| launcher.capabilities.iter().any(|item| item == capability);
+    match task.worktree_mode.as_str() {
+        "repo" => has(shared::LAUNCHER_CAPABILITY_CREATE_WORKTREE),
+        "scratch" => has(shared::LAUNCHER_CAPABILITY_SCRATCH_WORKTREE),
+        _ => true,
+    }
+}
+
 const UPCOMING_WINDOW_HOURS: i64 = 72;
 const MAX_UPCOMING_OCCURRENCES: usize = 10_000;
 
@@ -155,12 +164,7 @@ fn send_schedule_sync(app_state: &AppState, user_id: Uuid) {
         let filtered: Vec<ScheduledTaskConfig> = tasks
             .iter()
             .filter(|t| t.hostname == launcher.hostname)
-            .filter(|t| {
-                t.worktree_mode != "scratch"
-                    || launcher.capabilities.iter().any(|capability| {
-                        capability == shared::LAUNCHER_CAPABILITY_SCRATCH_WORKTREE
-                    })
-            })
+            .filter(|task| launcher_supports_task(&launcher, task))
             .map(task_to_config)
             .collect();
 
@@ -193,12 +197,16 @@ pub(crate) fn send_initial_schedule_sync(
     let task_configs: Vec<ScheduledTaskConfig> = tasks
         .iter()
         .filter(|t| t.hostname == hostname)
-        .filter(|t| {
-            t.worktree_mode != "scratch"
-                || app_state.session_manager.launcher_supports_capability(
-                    launcher_id,
-                    shared::LAUNCHER_CAPABILITY_SCRATCH_WORKTREE,
-                )
+        .filter(|task| match task.worktree_mode.as_str() {
+            "repo" => app_state.session_manager.launcher_supports_capability(
+                launcher_id,
+                shared::LAUNCHER_CAPABILITY_CREATE_WORKTREE,
+            ),
+            "scratch" => app_state.session_manager.launcher_supports_capability(
+                launcher_id,
+                shared::LAUNCHER_CAPABILITY_SCRATCH_WORKTREE,
+            ),
+            _ => true,
         })
         .map(task_to_config)
         .collect();
