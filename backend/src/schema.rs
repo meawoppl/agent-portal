@@ -61,6 +61,8 @@ diesel::table! {
         #[max_length = 32]
         send_mode -> Varchar,
         client_msg_id -> Nullable<Uuid>,
+        #[max_length = 32]
+        reasoning_effort -> Nullable<Varchar>,
     }
 }
 

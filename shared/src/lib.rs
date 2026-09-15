@@ -491,6 +491,31 @@ pub enum SendMode {
     Wiggum,
 }
 
+/// Optional per-turn reasoning effort override for agents/models that support
+/// it. `None` on the wire means "use the agent/model default"; concrete values
+/// are deliberately kept small and provider-agnostic.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReasoningEffort {
+    Minimal,
+    Low,
+    Medium,
+    High,
+    Xhigh,
+}
+
+impl ReasoningEffort {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ReasoningEffort::Minimal => "minimal",
+            ReasoningEffort::Low => "low",
+            ReasoningEffort::Medium => "medium",
+            ReasoningEffort::High => "high",
+            ReasoningEffort::Xhigh => "xhigh",
+        }
+    }
+}
+
 /// A directory entry returned by the launcher's filesystem listing
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DirectoryEntry {

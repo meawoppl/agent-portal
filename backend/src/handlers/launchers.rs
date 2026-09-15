@@ -365,6 +365,7 @@ pub async fn fork_session(
         serde_json::Value::String(fork_notice),
         None,
         None,
+        None,
     );
     app_state
         .session_manager

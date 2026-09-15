@@ -162,7 +162,11 @@ pub(super) async fn handle_wiggum_activation<A: Agent>(
         loop_durations: Vec::new(),
     });
     if let Err(e) = claude_session
-        .send_input_with_display(serde_json::Value::String(prompt), Some(display_event))
+        .send_input_with_display_and_effort(
+            serde_json::Value::String(prompt),
+            Some(display_event),
+            wiggum_input.reasoning_effort,
+        )
         .await
     {
         error!("Failed to send wiggum prompt to Claude: {}", e);

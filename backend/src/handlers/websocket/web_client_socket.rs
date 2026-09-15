@@ -129,6 +129,7 @@ fn handle_web_client_message(
         ClientToServer::AgentInput {
             content,
             send_mode,
+            reasoning_effort,
             client_msg_id,
         } => {
             // Gate on editor/owner role — re-queried on each input so role
@@ -203,6 +204,7 @@ fn handle_web_client_message(
                 *verified_session_id,
                 content,
                 send_mode,
+                reasoning_effort,
                 user_id,
                 client_msg_id,
             );
@@ -420,6 +422,7 @@ fn handle_web_input(
     verified_session_id: Option<Uuid>,
     content: serde_json::Value,
     send_mode: Option<SendMode>,
+    reasoning_effort: Option<shared::ReasoningEffort>,
     user_id: Uuid,
     client_msg_id: Option<Uuid>,
 ) {
@@ -510,8 +513,15 @@ fn handle_web_input(
 
     // Seq bump + best-effort persist + live delivery, shared with the
     // agent-messaging send path (see SessionManager::enqueue_input).
-    let outcome =
-        session_manager.enqueue_input(db_pool, key, session_id, content, send_mode, client_msg_id);
+    let outcome = session_manager.enqueue_input(
+        db_pool,
+        key,
+        session_id,
+        content,
+        send_mode,
+        reasoning_effort,
+        client_msg_id,
+    );
     if !outcome.delivered {
         warn!(
             "Failed to send to session '{}', session not found in SessionManager (input queued)",

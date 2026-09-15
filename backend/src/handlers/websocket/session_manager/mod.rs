@@ -317,6 +317,7 @@ pub(super) mod test_support {
             seq: n as i64,
             content: serde_json::json!({"n": n}),
             send_mode: None,
+            reasoning_effort: None,
             client_msg_id: None,
         }
     }

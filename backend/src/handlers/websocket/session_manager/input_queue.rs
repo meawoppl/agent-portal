@@ -14,7 +14,7 @@
 //! what matters, and persistence only governs replay if the proxy reconnects.
 
 use diesel::prelude::*;
-use shared::{SendMode, ServerToProxy};
+use shared::{ReasoningEffort, SendMode, ServerToProxy};
 use tracing::error;
 use uuid::Uuid;
 
@@ -46,6 +46,7 @@ impl SessionManager {
         session_id: Uuid,
         content: serde_json::Value,
         send_mode: Option<SendMode>,
+        reasoning_effort: Option<ReasoningEffort>,
         // Browser-assigned delivery-tracking id (#939); forwarded to the proxy
         // on `SequencedInput` so it can echo per-stage `InputProgressAck`s.
         // `None` for non-browser inputs (inter-agent, replay).
@@ -79,6 +80,7 @@ impl SessionManager {
                     content: serde_json::to_string(&content).unwrap_or_default(),
                     send_mode: send_mode.unwrap_or_default().as_str().to_string(),
                     client_msg_id,
+                    reasoning_effort: reasoning_effort.map(|effort| effort.as_str().to_string()),
                 };
                 match diesel::insert_into(pending_inputs::table)
                     .values(&new_input)
@@ -114,13 +116,18 @@ impl SessionManager {
                     seq,
                     content,
                     send_mode,
+                    reasoning_effort,
                     client_msg_id,
                 },
             )
         } else {
             self.send_to_session(
                 session_key,
-                ServerToProxy::AgentInput { content, send_mode },
+                ServerToProxy::AgentInput {
+                    content,
+                    send_mode,
+                    reasoning_effort,
+                },
             )
         };
 

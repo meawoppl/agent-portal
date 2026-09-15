@@ -868,6 +868,7 @@ fn handle_launcher_message(
                     content: serde_json::to_string(&content_value).unwrap_or_default(),
                     send_mode: shared::SendMode::Normal.as_str().to_string(),
                     client_msg_id: None,
+                    reasoning_effort: None,
                 };
                 let _ = diesel::insert_into(pending_inputs::table)
                     .values(&new_input)
@@ -880,6 +881,7 @@ fn handle_launcher_message(
                         seq: next_seq,
                         content: content_value,
                         send_mode: None,
+                        reasoning_effort: None,
                         client_msg_id: None,
                     },
                 );

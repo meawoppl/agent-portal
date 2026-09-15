@@ -344,6 +344,7 @@ pub async fn send_agent_message(
         target_id,
         content,
         None,
+        None,
         // Inter-agent sends have no browser to track delivery for.
         None,
     );

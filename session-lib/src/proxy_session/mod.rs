@@ -33,6 +33,7 @@ pub struct PermissionResponseData {
 pub struct PortalInput {
     pub text: String,
     pub display_event: Option<serde_json::Value>,
+    pub reasoning_effort: Option<shared::ReasoningEffort>,
     pub ack: Option<PortalInputAck>,
     pub client_msg_id: Option<uuid::Uuid>,
 }

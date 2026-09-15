@@ -226,6 +226,12 @@
         font-size: 16px; /* Prevents iOS zoom on focus */
     }
 
+    .reasoning-effort-select {
+        width: 5.4rem;
+        height: 36px;
+        font-size: 0.75rem;
+    }
+
     .session-view-input .send-button {
         padding: 0.6rem 1rem;
         font-size: 0.9rem;

@@ -22,6 +22,9 @@ pub enum IoCommand {
         /// The user-facing text. The I/O task wraps it in its protocol's
         /// user-message form.
         text: String,
+        /// Optional per-turn reasoning effort override. Only agents whose
+        /// native protocol supports this use it; others ignore it.
+        reasoning_effort: Option<shared::ReasoningEffort>,
         delivered: Option<oneshot::Sender<Result<(), String>>>,
         /// Optional typed portal event to display in place of the user-facing
         /// text for this input (e.g. an inter-agent
