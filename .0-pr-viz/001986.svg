@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-labelledby="title desc">
+  <title id="title">PR 1986 share http-ws scheme helpers via shared urls</title>
+  <desc id="desc">Before, backend downloads and launcher message each hand-rolled the http to ws scheme swap with whole-string replace. After, both call shared urls http_to_ws and ws_to_http, which swap only the leading scheme.</desc>
+  <rect width="2000" height="1200" fill="#16161e"/>
+  <text x="55" y="70" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24" letter-spacing="1">PR #1986 · Share http-ws scheme helpers via shared::urls</text>
+  <text x="55" y="124" fill="#e6e9f5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700">Two crates swapped URL schemes by hand;</text>
+  <text x="55" y="166" fill="#e6e9f5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700">now both call one tested helper, same output.</text>
+  <line x1="55" y1="190" x2="1945" y2="190" stroke="#3d4666" stroke-width="2"/>
+  <line x1="1000" y1="225" x2="1000" y2="1090" stroke="#3d4666" stroke-width="2" stroke-dasharray="12 14"/>
+  <text x="70" y="260" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" letter-spacing="4">BEFORE</text>
+  <text x="1070" y="260" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" letter-spacing="4">AFTER</text>
+  <rect x="70" y="295" width="820" height="610" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="105" y="350" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="27" font-weight="700">Two hand-rolled swaps</text>
+  <text x="105" y="415" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">downloads.rs install_script</text>
+  <text x="105" y="465" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">.replace("https://", "wss://")</text>
+  <text x="105" y="515" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">.replace("http://", "ws://")</text>
+  <line x1="330" y1="550" x2="330" y2="615" stroke="#f7768e" stroke-width="5"/>
+  <text x="105" y="670" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25" font-weight="700">Mirror copy, other direction</text>
+  <text x="105" y="725" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">message.rs api_base</text>
+  <text x="105" y="775" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">.replacen("wss://", ...)</text>
+  <text x="105" y="835" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">Whole-string replace rewrites</text>
+  <text x="105" y="875" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">scheme text past the prefix too.</text>
+  <rect x="1070" y="295" width="820" height="610" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="1105" y="350" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="27" font-weight="700">One shared helper</text>
+  <text x="1105" y="415" fill="#7aa2f7" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">shared::urls::http_to_ws()</text>
+  <text x="1105" y="465" fill="#7aa2f7" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">shared::urls::ws_to_http()</text>
+  <line x1="1330" y1="500" x2="1330" y2="565" stroke="#9ece6a" stroke-width="5"/>
+  <text x="1105" y="620" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25" font-weight="700">Swaps the leading scheme only</text>
+  <text x="1105" y="700" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">Std-only and WASM-safe, with unit</text>
+  <text x="1105" y="740" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">tests for passthrough + round-trip.</text>
+  <text x="1105" y="810" fill="#7dcfff" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="27">117 insertions, 11 deletions</text>
+  <text x="1105" y="875" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">Identical URLs for every real input.</text>
+  <text x="55" y="1160" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22">Scope: install-script backend_url fallback + launcher HTTP api_base; same ws output on http/https origins, same http output on ws/wss config.</text>
+</svg>

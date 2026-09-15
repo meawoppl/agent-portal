@@ -116,10 +116,9 @@ pub(crate) fn api_base() -> Result<(String, String)> {
     let ws_url = config
         .backend_url
         .unwrap_or_else(|| shared::default_backend_url().to_string());
-    // The config stores the WebSocket URL; the HTTP API shares the host.
-    let http = ws_url
-        .replacen("wss://", "https://", 1)
-        .replacen("ws://", "http://", 1);
+    // The config stores the WebSocket URL; the HTTP API shares the host
+    // (ws->http lives in shared::urls so every scheme swap stays identical).
+    let http = shared::urls::ws_to_http(&ws_url);
     Ok((http.trim_end_matches('/').to_string(), token))
 }
 

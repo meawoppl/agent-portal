@@ -130,6 +130,9 @@ pub mod fmt;
 // Blank-string guard shared between frontend and native crates
 pub mod strings;
 
+// HTTP<->WebSocket scheme helpers shared between frontend and native crates
+pub mod urls;
+
 // Timezone canonicalization (abbreviation -> IANA) shared across crates
 pub mod timezone;
 
