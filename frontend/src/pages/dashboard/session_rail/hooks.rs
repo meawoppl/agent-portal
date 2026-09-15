@@ -27,7 +27,8 @@ pub(super) fn use_scheduled_task_blocker(
                         .await
                         {
                             let has_scheduled_task = data.tasks.iter().any(|task| {
-                                task.fields.working_directory == working_directory && task.enabled
+                                task.fields.launch.working_directory == working_directory
+                                    && task.enabled
                             });
                             stop_has_tasks.set(has_scheduled_task);
                         }

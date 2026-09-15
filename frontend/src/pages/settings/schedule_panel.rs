@@ -6,6 +6,7 @@ use shared::api::{ScheduledTaskOccurrence, UpcomingScheduledTasksResponse};
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
+use crate::components::ScheduleDialog;
 use crate::utils::{self, On401};
 
 const WEEKDAYS: [&str; 7] = [
@@ -67,11 +68,13 @@ fn calendar_days(data: &UpcomingScheduledTasksResponse) -> Vec<(String, String)>
 pub fn schedule_panel() -> Html {
     let schedule = use_state(|| None::<UpcomingScheduledTasksResponse>);
     let error = use_state(|| None::<String>);
+    let manage_open = use_state(|| false);
+    let refresh = use_state(|| 0_u32);
 
     {
         let schedule = schedule.clone();
         let error = error.clone();
-        use_effect_with((), move |_| {
+        use_effect_with(*refresh, move |_| {
             spawn_local(async move {
                 match utils::fetch_json::<UpcomingScheduledTasksResponse>(
                     "/api/scheduled-tasks/upcoming",
@@ -154,8 +157,22 @@ pub fn schedule_panel() -> Html {
                 <p class="section-description">
                     { "Enabled scheduled-task runs during the next 72 hours, shown in your local time." }
                 </p>
+                <button class="sched-btn sched-btn-primary" onclick={{
+                    let manage_open = manage_open.clone();
+                    Callback::from(move |_| manage_open.set(true))
+                }}>{ "Manage scheduled tasks" }</button>
             </div>
             { content }
+            if *manage_open {
+                <ScheduleDialog session={None::<shared::SessionInfo>} on_close={{
+                    let manage_open = manage_open.clone();
+                    let refresh = refresh.clone();
+                    Callback::from(move |_| {
+                        manage_open.set(false);
+                        refresh.set((*refresh).wrapping_add(1));
+                    })
+                }} />
+            }
         </section>
     }
 }

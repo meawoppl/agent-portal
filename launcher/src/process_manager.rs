@@ -206,6 +206,7 @@ pub struct SpawnParams {
     /// Optional branch name for the worktree. When omitted a timestamped
     /// default (`session-<YYYYMMDD-HHMMSS>`) is derived.
     pub worktree_branch: Option<String>,
+    pub scratch_worktree: bool,
     pub fork_from_session_id: Option<Uuid>,
     pub fork_point_turn_id: Option<String>,
 }
@@ -290,7 +291,16 @@ impl ProcessManager {
         // When the request opts into a worktree, create it from the repo that
         // contains `base_dir` and run the session there instead. Otherwise the
         // session runs directly in `base_dir`.
-        let working_directory = if params.create_worktree {
+        let mut scratch_cleanup = None;
+        let working_directory = if params.scratch_worktree {
+            let branch = params.worktree_branch.as_deref().ok_or_else(|| {
+                anyhow::anyhow!("Scratch worktree requires a deterministic branch")
+            })?;
+            let scratch = crate::worktree::create_scratch_worktree(&base_dir, branch)?;
+            let path = scratch.path.to_string_lossy().to_string();
+            scratch_cleanup = Some(scratch);
+            path
+        } else if params.create_worktree {
             let worktree =
                 crate::worktree::create_worktree(&base_dir, params.worktree_branch.as_deref())?;
             // The derived worktree must also be under home (create_worktree
@@ -370,6 +380,9 @@ impl ProcessManager {
 
         let handle = tokio::spawn(async move {
             let outcome = run_session_task(proxy_config, cancel_clone).await;
+            if let Some(scratch) = scratch_cleanup {
+                crate::worktree::cleanup_scratch_worktree(scratch);
+            }
             let _ = exit_tx.send(SessionExited {
                 session_id,
                 exit_code: outcome.exit_code,

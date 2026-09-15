@@ -619,7 +619,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                 if let Some(ref session) = *schedule_session {
                     let schedule_session = schedule_session.clone();
                     let on_close = Callback::from(move |_| schedule_session.set(None));
-                    html! { <ScheduleDialog session={session.clone()} {on_close} /> }
+                    html! { <ScheduleDialog session={Some(session.clone())} {on_close} /> }
                 } else {
                     html! {}
                 }

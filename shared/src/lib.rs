@@ -25,6 +25,9 @@ pub const BUILD_TIME: &str = env!("PORTAL_BUILD_TIME");
 /// Launcher capability advertised by versions that honor
 /// `ServerToLauncher::LaunchSession.create_worktree`.
 pub const LAUNCHER_CAPABILITY_CREATE_WORKTREE: &str = "launch.create_worktree";
+/// Launcher capability advertised by versions that create and conservatively
+/// clean launcher-owned scratch worktrees.
+pub const LAUNCHER_CAPABILITY_SCRATCH_WORKTREE: &str = "launch.scratch_worktree";
 /// Launcher capability advertised by versions that can resolve local agent
 /// state and fork a session on the source host.
 pub const LAUNCHER_CAPABILITY_FORK_SESSION: &str = "launch.fork_session";
@@ -156,9 +159,9 @@ pub use model_version::{compact_model_version, context_window_for};
 pub mod api;
 pub mod local_frame;
 pub use api::{
-    AgentSessionInfo, AgentSessionsResponse, CodexPermissionInput, ErrorMessage, ModelUsage,
-    ModelUsageEntry, SendAgentMessageRequest, SendAgentMessageResponse, SoundSettingsResponse,
-    TurnMetrics, TurnMetricsResponse,
+    AgentSessionInfo, AgentSessionsResponse, CodexPermissionInput, ErrorMessage, LaunchSpec,
+    ModelUsage, ModelUsageEntry, SendAgentMessageRequest, SendAgentMessageResponse,
+    SoundSettingsResponse, TurnMetrics, TurnMetricsResponse, WorktreeMode,
 };
 pub use local_frame::{LocalFrame, UserFrame, ERROR_MESSAGE_TYPE};
 

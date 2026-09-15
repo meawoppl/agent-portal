@@ -371,6 +371,7 @@ pub async fn resume_session(
         resume: Some(true),
         create_worktree: false,
         worktree_branch: None,
+        scratch_worktree: false,
         fork_from_session_id: None,
         fork_point_turn_id: None,
     };

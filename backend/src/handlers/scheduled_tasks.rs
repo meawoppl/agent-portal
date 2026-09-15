@@ -13,7 +13,9 @@ use shared::api::{
     CreateScheduledTaskRequest, ScheduledTaskInfo, ScheduledTaskListResponse,
     ScheduledTaskOccurrence, UpcomingScheduledTasksResponse, UpdateScheduledTaskRequest,
 };
-use shared::{AgentType, ScheduledTaskConfig, ScheduledTaskFields, ServerToLauncher};
+use shared::{
+    AgentType, LaunchSpec, ScheduledTaskConfig, ScheduledTaskFields, ServerToLauncher, WorktreeMode,
+};
 use std::{str::FromStr, sync::Arc};
 use tracing::{error, info, warn};
 use uuid::Uuid;
@@ -33,10 +35,22 @@ fn task_to_fields(t: &ScheduledTask) -> ScheduledTaskFields {
         name: t.name.clone(),
         cron_expression: t.cron_expression.clone(),
         timezone: t.timezone.clone(),
-        working_directory: t.working_directory.clone(),
+        launch: LaunchSpec {
+            working_directory: t.working_directory.clone(),
+            session_name: t.session_name.clone(),
+            claude_args: jsonb_string_vec(&t.claude_args),
+            agent_type: AgentType::parse_or_default(&t.agent_type),
+            worktree: match t.worktree_mode.as_str() {
+                "repo" => WorktreeMode::Repo {
+                    branch: t.worktree_branch.clone(),
+                },
+                "scratch" => WorktreeMode::Scratch {
+                    branch: t.worktree_branch.clone(),
+                },
+                _ => WorktreeMode::None,
+            },
+        },
         prompt: t.prompt.clone(),
-        claude_args: jsonb_string_vec(&t.claude_args),
-        agent_type: AgentType::parse_or_default(&t.agent_type),
         max_runtime_minutes: t.max_runtime_minutes,
         session_mode: t.session_mode.parse().unwrap_or_default(),
     }
@@ -141,6 +155,12 @@ fn send_schedule_sync(app_state: &AppState, user_id: Uuid) {
         let filtered: Vec<ScheduledTaskConfig> = tasks
             .iter()
             .filter(|t| t.hostname == launcher.hostname)
+            .filter(|t| {
+                t.worktree_mode != "scratch"
+                    || launcher.capabilities.iter().any(|capability| {
+                        capability == shared::LAUNCHER_CAPABILITY_SCRATCH_WORKTREE
+                    })
+            })
             .map(task_to_config)
             .collect();
 
@@ -173,6 +193,13 @@ pub(crate) fn send_initial_schedule_sync(
     let task_configs: Vec<ScheduledTaskConfig> = tasks
         .iter()
         .filter(|t| t.hostname == hostname)
+        .filter(|t| {
+            t.worktree_mode != "scratch"
+                || app_state.session_manager.launcher_supports_capability(
+                    launcher_id,
+                    shared::LAUNCHER_CAPABILITY_SCRATCH_WORKTREE,
+                )
+        })
         .map(task_to_config)
         .collect();
 
@@ -260,6 +287,13 @@ pub async fn create_task_handler(
 
     let mut conn = app_state.conn()?;
 
+    let launch = req.fields.launch;
+    let worktree_branch = launch.worktree.branch().map(str::to_string);
+    let worktree_mode = match launch.worktree {
+        WorktreeMode::None => "none",
+        WorktreeMode::Repo { .. } => "repo",
+        WorktreeMode::Scratch { .. } => "scratch",
+    };
     let new_task = NewScheduledTask {
         user_id,
         name: req.fields.name,
@@ -268,10 +302,13 @@ pub async fn create_task_handler(
         // chrono_tz parse succeeds instead of silently using UTC (#1064).
         timezone: shared::timezone::canonicalize_timezone(&req.fields.timezone),
         hostname: req.hostname,
-        working_directory: req.fields.working_directory,
+        working_directory: launch.working_directory,
         prompt: req.fields.prompt,
-        claude_args: serde_json::to_value(req.fields.claude_args).unwrap_or_default(),
-        agent_type: req.fields.agent_type.as_str().to_string(),
+        claude_args: serde_json::to_value(launch.claude_args).unwrap_or_default(),
+        agent_type: launch.agent_type.as_str().to_string(),
+        worktree_mode: worktree_mode.to_string(),
+        worktree_branch,
+        session_name: launch.session_name,
         max_runtime_minutes: req.fields.max_runtime_minutes,
         session_mode: req.fields.session_mode.as_str().to_string(),
     };
@@ -313,6 +350,12 @@ pub async fn update_task_handler(
         }
     }
 
+    let (worktree_mode, worktree_branch) = match req.worktree {
+        Some(WorktreeMode::None) => (Some("none".to_string()), Some(None)),
+        Some(WorktreeMode::Repo { branch }) => (Some("repo".to_string()), Some(branch)),
+        Some(WorktreeMode::Scratch { branch }) => (Some("scratch".to_string()), Some(branch)),
+        None => (None, None),
+    };
     let changeset = ScheduledTaskChangeset {
         name: req.name,
         cron_expression: req.cron_expression,
@@ -330,6 +373,12 @@ pub async fn update_task_handler(
         enabled: req.enabled,
         max_runtime_minutes: req.max_runtime_minutes,
         session_mode: req.session_mode.map(|m| m.as_str().to_string()),
+        worktree_mode,
+        worktree_branch,
+        session_name: req.session_name.map(|name| {
+            let name = name.trim();
+            (!name.is_empty()).then(|| name.to_string())
+        }),
     };
 
     let updated: ScheduledTask = diesel::update(
@@ -430,6 +479,9 @@ mod tests {
             created_at: now,
             updated_at: now,
             session_mode: "fresh".to_string(),
+            worktree_mode: "none".to_string(),
+            worktree_branch: None,
+            session_name: None,
         }
     }
 

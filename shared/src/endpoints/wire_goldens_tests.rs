@@ -622,6 +622,7 @@ fn launcher_server_to_launcher_launch_roundtrip_golden() {
         resume: None,
         create_worktree: false,
         worktree_branch: None,
+        scratch_worktree: false,
         fork_from_session_id: None,
         fork_point_turn_id: None,
     };
@@ -653,6 +654,7 @@ fn launcher_to_server_request_launch_golden() {
         scheduled_task_id: None,
         last_session_id: None,
         continuation_id: None,
+        worktree: crate::WorktreeMode::None,
     };
     let v = serde_json::to_value(&msg).unwrap();
     assert_eq!(v["type"], "RequestLaunch");

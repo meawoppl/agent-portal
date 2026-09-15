@@ -446,6 +446,9 @@ pub struct ScheduledTask {
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
     pub session_mode: String,
+    pub worktree_mode: String,
+    pub worktree_branch: Option<String>,
+    pub session_name: Option<String>,
 }
 
 #[derive(Debug, Insertable)]
@@ -462,6 +465,9 @@ pub struct NewScheduledTask {
     pub agent_type: String,
     pub max_runtime_minutes: i32,
     pub session_mode: String,
+    pub worktree_mode: String,
+    pub worktree_branch: Option<String>,
+    pub session_name: Option<String>,
 }
 
 /// Partial update for a scheduled task. `None` fields are left unchanged
@@ -481,6 +487,9 @@ pub struct ScheduledTaskChangeset {
     pub enabled: Option<bool>,
     pub max_runtime_minutes: Option<i32>,
     pub session_mode: Option<String>,
+    pub worktree_mode: Option<String>,
+    pub worktree_branch: Option<Option<String>>,
+    pub session_name: Option<Option<String>>,
 }
 
 // ============================================================================

@@ -577,12 +577,20 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
 
             spawn_local(async move {
                 let body = LaunchRequest {
-                    working_directory: working_dir.clone(),
+                    launch: shared::LaunchSpec {
+                        working_directory: working_dir.clone(),
+                        session_name: name.clone(),
+                        claude_args,
+                        agent_type: selected_agent_type,
+                        worktree: if want_worktree {
+                            shared::WorktreeMode::Repo { branch: None }
+                        } else {
+                            shared::WorktreeMode::None
+                        },
+                    },
                     launcher_id,
-                    claude_args,
-                    agent_type: selected_agent_type,
                     name,
-                    create_worktree: want_worktree,
+                    create_worktree: false,
                 };
 
                 match utils::send_json(Request::post("/api/launch"), &body).await {

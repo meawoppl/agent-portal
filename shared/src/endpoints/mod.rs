@@ -267,6 +267,7 @@ mod tests {
             resume: None,
             create_worktree: false,
             worktree_branch: None,
+            scratch_worktree: false,
             fork_from_session_id: None,
             fork_point_turn_id: None,
         };
@@ -313,6 +314,7 @@ mod tests {
             scheduled_task_id: None,
             last_session_id: None,
             continuation_id: None,
+            worktree: crate::WorktreeMode::None,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"RequestLaunch""#));
@@ -355,10 +357,14 @@ mod tests {
                     name: "nightly audit".into(),
                     cron_expression: "0 3 * * *".into(),
                     timezone: "UTC".into(),
-                    working_directory: "/home/user/project".into(),
+                    launch: crate::LaunchSpec {
+                        working_directory: "/home/user/project".into(),
+                        session_name: None,
+                        claude_args: vec![],
+                        agent_type: AgentType::Claude,
+                        worktree: crate::WorktreeMode::None,
+                    },
                     prompt: "Check deps".into(),
-                    claude_args: vec![],
-                    agent_type: AgentType::Claude,
                     max_runtime_minutes: 30,
                     session_mode: SessionMode::Fresh,
                 },
@@ -389,10 +395,14 @@ mod tests {
                 name: "nightly audit".into(),
                 cron_expression: "0 3 * * *".into(),
                 timezone: "UTC".into(),
-                working_directory: "/home/user/project".into(),
+                launch: crate::LaunchSpec {
+                    working_directory: "/home/user/project".into(),
+                    session_name: None,
+                    claude_args: vec!["--verbose".into()],
+                    agent_type: AgentType::Claude,
+                    worktree: crate::WorktreeMode::None,
+                },
                 prompt: "Check deps".into(),
-                claude_args: vec!["--verbose".into()],
-                agent_type: AgentType::Claude,
                 max_runtime_minutes: 30,
                 session_mode: SessionMode::Continue,
             },

@@ -24,11 +24,15 @@ pub struct UpdateScheduledTaskRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_directory: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claude_args: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_type: Option<crate::AgentType>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree: Option<crate::WorktreeMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
