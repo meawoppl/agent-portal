@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-labelledby="title desc">
+  <title id="title">PR 1985 reuse shared URL helpers in proxy setup</title>
+  <desc id="desc">Before, ProxyTokenSetup hand-rolled the origin fallback and the http to ws scheme swap. After, it calls utils get_base_url and get_ws_url, the single home for both.</desc>
+  <rect width="2000" height="1200" fill="#16161e"/>
+  <text x="55" y="70" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24" letter-spacing="1">PR #1985 · Reuse shared URL helpers in proxy setup</text>
+  <text x="55" y="124" fill="#e6e9f5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700">The setup panel built its backend URLs by hand;</text>
+  <text x="55" y="166" fill="#e6e9f5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700">now it calls the shared helpers, with identical output.</text>
+  <line x1="55" y1="190" x2="1945" y2="190" stroke="#3d4666" stroke-width="2"/>
+  <line x1="1000" y1="225" x2="1000" y2="1090" stroke="#3d4666" stroke-width="2" stroke-dasharray="12 14"/>
+  <text x="70" y="260" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" letter-spacing="4">BEFORE</text>
+  <text x="1070" y="260" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" letter-spacing="4">AFTER</text>
+  <rect x="70" y="295" width="820" height="610" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="105" y="350" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="27" font-weight="700">Hand-rolled URLs</text>
+  <text x="105" y="415" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">web_sys::window()</text>
+  <text x="105" y="465" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">.location().origin().ok()</text>
+  <text x="105" y="515" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">.unwrap_or_else(localhost...)</text>
+  <line x1="330" y1="550" x2="330" y2="615" stroke="#f7768e" stroke-width="5"/>
+  <text x="105" y="670" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25" font-weight="700">Second copy of the fallback</text>
+  <text x="105" y="725" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">.replace("https://", "wss://")</text>
+  <text x="105" y="775" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">.replace("http://", "ws://")</text>
+  <text x="105" y="835" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">Drifts when the dev port or the</text>
+  <text x="105" y="875" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">scheme swap changes in one place.</text>
+  <rect x="1070" y="295" width="820" height="610" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="1105" y="350" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="27" font-weight="700">Shared helpers</text>
+  <text x="1105" y="415" fill="#7aa2f7" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">utils::get_base_url()</text>
+  <text x="1105" y="465" fill="#7aa2f7" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">utils::get_ws_url()</text>
+  <line x1="1330" y1="500" x2="1330" y2="565" stroke="#9ece6a" stroke-width="5"/>
+  <text x="1105" y="620" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25" font-weight="700">One home for origin + swap</text>
+  <text x="1105" y="700" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">Same origin fallback, same http to ws</text>
+  <text x="1105" y="740" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">mapping, owned by utils::location_parts.</text>
+  <text x="1105" y="810" fill="#7dcfff" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="27">5 insertions, 9 deletions</text>
+  <text x="1105" y="875" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">Install and login commands render byte-identical.</text>
+  <text x="55" y="1160" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22">Scope: ProxyTokenSetup install/login/service commands; identical URLs on http/https origins, same localhost fallback without a window.</text>
+</svg>
