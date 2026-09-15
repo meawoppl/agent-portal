@@ -733,6 +733,7 @@ fn handle_launcher_message(
             scheduled_task_id,
             last_session_id,
             continuation_id,
+            worktree,
         } => {
             info!(
                 "Launcher requested launch: dir={}, name={:?}",
@@ -800,8 +801,12 @@ fn handle_launcher_message(
                         resume_session_id: last_session_id,
                         // Scheduler/continuation relaunch of a prior session.
                         resume: Some(true),
-                        create_worktree: false,
-                        worktree_branch: None,
+                        create_worktree: !matches!(&worktree, shared::WorktreeMode::None),
+                        worktree_branch: worktree
+                            .branch()
+                            .map(str::to_string)
+                            .or_else(|| scheduled_task_id.map(|id| format!("sched-{id}"))),
+                        scratch_worktree: matches!(&worktree, shared::WorktreeMode::Scratch { .. }),
                         fork_from_session_id: None,
                         fork_point_turn_id: None,
                     };
@@ -1193,6 +1198,7 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
             resume: Some(!pending_fork),
             create_worktree,
             worktree_branch: create_worktree.then(|| session.session_name.clone()),
+            scratch_worktree: false,
             fork_from_session_id: pending_fork
                 .then_some(session.forked_from_session_id)
                 .flatten(),

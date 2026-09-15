@@ -167,6 +167,8 @@ pub enum LauncherToServer {
         /// scheduled continuation prompt.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         continuation_id: Option<Uuid>,
+        #[serde(default, skip_serializing_if = "crate::WorktreeMode::is_none")]
+        worktree: crate::WorktreeMode,
     },
 
     /// Inject input into a session on behalf of the scheduler
@@ -280,6 +282,10 @@ pub enum ServerToLauncher {
         /// derives a timestamped default.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         worktree_branch: Option<String>,
+        /// Place the worktree under the launcher-owned scratch root and make
+        /// it eligible for guarded cleanup after the session exits.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        scratch_worktree: bool,
         /// Source portal session whose local agent state should seed this
         /// brand-new session. Additive and first-spawn-only.
         #[serde(default, skip_serializing_if = "Option::is_none")]

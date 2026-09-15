@@ -8,9 +8,16 @@ Users want agents to perform recurring work — nightly code reviews, periodic d
 
 ## Core Concepts
 
-### Session Preservation
+### Launch specifications and session preservation
 
-Scheduled tasks **resume the same Claude session** across runs rather than creating a fresh one each time. This lets the agent build context incrementally — a nightly code reviewer remembers what it reviewed yesterday, a dependency auditor tracks which upgrades it already attempted.
+Schedules own their launch parameters: target host, working directory, agent,
+arguments, and worktree mode. They can be created and edited from Settings
+without first creating a session; opening the manager from a session simply
+prefills those fields.
+
+Each task chooses whether runs start fresh or resume the previous session.
+Continue mode lets an agent build context incrementally — a nightly code
+reviewer remembers what it reviewed yesterday, for example.
 
 The existing resume mechanism (`--resume <session-id>`) handles this. If Claude's local session data is lost (machine wipe, etc.), the `SessionNotFound` retry logic already creates a fresh session and marks the old one as `replaced`.
 
@@ -60,6 +67,8 @@ CREATE TABLE scheduled_tasks (
     prompt          TEXT NOT NULL,                -- initial message sent to agent
     claude_args     JSONB NOT NULL DEFAULT '[]',  -- extra CLI args
     agent_type      VARCHAR(16) NOT NULL DEFAULT 'claude',
+    worktree_mode   VARCHAR(16) NOT NULL DEFAULT 'none', -- none, repo, scratch
+    worktree_branch VARCHAR(255),
     enabled         BOOLEAN NOT NULL DEFAULT true,
     max_runtime_minutes INTEGER NOT NULL DEFAULT 30,
     last_session_id UUID REFERENCES sessions(id) ON DELETE SET NULL,  -- current long-lived session
@@ -91,6 +100,22 @@ Each scheduled task has **one long-lived session**. The flow:
 3. If `SessionNotFound`: the existing retry logic creates a fresh session (new UUID) and marks the old one `replaced`; the launcher reports the new `session_id` via `ScheduledRunStarted`, backend updates `last_session_id`
 
 The task→session mapping lives entirely in the `scheduled_tasks.last_session_id` database column, delivered to the launcher via `ScheduleSync`. No local persistence file needed.
+
+### Worktree modes
+
+- `none` runs in the configured working directory.
+- `repo` uses the repository's `.worktrees/<branch>` checkout and is never
+  cleaned automatically.
+- `scratch` uses a launcher-owned checkout under
+  `~/.agent-portal/worktrees/<repository>/<branch>`. Scheduled branches default
+  deterministically to `sched-<task-id>`, which keeps Continue-mode transcript
+  lookup on the same cwd across firings.
+
+After a scratch session exits, the launcher removes its checkout and branch
+only when the checkout is clean and has no commits beyond the revision from
+which it was created. Dirty, committed, or uninspectable work is retained and
+logged. This conservative rule is also what separates launcher-owned scratch
+worktrees from ordinary user worktrees.
 
 ## Protocol Changes
 

@@ -115,6 +115,7 @@ pub async fn run_launcher_loop(
                         .map(|p| p.to_string_lossy().to_string()),
                     capabilities: vec![
                         shared::LAUNCHER_CAPABILITY_CREATE_WORKTREE.to_string(),
+                        shared::LAUNCHER_CAPABILITY_SCRATCH_WORKTREE.to_string(),
                         shared::LAUNCHER_CAPABILITY_FORK_SESSION.to_string(),
                         shared::LAUNCHER_CAPABILITY_RESTART.to_string(),
                         shared::LAUNCHER_CAPABILITY_HEARTBEAT_ACK.to_string(),
@@ -325,13 +326,14 @@ pub async fn run_launcher_loop(
                                 );
                                 let msg = LauncherToServer::RequestLaunch {
                                     request_id: task_to_fire.request_id,
-                                    working_directory: task_to_fire.config.fields.working_directory.clone(),
-                                    session_name: Some(task_to_fire.config.fields.name.clone()),
-                                    claude_args: task_to_fire.config.fields.claude_args.clone(),
-                                    agent_type: task_to_fire.config.fields.agent_type,
+                                    working_directory: task_to_fire.config.fields.launch.working_directory.clone(),
+                                    session_name: task_to_fire.config.fields.launch.session_name.clone().or_else(|| Some(task_to_fire.config.fields.name.clone())),
+                                    claude_args: task_to_fire.config.fields.launch.claude_args.clone(),
+                                    agent_type: task_to_fire.config.fields.launch.agent_type,
                                     scheduled_task_id: Some(task_to_fire.config.id),
                                     last_session_id: task_to_fire.config.last_session_id,
                                     continuation_id: None,
+                                    worktree: task_to_fire.config.fields.launch.worktree.clone(),
                                 };
                                 if ws_sender.send(msg).await.is_err() {
                                     warn!("Failed to send RequestLaunch for scheduled task");
@@ -410,6 +412,7 @@ pub async fn run_launcher_loop(
                                         scheduled_task_id: None,
                                         last_session_id: Some(continuation.session_id),
                                         continuation_id: Some(continuation.id),
+                                        worktree: shared::WorktreeMode::None,
                                     };
                                     if ws_sender.send(relaunch).await.is_err() {
                                         warn!("Failed to send continuation RequestLaunch");
@@ -632,6 +635,7 @@ async fn handle_message(
             resume,
             create_worktree,
             worktree_branch,
+            scratch_worktree,
             fork_from_session_id,
             fork_point_turn_id,
             ..
@@ -668,6 +672,7 @@ async fn handle_message(
                     // backend leaves these fields at their defaults for them.
                     create_worktree,
                     worktree_branch,
+                    scratch_worktree,
                     fork_from_session_id,
                     fork_point_turn_id,
                 })

@@ -134,6 +134,12 @@ diesel::table! {
         updated_at -> Timestamp,
         #[max_length = 16]
         session_mode -> Varchar,
+        #[max_length = 16]
+        worktree_mode -> Varchar,
+        #[max_length = 255]
+        worktree_branch -> Nullable<Varchar>,
+        #[max_length = 255]
+        session_name -> Nullable<Varchar>,
     }
 }
 

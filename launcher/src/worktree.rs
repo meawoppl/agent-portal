@@ -29,7 +29,15 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use tracing::info;
+use tracing::{info, warn};
+
+/// Provenance needed to prove a launcher-owned scratch checkout is disposable.
+pub struct ScratchWorktree {
+    pub path: PathBuf,
+    repo_root: PathBuf,
+    branch: String,
+    base_commit: String,
+}
 
 /// Create (or reuse) a git worktree for a session.
 ///
@@ -110,6 +118,99 @@ pub fn create_worktree(base_dir: &Path, branch: Option<&str>) -> Result<PathBuf>
     })
 }
 
+/// Create or reuse a launcher-owned scratch worktree under the user's home.
+pub fn create_scratch_worktree(base_dir: &Path, branch: &str) -> Result<ScratchWorktree> {
+    let repo_root = git_repo_root(base_dir).with_context(|| {
+        format!(
+            "Cannot create a scratch worktree: {} is not inside a git repository",
+            base_dir.display()
+        )
+    })?;
+    let branch = sanitize_branch_name(branch);
+    if branch.is_empty() {
+        anyhow::bail!("Scratch worktree branch is empty after sanitization");
+    }
+    let repo_name = repo_root
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("repository");
+    let repo_key = format!(
+        "{}-{:016x}",
+        sanitize_branch_name(repo_name),
+        stable_path_hash(&repo_root)
+    );
+    let path = crate::path_policy::home_dir()?
+        .join(".agent-portal/worktrees")
+        .join(repo_key)
+        .join(&branch);
+    let base_commit = git_stdout(&repo_root, &["rev-parse", "HEAD"])?;
+
+    if !path.is_dir() {
+        let parent = path
+            .parent()
+            .context("Scratch worktree path has no parent")?;
+        std::fs::create_dir_all(parent)?;
+        let path_string = path.to_string_lossy().to_string();
+        let created = run_git(
+            &repo_root,
+            &["worktree", "add", "-b", &branch, &path_string],
+        )?;
+        if !created.success {
+            let reused = run_git(&repo_root, &["worktree", "add", &path_string, &branch])?;
+            if !reused.success {
+                anyhow::bail!(
+                    "git worktree add failed: {} (existing branch: {})",
+                    created.stderr.trim(),
+                    reused.stderr.trim()
+                );
+            }
+        }
+    }
+    let path = path.canonicalize()?;
+    crate::path_policy::ensure_canonical_path_under_home(&path)?;
+    Ok(ScratchWorktree {
+        path,
+        repo_root,
+        branch,
+        base_commit,
+    })
+}
+
+/// Remove a scratch checkout only when it has neither dirty files nor commits
+/// made since it was created. Retaining uncertain work is always safer.
+pub fn cleanup_scratch_worktree(scratch: ScratchWorktree) {
+    if !scratch_is_disposable(&scratch.path, &scratch.base_commit) {
+        warn!(path = %scratch.path.display(), "Retaining scratch worktree with changes or commits");
+        return;
+    }
+    let path = scratch.path.to_string_lossy().to_string();
+    match run_git(&scratch.repo_root, &["worktree", "remove", &path]) {
+        Ok(out) if out.success => {
+            let _ = run_git(&scratch.repo_root, &["branch", "-D", &scratch.branch]);
+            info!(path = %scratch.path.display(), "Removed clean scratch worktree");
+        }
+        Ok(out) => {
+            warn!(path = %scratch.path.display(), error = %out.stderr.trim(), "Failed to remove scratch worktree")
+        }
+        Err(error) => {
+            warn!(path = %scratch.path.display(), %error, "Failed to remove scratch worktree")
+        }
+    }
+}
+
+fn scratch_is_disposable(path: &Path, base_commit: &str) -> bool {
+    let clean = git_stdout(path, &["status", "--porcelain"])
+        .map(|s| s.is_empty())
+        .unwrap_or(false);
+    let no_new_commits = git_stdout(
+        path,
+        &["rev-list", "--count", &format!("{base_commit}..HEAD")],
+    )
+    .map(|s| s == "0")
+    .unwrap_or(false);
+    clean && no_new_commits
+}
+
 /// Return the top-level directory of the git repository containing `cwd`.
 fn git_repo_root(cwd: &Path) -> Option<PathBuf> {
     let out = Command::new("git")
@@ -142,6 +243,28 @@ fn run_git(cwd: &Path, args: &[&str]) -> Result<GitOutput> {
         success: out.status.success(),
         stderr: String::from_utf8_lossy(&out.stderr).to_string(),
     })
+}
+
+fn git_stdout(cwd: &Path, args: &[&str]) -> Result<String> {
+    let out = Command::new("git").args(args).current_dir(cwd).output()?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8(out.stdout)?.trim().to_string())
+}
+
+/// Stable FNV-1a key keeps repositories with the same basename separate while
+/// preserving the same scratch cwd across launcher restarts.
+fn stable_path_hash(path: &Path) -> u64 {
+    path.to_string_lossy()
+        .bytes()
+        .fold(0xcbf29ce484222325, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
+        })
 }
 
 /// Reduce an arbitrary user string to a git-safe branch name.
@@ -259,5 +382,33 @@ mod tests {
         let err = create_worktree(&tmp, None).unwrap_err();
         assert!(err.to_string().contains("not inside a git repository"));
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn scratch_cleanup_requires_clean_tree_without_new_commits() {
+        let tmp = std::env::temp_dir().join(format!("scratch-guard-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let run = |args: &[&str]| {
+            Command::new("git")
+                .args(args)
+                .current_dir(&tmp)
+                .output()
+                .unwrap()
+        };
+        run(&["init", "-q"]);
+        run(&["config", "user.email", "test@example.com"]);
+        run(&["config", "user.name", "Test"]);
+        std::fs::write(tmp.join("README.md"), "base").unwrap();
+        run(&["add", "."]);
+        run(&["commit", "-qm", "base"]);
+        let base = git_stdout(&tmp, &["rev-parse", "HEAD"]).unwrap();
+        assert!(scratch_is_disposable(&tmp, &base));
+
+        std::fs::write(tmp.join("README.md"), "dirty").unwrap();
+        assert!(!scratch_is_disposable(&tmp, &base));
+        run(&["add", "."]);
+        run(&["commit", "-qm", "work"]);
+        assert!(!scratch_is_disposable(&tmp, &base));
+        let _ = std::fs::remove_dir_all(tmp);
     }
 }

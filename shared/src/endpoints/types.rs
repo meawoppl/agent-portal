@@ -113,12 +113,9 @@ pub struct ScheduledTaskFields {
     pub cron_expression: String,
     #[serde(default = "default_timezone")]
     pub timezone: String,
-    pub working_directory: String,
+    #[serde(flatten)]
+    pub launch: crate::api::LaunchSpec,
     pub prompt: String,
-    #[serde(default)]
-    pub claude_args: Vec<String>,
-    #[serde(default)]
-    pub agent_type: AgentType,
     #[serde(default = "default_max_runtime_minutes")]
     pub max_runtime_minutes: i32,
     /// Whether each firing starts fresh or continues the prior conversation.

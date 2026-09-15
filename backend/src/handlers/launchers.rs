@@ -50,7 +50,13 @@ pub async fn launch_session(
         .session_manager
         .launcher_host_version(launcher_id)
         .ok_or(AppError::NotFound("Launcher not found"))?;
-    if req.create_worktree
+    let worktree =
+        if req.create_worktree && matches!(&req.launch.worktree, shared::WorktreeMode::None) {
+            shared::WorktreeMode::Repo { branch: None }
+        } else {
+            req.launch.worktree.clone()
+        };
+    if !matches!(&worktree, shared::WorktreeMode::None)
         && !app_state
             .session_manager
             .launcher_supports_capability(launcher_id, shared::LAUNCHER_CAPABILITY_CREATE_WORKTREE)
@@ -70,8 +76,8 @@ pub async fn launch_session(
     // several unnamed worktree sessions of the same repo stay distinguishable in
     // the rail instead of all collapsing onto the shared repo basename.
     let (session_name, worktree_branch) = match (
-        normalize_custom_name(req.name.as_deref()),
-        req.create_worktree,
+        normalize_custom_name(req.name.as_deref().or(req.launch.session_name.as_deref())),
+        !matches!(&worktree, shared::WorktreeMode::None),
     ) {
         (Some(name), true) => (name.clone(), Some(name)),
         (Some(name), false) => (name, None),
@@ -79,7 +85,7 @@ pub async fn launch_session(
             let branch = default_worktree_branch();
             (branch.clone(), Some(branch))
         }
-        (None, false) => (default_session_name(&req.working_directory), None),
+        (None, false) => (default_session_name(&req.launch.working_directory), None),
     };
 
     let request_id = Uuid::new_v4();
@@ -89,13 +95,13 @@ pub async fn launch_session(
         DesiredSessionDraft {
             session_id,
             user_id,
-            working_directory: req.working_directory.clone(),
+            working_directory: req.launch.working_directory.clone(),
             session_name: session_name.clone(),
             hostname,
             launcher_id: Some(launcher_id),
             client_version: Some(version),
-            agent_type: req.agent_type,
-            claude_args: req.claude_args.clone(),
+            agent_type: req.launch.agent_type,
+            claude_args: req.launch.claude_args.clone(),
             forked_from_session_id: None,
             fork_point_turn_id: None,
         },
@@ -108,17 +114,18 @@ pub async fn launch_session(
         request_id,
         user_id,
         auth_token,
-        working_directory: req.working_directory.clone(),
+        working_directory: req.launch.working_directory.clone(),
         session_name: Some(session_name),
-        claude_args: req.claude_args,
-        agent_type: req.agent_type,
+        claude_args: req.launch.claude_args,
+        agent_type: req.launch.agent_type,
         scheduled_task_id: None,
         resume_session_id: Some(session_id),
         // Brand-new session: the id above was just minted, so the launcher must
         // create it under that id, not `--resume` (and rotate) it (#1405).
         resume: Some(false),
-        create_worktree: req.create_worktree,
-        worktree_branch,
+        create_worktree: !matches!(&worktree, shared::WorktreeMode::None),
+        worktree_branch: worktree.branch().map(str::to_string).or(worktree_branch),
+        scratch_worktree: matches!(&worktree, shared::WorktreeMode::Scratch { .. }),
         fork_from_session_id: None,
         fork_point_turn_id: None,
     };
@@ -139,7 +146,7 @@ pub async fn launch_session(
 
     info!(
         "Launch request sent: request_id={}, launcher={}, dir={}",
-        request_id, launcher_id, req.working_directory
+        request_id, launcher_id, req.launch.working_directory
     );
 
     Ok(Json(LaunchResponse {
@@ -382,6 +389,7 @@ pub async fn fork_session(
         resume: Some(false),
         create_worktree,
         worktree_branch: create_worktree.then_some(name),
+        scratch_worktree: false,
         fork_from_session_id: Some(source_id),
         fork_point_turn_id: req.fork_point_turn_id,
     };

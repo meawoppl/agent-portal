@@ -488,10 +488,14 @@ mod tests {
             name: "nightly audit".to_string(),
             cron_expression: "0 3 * * *".to_string(),
             timezone: "UTC".to_string(),
-            working_directory: "/home/user/project".to_string(),
+            launch: crate::LaunchSpec {
+                working_directory: "/home/user/project".to_string(),
+                session_name: None,
+                claude_args: vec!["--verbose".to_string()],
+                agent_type: crate::AgentType::Claude,
+                worktree: crate::WorktreeMode::None,
+            },
             prompt: "Check deps".to_string(),
-            claude_args: vec!["--verbose".to_string()],
-            agent_type: crate::AgentType::Claude,
             max_runtime_minutes: 30,
             session_mode: crate::SessionMode::Fresh,
         }
@@ -541,8 +545,8 @@ mod tests {
         let parsed: CreateScheduledTaskRequest = serde_json::from_str(minimal).unwrap();
         assert_eq!(parsed.fields.timezone, "UTC");
         assert_eq!(parsed.fields.max_runtime_minutes, 30);
-        assert!(parsed.fields.claude_args.is_empty());
-        assert_eq!(parsed.fields.agent_type, crate::AgentType::Claude);
+        assert!(parsed.fields.launch.claude_args.is_empty());
+        assert_eq!(parsed.fields.launch.agent_type, crate::AgentType::Claude);
         // Omitted session_mode defaults to Fresh (historical behavior).
         assert_eq!(parsed.fields.session_mode, crate::SessionMode::Fresh);
     }
