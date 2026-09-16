@@ -14,6 +14,7 @@ use tower_cookies::{cookie::SameSite, Cookie, Cookies};
 use tracing::{info, warn};
 
 use crate::{
+    auth::bearer_token,
     errors::AppError,
     handlers::proxy_tokens::{
         issue_proxy_token_with_type, verify_and_get_user_with_token, TokenPersist,
@@ -576,13 +577,6 @@ pub async fn token_login(
     );
 
     Ok(Json(me_response(user)))
-}
-
-fn bearer_token(headers: &HeaderMap) -> Option<&str> {
-    headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.strip_prefix("Bearer "))
 }
 
 fn require_mobile_token(token_type: &str) -> Result<(), AppError> {
