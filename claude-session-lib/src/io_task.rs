@@ -549,6 +549,7 @@ pub(crate) async fn claude_io_task(
                 let result = match cmd {
                     IoCommand::UserInput {
                         text,
+                        reasoning_effort: _,
                         delivered,
                         display_event,
                     } => {
@@ -859,6 +860,7 @@ pub(crate) async fn claude_io_task(
                                 match cmd {
                                     IoCommand::UserInput {
                                         text,
+                                        reasoning_effort: _,
                                         delivered,
                                         display_event,
                                     } => {

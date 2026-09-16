@@ -9,7 +9,9 @@ use super::types::{
     TunnelCloseFields, TunnelDataFields, TunnelOpenFields, TunnelRefusedFields, TunnelStreamFields,
     TunnelWindowFields,
 };
-use crate::{AgentType, PermissionSuggestion, SendMode, SessionStatus, TurnMetrics};
+use crate::{
+    AgentType, PermissionSuggestion, ReasoningEffort, SendMode, SessionStatus, TurnMetrics,
+};
 
 pub struct SessionEndpoint;
 
@@ -264,6 +266,8 @@ pub enum ServerToProxy {
         content: serde_json::Value,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         send_mode: Option<SendMode>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reasoning_effort: Option<ReasoningEffort>,
     },
 
     /// Sequenced user input
@@ -273,6 +277,10 @@ pub enum ServerToProxy {
         content: serde_json::Value,
         #[serde(skip_serializing_if = "Option::is_none")]
         send_mode: Option<SendMode>,
+        /// Optional per-turn reasoning effort override. Agents that do not
+        /// support it ignore the value; Codex applies it when starting a turn.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reasoning_effort: Option<ReasoningEffort>,
         /// Browser-assigned correlation id for delivery tracking (#939); the
         /// proxy echoes it on `InputProgressAck`. `None` for legacy/replayed
         /// inputs (those still rely on content reconciliation in the UI).

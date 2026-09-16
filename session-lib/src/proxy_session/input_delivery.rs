@@ -65,9 +65,11 @@ where
     )
     .await;
 
-    let delivered = match claude_session
-        .enqueue_input_with_display(serde_json::Value::String(text), display_event)
-    {
+    let delivered = match claude_session.enqueue_input_with_display(
+        serde_json::Value::String(text),
+        display_event,
+        input.reasoning_effort,
+    ) {
         Ok(delivered) => delivered,
         Err(e) => {
             error!("Failed to send to Claude: {}", e);

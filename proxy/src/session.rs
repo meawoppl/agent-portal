@@ -86,19 +86,36 @@ async fn handle_server_message(
     ws_write: &SharedWsWrite,
 ) -> bool {
     match server_msg {
-        ServerToProxy::AgentInput { content, send_mode } => event_tx
-            .send(input_event(content, send_mode, None, None))
+        ServerToProxy::AgentInput {
+            content,
+            send_mode,
+            reasoning_effort,
+        } => event_tx
+            .send(input_event(
+                content,
+                send_mode,
+                reasoning_effort,
+                None,
+                None,
+            ))
             .is_ok(),
         ServerToProxy::SequencedInput {
             session_id,
             seq,
             content,
             send_mode,
+            reasoning_effort,
             client_msg_id,
         } => {
             let ack = Some(PortalInputAck { session_id, seq });
             event_tx
-                .send(input_event(content, send_mode, ack, client_msg_id))
+                .send(input_event(
+                    content,
+                    send_mode,
+                    reasoning_effort,
+                    ack,
+                    client_msg_id,
+                ))
                 .is_ok()
         }
         ServerToProxy::PermissionResponse(shared::PermissionResponseFields {
@@ -156,10 +173,11 @@ async fn handle_server_message(
 fn input_event(
     content: serde_json::Value,
     send_mode: Option<shared::SendMode>,
+    reasoning_effort: Option<shared::ReasoningEffort>,
     ack: Option<PortalInputAck>,
     client_msg_id: Option<uuid::Uuid>,
 ) -> WsEvent {
-    match classify_portal_input(content, send_mode, ack, client_msg_id) {
+    match classify_portal_input(content, send_mode, reasoning_effort, ack, client_msg_id) {
         RoutedPortalInput::Wiggum(input) => WsEvent::WiggumActivation(input),
         RoutedPortalInput::Input(input) => WsEvent::Input(input),
     }

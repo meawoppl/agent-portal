@@ -16,7 +16,9 @@ use crate::components::{
 use crate::utils::{self, On401};
 use gloo::timers::callback::Timeout;
 use shared::api::TurnMetricsResponse;
-use shared::{ClientToServer, DeliveryMeta, PortalMeta, SendMode, SessionInfo, TurnMetrics};
+use shared::{
+    ClientToServer, DeliveryMeta, PortalMeta, ReasoningEffort, SendMode, SessionInfo, TurnMetrics,
+};
 use std::collections::HashMap;
 use uuid::Uuid;
 use wasm_bindgen::closure::Closure;
@@ -139,7 +141,7 @@ pub enum SessionViewMsg {
     /// InputBar emitted a plain-text submission with the chosen send mode.
     /// We translate this into the optimistic local echo + the WS
     /// `ClientToServer::ClaudeInput` frame.
-    SendText(String, SendMode),
+    SendText(String, SendMode, Option<ReasoningEffort>),
     /// InputBar emitted a raw WS frame (used by the file-upload pipeline
     /// for `FileUploadStart` / `FileUploadChunk`). We just forward it over
     /// the WebSocket.
@@ -151,10 +153,12 @@ pub enum SessionViewMsg {
     UploadPrompt {
         content: String,
         upload_ids: Vec<String>,
+        reasoning_effort: Option<ReasoningEffort>,
     },
     SecretDrop {
         upload_id: String,
         file_size: u64,
+        reasoning_effort: Option<ReasoningEffort>,
     },
     /// The upload-commit wait expired (old proxy or very slow link):
     /// dispatch the held prompt anyway — pre-transactional behavior.
@@ -191,6 +195,7 @@ pub enum SessionViewMsg {
 struct PendingUploadPrompt {
     remaining: std::collections::HashSet<String>,
     content: String,
+    reasoning_effort: Option<ReasoningEffort>,
     /// Compat fallback: proxies that predate upload acks never send
     /// `FileUploadResult`, so fire the prompt anyway after this window
     /// (pre-transactional behavior). Cancelled by drop.
@@ -200,6 +205,7 @@ struct PendingUploadPrompt {
 struct PendingSecretDrop {
     upload_id: String,
     file_size: u64,
+    reasoning_effort: Option<ReasoningEffort>,
     _timeout: Timeout,
 }
 
@@ -531,8 +537,8 @@ impl Component for SessionView {
                 self.input_bar_dispatcher = Some(dispatcher);
                 false
             }
-            SessionViewMsg::SendText(input, mode) => {
-                self.send_text_input(input, mode);
+            SessionViewMsg::SendText(input, mode, reasoning_effort) => {
+                self.send_text_input(input, mode, reasoning_effort);
                 true
             }
             SessionViewMsg::SendFrame(frame) => match frame {
@@ -540,9 +546,12 @@ impl Component for SessionView {
                 // reconnect; other frames (interrupts, permission responses)
                 // are transient and fire-and-forget.
                 ClientToServer::AgentInput {
-                    content, send_mode, ..
+                    content,
+                    send_mode,
+                    reasoning_effort,
+                    ..
                 } => {
-                    self.dispatch_agent_input(content, send_mode);
+                    self.dispatch_agent_input(content, send_mode, reasoning_effort);
                     true
                 }
                 other => {
@@ -555,11 +564,13 @@ impl Component for SessionView {
             SessionViewMsg::UploadPrompt {
                 content,
                 upload_ids,
-            } => self.handle_upload_prompt(ctx, content, upload_ids),
+                reasoning_effort,
+            } => self.handle_upload_prompt(ctx, content, upload_ids, reasoning_effort),
             SessionViewMsg::SecretDrop {
                 upload_id,
                 file_size,
-            } => self.handle_secret_drop(ctx, upload_id, file_size),
+                reasoning_effort,
+            } => self.handle_secret_drop(ctx, upload_id, file_size, reasoning_effort),
             SessionViewMsg::UploadCommitTimeout => {
                 if self.pending_secret_drop.take().is_some() {
                     self.push_upload_error("secret upload commit timed out");
@@ -573,7 +584,11 @@ impl Component for SessionView {
                         "Upload commit ack timed out ({} outstanding); sending prompt anyway",
                         pending.remaining.len()
                     );
-                    self.dispatch_agent_input(serde_json::Value::String(pending.content), None);
+                    self.dispatch_agent_input(
+                        serde_json::Value::String(pending.content),
+                        None,
+                        pending.reasoning_effort,
+                    );
                     true
                 } else {
                     false
@@ -987,6 +1002,7 @@ impl SessionView {
         ctx: &Context<Self>,
         content: String,
         upload_ids: Vec<String>,
+        reasoning_effort: Option<ReasoningEffort>,
     ) -> bool {
         let mut remaining: std::collections::HashSet<String> = upload_ids.into_iter().collect();
         let mut early_failure: Option<String> = None;
@@ -1005,7 +1021,7 @@ impl SessionView {
             return true;
         }
         if remaining.is_empty() {
-            self.dispatch_agent_input(serde_json::Value::String(content), None);
+            self.dispatch_agent_input(serde_json::Value::String(content), None, reasoning_effort);
             return true;
         }
 
@@ -1016,6 +1032,7 @@ impl SessionView {
         self.pending_upload_prompt = Some(PendingUploadPrompt {
             remaining,
             content,
+            reasoning_effort,
             _timeout: timeout,
         });
         false
@@ -1041,7 +1058,7 @@ impl SessionView {
                             file_size: pending.file_size,
                         },
                     ]);
-                    self.dispatch_agent_input(message.to_json(), None);
+                    self.dispatch_agent_input(message.to_json(), None, pending.reasoning_effort);
                 } else {
                     self.push_upload_error("secret-drop result did not include a path");
                 }
@@ -1063,6 +1080,7 @@ impl SessionView {
                             self.dispatch_agent_input(
                                 serde_json::Value::String(done.content),
                                 None,
+                                done.reasoning_effort,
                             );
                         }
                     }
@@ -1087,6 +1105,7 @@ impl SessionView {
         ctx: &Context<Self>,
         upload_id: String,
         file_size: u64,
+        reasoning_effort: Option<ReasoningEffort>,
     ) -> bool {
         let link = ctx.link().clone();
         let timeout = Timeout::new(45_000, move || {
@@ -1095,6 +1114,7 @@ impl SessionView {
         self.pending_secret_drop = Some(PendingSecretDrop {
             upload_id: upload_id.clone(),
             file_size,
+            reasoning_effort,
             _timeout: timeout,
         });
         if let Some(fields) = self.early_upload_results.remove(&upload_id) {
@@ -1153,19 +1173,33 @@ impl SessionView {
     /// Translate a plain-text submission from `InputBar` into an outbox-tracked
     /// `AgentInput`. The bar has already trimmed and cleared its textarea and
     /// emitted `MessageSent` separately; we just dispatch the input.
-    fn send_text_input(&mut self, input: String, send_mode: SendMode) {
+    fn send_text_input(
+        &mut self,
+        input: String,
+        send_mode: SendMode,
+        reasoning_effort: Option<ReasoningEffort>,
+    ) {
         if input.is_empty() {
             return;
         }
         let send_mode = (send_mode != SendMode::Normal).then_some(send_mode);
-        self.dispatch_agent_input(serde_json::Value::String(input), send_mode);
+        self.dispatch_agent_input(
+            serde_json::Value::String(input),
+            send_mode,
+            reasoning_effort,
+        );
     }
 
     /// Optimistically echo an `AgentInput`, record it in the outbox (assigning a
     /// fresh `client_msg_id`), and try to transmit. If the socket is down — or
     /// the send fails — the entry stays queued and is flushed on the next
     /// reconnect, so the input is never silently lost.
-    fn dispatch_agent_input(&mut self, content: serde_json::Value, send_mode: Option<SendMode>) {
+    fn dispatch_agent_input(
+        &mut self,
+        content: serde_json::Value,
+        send_mode: Option<SendMode>,
+        reasoning_effort: Option<ReasoningEffort>,
+    ) {
         let client_msg_id = Uuid::new_v4();
         if let Some(text) = content.as_str() {
             let now_iso = js_sys::Date::new_0()
@@ -1178,6 +1212,7 @@ impl SessionView {
         let frame = ClientToServer::AgentInput {
             content,
             send_mode,
+            reasoning_effort,
             client_msg_id: Some(client_msg_id),
         };
         for dropped in self.outbox.record(client_msg_id, frame.clone()) {
@@ -1397,22 +1432,34 @@ impl SessionView {
     fn render_input_bar(&self, ctx: &Context<Self>) -> Html {
         let link = ctx.link();
         let on_register = link.callback(SessionViewMsg::InputBarDispatcherRegistered);
-        let on_send_text =
-            link.callback(|(text, mode): (String, SendMode)| SessionViewMsg::SendText(text, mode));
+        let on_send_text = link.callback(
+            |(text, mode, reasoning_effort): (String, SendMode, Option<ReasoningEffort>)| {
+                SessionViewMsg::SendText(text, mode, reasoning_effort)
+            },
+        );
         let on_send_frame = link.callback(SessionViewMsg::SendFrame);
-        let on_upload_prompt = link.callback(|(content, upload_ids): (String, Vec<String>)| {
-            SessionViewMsg::UploadPrompt {
-                content,
-                upload_ids,
-            }
-        });
-        let on_secret_drop =
-            link.callback(
-                |(upload_id, file_size): (String, u64)| SessionViewMsg::SecretDrop {
+        let on_upload_prompt = link.callback(
+            |(content, upload_ids, reasoning_effort): (
+                String,
+                Vec<String>,
+                Option<ReasoningEffort>,
+            )| {
+                SessionViewMsg::UploadPrompt {
+                    content,
+                    upload_ids,
+                    reasoning_effort,
+                }
+            },
+        );
+        let on_secret_drop = link.callback(
+            |(upload_id, file_size, reasoning_effort): (String, u64, Option<ReasoningEffort>)| {
+                SessionViewMsg::SecretDrop {
                     upload_id,
                     file_size,
-                },
-            );
+                    reasoning_effort,
+                }
+            },
+        );
         let on_message_sent = link.callback(|_| SessionViewMsg::MessageSent);
         html! {
             <InputBar

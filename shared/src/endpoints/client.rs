@@ -6,7 +6,10 @@ use super::types::{
     FileUploadChunkFields, FileUploadResultFields, FileUploadStartFields, PermissionResponseFields,
     RegisterFields, SubagentRetryStatus,
 };
-use crate::{AgentType, PermissionSuggestion, SendMode, SessionCost, SessionStatus, TurnMetrics};
+use crate::{
+    AgentType, PermissionSuggestion, ReasoningEffort, SendMode, SessionCost, SessionStatus,
+    TurnMetrics,
+};
 
 /// Stages a user input passes through end to end, named by **transport fact**
 /// (not implied model semantics) so the UI never claims "the model has it"
@@ -143,6 +146,10 @@ pub enum ClientToServer {
         content: serde_json::Value,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         send_mode: Option<SendMode>,
+        /// Optional per-turn reasoning effort override. `None` inherits the
+        /// session/model default and keeps legacy clients byte-compatible.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reasoning_effort: Option<ReasoningEffort>,
         /// Browser-assigned correlation id for delivery tracking. The backend
         /// echoes it on every `ServerToClient::InputProgress` so the frontend
         /// can advance the matching optimistic row through its delivery stages.

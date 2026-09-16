@@ -54,6 +54,7 @@ pub enum RoutedPortalInput {
 pub fn classify_portal_input(
     content: serde_json::Value,
     send_mode: Option<SendMode>,
+    reasoning_effort: Option<shared::ReasoningEffort>,
     ack: Option<PortalInputAck>,
     client_msg_id: Option<uuid::Uuid>,
 ) -> RoutedPortalInput {
@@ -70,6 +71,7 @@ pub fn classify_portal_input(
     let input = PortalInput {
         text,
         display_event,
+        reasoning_effort,
         ack,
         client_msg_id,
     };
@@ -84,6 +86,7 @@ pub fn classify_portal_input(
 fn route_portal_input(
     content: serde_json::Value,
     send_mode: Option<SendMode>,
+    reasoning_effort: Option<shared::ReasoningEffort>,
     ack: Option<PortalInputAck>,
     client_msg_id: Option<uuid::Uuid>,
     input_tx: &mpsc::UnboundedSender<PortalInput>,
@@ -94,7 +97,7 @@ fn route_portal_input(
         .as_ref()
         .map(|a| format!(" seq={}", a.seq))
         .unwrap_or_default();
-    match classify_portal_input(content, send_mode, ack, client_msg_id) {
+    match classify_portal_input(content, send_mode, reasoning_effort, ack, client_msg_id) {
         RoutedPortalInput::Wiggum(input) => {
             debug!(
                 "→ [{}/wiggum]{} {}",
@@ -236,19 +239,33 @@ async fn handle_ws_message(
     }
 
     match proxy_msg {
-        ServerToProxy::AgentInput { content, send_mode } => {
-            return route_portal_input(content, send_mode, None, None, input_tx, wiggum_tx);
+        ServerToProxy::AgentInput {
+            content,
+            send_mode,
+            reasoning_effort,
+        } => {
+            return route_portal_input(
+                content,
+                send_mode,
+                reasoning_effort,
+                None,
+                None,
+                input_tx,
+                wiggum_tx,
+            );
         }
         ServerToProxy::SequencedInput {
             session_id,
             seq,
             content,
             send_mode,
+            reasoning_effort,
             client_msg_id,
         } => {
             return route_portal_input(
                 content,
                 send_mode,
+                reasoning_effort,
                 Some(PortalInputAck { session_id, seq }),
                 client_msg_id,
                 input_tx,
@@ -422,7 +439,7 @@ mod tests {
         .to_json();
 
         let RoutedPortalInput::Input(input) =
-            classify_portal_input(content.clone(), None, None, None)
+            classify_portal_input(content.clone(), None, None, None, None)
         else {
             panic!("expected normal input");
         };
@@ -440,6 +457,7 @@ mod tests {
     fn classify_plain_string_input_has_no_display_event() {
         let RoutedPortalInput::Input(input) = classify_portal_input(
             serde_json::Value::String("hello".to_string()),
+            None,
             None,
             None,
             None,
@@ -466,6 +484,7 @@ mod tests {
         let RoutedPortalInput::Input(input) = classify_portal_input(
             serde_json::Value::String("hi".to_string()),
             None,
+            Some(shared::ReasoningEffort::High),
             Some(ack),
             Some(client_msg_id),
         ) else {
@@ -473,6 +492,7 @@ mod tests {
         };
 
         assert_eq!(input.client_msg_id, Some(client_msg_id));
+        assert_eq!(input.reasoning_effort, Some(shared::ReasoningEffort::High));
         let ack = input.ack.expect("ack preserved");
         assert_eq!(ack.seq, 42);
         assert_eq!(ack.session_id, session_id);
@@ -489,6 +509,7 @@ mod tests {
         let RoutedPortalInput::Wiggum(input) = classify_portal_input(
             serde_json::Value::String("activate".to_string()),
             Some(SendMode::Wiggum),
+            None,
             Some(ack),
             Some(client_msg_id),
         ) else {

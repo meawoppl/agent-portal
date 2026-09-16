@@ -12,6 +12,7 @@ mod turn_metrics;
 mod uploads;
 mod web_client_socket;
 
+pub(crate) use session_manager::EnqueueInput;
 pub use session_manager::{
     conn_channel, ConnSender, DataPlaneConnection, DataPlaneSender, ForwardHealth,
     LauncherConnection, ProxySender, SessionId, SessionManager, TunnelError, TunnelIn,

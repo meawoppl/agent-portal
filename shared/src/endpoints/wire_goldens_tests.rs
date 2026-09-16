@@ -107,6 +107,7 @@ fn client_to_server_agent_input_golden_uses_legacy_claude_tag() {
     let msg = ClientToServer::AgentInput {
         content: json!({"text": "hi"}),
         send_mode: Some(SendMode::Wiggum),
+        reasoning_effort: Some(crate::ReasoningEffort::High),
         client_msg_id: Some(id),
     };
     assert_golden(
@@ -115,6 +116,7 @@ fn client_to_server_agent_input_golden_uses_legacy_claude_tag() {
             "type": "ClaudeInput",
             "content": {"text": "hi"},
             "send_mode": "wiggum",
+            "reasoning_effort": "high",
             "client_msg_id": "00000000-0000-0000-0000-000000000007"
         }),
     );
@@ -128,10 +130,12 @@ fn client_to_server_agent_input_golden_uses_legacy_claude_tag() {
         ClientToServer::AgentInput {
             client_msg_id,
             send_mode,
+            reasoning_effort,
             ..
         } => {
             assert_eq!(client_msg_id, None);
             assert_eq!(send_mode, None);
+            assert_eq!(reasoning_effort, None);
         }
         _ => panic!("wrong variant"),
     }
@@ -544,17 +548,25 @@ fn server_to_proxy_sequenced_input_golden() {
         seq: 5,
         content: json!({"text": "hello"}),
         send_mode: Some(SendMode::Wiggum),
+        reasoning_effort: Some(crate::ReasoningEffort::Xhigh),
         client_msg_id: None,
     };
     let v = serde_json::to_value(&msg).unwrap();
     assert_eq!(v["type"], "SequencedInput");
     assert_eq!(v["seq"], 5);
     assert_eq!(v["send_mode"], "wiggum");
+    assert_eq!(v["reasoning_effort"], "xhigh");
     let back: ServerToProxy = serde_json::from_value(v).unwrap();
     match back {
-        ServerToProxy::SequencedInput { seq, send_mode, .. } => {
+        ServerToProxy::SequencedInput {
+            seq,
+            send_mode,
+            reasoning_effort,
+            ..
+        } => {
             assert_eq!(seq, 5);
             assert_eq!(send_mode, Some(SendMode::Wiggum));
+            assert_eq!(reasoning_effort, Some(crate::ReasoningEffort::Xhigh));
         }
         _ => panic!("wrong variant"),
     }

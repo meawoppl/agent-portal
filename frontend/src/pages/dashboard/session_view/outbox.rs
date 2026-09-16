@@ -106,6 +106,7 @@ mod tests {
         ClientToServer::AgentInput {
             content: serde_json::Value::String(tag.to_string()),
             send_mode: None,
+            reasoning_effort: None,
             client_msg_id: None,
         }
     }

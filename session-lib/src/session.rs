@@ -362,7 +362,21 @@ impl<A: Agent> Session<A> {
         content: serde_json::Value,
         display_event: Option<serde_json::Value>,
     ) -> Result<(), SessionError> {
-        let delivered_rx = self.enqueue_input_with_display(content, display_event)?;
+        self.send_input_with_display_and_effort(content, display_event, None)
+            .await
+    }
+
+    /// Like [`send_input_with_display`](Self::send_input_with_display), but
+    /// carries an optional per-turn reasoning effort override for agents that
+    /// expose one.
+    pub async fn send_input_with_display_and_effort(
+        &mut self,
+        content: serde_json::Value,
+        display_event: Option<serde_json::Value>,
+        reasoning_effort: Option<shared::ReasoningEffort>,
+    ) -> Result<(), SessionError> {
+        let delivered_rx =
+            self.enqueue_input_with_display(content, display_event, reasoning_effort)?;
         delivered_rx
             .await
             .map_err(|_| {
@@ -384,6 +398,7 @@ impl<A: Agent> Session<A> {
         &mut self,
         content: serde_json::Value,
         display_event: Option<serde_json::Value>,
+        reasoning_effort: Option<shared::ReasoningEffort>,
     ) -> Result<oneshot::Receiver<Result<(), String>>, SessionError> {
         if let SessionState::Exited { code } = self.state {
             return Err(SessionError::AlreadyExited(code));
@@ -401,6 +416,7 @@ impl<A: Agent> Session<A> {
         command_tx
             .send(IoCommand::UserInput {
                 text,
+                reasoning_effort,
                 delivered: Some(delivered_tx),
                 display_event: display_event.map(Box::new),
             })
@@ -636,7 +652,7 @@ mod tests {
             .unwrap();
 
         let delivered = session
-            .enqueue_input_with_display(serde_json::Value::String("queued".to_string()), None)
+            .enqueue_input_with_display(serde_json::Value::String("queued".to_string()), None, None)
             .unwrap();
 
         while !COMMAND_RECEIVED.load(Ordering::SeqCst) {

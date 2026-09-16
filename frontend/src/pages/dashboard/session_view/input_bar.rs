@@ -21,13 +21,15 @@ use crate::pages::dashboard::load_vim_mode;
 use crate::utils::format_file_size;
 use gloo::timers::callback::Timeout;
 use shared::protocol::UPLOAD_CHUNK_SIZE;
-use shared::{ClientToServer, SendMode};
+use shared::{ClientToServer, ReasoningEffort, SendMode};
 use std::cell::RefCell;
 use std::rc::Rc;
 use uuid::Uuid;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
-use web_sys::{ClipboardEvent, DragEvent, Element, HtmlTextAreaElement, KeyboardEvent};
+use web_sys::{
+    ClipboardEvent, DragEvent, Element, HtmlSelectElement, HtmlTextAreaElement, KeyboardEvent,
+};
 use yew::prelude::*;
 
 /// Inputs to the bar.
@@ -53,7 +55,7 @@ pub struct InputBarProps {
     pub on_register: Callback<Callback<InputBarInbound>>,
     /// Plain-text submit. Parent packages into `ClientToServer::ClaudeInput`
     /// and emits the optimistic local echo.
-    pub on_send_text: Callback<(String, SendMode)>,
+    pub on_send_text: Callback<(String, SendMode, Option<ReasoningEffort>)>,
     /// Raw WS frame emitted by the bar. Used by the file-upload pipeline
     /// to stream `FileUploadStart` / `FileUploadChunk` frames.
     pub on_send_frame: Callback<ClientToServer>,
@@ -62,10 +64,10 @@ pub struct InputBarProps {
     /// the prompt until every upload commits on the proxy host (#939
     /// phase 4) — the agent must never be told about a file that isn't
     /// fully on disk.
-    pub on_upload_prompt: Callback<(String, Vec<String>)>,
+    pub on_upload_prompt: Callback<(String, Vec<String>, Option<ReasoningEffort>)>,
     /// Composer contents streamed as an opaque secret drop. The callback only
     /// carries the upload id and byte count; secret bytes stay on upload frames.
-    pub on_secret_drop: Callback<(String, u64)>,
+    pub on_secret_drop: Callback<(String, u64, Option<ReasoningEffort>)>,
     /// Fires once per submit (text or upload) so the parent can bump its
     /// per-session "I sent something" bookkeeping.
     pub on_message_sent: Callback<()>,
@@ -84,6 +86,38 @@ fn dashboard_in_nav_mode() -> bool {
         .ok()
         .flatten()
         .is_some()
+}
+
+const REASONING_EFFORT_KEY: &str = "agent-portal-reasoning-effort";
+
+fn reasoning_effort_from_str(value: &str) -> Option<ReasoningEffort> {
+    match value {
+        "minimal" => Some(ReasoningEffort::Minimal),
+        "low" => Some(ReasoningEffort::Low),
+        "medium" => Some(ReasoningEffort::Medium),
+        "high" => Some(ReasoningEffort::High),
+        "xhigh" => Some(ReasoningEffort::Xhigh),
+        _ => None,
+    }
+}
+
+fn load_reasoning_effort() -> Option<ReasoningEffort> {
+    gloo::utils::window()
+        .local_storage()
+        .ok()
+        .flatten()
+        .and_then(|storage| storage.get_item(REASONING_EFFORT_KEY).ok().flatten())
+        .and_then(|value| reasoning_effort_from_str(&value))
+}
+
+fn save_reasoning_effort(effort: Option<ReasoningEffort>) {
+    if let Ok(Some(storage)) = gloo::utils::window().local_storage() {
+        if let Some(effort) = effort {
+            let _ = storage.set_item(REASONING_EFFORT_KEY, effort.as_str());
+        } else {
+            let _ = storage.remove_item(REASONING_EFFORT_KEY);
+        }
+    }
 }
 
 /// Auto-resize the textarea to fit its content. Measures the scroll height
@@ -120,6 +154,7 @@ pub enum InputBarMsg {
     /// User picked "Wiggum" from the send-mode dropdown.
     SendWiggum,
     SendSecretDrop,
+    SetReasoningEffort(Option<ReasoningEffort>),
     HistoryUp,
     HistoryDown,
     ToggleSendModeDropdown,
@@ -161,6 +196,7 @@ pub struct InputBar {
     is_recording: bool,
     interim_transcription: Option<String>,
     pending_suggestion: Option<String>,
+    reasoning_effort: Option<ReasoningEffort>,
     voice_button_ref: NodeRef,
     was_focused: bool,
     /// Mirror of the `ws_connected` prop from the previous render. The composer
@@ -236,6 +272,7 @@ impl Component for InputBar {
             is_recording: false,
             interim_transcription: None,
             pending_suggestion: None,
+            reasoning_effort: load_reasoning_effort(),
             voice_button_ref: NodeRef::default(),
             was_focused: ctx.props().focused,
             was_ws_connected: ctx.props().ws_connected,
@@ -342,6 +379,11 @@ impl Component for InputBar {
             }
             InputBarMsg::SendSecretDrop => {
                 self.start_secret_drop(ctx);
+                true
+            }
+            InputBarMsg::SetReasoningEffort(effort) => {
+                self.reasoning_effort = effort;
+                save_reasoning_effort(effort);
                 true
             }
             InputBarMsg::HistoryUp => {
@@ -587,6 +629,10 @@ impl Component for InputBar {
         });
 
         let close_dropdown = link.callback(|_| InputBarMsg::CloseSendModeDropdown);
+        let handle_effort_change = link.callback(|e: Event| {
+            let select: HtmlSelectElement = e.target_unchecked_into();
+            InputBarMsg::SetReasoningEffort(reasoning_effort_from_str(&select.value()))
+        });
 
         let handle_paste = link.callback(|e: Event| {
             let e: ClipboardEvent = e.unchecked_into();
@@ -684,6 +730,7 @@ impl Component for InputBar {
                             onclick={link.callback(|_| InputBarMsg::AcceptSuggestion)}
                         >{ "Tab" }</button>
                     }
+                    { self.render_reasoning_effort_select(handle_effort_change) }
                     { self.render_voice_input(ctx) }
                     { self.render_send_button(ctx) }
                     <div class="drop-hint">{ "Drop files here to upload" }</div>
@@ -753,7 +800,9 @@ impl InputBar {
         self.input_text.clear();
         self.pending_suggestion = None;
         ctx.props().on_message_sent.emit(());
-        ctx.props().on_send_text.emit((agent_input, mode));
+        ctx.props()
+            .on_send_text
+            .emit((agent_input, mode, self.reasoning_effort));
     }
 
     /// Drive the chunk-upload pipeline. Reads the current textarea as
@@ -816,7 +865,9 @@ impl InputBar {
                     },
                 ));
         }
-        ctx.props().on_secret_drop.emit((upload_id, total_size));
+        ctx.props()
+            .on_secret_drop
+            .emit((upload_id, total_size, self.reasoning_effort));
         ctx.link()
             .send_message(InputBarMsg::FileUploaded("secret file".to_string()));
     }
@@ -839,6 +890,7 @@ impl InputBar {
         let link = ctx.link().clone();
         let on_send_frame = ctx.props().on_send_frame.clone();
         let on_upload_prompt = ctx.props().on_upload_prompt.clone();
+        let reasoning_effort = self.reasoning_effort;
 
         spawn_local(async move {
             let mut uploaded_files: Vec<(String, u64)> = Vec::new();
@@ -911,7 +963,7 @@ impl InputBar {
             // the parent dispatches it only once every upload above has
             // committed on the proxy host (#939 phase 4).
             let combined = build_upload_message(&user_input, &uploaded_files);
-            on_upload_prompt.emit((combined, upload_ids));
+            on_upload_prompt.emit((combined, upload_ids, reasoning_effort));
 
             link.send_message(InputBarMsg::FileUploaded(
                 uploaded_files
@@ -950,6 +1002,29 @@ impl InputBar {
             format!("{} {}", current, interim)
         };
         html! { <div class="interim-transcription">{ preview }</div> }
+    }
+
+    fn render_reasoning_effort_select(&self, onchange: Callback<Event>) -> Html {
+        let selected = self
+            .reasoning_effort
+            .map(|effort| effort.as_str())
+            .unwrap_or("auto");
+        html! {
+            <select
+                class="reasoning-effort-select"
+                title="Reasoning effort for the next turn"
+                aria-label="Reasoning effort"
+                value={selected}
+                {onchange}
+            >
+                <option value="auto">{ "Auto" }</option>
+                <option value="minimal">{ "Minimal" }</option>
+                <option value="low">{ "Low" }</option>
+                <option value="medium">{ "Medium" }</option>
+                <option value="high">{ "High" }</option>
+                <option value="xhigh">{ "XHigh" }</option>
+            </select>
+        }
     }
 
     fn render_upload_bar(&self) -> Html {
