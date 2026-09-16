@@ -5,6 +5,7 @@ use reqwest::{
     StatusCode,
 };
 use shared::api::{DeviceClientType, DeviceCodeRequest, DeviceCodeResponse, DeviceFlowPollRequest};
+use shared::urls::ws_to_http;
 use shared::DevicePollResponse;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -15,12 +16,6 @@ pub struct DeviceFlowResult {
     pub access_token: String,
     pub user_id: String,
     pub user_email: String,
-}
-
-/// Convert a WebSocket URL to an HTTP URL for API calls.
-pub fn ws_to_http(url: &str) -> String {
-    url.replace("ws://", "http://")
-        .replace("wss://", "https://")
 }
 
 fn retry_after_delay(headers: &HeaderMap, interval: Duration) -> Duration {
