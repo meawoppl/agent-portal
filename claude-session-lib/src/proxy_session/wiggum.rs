@@ -538,6 +538,8 @@ mod tests {
             errors: Vec::new(),
             uuid: None,
             api_error_status: None,
+            api_error_code: None,
+            startup_failure_reason: None,
             stop_reason: None,
             terminal_reason: None,
             fast_mode_state: None,
