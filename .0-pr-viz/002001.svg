@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="pr2001-title pr2001-desc">
+  <title id="pr2001-title">PR 2001 shared truncate_with_ellipsis</title>
+  <desc id="pr2001-desc">Push snippets and peek summaries each hand-inlined the same take-and-ellipsis cap; now shared::strings owns it once.</desc>
+  <rect x="0" y="0" width="1200" height="720" fill="#1a1b26"/>
+  <defs>
+    <marker id="pr2001-arrow-green" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#9ece6a"/>
+    </marker>
+  </defs>
+  <text x="32" y="36" fill="#565f89" font-family="sans-serif" font-size="15" letter-spacing="0.6">PR #2001 · Share truncate-with-ellipsis via shared strings</text>
+  <text x="32" y="66" fill="#c0caf5" font-family="sans-serif" font-size="19">Push snippets and peek summaries each hand-inlined the same</text>
+  <text x="32" y="90" fill="#c0caf5" font-family="sans-serif" font-size="19">take-and-ellipsis cap; now shared::strings owns it once.</text>
+  <line x1="32" y1="96" x2="1168" y2="96" stroke="#565f89" stroke-opacity="0.35" stroke-width="1"/>
+  <line x1="600" y1="112" x2="600" y2="690" stroke="#565f89" stroke-opacity="0.5" stroke-width="1" stroke-dasharray="6 6"/>
+
+  <text x="32" y="130" fill="#f7768e" font-family="sans-serif" font-size="12" letter-spacing="1.6">BEFORE</text>
+  <rect x="48" y="150" width="512" height="170" rx="8" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+  <text x="68" y="182" fill="#7aa2f7" font-family="monospace" font-size="15">push/mod.rs cap_snippet</text>
+  <text x="68" y="214" fill="#c0caf5" font-family="monospace" font-size="14">take(120 - 1) + push('…')</text>
+  <text x="68" y="244" fill="#c0caf5" font-family="monospace" font-size="14">output at most 120 chars</text>
+  <text x="68" y="282" fill="#565f89" font-family="sans-serif" font-size="13">Notification snippet cap, hand-inlined.</text>
+  <rect x="48" y="340" width="512" height="170" rx="8" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+  <text x="68" y="372" fill="#7aa2f7" font-family="monospace" font-size="15">peek_summary.rs cap</text>
+  <text x="68" y="404" fill="#c0caf5" font-family="monospace" font-size="14">take(240 - 1) + push('…')</text>
+  <text x="68" y="434" fill="#c0caf5" font-family="monospace" font-size="14">output at most 240 chars</text>
+  <text x="68" y="472" fill="#565f89" font-family="sans-serif" font-size="13">Collapse to one line, then the same shape.</text>
+  <rect x="48" y="530" width="512" height="120" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="1"/>
+  <text x="68" y="562" fill="#f7768e" font-family="monospace" font-size="14">identical core, two homes</text>
+  <text x="68" y="592" fill="#c0caf5" font-family="sans-serif" font-size="13">Fix one cap, miss the other, and callers drift.</text>
+  <text x="68" y="620" fill="#565f89" font-family="sans-serif" font-size="13">Same algorithm, same marker, no shared owner.</text>
+
+  <text x="624" y="130" fill="#9ece6a" font-family="sans-serif" font-size="12" letter-spacing="1.6">AFTER</text>
+  <rect x="640" y="150" width="512" height="170" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="660" y="182" fill="#7aa2f7" font-family="monospace" font-size="15">shared::strings</text>
+  <text x="660" y="214" fill="#9ece6a" font-family="monospace" font-size="14">pub fn truncate_with_ellipsis</text>
+  <text x="660" y="244" fill="#c0caf5" font-family="monospace" font-size="14">take(max - 1) + push('…')</text>
+  <text x="660" y="282" fill="#565f89" font-family="sans-serif" font-size="13">Single home, std-only, WASM-safe, tested.</text>
+  <line x1="768" y1="320" x2="768" y2="352" stroke="#9ece6a" stroke-width="2" marker-end="url(#pr2001-arrow-green)"/>
+  <line x1="1024" y1="320" x2="1024" y2="352" stroke="#9ece6a" stroke-width="2" marker-end="url(#pr2001-arrow-green)"/>
+  <rect x="640" y="360" width="240" height="150" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="656" y="392" fill="#7aa2f7" font-family="monospace" font-size="14">cap_snippet</text>
+  <text x="656" y="422" fill="#c0caf5" font-family="monospace" font-size="14">max = 120</text>
+  <text x="656" y="452" fill="#565f89" font-family="sans-serif" font-size="13">One-line call,</text>
+  <text x="656" y="474" fill="#565f89" font-family="sans-serif" font-size="13">same output.</text>
+  <rect x="912" y="360" width="240" height="150" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="928" y="392" fill="#7aa2f7" font-family="monospace" font-size="14">cap</text>
+  <text x="928" y="422" fill="#c0caf5" font-family="monospace" font-size="14">max = 240</text>
+  <text x="928" y="452" fill="#565f89" font-family="sans-serif" font-size="13">Collapse, then</text>
+  <text x="928" y="474" fill="#565f89" font-family="sans-serif" font-size="13">one-line call.</text>
+  <text x="640" y="560" fill="#9ece6a" font-family="sans-serif" font-size="14">One definition - every caller agrees.</text>
+  <text x="640" y="590" fill="#565f89" font-family="sans-serif" font-size="13">No behavior change: both maxima are above 1,</text>
+  <text x="640" y="612" fill="#565f89" font-family="sans-serif" font-size="13">where saturating_sub matches the old minus-one.</text>
+  <text x="640" y="652" fill="#565f89" font-family="sans-serif" font-size="13">New unit tests lock the cap and the marker.</text>
+
+  <text x="32" y="706" fill="#565f89" font-family="sans-serif" font-size="11">Caveat: portal-stt keeps MAX chars before the marker and mobile uses ... - both left separate on purpose.</text>
+</svg>
