@@ -38,12 +38,7 @@ pub fn summarize_message(
 /// One line, whitespace-collapsed, capped, with an ellipsis when truncated.
 fn cap(text: &str) -> String {
     let one_line = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if one_line.chars().count() <= MAX_SUMMARY_CHARS {
-        return one_line;
-    }
-    let mut capped: String = one_line.chars().take(MAX_SUMMARY_CHARS - 1).collect();
-    capped.push('…');
-    capped
+    shared::strings::truncate_with_ellipsis(&one_line, MAX_SUMMARY_CHARS)
 }
 
 /// First meaningful line of free text, with machine-authored notice blocks
