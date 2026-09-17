@@ -285,12 +285,7 @@ const SNIPPET_BODY_MAX_CHARS: usize = 120;
 /// Truncate to [`SNIPPET_BODY_MAX_CHARS`] on a char boundary, appending an
 /// ellipsis when anything was cut.
 fn cap_snippet(s: &str) -> String {
-    if s.chars().count() <= SNIPPET_BODY_MAX_CHARS {
-        return s.to_string();
-    }
-    let mut out: String = s.chars().take(SNIPPET_BODY_MAX_CHARS - 1).collect();
-    out.push('…');
-    out
+    shared::strings::truncate_with_ellipsis(s, SNIPPET_BODY_MAX_CHARS)
 }
 
 /// A push payload, independent of transport. `collapse_key` is the session id
