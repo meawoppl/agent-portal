@@ -383,10 +383,9 @@ pub async fn update_task_handler(
         session_mode: req.session_mode.map(|m| m.as_str().to_string()),
         worktree_mode,
         worktree_branch,
-        session_name: req.session_name.map(|name| {
-            let name = name.trim();
-            (!name.is_empty()).then(|| name.to_string())
-        }),
+        session_name: req
+            .session_name
+            .map(|name| shared::strings::owned_non_blank(&name)),
     };
 
     let updated: ScheduledTask = diesel::update(
