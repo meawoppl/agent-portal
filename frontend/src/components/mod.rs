@@ -18,6 +18,7 @@ pub(crate) mod markdown;
 pub mod message_renderer;
 mod model_select;
 pub mod muse_renderer;
+mod onboarding_tutorial;
 mod proxy_token_setup;
 mod schedule_dialog;
 mod share_dialog;
@@ -42,6 +43,7 @@ pub use message_renderer::{
     group_is_turn_terminator, group_messages, thinking_chip_starts, MessageGroupRenderer,
 };
 pub use model_select::ModelSelect;
+pub use onboarding_tutorial::OnboardingTutorial;
 pub use proxy_token_setup::ProxyTokenSetup;
 pub use schedule_dialog::ScheduleDialog;
 pub use share_dialog::ShareDialog;

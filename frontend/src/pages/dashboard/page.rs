@@ -14,7 +14,8 @@ use super::types::{
     load_rail_position, save_header_collapsed, save_hidden_sessions, save_inactive_hidden,
 };
 use crate::components::{
-    ConfirmModal, ConfirmModalStyle, HelpOverlay, LaunchDialog, TurnMetricsHeaderPill,
+    ConfirmModal, ConfirmModalStyle, HelpOverlay, LaunchDialog, OnboardingTutorial,
+    TurnMetricsHeaderPill,
 };
 use crate::hooks::{
     use_client_websocket, use_interrupt_hotkey, use_keyboard_nav, use_sessions, KeyboardNavConfig,
@@ -299,7 +300,7 @@ pub fn dashboard_page() -> Html {
         on_select: focus.on_select_session.clone(),
         on_activate: focus.on_activate.clone(),
         on_show_help,
-        on_new_session,
+        on_new_session: on_new_session.clone(),
         on_delete: on_delete.clone(),
         on_jump_to_latest: focus.on_jump_to_latest.clone(),
         on_interrupt: focus.on_interrupt.clone(),
@@ -795,23 +796,7 @@ pub fn dashboard_page() -> Html {
                 </div>
             } else if active_sessions.is_empty() {
                 <div class="onboarding-container">
-                    <div class="onboarding-content">
-                        <h2>{ "No Sessions Connected" }</h2>
-                        <div class="onboarding-steps">
-                            <div class="onboarding-step">
-                                <span class="step-number">{ "1" }</span>
-                                <div class="step-content">
-                                    <p>{ "Click " }<strong>{ "+ Launch Session" }</strong>{ " to install agent-portal on a machine" }</p>
-                                </div>
-                            </div>
-                            <div class="onboarding-step">
-                                <span class="step-number">{ "2" }</span>
-                                <div class="step-content">
-                                    <p>{ "Once a launcher is connected, use " }<strong>{ "+ Launch Session" }</strong>{ " to start a session" }</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                    <OnboardingTutorial on_open_launch={on_new_session.clone()} />
                 </div>
             } else {
                 <>

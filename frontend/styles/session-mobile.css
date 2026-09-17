@@ -275,16 +275,50 @@
     }
 
     .onboarding-container {
-        padding: 1rem;
-    }
-
-    .onboarding-content h2 {
-        font-size: 1.2rem;
-    }
-
-    .onboarding-step {
         padding: 0.75rem;
+    }
+
+    .onboarding-hero {
+        grid-template-columns: 1fr;
+        align-items: stretch;
+        padding: 1rem 0;
+    }
+
+    .onboarding-hero h2 {
+        font-size: 1.3rem;
+    }
+
+    .onboarding-primary,
+    .onboarding-secondary,
+    .onboarding-link-action {
+        width: 100%;
+    }
+
+    .onboarding-grid {
+        grid-template-columns: 1fr;
         gap: 0.75rem;
+    }
+
+    .onboarding-install-panel,
+    .onboarding-feature-panel {
+        grid-row: auto;
+        grid-column: auto;
+    }
+
+    .onboarding-panel {
+        padding: 0.85rem;
+    }
+
+    .onboarding-panel-header {
+        gap: 0.75rem;
+    }
+
+    .onboarding-feature-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .onboarding-install-panel .platform-selector {
+        flex-wrap: wrap;
     }
 
     .code-block {
