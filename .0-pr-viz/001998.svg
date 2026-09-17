@@ -46,8 +46,8 @@
   <rect x="1095" y="865" width="830" height="130" rx="16" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
   <text x="1125" y="910" fill="#7aa2f7" font-family="monospace" font-size="26">frontend utils.rs re-exports</text>
   <text x="1125" y="955" fill="#565f89" font-family="Arial, sans-serif" font-size="23">All call sites keep working unchanged.</text>
-  <text x="1095" y="1060" fill="#9ece6a" font-family="Arial, sans-serif" font-size="23">One definition — every caller agrees.</text>
+  <text x="1095" y="1060" fill="#9ece6a" font-family="Arial, sans-serif" font-size="23">One definition - every caller agrees.</text>
   <text x="1095" y="1100" fill="#565f89" font-family="Arial, sans-serif" font-size="23">No behavior change, less surface to drift.</text>
 
-  <text x="55" y="1172" fill="#565f89" font-family="Arial, sans-serif" font-size="20">Caveat: codex-session-lib non_empty_string also drops "unknown" — left separate on purpose.</text>
+  <text x="55" y="1172" fill="#565f89" font-family="Arial, sans-serif" font-size="20">Caveat: codex-session-lib non_empty_string also drops "unknown" - left separate on purpose.</text>
 </svg>
