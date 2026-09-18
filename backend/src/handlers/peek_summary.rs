@@ -96,7 +96,7 @@ fn summarize_portal(content: &str) -> (&'static str, String) {
                 from_session_id,
                 text,
             } => {
-                let short: String = from_session_id.chars().take(8).collect();
+                let short = shared::short_session_id(from_session_id);
                 return (
                     "text",
                     format!("[from {from_agent_type} {short}] {}", excerpt(text)),

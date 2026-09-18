@@ -930,7 +930,7 @@ The file contains sensitive material. Use it directly without printing, echoing,
 /// Claude's echoed-input path and Codex's synthetic-input path explain the
 /// same reply workflow without maintaining two copies.
 pub fn agent_message_reply_reminder(from_session_id: &str) -> String {
-    let reply_session_id = short_reply_session_id(from_session_id);
+    let reply_session_id = short_session_id(from_session_id);
     format!(
         "This message came from another agent. Reply to that agent, not the user.\n\
 Sender session id: {from_session_id}\n\
@@ -939,7 +939,14 @@ agent-portal message send {reply_session_id} \"your reply\""
     )
 }
 
-fn short_reply_session_id(session_id: &str) -> String {
+/// First 8 hex chars of a session id, dash-stripped, for display.
+///
+/// Single home for the short-id shape so the reply reminder an agent acts on
+/// and the peek summary it reads name the same session the same way.
+/// Non-UUID input passes through untouched rather than being sliced
+/// mid-string.
+#[must_use]
+pub fn short_session_id(session_id: &str) -> String {
     let compact = session_id.replace('-', "");
     if compact.len() >= 8 && compact.chars().all(|c| c.is_ascii_hexdigit()) {
         compact.chars().take(8).collect()
@@ -1471,6 +1478,23 @@ mod tests {
         assert_eq!(AgentType::Claude.display_name(), "Claude");
         assert_eq!(AgentType::Codex.display_name(), "Codex");
         assert_eq!(AgentType::Muse.display_name(), "Muse");
+    }
+
+    #[test]
+    fn short_session_id_strips_dashes_and_caps_at_eight_hex_chars() {
+        assert_eq!(
+            short_session_id("12345678-0000-0000-0000-000000000000"),
+            "12345678"
+        );
+        assert_eq!(short_session_id("abcdef123456"), "abcdef12");
+    }
+
+    #[test]
+    fn short_session_id_passes_non_uuid_input_through_untouched() {
+        // Slicing these to 8 chars could cut mid-token; the caller shows the
+        // whole id instead.
+        assert_eq!(short_session_id("abc"), "abc");
+        assert_eq!(short_session_id("not-a-uuid!"), "not-a-uuid!");
     }
 
     #[test]
