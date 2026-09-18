@@ -121,8 +121,8 @@ impl Filters {
         if let Some(user) = &self.user {
             let needle = user.to_ascii_lowercase();
             let email_hit = m.owner_email.to_ascii_lowercase().contains(&needle);
-            let uuid_hit = matches_uuid_prefix(m.user_id, &needle)
-                || matches_uuid_prefix(m.session_id, &needle);
+            let uuid_hit = shared::uuid_matches_prefix(&m.user_id, &needle)
+                || shared::uuid_matches_prefix(&m.session_id, &needle);
             if !email_hit && !uuid_hit {
                 return false;
             }
@@ -153,16 +153,6 @@ impl Filters {
         }
         true
     }
-}
-
-/// True when `id`'s hyphen-free hex rendering starts with `prefix` (already
-/// lowercased, hyphens allowed and stripped).
-fn matches_uuid_prefix(id: Uuid, prefix: &str) -> bool {
-    let prefix = prefix.replace('-', "");
-    if prefix.is_empty() || !prefix.chars().all(|c| c.is_ascii_hexdigit()) {
-        return false;
-    }
-    id.simple().to_string().starts_with(&prefix)
 }
 
 /// Apply filters and sort by `last_activity` descending (most recent first).
@@ -377,6 +367,21 @@ mod tests {
             ..Default::default()
         };
         let out = filter_and_sort(rows, &filters);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].manifest.agent_type, "codex");
+    }
+
+    #[test]
+    fn filter_by_uuid_prefix_tolerates_case_dashes_and_padding() {
+        // `shared::uuid_matches_prefix` normalizes, so an uppercase dashed
+        // padded needle hits the same row as the raw hex prefix.
+        let target = session_for(12).simple().to_string();
+        let dashed_upper = format!("  {}-{}  ", target[..4].to_uppercase(), &target[4..8]);
+        let filters = Filters {
+            user: Some(dashed_upper),
+            ..Default::default()
+        };
+        let out = filter_and_sort(sample(), &filters);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].manifest.agent_type, "codex");
     }

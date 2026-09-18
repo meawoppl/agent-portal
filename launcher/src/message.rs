@@ -511,7 +511,7 @@ fn resolve_session_id(
     let prefix = normalize_session_id_prefix(input)?;
     let matches = sessions
         .iter()
-        .filter(|session| session.id.simple().to_string().starts_with(&prefix))
+        .filter(|session| shared::uuid_matches_prefix(&session.id, &prefix))
         .collect::<Vec<_>>();
 
     match matches.as_slice() {
@@ -533,17 +533,14 @@ fn resolve_session_id(
 }
 
 fn normalize_session_id_prefix(input: &str) -> Result<String> {
-    let prefix = input.trim().replace('-', "").to_ascii_lowercase();
-    if prefix.is_empty() {
-        return Err(anyhow!("session id prefix cannot be empty"));
-    }
-    if !prefix.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err(anyhow!(
-            "session id prefix `{}` must contain only hex digits",
-            input.trim()
-        ));
-    }
-    Ok(prefix)
+    let trimmed = input.trim();
+    shared::normalize_uuid_prefix(input).ok_or_else(|| {
+        if trimmed.replace('-', "").is_empty() {
+            anyhow!("session id prefix cannot be empty")
+        } else {
+            anyhow!("session id prefix `{trimmed}` must contain only hex digits")
+        }
+    })
 }
 
 #[cfg(test)]
@@ -749,6 +746,19 @@ mod tests {
         assert_eq!(
             resolve_session_id("12345678-0000-0000-0000-000000000000", &sessions)
                 .expect("resolved"),
+            sessions[0].id
+        );
+    }
+
+    #[test]
+    fn resolve_session_id_accepts_uppercase_prefix() {
+        let sessions = vec![
+            session("abcdef12-0000-0000-0000-000000000000"),
+            session("12345678-0000-0000-0000-000000000000"),
+        ];
+
+        assert_eq!(
+            resolve_session_id("ABCDEF12", &sessions).expect("resolved"),
             sessions[0].id
         );
     }
