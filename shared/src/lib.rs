@@ -955,6 +955,30 @@ pub fn short_session_id(session_id: &str) -> String {
     }
 }
 
+/// Normalize a session/user UUID prefix for lookup: trim, strip dashes,
+/// lowercase. Returns `None` when nothing remains or non-hex chars are
+/// present, so every caller agrees on what counts as a searchable prefix.
+///
+/// Single home for the shape the launcher CLI (`message send --agent`) and
+/// the archive history filter both match against hyphen-free UUID hex.
+#[must_use]
+pub fn normalize_uuid_prefix(raw: &str) -> Option<String> {
+    let compact = raw.trim().replace('-', "").to_ascii_lowercase();
+    if compact.is_empty() || !compact.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(compact)
+}
+
+/// True when `id`'s hyphen-free lowercase hex rendering starts with `prefix`
+/// (dashes, case, and surrounding whitespace tolerated via
+/// [`normalize_uuid_prefix`]).
+#[must_use]
+pub fn uuid_matches_prefix(id: &Uuid, prefix: &str) -> bool {
+    normalize_uuid_prefix(prefix)
+        .is_some_and(|normalized| id.simple().to_string().starts_with(&normalized))
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum PortalContent {
@@ -1495,6 +1519,38 @@ mod tests {
         // whole id instead.
         assert_eq!(short_session_id("abc"), "abc");
         assert_eq!(short_session_id("not-a-uuid!"), "not-a-uuid!");
+    }
+
+    #[test]
+    fn normalize_uuid_prefix_trims_strips_dashes_and_lowercases() {
+        assert_eq!(
+            normalize_uuid_prefix("  abcdef12-0000  ").as_deref(),
+            Some("abcdef120000")
+        );
+        assert_eq!(
+            normalize_uuid_prefix("ABCDEF12").as_deref(),
+            Some("abcdef12")
+        );
+    }
+
+    #[test]
+    fn normalize_uuid_prefix_rejects_empty_and_non_hex() {
+        assert_eq!(normalize_uuid_prefix(""), None);
+        assert_eq!(normalize_uuid_prefix("  --  "), None);
+        // Inner whitespace survives the trim, so it fails the hex check.
+        assert_eq!(normalize_uuid_prefix("ab cd"), None);
+        assert_eq!(normalize_uuid_prefix("xyz"), None);
+    }
+
+    #[test]
+    fn uuid_matches_prefix_accepts_dashed_uppercase_padded_prefix() {
+        let id = Uuid::from_u128(0xabcdef12_0000_0000_0000_000000000000);
+        assert!(uuid_matches_prefix(&id, "abcdef12"));
+        assert!(uuid_matches_prefix(&id, "ABCDEF12-0000"));
+        assert!(uuid_matches_prefix(&id, "  abcdef12  "));
+        assert!(!uuid_matches_prefix(&id, "abcdef99"));
+        assert!(!uuid_matches_prefix(&id, ""));
+        assert!(!uuid_matches_prefix(&id, "xyz"));
     }
 
     #[test]
