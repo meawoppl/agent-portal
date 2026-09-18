@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+  <rect width="2000" height="1200" fill="#16161e"/>
+  <text x="70" y="72" fill="#565f89" font-family="Arial, sans-serif" font-size="22" letter-spacing="1">PR #2003 · Performance dashboards rendered with Rizzma</text>
+  <text x="70" y="126" fill="#c0caf5" font-family="Arial, sans-serif" font-size="36" font-weight="bold">One portable figure replaces the bespoke frontend chart stack</text>
+  <text x="70" y="168" fill="#c0caf5" font-family="Arial, sans-serif" font-size="24">Existing filters still drive all six plots; rendering moves behind the authenticated backend.</text>
+
+  <rect x="70" y="230" width="360" height="180" rx="18" fill="#1e202e" stroke="#7aa2f7" stroke-width="3"/>
+  <text x="100" y="278" fill="#7aa2f7" font-family="Arial, sans-serif" font-size="25" font-weight="bold">Performance controls</text>
+  <text x="100" y="325" fill="#c0caf5" font-family="Arial, sans-serif" font-size="22">window · model/tier</text>
+  <text x="100" y="362" fill="#c0caf5" font-family="Arial, sans-serif" font-size="22">linear/symlog · p95</text>
+  <text x="100" y="393" fill="#565f89" font-family="Arial, sans-serif" font-size="18">Yew keeps query state</text>
+
+  <line x1="430" y1="320" x2="530" y2="320" stroke="#7dcfff" stroke-width="4"/>
+  <polygon points="550,320 525,308 525,332" fill="#7dcfff"/>
+
+  <rect x="550" y="230" width="440" height="180" rx="18" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="580" y="278" fill="#9ece6a" font-family="Arial, sans-serif" font-size="25" font-weight="bold">Authenticated figure endpoint</text>
+  <text x="580" y="325" fill="#c0caf5" font-family="Arial, sans-serif" font-size="21">GET /api/metrics/turns/figure</text>
+  <text x="580" y="362" fill="#c0caf5" font-family="Arial, sans-serif" font-size="21">native aggregation -&gt; Rizzma Figure</text>
+  <text x="580" y="393" fill="#565f89" font-family="Arial, sans-serif" font-size="18">private, no-store · portable .riz</text>
+
+  <line x1="990" y1="320" x2="1090" y2="320" stroke="#7dcfff" stroke-width="4"/>
+  <polygon points="1110,320 1085,308 1085,332" fill="#7dcfff"/>
+
+  <rect x="1110" y="230" width="620" height="180" rx="18" fill="#1e202e" stroke="#bb9af7" stroke-width="3"/>
+  <text x="1140" y="278" fill="#bb9af7" font-family="Arial, sans-serif" font-size="25" font-weight="bold">Pinned sandbox renderer</text>
+  <text x="1140" y="325" fill="#c0caf5" font-family="Arial, sans-serif" font-size="21">verified Rizzma 1.12 runtime · opaque origin</text>
+  <text x="1140" y="362" fill="#c0caf5" font-family="Arial, sans-serif" font-size="21">one lifecycle-owned dashboard realm</text>
+  <text x="1140" y="393" fill="#565f89" font-family="Arial, sans-serif" font-size="18">does not consume transcript activation slots</text>
+
+  <text x="70" y="492" fill="#e0af68" font-family="Arial, sans-serif" font-size="23" font-weight="bold" letter-spacing="3">PORTABLE 3 × 2 DASHBOARD</text>
+  <g font-family="Arial, sans-serif">
+    <g transform="translate(70 530)">
+      <rect width="510" height="185" rx="14" fill="#16161e" stroke="#565f89" stroke-width="2"/>
+      <text x="24" y="38" fill="#c0caf5" font-size="22">Throughput · p50 / p95</text>
+      <polyline points="30,145 105,115 180,130 255,72 330,92 405,54 478,66" fill="none" stroke="#7aa2f7" stroke-width="5"/>
+      <polyline points="30,126 105,88 180,103 255,50 330,64 405,35 478,43" fill="none" stroke="#7aa2f7" stroke-width="3" stroke-dasharray="10 8"/>
+    </g>
+    <g transform="translate(645 530)">
+      <rect width="510" height="185" rx="14" fill="#16161e" stroke="#565f89" stroke-width="2"/>
+      <text x="24" y="38" fill="#c0caf5" font-size="22">Time to first token</text>
+      <polyline points="30,76 105,95 180,68 255,118 330,90 405,126 478,105" fill="none" stroke="#bb9af7" stroke-width="5"/>
+      <polyline points="30,52 105,70 180,48 255,89 330,66 405,96 478,80" fill="none" stroke="#bb9af7" stroke-width="3" stroke-dasharray="10 8"/>
+    </g>
+    <g transform="translate(1220 530)">
+      <rect width="510" height="185" rx="14" fill="#16161e" stroke="#565f89" stroke-width="2"/>
+      <text x="24" y="38" fill="#c0caf5" font-size="22">Stop-reason mix</text>
+      <path d="M30 150 L30 105 L105 95 L180 112 L255 84 L330 92 L405 70 L478 75 L478 150 Z" fill="#7aa2f7" opacity="0.7"/>
+      <path d="M30 105 L30 72 L105 66 L180 80 L255 54 L330 60 L405 43 L478 48 L478 75 L405 70 L330 92 L255 84 L180 112 L105 95 Z" fill="#9ece6a" opacity="0.65"/>
+    </g>
+    <g transform="translate(70 755)">
+      <rect width="510" height="185" rx="14" fill="#16161e" stroke="#565f89" stroke-width="2"/>
+      <text x="24" y="38" fill="#c0caf5" font-size="22">Cache hit rate</text>
+      <polyline points="30,132 105,118 180,120 255,86 330,74 405,63 478,52" fill="none" stroke="#9ece6a" stroke-width="5"/>
+    </g>
+    <g transform="translate(645 755)">
+      <rect width="510" height="185" rx="14" fill="#16161e" stroke="#565f89" stroke-width="2"/>
+      <text x="24" y="38" fill="#c0caf5" font-size="22">Cost per 1k output tokens</text>
+      <polyline points="30,70 105,94 180,78 255,120 330,108 405,134 478,126" fill="none" stroke="#e0af68" stroke-width="5"/>
+    </g>
+    <g transform="translate(1220 755)">
+      <rect width="510" height="185" rx="14" fill="#16161e" stroke="#565f89" stroke-width="2"/>
+      <text x="24" y="38" fill="#c0caf5" font-size="22">Auxiliary tokens</text>
+      <polyline points="30,138 105,112 180,126 255,74 330,101 405,58 478,83" fill="none" stroke="#7dcfff" stroke-width="5"/>
+    </g>
+  </g>
+  <text x="70" y="1110" fill="#9ece6a" font-family="Arial, sans-serif" font-size="22">-2,045 legacy chart lines · portable artifact validation covered by backend tests</text>
+</svg>
