@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-labelledby="title desc">
+  <title id="title">PR 2002 session onboarding tutorial</title>
+  <desc id="desc">Visual summary of replacing the empty dashboard state with a guided session-workspace onboarding tutorial.</desc>
+  <rect width="2000" height="1200" fill="#16161e"/>
+  <line x1="1000" y1="190" x2="1000" y2="1140" stroke="#3d4666" stroke-width="4"/>
+
+  <text x="80" y="110" fill="#c0caf5" font-family="Inter,Arial,sans-serif" font-size="56" font-weight="700">Empty State</text>
+  <text x="80" y="165" fill="#a9b1d6" font-family="Inter,Arial,sans-serif" font-size="28">The old workspace stopped at two setup hints</text>
+  <text x="1090" y="110" fill="#c0caf5" font-family="Inter,Arial,sans-serif" font-size="56" font-weight="700">Guided Onboarding</text>
+  <text x="1090" y="165" fill="#a9b1d6" font-family="Inter,Arial,sans-serif" font-size="28">A full tutorial now lives inside the session area</text>
+
+  <rect x="90" y="260" width="820" height="300" rx="18" fill="#1e202e" stroke="#3d4666" stroke-width="3"/>
+  <text x="130" y="335" fill="#c0caf5" font-family="Inter,Arial,sans-serif" font-size="38" font-weight="700">No Sessions Connected</text>
+  <circle cx="150" cy="420" r="24" fill="#7aa2f7"/>
+  <text x="143" y="430" fill="#16161e" font-family="Inter,Arial,sans-serif" font-size="26" font-weight="800">1</text>
+  <text x="195" y="430" fill="#a9b1d6" font-family="Inter,Arial,sans-serif" font-size="28">Click + Launch Session</text>
+  <circle cx="150" cy="500" r="24" fill="#7aa2f7"/>
+  <text x="143" y="510" fill="#16161e" font-family="Inter,Arial,sans-serif" font-size="26" font-weight="800">2</text>
+  <text x="195" y="510" fill="#a9b1d6" font-family="Inter,Arial,sans-serif" font-size="28">Start a session later</text>
+
+  <rect x="90" y="640" width="820" height="250" rx="18" fill="#1e202e" stroke="#3d4666" stroke-width="3"/>
+  <text x="130" y="705" fill="#f7768e" font-family="Inter,Arial,sans-serif" font-size="34" font-weight="700">Problem</text>
+  <text x="130" y="765" fill="#c0caf5" font-family="Inter,Arial,sans-serif" font-size="30">First-time users had to leave the</text>
+  <text x="130" y="815" fill="#c0caf5" font-family="Inter,Arial,sans-serif" font-size="30">session workspace to understand setup.</text>
+
+  <rect x="1090" y="240" width="820" height="210" rx="18" fill="#1e202e" stroke="#3d4666" stroke-width="3"/>
+  <text x="1130" y="300" fill="#7dcfff" font-family="Inter,Arial,sans-serif" font-size="34" font-weight="700">Install the device</text>
+  <text x="1130" y="355" fill="#c0caf5" font-family="Inter,Arial,sans-serif" font-size="28">Reuses the existing platform-specific launcher</text>
+  <text x="1130" y="400" fill="#a9b1d6" font-family="Inter,Arial,sans-serif" font-size="24">commands, login command, and service install path.</text>
+
+  <rect x="1090" y="500" width="820" height="210" rx="18" fill="#1e202e" stroke="#3d4666" stroke-width="3"/>
+  <text x="1130" y="560" fill="#bb9af7" font-family="Inter,Arial,sans-serif" font-size="34" font-weight="700">Prepare GitHub</text>
+  <text x="1130" y="615" fill="#c0caf5" font-family="Inter,Arial,sans-serif" font-size="28">Links account setup, gh auth, and cloning</text>
+  <text x="1130" y="660" fill="#a9b1d6" font-family="Inter,Arial,sans-serif" font-size="24">so pull-request workflows have a clear next step.</text>
+
+  <rect x="1090" y="760" width="820" height="260" rx="18" fill="#1e202e" stroke="#3d4666" stroke-width="3"/>
+  <text x="1130" y="820" fill="#9ece6a" font-family="Inter,Arial,sans-serif" font-size="34" font-weight="700">Learn by launching</text>
+  <text x="1130" y="875" fill="#c0caf5" font-family="Inter,Arial,sans-serif" font-size="28">The tutorial opens the launch dialog and tours</text>
+  <text x="1130" y="920" fill="#a9b1d6" font-family="Inter,Arial,sans-serif" font-size="24">prompting, voice, files, permissions, sharing,</text>
+  <text x="1130" y="960" fill="#a9b1d6" font-family="Inter,Arial,sans-serif" font-size="24">schedules, and history after the first session.</text>
+
+  <path d="M500 900 C640 1040 820 1040 960 900" stroke="#565f89" stroke-width="6" fill="none"/>
+  <path d="M934 905 L972 888 L960 930 Z" fill="#565f89"/>
+  <text x="340" y="1045" fill="#e0af68" font-family="Inter,Arial,sans-serif" font-size="28" font-weight="700">From sparse hints to a session-window tutorial</text>
+</svg>
