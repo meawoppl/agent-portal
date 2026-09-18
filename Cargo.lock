@@ -1157,9 +1157,9 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "claude-codes"
-version = "2.1.274"
+version = "2.1.276"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4d148ae27ef0c635a55ddfe7a9079f3834371e3b7291ccfd098fa585c8dc42f"
+checksum = "44b71c80f361cf1807affa2a79708b874244df9a3cc5f4ab1f2cb0b532ea5dc2"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1259,9 +1259,9 @@ dependencies = [
 
 [[package]]
 name = "codex-codes"
-version = "0.154.4"
+version = "0.155.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22980fd8d9bba2eb9e67747e23cfa9a87e2abbdeb29cc8a261f271602f86ef27"
+checksum = "4c357f5f16586a9316ae36130da0424c5b0f048252a9e31be7b70418cd20e501"
 dependencies = [
  "log",
  "serde",
