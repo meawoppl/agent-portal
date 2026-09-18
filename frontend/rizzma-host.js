@@ -232,9 +232,13 @@ function disposeEntry(entry) {
   if (index >= 0) active.splice(index, 1);
 }
 
-export async function mountRizzma(iframe, artifactUrl, rendererVersion) {
+async function mountRizzmaInternal(iframe, artifactUrl, rendererVersion, budgeted) {
   if (!(iframe instanceof HTMLIFrameElement)) throw new Error("portable-figure frame is missing");
-  while (active.length >= 2) disposeEntry(active[0]);
+  if (budgeted) {
+    while (active.filter((entry) => entry.budgeted).length >= 2) {
+      disposeEntry(active.find((entry) => entry.budgeted));
+    }
+  }
   const artifactResponse = await fetch(artifactUrl, {credentials:"same-origin"});
   if (!artifactResponse.ok) throw new Error("portable figure expired or is unavailable");
   const artifact = await artifactResponse.arrayBuffer();
@@ -249,7 +253,7 @@ export async function mountRizzma(iframe, artifactUrl, rendererVersion) {
   const nonceBytes = crypto.getRandomValues(new Uint8Array(16));
   const nonce = Array.from(nonceBytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
   const channel = new MessageChannel();
-  const entry = {iframe, nonce, port:channel.port1, disposed:false, nextSeq:1};
+  const entry = {iframe, nonce, port:channel.port1, disposed:false, nextSeq:1, budgeted};
   active.push(entry);
   const loaded = new Promise((resolve) => iframe.addEventListener("load", resolve, {once:true}));
   iframe.srcdoc = childDocument(nonce);
@@ -281,6 +285,17 @@ export async function mountRizzma(iframe, artifactUrl, rendererVersion) {
     };
     iframe.contentWindow.postMessage({kind:"rizzma-bootstrap", nonce, loader}, "*", [channel.port2]);
   });
+}
+
+export function mountRizzma(iframe, artifactUrl, rendererVersion) {
+  return mountRizzmaInternal(iframe, artifactUrl, rendererVersion, true);
+}
+
+// Performance uses one bounded static dashboard figure. It does not compete
+// with transcript figures for the two-item active-renderer budget; its
+// component lifecycle still disposes the realm when the panel or query changes.
+export function mountRizzmaChart(iframe, artifactUrl, rendererVersion) {
+  return mountRizzmaInternal(iframe, artifactUrl, rendererVersion, false);
 }
 
 function sendControl(iframe, type, fields = {}) {

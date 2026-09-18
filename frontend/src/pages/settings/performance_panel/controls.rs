@@ -2,9 +2,7 @@
 
 use yew::prelude::*;
 
-use crate::components::charts::AxisScale;
-
-use super::model::{pair_label, GroupBy, GroupKey, TimeWindow};
+use super::model::{pair_label, AxisScale, GroupBy, GroupKey, TimeWindow};
 
 pub(super) struct PerformanceControlsProps<'a> {
     pub window: TimeWindow,
