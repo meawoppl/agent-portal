@@ -595,8 +595,8 @@ impl Component for VoiceInput {
                 false
             }
             VoiceInputMsg::RecognitionError(kind, message) => {
-                let is_ios_singleton_conflict =
-                    kind == "aborted" && message.to_ascii_lowercase().contains("another request");
+                let is_ios_singleton_conflict = kind == "aborted"
+                    && utils::contains_case_insensitive(&message, "another request");
                 let is_permission = kind == "not-allowed" || kind == "service-not-allowed";
                 let is_silent_benign = kind == "no-speech" || kind == "aborted";
 
