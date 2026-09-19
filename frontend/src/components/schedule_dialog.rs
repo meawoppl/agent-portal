@@ -373,8 +373,9 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                         reload_tasks.emit(());
                     }
                     Ok(resp) => {
-                        let msg = resp.text().await.unwrap_or_default();
-                        error_msg.set(Some(format!("Error ({}): {}", resp.status(), msg)));
+                        let status = resp.status();
+                        let msg = utils::error_body(resp).await;
+                        error_msg.set(Some(format!("Error ({}): {}", status, msg)));
                     }
                     Err(e) => {
                         error_msg.set(Some(format!("Request failed: {:?}", e)));

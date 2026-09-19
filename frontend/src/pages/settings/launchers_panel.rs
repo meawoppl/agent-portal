@@ -747,8 +747,9 @@ pub fn launchers_panel() -> Html {
                 let failure = match Request::post(&url).send().await {
                     Ok(resp) if resp.ok() => None,
                     Ok(resp) => {
-                        let text = resp.text().await.unwrap_or_default();
-                        Some(format!("{verb} failed: {} {}", resp.status(), text))
+                        let status = resp.status();
+                        let text = utils::error_body(resp).await;
+                        Some(format!("{verb} failed: {} {}", status, text))
                     }
                     Err(e) => Some(format!("{verb} request failed: {e:?}")),
                 };

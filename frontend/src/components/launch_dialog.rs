@@ -617,10 +617,10 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                     }
                     Ok(resp) => {
                         let status = resp.status();
-                        let text = resp.text().await.unwrap_or_default();
                         if status == 404 {
                             error_msg.set(Some("No connected launchers".to_string()));
                         } else {
+                            let text = utils::error_body(resp).await;
                             error_msg.set(Some(format!("Error {}: {}", status, text)));
                         }
                     }
