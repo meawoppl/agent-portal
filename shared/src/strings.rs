@@ -1,8 +1,9 @@
-//! Small blank-string guard shared across crates.
+//! Small string helpers shared across crates.
 //!
 //! Single home for the repeated `!s.trim().is_empty()` shape in `if` guards
-//! and `filter` closures. Everything here is std-only so the crate keeps
-//! compiling for `wasm32-unknown-unknown`.
+//! and `filter` closures, plus ASCII case-insensitive substring matching.
+//! Everything here is std-only so the crate keeps compiling for
+//! `wasm32-unknown-unknown`.
 
 /// True when `s` holds non-whitespace text.
 #[must_use]
@@ -29,6 +30,19 @@ pub fn owned_non_blank(s: &str) -> Option<String> {
     non_blank(s).map(str::to_string)
 }
 
+/// True when `haystack` contains `needle`, comparing ASCII-case-insensitively.
+///
+/// Single home for the repeated `haystack.to_ascii_lowercase().contains(...)`
+/// shape at filter and error-classification call sites so they cannot drift
+/// (e.g. one arm lowering only the haystack while another lowers both sides).
+/// An empty needle matches everything, mirroring [`str::contains`].
+#[must_use]
+pub fn contains_case_insensitive(haystack: &str, needle: &str) -> bool {
+    haystack
+        .to_ascii_lowercase()
+        .contains(&needle.to_ascii_lowercase())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -46,5 +60,21 @@ mod tests {
         assert_eq!(owned_non_blank(""), None);
         assert_eq!(owned_non_blank("   "), None);
         assert_eq!(owned_non_blank("  hi  "), Some("hi".to_string()));
+    }
+
+    #[test]
+    fn contains_case_insensitive_ignores_ascii_case_on_both_sides() {
+        assert!(contains_case_insensitive("Claude-Opus-4-7[1M]", "[1m]"));
+        assert!(contains_case_insensitive(
+            "Request Aborted: ANOTHER REQUEST in flight",
+            "another request"
+        ));
+        assert!(contains_case_insensitive("owner@Example.com", "EXAMPLE"));
+        assert!(!contains_case_insensitive("owner@example.com", "other"));
+    }
+
+    #[test]
+    fn contains_case_insensitive_empty_needle_matches_everything() {
+        assert!(contains_case_insensitive("anything", ""));
     }
 }

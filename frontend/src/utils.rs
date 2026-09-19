@@ -246,6 +246,13 @@ pub use shared::strings::non_blank;
 /// `utils::owned_non_blank` without a second copy of the check to drift.
 pub use shared::strings::owned_non_blank;
 
+/// True when `haystack` contains `needle`, ASCII-case-insensitively.
+///
+/// Re-export of the shared helper so error-classification call sites keep
+/// calling `utils::contains_case_insensitive` without a second copy of the
+/// lower-both-sides shape to drift.
+pub use shared::strings::contains_case_insensitive;
+
 /// Remove a key from browser localStorage, silently doing nothing when
 /// storage is unavailable.
 pub fn storage_remove(key: &str) {

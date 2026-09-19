@@ -142,7 +142,7 @@ fn is_native_1m_model(model_id: &str) -> bool {
 /// the wire (see the `claude-codes` result fixture), so matching the tag is
 /// exact, not a heuristic.
 fn has_one_million_tag(model_id: &str) -> bool {
-    model_id.to_ascii_lowercase().contains("[1m]")
+    crate::strings::contains_case_insensitive(model_id, "[1m]")
 }
 
 /// Nominal context-window size (in tokens) for a Claude model id.

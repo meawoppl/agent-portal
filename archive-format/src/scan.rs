@@ -119,10 +119,9 @@ impl Filters {
     pub fn matches(&self, row: &FlatRow) -> bool {
         let m = &row.manifest;
         if let Some(user) = &self.user {
-            let needle = user.to_ascii_lowercase();
-            let email_hit = m.owner_email.to_ascii_lowercase().contains(&needle);
-            let uuid_hit = shared::uuid_matches_prefix(&m.user_id, &needle)
-                || shared::uuid_matches_prefix(&m.session_id, &needle);
+            let email_hit = shared::strings::contains_case_insensitive(&m.owner_email, user);
+            let uuid_hit = shared::uuid_matches_prefix(&m.user_id, user)
+                || shared::uuid_matches_prefix(&m.session_id, user);
             if !email_hit && !uuid_hit {
                 return false;
             }
@@ -133,11 +132,7 @@ impl Filters {
             }
         }
         if let Some(name) = &self.name {
-            if !m
-                .session_name
-                .to_ascii_lowercase()
-                .contains(&name.to_ascii_lowercase())
-            {
+            if !shared::strings::contains_case_insensitive(&m.session_name, name) {
                 return false;
             }
         }
