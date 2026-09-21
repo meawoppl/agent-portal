@@ -198,6 +198,60 @@
         padding: 0.2rem 0.4rem;
     }
 
+    .session-view-body {
+        flex-direction: column;
+    }
+
+    .session-view-body.has-surface .session-view-chat {
+        min-height: 40%;
+        flex: 1 1 calc(100% - var(--surface-basis));
+    }
+
+    .session-view-body.fullscreen .session-view-chat {
+        display: none;
+    }
+
+    .session-view-body.surface-collapsed .session-view-chat {
+        flex-basis: auto;
+    }
+
+    .session-surface-resize-handle {
+        flex-basis: 0.45rem;
+        cursor: row-resize;
+    }
+
+    .session-surface-resize-handle::before {
+        inset: 0.18rem 0.5rem;
+    }
+
+    .session-forward-surface {
+        flex: 0 0 var(--surface-basis);
+        min-width: 0;
+        max-width: none;
+        min-height: 14rem;
+        border-left: 0;
+        border-top: 1px solid rgba(122, 162, 247, 0.45);
+        box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.22);
+    }
+
+    .session-forward-surface.collapsed {
+        flex: 0 0 2.5rem;
+        min-width: 0;
+        max-width: none;
+        min-height: 2.5rem;
+    }
+
+    .session-forward-surface.fullscreen {
+        flex: 1 1 100%;
+        min-height: 0;
+        border-top: 0;
+        box-shadow: none;
+    }
+
+    .session-forward-toolbar {
+        min-height: 2.5rem;
+    }
+
     /* ---- Messages area ---- */
     .session-view-messages {
         padding: 0.75rem;
@@ -275,16 +329,50 @@
     }
 
     .onboarding-container {
-        padding: 1rem;
-    }
-
-    .onboarding-content h2 {
-        font-size: 1.2rem;
-    }
-
-    .onboarding-step {
         padding: 0.75rem;
+    }
+
+    .onboarding-hero {
+        grid-template-columns: 1fr;
+        align-items: stretch;
+        padding: 1rem 0;
+    }
+
+    .onboarding-hero h2 {
+        font-size: 1.3rem;
+    }
+
+    .onboarding-primary,
+    .onboarding-secondary,
+    .onboarding-link-action {
+        width: 100%;
+    }
+
+    .onboarding-grid {
+        grid-template-columns: 1fr;
         gap: 0.75rem;
+    }
+
+    .onboarding-install-panel,
+    .onboarding-feature-panel {
+        grid-row: auto;
+        grid-column: auto;
+    }
+
+    .onboarding-panel {
+        padding: 0.85rem;
+    }
+
+    .onboarding-panel-header {
+        gap: 0.75rem;
+    }
+
+    .onboarding-feature-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .onboarding-install-panel .platform-selector {
+        flex-wrap: wrap;
     }
 
     .code-block {

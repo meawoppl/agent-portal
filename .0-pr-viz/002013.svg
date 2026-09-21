@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-labelledby="title desc">
+  <title id="title">PR 2013 forwarded apps open in a session split surface</title>
+  <desc id="desc">Visual summary of replacing the floating forward preview overlay with a split-pane session surface hosted by SessionView and ForwardSurface.</desc>
+  <rect width="2000" height="1200" fill="#16161e"/>
+  <line x1="1000" y1="190" x2="1000" y2="1140" stroke="#3d4666" stroke-width="4"/>
+
+  <text x="80" y="110" fill="#c0caf5" font-family="Inter,Arial,sans-serif" font-size="56" font-weight="700">Floating Overlay</text>
+  <text x="80" y="165" fill="#a9b1d6" font-family="Inter,Arial,sans-serif" font-size="28">ForwardChips owned the preview window</text>
+  <text x="1090" y="110" fill="#c0caf5" font-family="Inter,Arial,sans-serif" font-size="56" font-weight="700">Split Surface</text>
+  <text x="1090" y="165" fill="#a9b1d6" font-family="Inter,Arial,sans-serif" font-size="28">SessionView hosts chat and the forwarded app together</text>
+
+  <rect x="80" y="245" width="830" height="780" rx="18" fill="#1e202e" stroke="#3d4666" stroke-width="3"/>
+  <rect x="120" y="295" width="750" height="72" rx="10" fill="#16161e" stroke="#565f89" stroke-width="2"/>
+  <text x="145" y="342" fill="#c0caf5" font-family="Inter,Arial,sans-serif" font-size="28" font-weight="700">Session header</text>
+  <rect x="640" y="314" width="112" height="34" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="660" y="338" fill="#7dcfff" font-family="Inter,Arial,sans-serif" font-size="22" font-weight="700">:8080</text>
+
+  <rect x="140" y="445" width="560" height="360" rx="18" fill="#1e202e" stroke="#7aa2f7" stroke-width="4"/>
+  <rect x="140" y="445" width="560" height="58" rx="18" fill="#16161e" stroke="#7aa2f7" stroke-width="0"/>
+  <text x="178" y="482" fill="#c0caf5" font-family="Inter,Arial,sans-serif" font-size="24" font-weight="700">python3 :8080</text>
+  <text x="520" y="482" fill="#7dcfff" font-family="Inter,Arial,sans-serif" font-size="22">Visit site</text>
+  <rect x="165" y="535" width="510" height="235" rx="10" fill="#e6e9f5"/>
+  <text x="210" y="660" fill="#16161e" font-family="Inter,Arial,sans-serif" font-size="32" font-weight="700">iframe preview</text>
+
+  <text x="120" y="900" fill="#f7768e" font-family="Inter,Arial,sans-serif" font-size="32" font-weight="700">Problems</text>
+  <text x="120" y="950" fill="#c0caf5" font-family="Inter,Arial,sans-serif" font-size="26">Overlay geometry lived inside ForwardChips.</text>
+  <text x="120" y="992" fill="#c0caf5" font-family="Inter,Arial,sans-serif" font-size="26">Dense tools competed with the transcript.</text>
+
+  <rect x="1090" y="245" width="820" height="780" rx="18" fill="#1e202e" stroke="#3d4666" stroke-width="3"/>
+  <rect x="1130" y="295" width="740" height="72" rx="10" fill="#16161e" stroke="#565f89" stroke-width="2"/>
+  <text x="1155" y="342" fill="#c0caf5" font-family="Inter,Arial,sans-serif" font-size="28" font-weight="700">Session header</text>
+  <rect x="1658" y="314" width="112" height="34" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="1678" y="338" fill="#7dcfff" font-family="Inter,Arial,sans-serif" font-size="22" font-weight="700">:8080</text>
+
+  <rect x="1130" y="420" width="340" height="485" rx="14" fill="#16161e" stroke="#565f89" stroke-width="2"/>
+  <text x="1165" y="470" fill="#7aa2f7" font-family="Inter,Arial,sans-serif" font-size="26" font-weight="700">session-view-chat</text>
+  <rect x="1165" y="520" width="270" height="68" rx="10" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+  <rect x="1165" y="615" width="270" height="68" rx="10" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+  <rect x="1165" y="710" width="270" height="68" rx="10" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+  <rect x="1165" y="825" width="270" height="42" rx="8" fill="#1e202e" stroke="#7aa2f7" stroke-width="2"/>
+  <text x="1190" y="852" fill="#a9b1d6" font-family="Inter,Arial,sans-serif" font-size="20">prompt bar</text>
+
+  <rect x="1495" y="420" width="375" height="485" rx="14" fill="#16161e" stroke="#7aa2f7" stroke-width="4"/>
+  <rect x="1495" y="420" width="375" height="58" rx="14" fill="#1e202e"/>
+  <circle cx="1530" cy="449" r="8" fill="#9ece6a"/>
+  <text x="1555" y="457" fill="#c0caf5" font-family="Inter,Arial,sans-serif" font-size="22" font-weight="700">ForwardSurface</text>
+  <text x="1740" y="457" fill="#7dcfff" font-family="Inter,Arial,sans-serif" font-size="18">Visit</text>
+  <rect x="1525" y="510" width="315" height="340" rx="10" fill="#e6e9f5"/>
+  <text x="1562" y="690" fill="#16161e" font-family="Inter,Arial,sans-serif" font-size="30" font-weight="700">forward iframe</text>
+
+  <path d="M910 620 C990 620 1010 620 1090 620" stroke="#e0af68" stroke-width="7" fill="none"/>
+  <path d="M1060 594 L1105 620 L1060 646 Z" fill="#e0af68"/>
+
+  <text x="1130" y="980" fill="#9ece6a" font-family="Inter,Arial,sans-serif" font-size="30" font-weight="700">What changed</text>
+  <text x="1130" y="1028" fill="#c0caf5" font-family="Inter,Arial,sans-serif" font-size="24">ForwardChips emits ForwardInfo; SessionView owns the surface.</text>
+  <text x="1130" y="1068" fill="#c0caf5" font-family="Inter,Arial,sans-serif" font-size="24">ForwardSurface reuses the existing /forwards/open handoff URL.</text>
+  <text x="1130" y="1108" fill="#c0caf5" font-family="Inter,Arial,sans-serif" font-size="24">Mobile stacks the surface under chat instead of floating above it.</text>
+</svg>

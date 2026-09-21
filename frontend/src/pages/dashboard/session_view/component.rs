@@ -14,8 +14,9 @@ use crate::components::{
     MessageGroupRenderer,
 };
 use crate::utils::{self, On401};
+use gloo::events::EventListener;
 use gloo::timers::callback::Timeout;
-use shared::api::TurnMetricsResponse;
+use shared::api::{ForwardInfo, TurnMetricsResponse};
 use shared::{
     ClientToServer, DeliveryMeta, PortalMeta, ReasoningEffort, SendMode, SessionInfo, TurnMetrics,
 };
@@ -24,10 +25,11 @@ use uuid::Uuid;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
-use web_sys::Element;
+use web_sys::{Element, KeyboardEvent, MouseEvent};
 use yew::prelude::*;
 
 use super::forward_chips::ForwardChips;
+use super::forward_surface::ForwardSurface;
 use super::helpers::{
     autoscroll_transition, classify_output_msg_type, clear_completed_tools,
     enrich_codex_file_change_permission, ephemeral_summary, format_tool_elapsed, is_awaiting,
@@ -38,6 +40,9 @@ use super::input_bar::{InputBar, InputBarInbound};
 use super::outbox::Outbox;
 use super::permission_handler::{
     build_permission_response, PermissionHandler, PermissionResponseKind,
+};
+use super::session_surface::{
+    clamp_split_percent, load_split_percent, save_split_percent, SessionSurface, SessionSurfaceMode,
 };
 use super::state::{
     counts_toward_render_limit, insert_turn_metrics_sorted, push_message_with_cost_limit,
@@ -102,6 +107,13 @@ fn optimistic_user_message(
     )
 }
 
+fn is_mobile_surface_viewport() -> bool {
+    web_sys::window()
+        .and_then(|window| window.inner_width().ok())
+        .and_then(|value| value.as_f64())
+        .is_some_and(|width| width < 700.0)
+}
+
 /// Messages for the SessionView component
 pub enum SessionViewMsg {
     LoadHistory(Vec<MessageData>, Option<String>),
@@ -160,6 +172,18 @@ pub enum SessionViewMsg {
         file_size: u64,
         reasoning_effort: Option<ReasoningEffort>,
     },
+    /// Open a session-owned surface for the selected forwarded app.
+    OpenForwardSurface(ForwardInfo),
+    /// The forward chip strip fetched the current forward set.
+    ForwardsLoaded(Vec<ForwardInfo>),
+    /// Close the active session surface.
+    CloseSurface,
+    ToggleSurfaceCollapsed,
+    ToggleSurfaceMode,
+    SurfaceResizeStart(MouseEvent),
+    SurfaceResizeTo(f64),
+    SurfaceResizeEnd,
+    EscapeSurface,
     /// The upload-commit wait expired (old proxy or very slow link):
     /// dispatch the held prompt anyway — pre-transactional behavior.
     UploadCommitTimeout,
@@ -284,6 +308,12 @@ pub struct SessionView {
     /// Monotonic tick bumped on every `ForwardsChanged` frame; passed to the
     /// forward-chip strip as a prop so it refetches (docs/PORT_FORWARDING.md).
     forwards_refresh: u32,
+    active_surface: Option<SessionSurface>,
+    surface_split_percent: f64,
+    body_ref: NodeRef,
+    resize_listeners: Vec<EventListener>,
+    #[allow(dead_code)]
+    surface_escape_listener: Option<EventListener>,
     show_fork_dialog: bool,
 }
 
@@ -296,6 +326,19 @@ impl Component for SessionView {
         let session_id = ctx.props().session.id;
         let agent_type = ctx.props().session.agent_type;
         let on_awaiting_change = ctx.props().on_awaiting_change.clone();
+        let escape_link = ctx.link().clone();
+        let surface_escape_listener = web_sys::window().and_then(|window| {
+            window.document().map(|document| {
+                EventListener::new(&document, "keydown", move |event| {
+                    let Some(event) = event.dyn_ref::<KeyboardEvent>() else {
+                        return;
+                    };
+                    if event.key() == "Escape" {
+                        escape_link.send_message(SessionViewMsg::EscapeSurface);
+                    }
+                })
+            })
+        });
 
         // Hydrate the per-turn metrics buffer in its own task, off the
         // history→WebSocket critical path (#1915): metrics only feed the
@@ -380,11 +423,21 @@ impl Component for SessionView {
             ephemeral_status: None,
             muse_live_turn: MuseLiveTurn::default(),
             forwards_refresh: 0,
+            active_surface: None,
+            surface_split_percent: load_split_percent(session_id),
+            body_ref: NodeRef::default(),
+            resize_listeners: Vec::new(),
+            surface_escape_listener,
             show_fork_dialog: false,
         }
     }
 
     fn changed(&mut self, ctx: &Context<Self>, old_props: &Self::Properties) -> bool {
+        if ctx.props().session.id != old_props.session.id {
+            self.active_surface = None;
+            self.surface_split_percent = load_split_percent(ctx.props().session.id);
+        }
+
         // Detect interrupt signal change on the focused session. Textarea
         // focus on focused-transition is owned by `InputBar` (it sees the
         // `focused` prop directly through its own `changed()`).
@@ -571,6 +624,109 @@ impl Component for SessionView {
                 file_size,
                 reasoning_effort,
             } => self.handle_secret_drop(ctx, upload_id, file_size, reasoning_effort),
+            SessionViewMsg::OpenForwardSurface(forward) => {
+                let mode = if is_mobile_surface_viewport() {
+                    SessionSurfaceMode::Fullscreen
+                } else {
+                    SessionSurfaceMode::Split
+                };
+                self.active_surface = Some(SessionSurface::from_forward(
+                    ctx.props().session.id,
+                    forward,
+                    mode,
+                ));
+                true
+            }
+            SessionViewMsg::ForwardsLoaded(forwards) => {
+                let Some(surface) = self.active_surface.as_mut() else {
+                    return false;
+                };
+                let Some(current) = surface.forward() else {
+                    return false;
+                };
+                if let Some(next) = forwards.iter().find(|forward| forward.port == current.port) {
+                    if next != current {
+                        surface.update_forward(next.clone());
+                        return true;
+                    }
+                    return false;
+                }
+                self.active_surface = None;
+                true
+            }
+            SessionViewMsg::CloseSurface => {
+                self.active_surface = None;
+                self.resize_listeners.clear();
+                true
+            }
+            SessionViewMsg::ToggleSurfaceCollapsed => {
+                let Some(surface) = self.active_surface.as_mut() else {
+                    return false;
+                };
+                surface.collapsed = !surface.collapsed;
+                true
+            }
+            SessionViewMsg::ToggleSurfaceMode => {
+                let Some(surface) = self.active_surface.as_mut() else {
+                    return false;
+                };
+                surface.mode = match surface.mode {
+                    SessionSurfaceMode::Split => SessionSurfaceMode::Fullscreen,
+                    SessionSurfaceMode::Fullscreen => SessionSurfaceMode::Split,
+                };
+                true
+            }
+            SessionViewMsg::SurfaceResizeStart(event) => {
+                event.prevent_default();
+                if self.active_surface.is_none() {
+                    return false;
+                }
+                let Some(element) = self.body_ref.cast::<Element>() else {
+                    return false;
+                };
+                let rect = element.get_bounding_client_rect();
+                let vertical = rect.width() < 900.0;
+                let link = ctx.link().clone();
+                let move_listener =
+                    EventListener::new(&gloo::utils::window(), "mousemove", move |event| {
+                        let Some(event) = event.dyn_ref::<MouseEvent>() else {
+                            return;
+                        };
+                        let raw_percent = if vertical {
+                            ((rect.bottom() - f64::from(event.client_y())) / rect.height()) * 100.0
+                        } else {
+                            ((rect.right() - f64::from(event.client_x())) / rect.width()) * 100.0
+                        };
+                        link.send_message(SessionViewMsg::SurfaceResizeTo(raw_percent));
+                    });
+                let link = ctx.link().clone();
+                let up_listener =
+                    EventListener::new(&gloo::utils::window(), "mouseup", move |_| {
+                        link.send_message(SessionViewMsg::SurfaceResizeEnd);
+                    });
+                self.resize_listeners = vec![move_listener, up_listener];
+                false
+            }
+            SessionViewMsg::SurfaceResizeTo(percent) => {
+                self.surface_split_percent = clamp_split_percent(percent);
+                true
+            }
+            SessionViewMsg::SurfaceResizeEnd => {
+                self.resize_listeners.clear();
+                save_split_percent(ctx.props().session.id, self.surface_split_percent);
+                false
+            }
+            SessionViewMsg::EscapeSurface => {
+                let Some(surface) = self.active_surface.as_mut() else {
+                    return false;
+                };
+                if surface.mode == SessionSurfaceMode::Fullscreen {
+                    surface.mode = SessionSurfaceMode::Split;
+                } else {
+                    self.active_surface = None;
+                }
+                true
+            }
             SessionViewMsg::UploadCommitTimeout => {
                 if self.pending_secret_drop.take().is_some() {
                     self.push_upload_error("secret upload commit timed out");
@@ -752,6 +908,8 @@ impl Component for SessionView {
                         session_id={ctx.props().session.id}
                         is_owner={is_forward_owner}
                         refresh={self.forwards_refresh}
+                        on_open={ctx.link().callback(SessionViewMsg::OpenForwardSurface)}
+                        on_loaded={ctx.link().callback(SessionViewMsg::ForwardsLoaded)}
                     />
                     <span class={status_class}>{ ctx.props().session.status.as_str() }</span>
                     if ctx.props().session.my_role == shared::SessionRole::Owner
@@ -765,57 +923,96 @@ impl Component for SessionView {
                         >{ "Fork…" }</button>
                     }
                 </div>
-                <div class="session-view-scroll-area">
-                    <div class="session-view-messages" ref={self.messages_ref.clone()}>
-                        if let Some(source_id) = ctx.props().session.forked_from_session_id {
-                            <div class="fork-lineage-card">
-                                { "Forked from " }
-                                <a href={format!("/dashboard?session={source_id}")}>{ &source_id.to_string()[..8] }</a>
-                                if let Some(point) = &ctx.props().session.fork_point_turn_id {
-                                    <span>{ format!(" · turn {point}") }</span>
+                <div
+                    ref={self.body_ref.clone()}
+                    class={classes!(
+                    "session-view-body",
+                    self.active_surface.is_some().then_some("has-surface"),
+                    self.active_surface.as_ref().and_then(|surface| {
+                        (surface.mode == SessionSurfaceMode::Fullscreen).then_some("fullscreen")
+                    }),
+                    self.active_surface.as_ref().and_then(|surface| {
+                        surface.collapsed.then_some("surface-collapsed")
+                    }),
+                    )}
+                    style={format!("--surface-basis: {:.1}%;", self.surface_split_percent)}
+                >
+                    <div class="session-view-chat">
+                        <div class="session-view-scroll-area">
+                            <div class="session-view-messages" ref={self.messages_ref.clone()}>
+                                if let Some(source_id) = ctx.props().session.forked_from_session_id {
+                                    <div class="fork-lineage-card">
+                                        { "Forked from " }
+                                        <a href={format!("/dashboard?session={source_id}")}>{ &source_id.to_string()[..8] }</a>
+                                        if let Some(point) = &ctx.props().session.fork_point_turn_id {
+                                            <span>{ format!(" · turn {point}") }</span>
+                                        }
+                                        <span>{ " · shared agent history remains on the source launcher" }</span>
+                                    </div>
                                 }
-                                <span>{ " · shared agent history remains on the source launcher" }</span>
+                                {
+                                    groups.into_iter().enumerate().map(|(i, group)| {
+                                        let key = group.key(i);
+                                        let metrics = group_metrics.get(i).cloned().flatten();
+                                        let thinking_start = thinking_starts.get(i).copied().unwrap_or(0);
+                                        let muse_live_events = if live_muse_group == Some(i) { self.muse_live_turn.events.clone() } else { Vec::new() };
+                                        html! { <MessageGroupRenderer {key} group={group} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} turn_metrics={metrics} {thinking_start} {muse_live_events} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} /> }
+                                    }).collect::<Html>()
+                                }
+                                { for self.pending_sends.iter().enumerate().map(|(i, message)| {
+                                    html! { <MessageRenderer key={format!("p{}", i)} message={message.clone()} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} /> }
+                                })}
+                                if let Some(tree) = unmatched_muse_tree {
+                                    <div class="claude-message muse-message muse-task-card muse-live-card">
+                                        <div class="message-header">
+                                            <span class="message-type-badge muse">{ "Muse" }</span>
+                                        </div>
+                                        <div class="message-body">
+                                            { crate::components::muse_renderer::render_task_tree(&tree) }
+                                        </div>
+                                    </div>
+                                }
+                                { self.render_active_tools() }
+                                { self.render_ephemeral_status() }
                             </div>
-                        }
-                        {
-                            groups.into_iter().enumerate().map(|(i, group)| {
-                                let key = group.key(i);
-                                let metrics = group_metrics.get(i).cloned().flatten();
-                                let thinking_start = thinking_starts.get(i).copied().unwrap_or(0);
-                                let muse_live_events = if live_muse_group == Some(i) { self.muse_live_turn.events.clone() } else { Vec::new() };
-                                html! { <MessageGroupRenderer {key} group={group} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} turn_metrics={metrics} {thinking_start} {muse_live_events} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} /> }
-                            }).collect::<Html>()
-                        }
-                        { for self.pending_sends.iter().enumerate().map(|(i, message)| {
-                            html! { <MessageRenderer key={format!("p{}", i)} message={message.clone()} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} /> }
-                        })}
-                        if let Some(tree) = unmatched_muse_tree {
-                            <div class="claude-message muse-message muse-task-card muse-live-card">
-                                <div class="message-header">
-                                    <span class="message-type-badge muse">{ "Muse" }</span>
-                                </div>
-                                <div class="message-body">
-                                    { crate::components::muse_renderer::render_task_tree(&tree) }
-                                </div>
-                            </div>
-                        }
-                        { self.render_active_tools() }
-                        { self.render_ephemeral_status() }
+                            if !is_tailing {
+                                <button
+                                    class="jump-to-live-pill"
+                                    onclick={on_jump_to_live}
+                                    title="Resume live tailing of new messages"
+                                >
+                                    { "Jump to live ↓" }
+                                </button>
+                            }
+                            { self.render_tasks_panel(ctx) }
+                        </div>
+
+                        { self.render_permission_handler(ctx) }
+                        { self.render_input_bar(ctx) }
                     </div>
-                    if !is_tailing {
-                        <button
-                            class="jump-to-live-pill"
-                            onclick={on_jump_to_live}
-                            title="Resume live tailing of new messages"
-                        >
-                            { "Jump to live ↓" }
-                        </button>
+                    if let Some(surface) = self.active_surface.clone() {
+                        if surface.mode == SessionSurfaceMode::Split && !surface.collapsed {
+                            <div
+                                class="session-surface-resize-handle"
+                                role="separator"
+                                aria-orientation="vertical"
+                                title="Resize surface"
+                                onmousedown={ctx.link().callback(SessionViewMsg::SurfaceResizeStart)}
+                            />
+                        }
+                        if let Some(forward) = surface.forward().cloned() {
+                            <ForwardSurface
+                                session_id={ctx.props().session.id}
+                                {surface}
+                                {forward}
+                                on_close={ctx.link().callback(|_| SessionViewMsg::CloseSurface)}
+                                on_toggle_collapsed={ctx.link().callback(|_| SessionViewMsg::ToggleSurfaceCollapsed)}
+                                on_toggle_mode={ctx.link().callback(|_| SessionViewMsg::ToggleSurfaceMode)}
+                            />
+                        }
                     }
-                    { self.render_tasks_panel(ctx) }
                 </div>
 
-                { self.render_permission_handler(ctx) }
-                { self.render_input_bar(ctx) }
                 if self.show_fork_dialog {
                     <ForkDialog
                         session={ctx.props().session.clone()}

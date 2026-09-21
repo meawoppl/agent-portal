@@ -91,7 +91,7 @@ dependencies = [
 
 [[package]]
 name = "agent-portal"
-version = "2.14.11"
+version = "2.14.13"
 dependencies = [
  "anyhow",
  "chrono",
@@ -123,7 +123,7 @@ dependencies = [
 
 [[package]]
 name = "agent-portal-mobile"
-version = "2.14.11"
+version = "2.14.13"
 dependencies = [
  "agent-portal-mobile-status-notification",
  "reqwest 0.12.28",
@@ -251,7 +251,7 @@ checksum = "d301b3b94cb4b2f23d7917810addbbaff90738e0ca2be692bd027e70d7e0330c"
 
 [[package]]
 name = "archive-format"
-version = "2.14.11"
+version = "2.14.13"
 dependencies = [
  "chrono",
  "object_store",
@@ -640,7 +640,7 @@ dependencies = [
 
 [[package]]
 name = "backend"
-version = "2.14.11"
+version = "2.14.13"
 dependencies = [
  "a2",
  "anyhow",
@@ -1157,9 +1157,9 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "claude-codes"
-version = "2.1.276"
+version = "2.1.278"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44b71c80f361cf1807affa2a79708b874244df9a3cc5f4ab1f2cb0b532ea5dc2"
+checksum = "08ebf6605f2025374eba822611467b95fe6335b8efc500c879a12d63710657f2"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1176,7 +1176,7 @@ dependencies = [
 
 [[package]]
 name = "claude-portal"
-version = "2.14.11"
+version = "2.14.13"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1208,7 +1208,7 @@ dependencies = [
 
 [[package]]
 name = "claude-session-lib"
-version = "2.14.11"
+version = "2.14.13"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1273,7 +1273,7 @@ dependencies = [
 
 [[package]]
 name = "codex-session-lib"
-version = "2.14.11"
+version = "2.14.13"
 dependencies = [
  "chrono",
  "claude-codes",
@@ -2475,7 +2475,7 @@ dependencies = [
 
 [[package]]
 name = "frontend"
-version = "2.14.11"
+version = "2.14.13"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -4500,7 +4500,7 @@ dependencies = [
 
 [[package]]
 name = "muse-session-lib"
-version = "2.14.11"
+version = "2.14.13"
 dependencies = [
  "chrono",
  "claude-codes",
@@ -5430,7 +5430,7 @@ dependencies = [
 
 [[package]]
 name = "portal-auth"
-version = "2.14.11"
+version = "2.14.13"
 dependencies = [
  "anyhow",
  "colored",
@@ -5445,7 +5445,7 @@ dependencies = [
 
 [[package]]
 name = "portal-stt"
-version = "2.14.11"
+version = "2.14.13"
 dependencies = [
  "anyhow",
  "aws-credential-types",
@@ -5466,7 +5466,7 @@ dependencies = [
 
 [[package]]
 name = "portal-update"
-version = "2.14.11"
+version = "2.14.13"
 dependencies = [
  "anyhow",
  "hex",
@@ -6620,7 +6620,7 @@ dependencies = [
 
 [[package]]
 name = "session-lib"
-version = "2.14.11"
+version = "2.14.13"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -6709,7 +6709,7 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "2.14.11"
+version = "2.14.13"
 dependencies = [
  "base64 0.22.1",
  "chrono",

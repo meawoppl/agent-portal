@@ -36,6 +36,55 @@
     min-width: 0; /* Prevent flex child from overflowing parent on rotation */
 }
 
+.session-view-body {
+    --surface-basis: 50%;
+
+    flex: 1;
+    display: flex;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.session-view-chat {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    min-width: 0;
+}
+
+.session-view-body.has-surface .session-view-chat {
+    flex: 1 1 calc(100% - var(--surface-basis));
+}
+
+.session-view-body.fullscreen .session-view-chat {
+    display: none;
+}
+
+.session-view-body.surface-collapsed .session-view-chat {
+    flex-basis: auto;
+}
+
+.session-surface-resize-handle {
+    flex: 0 0 0.45rem;
+    cursor: col-resize;
+    position: relative;
+    background: transparent;
+}
+
+.session-surface-resize-handle::before {
+    content: "";
+    position: absolute;
+    inset: 0.5rem 0.18rem;
+    border-radius: 999px;
+    background: rgba(86, 95, 137, 0.55);
+}
+
+.session-surface-resize-handle:hover::before {
+    background: rgba(122, 162, 247, 0.85);
+}
+
 @keyframes slideIn {
     from {
         opacity: 0;
@@ -149,12 +198,18 @@
     white-space: nowrap;
 }
 
-.session-view-header .forward-chip a {
+.session-view-header .forward-chip-open {
+    appearance: none;
+    background: none;
+    border: 0;
+    padding: 0;
+    font: inherit;
     color: var(--text-teal, #7dcfff);
     text-decoration: none;
+    cursor: pointer;
 }
 
-.session-view-header .forward-chip a:hover {
+.session-view-header .forward-chip-open:hover {
     text-decoration: underline;
 }
 
@@ -167,7 +222,7 @@
     animation: forward-chip-breathe 2.8s ease-in-out infinite;
 }
 
-.session-view-header .forward-chip.is-up a {
+.session-view-header .forward-chip.is-up .forward-chip-open {
     color: var(--success, #9ece6a);
 }
 
@@ -195,7 +250,7 @@
     background: rgba(247, 118, 142, 0.12);
 }
 
-.session-view-header .forward-chip.is-down a {
+.session-view-header .forward-chip.is-down .forward-chip-open {
     color: var(--error, #f7768e);
 }
 
@@ -213,158 +268,137 @@
     color: var(--error);
 }
 
-/* Inline preview overlay for the session's forward (opened from the chip).
-   left/top/width come from inline style (draggable by the title bar,
-   resizable by the corner grip); max-width keeps phones sane. */
-.forward-preview {
-    position: fixed;
-    z-index: 900;
-    max-width: calc(100vw - 1rem);
+.session-forward-surface {
+    flex: 0 0 var(--surface-basis);
+    position: relative;
+    min-width: min(28rem, 50vw);
+    max-width: 70%;
     display: flex;
     flex-direction: column;
+    min-height: 0;
     background: var(--bg-darker);
-
-    /* Accent edge: the default --border blends into the dark page behind a
-       floating window; the accent line keeps the panel readable as a
-       distinct surface. */
-    border: 1px solid rgba(122, 162, 247, 0.55);
-    border-radius: 10px;
-    box-shadow:
-        0 0 0 1px rgba(122, 162, 247, 0.15),
-        0 12px 32px rgba(0, 0, 0, 0.55);
-    overflow: hidden;
-
-    /* Genie in: expand out of the launching chip (transform-origin is set
-       inline to the chip's position). */
-    animation: forward-preview-in 0.18s ease-out;
+    border-left: 1px solid rgba(122, 162, 247, 0.45);
+    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.22);
 }
 
-/* Genie out: collapse back into the chip; unmount happens on animationend
-   (with a timer fallback for reduced-motion, where this never plays). */
-.forward-preview.closing {
-    animation: forward-preview-out 0.16s ease-in forwards;
-    pointer-events: none;
+.session-forward-surface.collapsed {
+    flex-basis: 3rem;
+    min-width: 3rem;
+    max-width: 3rem;
 }
 
-@keyframes forward-preview-in {
-    from {
-        transform: scale(0.05);
-        opacity: 0.25;
-    }
-
-    to {
-        transform: scale(1);
-        opacity: 1;
-    }
+.session-forward-surface.fullscreen {
+    flex: 1 1 100%;
+    min-width: 0;
+    max-width: none;
+    border-left: 0;
+    box-shadow: none;
 }
 
-@keyframes forward-preview-out {
-    from {
-        transform: scale(1);
-        opacity: 1;
-    }
-
-    to {
-        transform: scale(0.05);
-        opacity: 0;
-    }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .forward-preview,
-    .forward-preview.closing {
-        animation: none;
-    }
-}
-
-.forward-preview-bar {
+.session-forward-toolbar {
+    flex: 0 0 auto;
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    padding: 0.4rem 0.6rem;
+    min-height: 2.4rem;
+    padding: 0.35rem 0.5rem;
     border-bottom: 1px solid var(--border);
+    background: rgba(0, 0, 0, 0.18);
 }
 
-.forward-preview-title {
-    flex: 1;
-    font-family: monospace;
-    font-size: 0.8rem;
+.surface-icon-button {
+    appearance: none;
+    flex: 0 0 auto;
+    width: 1.6rem;
+    height: 1.6rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
     color: var(--text-secondary);
+    cursor: pointer;
+    line-height: 1;
+}
+
+.surface-icon-button:hover {
+    color: var(--text-primary);
+    border-color: var(--border);
+    background: rgba(122, 162, 247, 0.08);
+}
+
+.surface-close-button:hover {
+    color: var(--error);
+    border-color: rgba(247, 118, 142, 0.45);
+    background: rgba(247, 118, 142, 0.08);
+}
+
+.surface-status {
+    flex: 0 0 auto;
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 999px;
+    background: var(--text-muted);
+    opacity: 0.7;
+}
+
+.surface-status.is-up {
+    background: var(--success, #9ece6a);
+    opacity: 1;
+}
+
+.surface-status.is-down {
+    background: var(--error, #f7768e);
+    opacity: 1;
+}
+
+.session-forward-title {
+    flex: 1 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    cursor: move;
-
-    /* Prevent text-selection/scroll gestures from hijacking the drag. */
-    user-select: none;
-    touch-action: none;
+    color: var(--text-secondary);
+    font: 0.8rem var(--font-mono, monospace);
 }
 
-.forward-preview-visit {
+.session-forward-visit {
+    flex: 0 0 auto;
     color: var(--text-teal, #7dcfff);
     font-size: 0.8rem;
     text-decoration: none;
     white-space: nowrap;
 }
 
-.forward-preview-visit:hover {
+.session-forward-visit:hover {
     text-decoration: underline;
 }
 
-.forward-preview-btn {
-    background: none;
-    border: none;
-    color: var(--text-secondary);
-    cursor: pointer;
-    font-size: 0.95rem;
-    padding: 0 0.2rem;
-    line-height: 1;
-}
-
-.forward-preview-close:hover {
-    color: var(--error);
-}
-
-/* Kept mounted while collapsed (inline height 0) so the embedded app keeps
-   state; height otherwise comes from inline style (resizable). */
-.forward-preview-frame {
+.session-forward-frame {
+    flex: 1 1 auto;
     display: block;
     width: 100%;
+    min-height: 0;
     border: 0;
     background: #fff;
 }
 
-/* During drag/resize the iframe must not swallow pointer events. */
-.forward-preview-frame.interacting {
-    pointer-events: none;
+.session-forward-surface.collapsed .surface-status,
+.session-forward-surface.collapsed .session-forward-title,
+.session-forward-surface.collapsed .surface-mode-button,
+.session-forward-surface.collapsed .session-forward-visit,
+.session-forward-surface.collapsed .surface-close-button {
+    display: none;
 }
 
-.forward-preview-grip {
+.session-forward-surface.collapsed .session-forward-frame {
     position: absolute;
-    right: 0;
-    bottom: 0;
-    width: 16px;
-    height: 16px;
-    cursor: nwse-resize;
-    touch-action: none;
-
-    /* Two diagonal ticks, echoing the platform resize affordance. */
-    background: linear-gradient(
-        135deg,
-        transparent 55%,
-        var(--text-secondary) 55%,
-        var(--text-secondary) 62%,
-        transparent 62%,
-        transparent 75%,
-        var(--text-secondary) 75%,
-        var(--text-secondary) 82%,
-        transparent 82%
-    );
-    opacity: 0.7;
-}
-
-.forward-preview-grip:hover {
-    opacity: 1;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
 }
 
 .session-view-header .status {

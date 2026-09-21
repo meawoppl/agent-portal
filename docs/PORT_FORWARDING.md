@@ -553,19 +553,25 @@ upgrade/concurrency smoke test, not on green CI alone.
   proxy resolves the owning process via the `listeners` crate (same-user
   `/proc`/libproc lookup) and includes it in `ForwardStatus.process`; it
   surfaces as `ForwardInfo.process`, in the chip tooltip (`python3 — {url}`)
-  and the preview overlay's title bar. A name change on the same port (app
-  swap) counts as a verdict change and re-reports.
-- **Clicking the chip opens an inline preview overlay**: a fixed collapsible
-  panel containing an `<iframe>` pointed at the `open` handoff endpoint, with
-  a "Visit site ↗" link that opens the full page in a new tab and a collapse
-  toggle that hides the frame without unmounting it (the embedded app keeps
-  running). Auth inside the iframe rides the normal handoff → `portal_fwd`
-  cookie flow; that cookie is `SameSite=Lax`, which is sent because the
-  forward origin and the portal are same-*site* (same eTLD+1) in production.
-  On `*.localhost` dev domains browsers treat the two as cross-site, so the
-  overlay's iframe can't authenticate there — public forwards still preview,
-  private ones need "Visit site". The reverse proxy re-scopes upstream
-  framing policy so the portal may embed (see Response rewriting).
+  and the split surface's title bar. A name change on the same port (app swap)
+  counts as a verdict change and re-reports.
+- **Clicking the chip opens a session split surface**: the chat stays mounted
+  in the left pane and the forwarded app opens in a right-side `<iframe>`
+  pointed at the `open` handoff endpoint. The surface defaults to half the
+  session width on desktop, can be resized between 30% and 70%, stacks under the
+  chat on narrow/tablet screens, and opens directly in full-screen surface mode
+  on phone-sized viewports. The split size is remembered per session. Collapse
+  hides the surface chrome while keeping the iframe mounted so app state
+  survives; full-screen mode can be exited with Escape, and a second Escape
+  closes the surface. The toolbar includes close/collapse/full-screen controls
+  plus a "Visit site ↗" link for opening the full forward origin in a new tab.
+  Auth inside the iframe rides the normal handoff → `portal_fwd` cookie flow;
+  that cookie is `SameSite=Lax`, which is sent because the forward origin and
+  the portal are same-*site* (same eTLD+1) in production. On `*.localhost` dev
+  domains browsers treat the two as cross-site, so the split iframe can't
+  authenticate there — public forwards still preview, private ones need "Visit
+  site". The reverse proxy re-scopes upstream framing policy so the portal may
+  embed (see Response rewriting).
 - **Settings ▸ Forwarding** lists the caller's active forwards across their
   sessions (`GET /api/forwards`, owner-scoped) with a per-forward public/private
   toggle (`PATCH …/forwards/public`), so the owner can opt a forward into
