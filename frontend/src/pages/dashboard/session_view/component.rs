@@ -15,7 +15,7 @@ use crate::components::{
 };
 use crate::utils::{self, On401};
 use gloo::timers::callback::Timeout;
-use shared::api::TurnMetricsResponse;
+use shared::api::{ForwardInfo, TurnMetricsResponse};
 use shared::{
     ClientToServer, DeliveryMeta, PortalMeta, ReasoningEffort, SendMode, SessionInfo, TurnMetrics,
 };
@@ -28,6 +28,7 @@ use web_sys::Element;
 use yew::prelude::*;
 
 use super::forward_chips::ForwardChips;
+use super::forward_surface::ForwardSurface;
 use super::helpers::{
     autoscroll_transition, classify_output_msg_type, clear_completed_tools,
     enrich_codex_file_change_permission, ephemeral_summary, format_tool_elapsed, is_awaiting,
@@ -160,6 +161,10 @@ pub enum SessionViewMsg {
         file_size: u64,
         reasoning_effort: Option<ReasoningEffort>,
     },
+    /// Open a session-owned surface for the selected forwarded app.
+    OpenForwardSurface(ForwardInfo),
+    /// Close the active forwarded-app surface.
+    CloseForwardSurface,
     /// The upload-commit wait expired (old proxy or very slow link):
     /// dispatch the held prompt anyway — pre-transactional behavior.
     UploadCommitTimeout,
@@ -284,6 +289,7 @@ pub struct SessionView {
     /// Monotonic tick bumped on every `ForwardsChanged` frame; passed to the
     /// forward-chip strip as a prop so it refetches (docs/PORT_FORWARDING.md).
     forwards_refresh: u32,
+    active_forward_surface: Option<ForwardInfo>,
     show_fork_dialog: bool,
 }
 
@@ -380,11 +386,16 @@ impl Component for SessionView {
             ephemeral_status: None,
             muse_live_turn: MuseLiveTurn::default(),
             forwards_refresh: 0,
+            active_forward_surface: None,
             show_fork_dialog: false,
         }
     }
 
     fn changed(&mut self, ctx: &Context<Self>, old_props: &Self::Properties) -> bool {
+        if ctx.props().session.id != old_props.session.id {
+            self.active_forward_surface = None;
+        }
+
         // Detect interrupt signal change on the focused session. Textarea
         // focus on focused-transition is owned by `InputBar` (it sees the
         // `focused` prop directly through its own `changed()`).
@@ -571,6 +582,14 @@ impl Component for SessionView {
                 file_size,
                 reasoning_effort,
             } => self.handle_secret_drop(ctx, upload_id, file_size, reasoning_effort),
+            SessionViewMsg::OpenForwardSurface(forward) => {
+                self.active_forward_surface = Some(forward);
+                true
+            }
+            SessionViewMsg::CloseForwardSurface => {
+                self.active_forward_surface = None;
+                true
+            }
             SessionViewMsg::UploadCommitTimeout => {
                 if self.pending_secret_drop.take().is_some() {
                     self.push_upload_error("secret upload commit timed out");
@@ -752,6 +771,7 @@ impl Component for SessionView {
                         session_id={ctx.props().session.id}
                         is_owner={is_forward_owner}
                         refresh={self.forwards_refresh}
+                        on_open={ctx.link().callback(SessionViewMsg::OpenForwardSurface)}
                     />
                     <span class={status_class}>{ ctx.props().session.status.as_str() }</span>
                     if ctx.props().session.my_role == shared::SessionRole::Owner
@@ -765,57 +785,72 @@ impl Component for SessionView {
                         >{ "Fork…" }</button>
                     }
                 </div>
-                <div class="session-view-scroll-area">
-                    <div class="session-view-messages" ref={self.messages_ref.clone()}>
-                        if let Some(source_id) = ctx.props().session.forked_from_session_id {
-                            <div class="fork-lineage-card">
-                                { "Forked from " }
-                                <a href={format!("/dashboard?session={source_id}")}>{ &source_id.to_string()[..8] }</a>
-                                if let Some(point) = &ctx.props().session.fork_point_turn_id {
-                                    <span>{ format!(" · turn {point}") }</span>
+                <div class={classes!(
+                    "session-view-body",
+                    self.active_forward_surface.is_some().then_some("has-surface"),
+                )}>
+                    <div class="session-view-chat">
+                        <div class="session-view-scroll-area">
+                            <div class="session-view-messages" ref={self.messages_ref.clone()}>
+                                if let Some(source_id) = ctx.props().session.forked_from_session_id {
+                                    <div class="fork-lineage-card">
+                                        { "Forked from " }
+                                        <a href={format!("/dashboard?session={source_id}")}>{ &source_id.to_string()[..8] }</a>
+                                        if let Some(point) = &ctx.props().session.fork_point_turn_id {
+                                            <span>{ format!(" · turn {point}") }</span>
+                                        }
+                                        <span>{ " · shared agent history remains on the source launcher" }</span>
+                                    </div>
                                 }
-                                <span>{ " · shared agent history remains on the source launcher" }</span>
+                                {
+                                    groups.into_iter().enumerate().map(|(i, group)| {
+                                        let key = group.key(i);
+                                        let metrics = group_metrics.get(i).cloned().flatten();
+                                        let thinking_start = thinking_starts.get(i).copied().unwrap_or(0);
+                                        let muse_live_events = if live_muse_group == Some(i) { self.muse_live_turn.events.clone() } else { Vec::new() };
+                                        html! { <MessageGroupRenderer {key} group={group} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} turn_metrics={metrics} {thinking_start} {muse_live_events} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} /> }
+                                    }).collect::<Html>()
+                                }
+                                { for self.pending_sends.iter().enumerate().map(|(i, message)| {
+                                    html! { <MessageRenderer key={format!("p{}", i)} message={message.clone()} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} /> }
+                                })}
+                                if let Some(tree) = unmatched_muse_tree {
+                                    <div class="claude-message muse-message muse-task-card muse-live-card">
+                                        <div class="message-header">
+                                            <span class="message-type-badge muse">{ "Muse" }</span>
+                                        </div>
+                                        <div class="message-body">
+                                            { crate::components::muse_renderer::render_task_tree(&tree) }
+                                        </div>
+                                    </div>
+                                }
+                                { self.render_active_tools() }
+                                { self.render_ephemeral_status() }
                             </div>
-                        }
-                        {
-                            groups.into_iter().enumerate().map(|(i, group)| {
-                                let key = group.key(i);
-                                let metrics = group_metrics.get(i).cloned().flatten();
-                                let thinking_start = thinking_starts.get(i).copied().unwrap_or(0);
-                                let muse_live_events = if live_muse_group == Some(i) { self.muse_live_turn.events.clone() } else { Vec::new() };
-                                html! { <MessageGroupRenderer {key} group={group} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} turn_metrics={metrics} {thinking_start} {muse_live_events} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} /> }
-                            }).collect::<Html>()
-                        }
-                        { for self.pending_sends.iter().enumerate().map(|(i, message)| {
-                            html! { <MessageRenderer key={format!("p{}", i)} message={message.clone()} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} /> }
-                        })}
-                        if let Some(tree) = unmatched_muse_tree {
-                            <div class="claude-message muse-message muse-task-card muse-live-card">
-                                <div class="message-header">
-                                    <span class="message-type-badge muse">{ "Muse" }</span>
-                                </div>
-                                <div class="message-body">
-                                    { crate::components::muse_renderer::render_task_tree(&tree) }
-                                </div>
-                            </div>
-                        }
-                        { self.render_active_tools() }
-                        { self.render_ephemeral_status() }
+                            if !is_tailing {
+                                <button
+                                    class="jump-to-live-pill"
+                                    onclick={on_jump_to_live}
+                                    title="Resume live tailing of new messages"
+                                >
+                                    { "Jump to live ↓" }
+                                </button>
+                            }
+                            { self.render_tasks_panel(ctx) }
+                        </div>
+
+                        { self.render_permission_handler(ctx) }
+                        { self.render_input_bar(ctx) }
                     </div>
-                    if !is_tailing {
-                        <button
-                            class="jump-to-live-pill"
-                            onclick={on_jump_to_live}
-                            title="Resume live tailing of new messages"
-                        >
-                            { "Jump to live ↓" }
-                        </button>
+                    if let Some(forward) = self.active_forward_surface.clone() {
+                        <ForwardSurface
+                            session_id={ctx.props().session.id}
+                            {forward}
+                            on_close={ctx.link().callback(|_| SessionViewMsg::CloseForwardSurface)}
+                        />
                     }
-                    { self.render_tasks_panel(ctx) }
                 </div>
 
-                { self.render_permission_handler(ctx) }
-                { self.render_input_bar(ctx) }
                 if self.show_fork_dialog {
                     <ForkDialog
                         session={ctx.props().session.clone()}

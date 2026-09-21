@@ -198,6 +198,36 @@
         padding: 0.2rem 0.4rem;
     }
 
+    .session-view-body {
+        flex-direction: column;
+    }
+
+    .session-view-body.has-surface .session-view-chat {
+        min-height: 40%;
+        flex-basis: 40%;
+    }
+
+    .session-forward-surface {
+        flex: 1 1 60%;
+        min-width: 0;
+        max-width: none;
+        min-height: 14rem;
+        border-left: 0;
+        border-top: 1px solid rgba(122, 162, 247, 0.45);
+        box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.22);
+    }
+
+    .session-forward-surface.collapsed {
+        flex: 0 0 2.5rem;
+        min-width: 0;
+        max-width: none;
+        min-height: 2.5rem;
+    }
+
+    .session-forward-toolbar {
+        min-height: 2.5rem;
+    }
+
     /* ---- Messages area ---- */
     .session-view-messages {
         padding: 0.75rem;
