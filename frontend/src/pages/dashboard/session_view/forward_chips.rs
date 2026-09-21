@@ -25,6 +25,9 @@ pub struct ForwardChipsProps {
     pub refresh: u32,
     /// Open the selected forward in the session-owned surface host.
     pub on_open: Callback<ForwardInfo>,
+    /// Report the fetched list back to the surface host so an open surface can
+    /// update health/process metadata or close itself after revoke.
+    pub on_loaded: Callback<Vec<ForwardInfo>>,
 }
 
 #[function_component(ForwardChips)]
@@ -42,21 +45,26 @@ pub fn forward_chips(props: &ForwardChipsProps) -> Html {
     // Refetch on mount and whenever (session, refresh) changes.
     {
         let state = state.clone();
+        let on_loaded = props.on_loaded.clone();
         let session_id = props.session_id;
         use_effect_with((session_id, props.refresh), move |_| {
             let cancelled = Rc::new(Cell::new(false));
             let guard = cancelled.clone();
             spawn_local(async move {
-                let forwards = fetch_json::<SessionForwardsResponse>(
+                let result = fetch_json::<SessionForwardsResponse>(
                     &format!("/api/sessions/{session_id}/forwards"),
                     On401::Ignore,
                 )
-                .await
-                .map(|data| data.forwards)
-                .unwrap_or_default();
+                .await;
                 // Superseded by a newer (session, refresh) — don't write.
                 if !guard.get() {
-                    state.set((session_id, forwards));
+                    match result {
+                        Ok(data) => {
+                            on_loaded.emit(data.forwards.clone());
+                            state.set((session_id, data.forwards));
+                        }
+                        Err(_) => state.set((session_id, Vec::new())),
+                    }
                 }
             });
             // Cleanup runs before the next effect (deps changed) and on

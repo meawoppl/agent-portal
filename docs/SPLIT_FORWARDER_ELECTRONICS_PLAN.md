@@ -1,9 +1,8 @@
 # Split Forwarder and Electronics Session Plan
 
-This document lays out the path from today's forwarded-app overlay to a durable
-session work surface that can support PCB/electronics workflows inspired by
-Backplane and PasteBOM. It is a planning document: no code behavior is implied
-until the individual PRs land.
+This document lays out the durable session work surface used by forwarded apps
+today and the path toward PCB/electronics workflows inspired by Backplane and
+PasteBOM.
 
 ## Objective
 
@@ -33,17 +32,12 @@ Port forwarding already has strong transport and auth foundations:
 - owner-only revoke;
 - live port health and process-name reporting.
 
-The current UI is implemented inside `ForwardChips`. It owns fetch/refetch,
-chip rendering, overlay open state, overlay drag/resize state, and iframe
-mounting. That made sense for the first preview, but it is too much
-responsibility for the next stage.
+The session UI separates:
 
-The next step should separate:
-
-- forward discovery and chip controls;
-- generic session surface state;
-- iframe host chrome;
-- layout policy;
+- forward discovery and chip controls (`ForwardChips`);
+- generic session surface state (`SessionSurface`);
+- iframe host chrome (`ForwardSurface`);
+- split/fullscreen layout policy in `SessionView`;
 - future artifact surfaces that are not plain forwarded apps.
 
 ## Product Direction
@@ -71,10 +65,10 @@ Desktop:
 - Default split: 50% surface width for visual tools, 40-45% for simple web apps
   if the viewport is narrow.
 - User can resize between 30% and 70%.
-- Width is remembered per session and optionally per surface kind.
+- Width is remembered per session.
 - Closing the surface restores full-width chat.
-- Collapsing should hide the surface while keeping the iframe mounted when
-  possible, preserving app state.
+- Collapsing hides the surface while keeping the iframe mounted, preserving app
+  state.
 
 Tablet / narrow desktop:
 
@@ -84,8 +78,10 @@ Tablet / narrow desktop:
 
 Mobile:
 
-- Split view becomes full-screen surface mode.
-- A persistent back affordance returns to chat.
+- Split view becomes full-screen surface mode when a surface opens on a
+  phone-sized viewport.
+- The surface toolbar returns to split/chat, and Escape exits fullscreen before
+  closing the surface.
 - Inline cards remain tappable entry points.
 
 Multi-session dashboard:
@@ -100,7 +96,7 @@ Multi-session dashboard:
 
 Introduce a frontend concept named `SessionSurface`.
 
-Initial shape:
+Implemented shape:
 
 ```text
 SessionSurface
@@ -112,7 +108,6 @@ SessionSurface
   url
   port
   process
-  status
   open_mode: Split | Fullscreen
   collapsed
 ```
@@ -135,7 +130,7 @@ body.
 
 ## Forwarder Changes
 
-`ForwardChips` should become a small control strip:
+`ForwardChips` is a small control strip:
 
 - fetch forwards;
 - render chips and owner revoke button;
@@ -143,13 +138,13 @@ body.
 - no overlay geometry;
 - no iframe chrome.
 
-New component responsibilities:
+Component responsibilities:
 
-- `SessionSurfaceHost`: owns active surface selection and mode.
-- `SessionSplitLayout`: arranges transcript/prompt beside surface.
+- `SessionView`: owns active surface selection, mode, resize, and persistence.
 - `ForwardSurface`: renders the forward iframe, title, visit link, close,
-  collapse, and status.
-- `SurfaceToolbar`: shared chrome for future board/BOM/3D surfaces.
+  collapse, fullscreen, and status.
+- `SessionSurface`: carries the generic frontend state future board/BOM/3D
+  surfaces will reuse.
 
 The iframe should keep the existing handoff URL behavior. Auth, cookies, reverse
 proxy rewriting, and tunnel transport should not change in the split-view PR.
@@ -254,7 +249,7 @@ Exit criteria:
 
 - The team agrees on the PR boundaries and the split-surface direction.
 
-### P1: Surface State Extraction
+### P1: Surface State Extraction (shipped)
 
 Scope:
 
@@ -279,7 +274,7 @@ Risks:
 - Session switch races from stale forward fetches.
 - Hidden session panes retaining open surface state incorrectly.
 
-### P2: Split Layout Shell
+### P2: Split Layout Shell (shipped)
 
 Scope:
 
@@ -300,7 +295,7 @@ Exit criteria:
 - Chat scrolling, prompt focus, and jump-to-live still work.
 - Permission dialogs and task panels remain usable.
 
-### P3: Forward Iframe Surface
+### P3: Forward Iframe Surface (shipped)
 
 Scope:
 
@@ -317,7 +312,7 @@ Exit criteria:
 - Revoking the forward closes or invalidates the surface gracefully.
 - WebSocket/SSE behavior remains unchanged.
 
-### P4: Responsive and Fullscreen Behavior
+### P4: Responsive and Fullscreen Behavior (shipped)
 
 Scope:
 
@@ -332,7 +327,7 @@ Exit criteria:
 - Prompt remains reachable after returning from full-screen surface.
 - No fixed-width controls overflow mobile.
 
-### P5: Persistence and Keyboard Polish
+### P5: Persistence and Keyboard Polish (shipped)
 
 Scope:
 

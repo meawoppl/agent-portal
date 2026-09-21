@@ -21,6 +21,7 @@ mod history;
 mod input_bar;
 mod outbox;
 mod permission_handler;
+mod session_surface;
 mod state;
 mod tasks_panel;
 mod types;
