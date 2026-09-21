@@ -15,6 +15,7 @@
 
 mod component;
 mod forward_chips;
+mod forward_surface;
 pub(super) mod helpers;
 mod history;
 mod input_bar;
