@@ -204,11 +204,28 @@
 
     .session-view-body.has-surface .session-view-chat {
         min-height: 40%;
-        flex-basis: 40%;
+        flex: 1 1 calc(100% - var(--surface-basis));
+    }
+
+    .session-view-body.fullscreen .session-view-chat {
+        display: none;
+    }
+
+    .session-view-body.surface-collapsed .session-view-chat {
+        flex-basis: auto;
+    }
+
+    .session-surface-resize-handle {
+        flex-basis: 0.45rem;
+        cursor: row-resize;
+    }
+
+    .session-surface-resize-handle::before {
+        inset: 0.18rem 0.5rem;
     }
 
     .session-forward-surface {
-        flex: 1 1 60%;
+        flex: 0 0 var(--surface-basis);
         min-width: 0;
         max-width: none;
         min-height: 14rem;
@@ -222,6 +239,13 @@
         min-width: 0;
         max-width: none;
         min-height: 2.5rem;
+    }
+
+    .session-forward-surface.fullscreen {
+        flex: 1 1 100%;
+        min-height: 0;
+        border-top: 0;
+        box-shadow: none;
     }
 
     .session-forward-toolbar {

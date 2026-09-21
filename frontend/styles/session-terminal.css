@@ -37,6 +37,8 @@
 }
 
 .session-view-body {
+    --surface-basis: 50%;
+
     flex: 1;
     display: flex;
     min-height: 0;
@@ -53,7 +55,34 @@
 }
 
 .session-view-body.has-surface .session-view-chat {
-    flex-basis: 50%;
+    flex: 1 1 calc(100% - var(--surface-basis));
+}
+
+.session-view-body.fullscreen .session-view-chat {
+    display: none;
+}
+
+.session-view-body.surface-collapsed .session-view-chat {
+    flex-basis: auto;
+}
+
+.session-surface-resize-handle {
+    flex: 0 0 0.45rem;
+    cursor: col-resize;
+    position: relative;
+    background: transparent;
+}
+
+.session-surface-resize-handle::before {
+    content: "";
+    position: absolute;
+    inset: 0.5rem 0.18rem;
+    border-radius: 999px;
+    background: rgba(86, 95, 137, 0.55);
+}
+
+.session-surface-resize-handle:hover::before {
+    background: rgba(122, 162, 247, 0.85);
 }
 
 @keyframes slideIn {
@@ -240,7 +269,8 @@
 }
 
 .session-forward-surface {
-    flex: 0 1 50%;
+    flex: 0 0 var(--surface-basis);
+    position: relative;
     min-width: min(28rem, 50vw);
     max-width: 70%;
     display: flex;
@@ -255,6 +285,14 @@
     flex-basis: 3rem;
     min-width: 3rem;
     max-width: 3rem;
+}
+
+.session-forward-surface.fullscreen {
+    flex: 1 1 100%;
+    min-width: 0;
+    max-width: none;
+    border-left: 0;
+    box-shadow: none;
 }
 
 .session-forward-toolbar {
@@ -349,9 +387,18 @@
 
 .session-forward-surface.collapsed .surface-status,
 .session-forward-surface.collapsed .session-forward-title,
+.session-forward-surface.collapsed .surface-mode-button,
 .session-forward-surface.collapsed .session-forward-visit,
 .session-forward-surface.collapsed .surface-close-button {
     display: none;
+}
+
+.session-forward-surface.collapsed .session-forward-frame {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
 }
 
 .session-view-header .status {
