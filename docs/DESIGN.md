@@ -556,6 +556,8 @@ These are the load-bearing rules; violating them in a PR means breaking somethin
 - [`docs/AUTH_FLOWS.md`](AUTH_FLOWS.md) — OAuth + device flow + cookie details.
 - [`docs/DATABASE.md`](DATABASE.md) — table-by-table schema reference.
 - [`docs/SCHEDULED_TASKS.md`](SCHEDULED_TASKS.md) — user-visible cron semantics.
+- [`docs/PLUGIN_ARCHITECTURE.md`](PLUGIN_ARCHITECTURE.md) — repo-adjacent
+  plugin install, lifecycle, and session-surface contract.
 - [`docs/OVERSEER.md`](OVERSEER.md) — the long-running observer that watches the system.
 - [`docs/PROXY_AUTH.md`](PROXY_AUTH.md), [`docs/proxy-internals.md`](proxy-internals.md), [`docs/proxy-login-flow.md`](proxy-login-flow.md) — proxy-side specifics.
 - [`docs/DEPLOYING.md`](DEPLOYING.md), [`docs/DOCKER.md`](DOCKER.md), [`docs/LOCAL_DEVELOPMENT.md`](LOCAL_DEVELOPMENT.md) — operator-facing guides.
