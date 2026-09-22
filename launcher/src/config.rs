@@ -350,6 +350,7 @@ mod tests {
                 claude_args: vec!["--verbose".to_string()],
                 session_id: None,
             }],
+            plugins: std::collections::BTreeMap::new(),
         };
         let serialized = serde_json::to_string_pretty(&config).unwrap();
         let deserialized: LauncherConfig = serde_json::from_str(&serialized).unwrap();
@@ -382,6 +383,7 @@ mod tests {
         }"#;
         let config: LauncherConfig = serde_json::from_str(json).unwrap();
         assert_eq!(config.sessions.len(), 2);
+        assert!(config.plugins.is_empty());
 
         assert_eq!(config.sessions[0].working_directory, "/home/user/project-a");
         assert_eq!(
@@ -431,6 +433,7 @@ mod tests {
                 claude_args: vec![],
                 session_id: Some(sid),
             }],
+            plugins: std::collections::BTreeMap::new(),
         };
         let serialized = serde_json::to_string_pretty(&config).unwrap();
         let deserialized: LauncherConfig = serde_json::from_str(&serialized).unwrap();
