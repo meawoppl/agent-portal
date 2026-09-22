@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-label="Visual summary of PR 2016: Portal plugins install into agent-portal-plugins, run on the launcher host, and expose dockable session surfaces plus agent skills.">
+  <rect width="2000" height="1200" fill="#16161e"/>
+
+  <text x="72" y="112" fill="#e6e9f5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="50" font-weight="700">Portal plugins: local workbench + agent skills</text>
+  <text x="72" y="164" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26">A plugin lives in agent-portal-plugins/&lt;name&gt;, runs on the launcher host, and opens as a session surface.</text>
+
+  <defs>
+    <marker id="arrow" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto">
+      <path d="M 0 0 L 14 7 L 0 14 z" fill="#7aa2f7"/>
+    </marker>
+    <marker id="green-arrow" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto">
+      <path d="M 0 0 L 14 7 L 0 14 z" fill="#9ece6a"/>
+    </marker>
+  </defs>
+
+  <g transform="translate(90 245)">
+    <rect x="0" y="0" width="470" height="720" rx="14" fill="#1e202e" stroke="#3d4666" stroke-width="3"/>
+    <text x="36" y="62" fill="#7aa2f7" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="32" font-weight="700">Install root</text>
+    <text x="36" y="106" fill="#c0caf5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">~/agent-portal-plugins</text>
+
+    <rect x="34" y="154" width="402" height="476" rx="10" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+    <text x="62" y="202" fill="#e6e9f5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="26">backplane/</text>
+    <text x="88" y="254" fill="#9ece6a" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="22">agent-portal-plugin.toml</text>
+    <text x="88" y="304" fill="#c0caf5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="22">bin/backplane</text>
+    <text x="88" y="354" fill="#c0caf5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="22">skills/pcb-workflow</text>
+    <text x="88" y="404" fill="#c0caf5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="22">prompts/session.md</text>
+    <text x="88" y="454" fill="#c0caf5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="22">assets/</text>
+    <text x="88" y="504" fill="#c0caf5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="22">examples/</text>
+
+    <rect x="34" y="660" width="402" height="40" rx="8" fill="#16161e" stroke="#3d4666" stroke-width="2"/>
+    <text x="58" y="687" fill="#a9b1d6" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18">agent-portal plugin install ...</text>
+  </g>
+
+  <g transform="translate(742 245)">
+    <rect x="0" y="0" width="516" height="720" rx="14" fill="#1e202e" stroke="#3d4666" stroke-width="3"/>
+    <text x="36" y="62" fill="#bb9af7" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="32" font-weight="700">Launcher host</text>
+    <text x="36" y="106" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">Owns files, tools, Git, and local ports</text>
+
+    <rect x="42" y="164" width="432" height="110" rx="10" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+    <text x="72" y="210" fill="#e6e9f5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">Manifest parser</text>
+    <text x="72" y="248" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="21">Validate compatibility and capabilities</text>
+
+    <rect x="42" y="322" width="432" height="110" rx="10" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+    <text x="72" y="368" fill="#e6e9f5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">Runtime lifecycle</text>
+    <text x="72" y="406" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="21">setup, doctor, start, stop, update</text>
+
+    <rect x="42" y="480" width="432" height="110" rx="10" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+    <text x="72" y="526" fill="#e6e9f5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">Local plugin service</text>
+    <text x="72" y="564" fill="#a9b1d6" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="21">127.0.0.1:{port}</text>
+
+    <rect x="42" y="638" width="432" height="48" rx="8" fill="#16161e" stroke="#3d4666" stroke-width="2"/>
+    <text x="70" y="670" fill="#c0caf5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="20">agent-portal plugin open backplane</text>
+  </g>
+
+  <g transform="translate(1438 245)">
+    <rect x="0" y="0" width="470" height="720" rx="14" fill="#1e202e" stroke="#3d4666" stroke-width="3"/>
+    <text x="36" y="62" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="32" font-weight="700">Session experience</text>
+    <text x="36" y="106" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">Chat plus docked workbench</text>
+
+    <rect x="38" y="158" width="394" height="260" rx="10" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+    <rect x="62" y="198" width="158" height="178" rx="8" fill="#16161e" stroke="#3d4666" stroke-width="2"/>
+    <rect x="244" y="198" width="164" height="178" rx="8" fill="#16161e" stroke="#3d4666" stroke-width="2"/>
+    <text x="93" y="296" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">chat</text>
+    <text x="271" y="286" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">plugin</text>
+    <text x="278" y="318" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">surface</text>
+
+    <rect x="38" y="478" width="394" height="94" rx="10" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+    <text x="68" y="516" fill="#e6e9f5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25" font-weight="700">Agent guidance</text>
+    <text x="68" y="550" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="20">skills, prompts, commands, MCP</text>
+
+    <rect x="38" y="626" width="394" height="60" rx="8" fill="#16161e" stroke="#3d4666" stroke-width="2"/>
+    <text x="72" y="664" fill="#7dcfff" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22">Same forwarder, native feel</text>
+  </g>
+
+  <path d="M 560 605 C 642 605 660 605 730 605" fill="none" stroke="#7aa2f7" stroke-width="7" stroke-linecap="round" marker-end="url(#arrow)"/>
+  <text x="600" y="570" fill="#7aa2f7" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22">install</text>
+
+  <path d="M 1258 538 C 1348 538 1368 320 1428 320" fill="none" stroke="#9ece6a" stroke-width="7" stroke-linecap="round" marker-end="url(#green-arrow)"/>
+  <text x="1292" y="438" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22">forward surface</text>
+
+  <path d="M 1258 686 C 1350 686 1368 538 1428 538" fill="none" stroke="#bb9af7" stroke-width="7" stroke-linecap="round" marker-end="url(#arrow)"/>
+  <text x="1302" y="650" fill="#bb9af7" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22">inject guidance</text>
+
+  <g transform="translate(184 1042)">
+    <rect x="0" y="0" width="410" height="66" rx="10" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+    <text x="28" y="42" fill="#7aa2f7" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22">repo-adjacent installs</text>
+    <rect x="470" y="0" width="410" height="66" rx="10" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+    <text x="498" y="42" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22">dockable web apps</text>
+    <rect x="940" y="0" width="410" height="66" rx="10" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+    <text x="968" y="42" fill="#bb9af7" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22">skills and tools</text>
+    <rect x="1410" y="0" width="410" height="66" rx="10" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+    <text x="1438" y="42" fill="#e0af68" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22">Backplane-ready</text>
+  </g>
+</svg>
