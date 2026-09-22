@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="arr-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+    </marker>
+    <marker id="arr-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+  </defs>
+
+  <!-- Header -->
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2022 · Upgrade the Visual PR check to visual-pr@v4</text>
+
+  <!-- Thesis -->
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">@v3 judged only the shape of the description's image URL, so a SHA that was never</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">pushed passed green over a 404; @v4 looks the permalink up and requires the head's SVG.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <!-- ==================== BEFORE ==================== -->
+  <g>
+    <rect x="80" y="250" width="860" height="120" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="292" font-size="26" fill="#c0caf5">.github/workflows/visual-pr.yml</text>
+    <text x="104" y="332" font-size="23" fill="#7aa2f7">- uses: meawoppl/visual-pr@v3</text>
+  </g>
+
+  <line x1="510" y1="370" x2="510" y2="432" stroke="#565f89" stroke-width="1.5" marker-end="url(#arr-dim)"/>
+
+  <g>
+    <rect x="80" y="440" width="860" height="150" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="482" font-size="26" fill="#7aa2f7">pr_body_image.py: shape of the URL only</text>
+    <text x="104" y="522" font-size="23" fill="#a9b1d6">40 hex chars, GitHub host, this repo -- judged offline</text>
+    <text x="104" y="558" font-size="22" fill="#565f89">nothing asks GitHub whether that commit exists or has the file</text>
+  </g>
+
+  <line x1="510" y1="590" x2="510" y2="652" stroke="#565f89" stroke-width="1.5" marker-end="url(#arr-dim)"/>
+
+  <g>
+    <rect x="80" y="660" width="860" height="120" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="702" font-size="26" fill="#c0caf5">"PR description opens with an image of .0-pr-viz/002022.svg"</text>
+    <text x="104" y="742" font-size="22" fill="#a9b1d6">Visual PR attached: green</text>
+  </g>
+
+  <line x1="510" y1="780" x2="510" y2="842" stroke="#f7768e" stroke-width="1.5" marker-end="url(#arr-red)"/>
+
+  <g>
+    <rect x="80" y="850" width="860" height="150" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="892" font-size="26" fill="#f7768e">reviewer opens the PR: broken or stale image</text>
+    <text x="104" y="932" font-size="23" fill="#a9b1d6">a mistyped or unpushed SHA is HTTP 404 forever (visual-pr#15);</text>
+    <text x="104" y="968" font-size="23" fill="#a9b1d6">an older commit shows a picture that is not the one validated</text>
+  </g>
+
+  <text x="80" y="1060" font-size="22" fill="#a9b1d6">Seen on meawoppl/agent-portal#2002: green check, dead picture,</text>
+  <text x="80" y="1094" font-size="22" fill="#f7768e">and nothing told the author.</text>
+
+  <!-- ==================== AFTER ==================== -->
+  <g>
+    <rect x="1065" y="250" width="860" height="120" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1089" y="292" font-size="26" fill="#c0caf5">.github/workflows/visual-pr.yml</text>
+    <text x="1089" y="332" font-size="23" fill="#9ece6a">- uses: meawoppl/visual-pr@v4</text>
+  </g>
+
+  <line x1="1495" y1="370" x2="1495" y2="432" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+
+  <g>
+    <rect x="1065" y="440" width="860" height="150" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1089" y="482" font-size="26" fill="#7aa2f7">pr_body_image.py --print-pin, then gh api</text>
+    <text x="1089" y="522" font-size="23" fill="#a9b1d6">repos/meawoppl/agent-portal/contents/.0-pr-viz/002022.svg?ref=&lt;sha&gt;</text>
+    <text x="1089" y="558" font-size="22" fill="#565f89">the job's token, so it works on a private repo; blob vs git hash-object</text>
+  </g>
+
+  <line x1="1495" y1="590" x2="1495" y2="652" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+
+  <g>
+    <rect x="1065" y="660" width="860" height="230" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="1089" y="700" font-size="23" fill="#f7768e">HTTP 404          -> fails: "404s ... re-pin to &lt;head sha&gt;"</text>
+    <text x="1089" y="740" font-size="23" fill="#f7768e">blob differs      -> fails: "older ... than this PR's head"</text>
+    <text x="1089" y="780" font-size="23" fill="#9ece6a">blob equal        -> passes; older commit with the same bytes is fine</text>
+    <text x="1089" y="820" font-size="23" fill="#e0af68">other API error   -> ::warning::, passes on shape alone</text>
+    <text x="1089" y="860" font-size="22" fill="#565f89">the failure recipe prints the gh api / git hash-object pair to run locally</text>
+  </g>
+
+  <g>
+    <rect x="1065" y="960" width="860" height="120" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="1089" y="1002" font-size="24" fill="#c0caf5">what else this PR touches</text>
+    <text x="1089" y="1040" font-size="22" fill="#a9b1d6">AGENTS.md: the Visual PRs section now says the permalink is looked up</text>
+  </g>
+
+  <!-- Footer -->
+  <text x="55" y="1172" font-size="22" fill="#565f89">The base branch runs this workflow (pull_request_target), so this PR's own check still ran @v3; the first PR after the merge is the live proof of @v4.</text>
+</svg>
