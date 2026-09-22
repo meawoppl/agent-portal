@@ -11,8 +11,6 @@ use shared::api::{
     AgentSessionsResponse, PeekMessagesResponse, SendAgentMessageRequest, SendAgentMessageResponse,
 };
 
-const SHORT_SESSION_ID_LEN: usize = 8;
-
 /// The calling agent's own portal session id, read from whatever the agent
 /// already exposes:
 ///
@@ -420,7 +418,7 @@ fn format_peek(data: &PeekMessagesResponse, now: chrono::DateTime<chrono::Utc>) 
     let s = &data.session;
     let mut out = format!(
         "{}  {} / {} / {}{}  {}  {}  {}\n",
-        short_session_id(&s.id),
+        shared::short_session_id(&s.id.to_string()),
         full_agent_name(s),
         if session_is_connected(s) {
             "connected"
@@ -479,22 +477,14 @@ fn relative_age(rfc3339: &str, now: chrono::DateTime<chrono::Utc>) -> String {
     }
 }
 
-fn short_session_id(id: &uuid::Uuid) -> String {
-    id.simple()
-        .to_string()
-        .chars()
-        .take(SHORT_SESSION_ID_LEN)
-        .collect()
-}
-
 fn display_session_id(
     session: &shared::api::AgentSessionInfo,
     sessions: &[shared::api::AgentSessionInfo],
 ) -> String {
-    let short = short_session_id(&session.id);
+    let short = shared::short_session_id(&session.id.to_string());
     let collision = sessions
         .iter()
-        .filter(|candidate| short_session_id(&candidate.id) == short)
+        .filter(|candidate| shared::short_session_id(&candidate.id.to_string()) == short)
         .count()
         > 1;
     if collision {
