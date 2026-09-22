@@ -338,7 +338,7 @@ async fn handle_ws_message(
         }) => {
             info!(
                 "[upload {}] Starting: {} ({} bytes, {} chunks)",
-                &upload_id[..8.min(upload_id.len())],
+                truncate(&upload_id, 8),
                 filename,
                 total_size,
                 total_chunks
@@ -367,7 +367,7 @@ async fn handle_ws_message(
         }) => {
             info!(
                 "[upload {}] Starting private drop ({} bytes, {} chunks)",
-                &upload_id[..8.min(upload_id.len())],
+                truncate(&upload_id, 8),
                 total_size,
                 total_chunks
             );
