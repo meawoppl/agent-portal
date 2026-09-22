@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-label="Visual summary of PR 2015: resize only tracks while the mouse button is down, and cancels on blur or leave.">
+  <rect width="2000" height="1200" fill="#16161e"/>
+  <text x="64" y="112" fill="#e6e9f5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="48" font-weight="700">Resize handle stops when the drag stops</text>
+  <text x="64" y="162" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25">The split divider no longer keeps following the cursor after a missed mouseup.</text>
+
+  <line x1="1000" y1="220" x2="1000" y2="1080" stroke="#565f89" stroke-width="2" stroke-dasharray="10 12"/>
+
+  <g transform="translate(100 280)">
+    <text x="0" y="0" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700">Before</text>
+    <rect x="0" y="50" width="760" height="540" rx="14" fill="#1e202e" stroke="#3d4666" stroke-width="3"/>
+    <rect x="0" y="50" width="430" height="540" rx="14" fill="#1e202e"/>
+    <rect x="430" y="50" width="18" height="540" fill="#f7768e"/>
+    <rect x="448" y="50" width="312" height="540" rx="14" fill="#1e202e"/>
+    <text x="56" y="145" fill="#c0caf5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="27">chat</text>
+    <text x="516" y="145" fill="#c0caf5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="27">app</text>
+    <path d="M520 680 C640 620 660 520 590 420 C530 330 600 250 720 210" fill="none" stroke="#f7768e" stroke-width="8" stroke-linecap="round"/>
+    <text x="0" y="705" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25">A missed mouseup leaves the window mousemove listener active.</text>
+  </g>
+
+  <g transform="translate(1120 280)">
+    <text x="0" y="0" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700">After</text>
+    <rect x="0" y="50" width="760" height="540" rx="14" fill="#1e202e" stroke="#3d4666" stroke-width="3"/>
+    <rect x="0" y="50" width="430" height="540" rx="14" fill="#1e202e"/>
+    <rect x="430" y="50" width="18" height="540" fill="#9ece6a"/>
+    <rect x="448" y="50" width="312" height="540" rx="14" fill="#1e202e"/>
+    <text x="56" y="145" fill="#c0caf5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="27">chat</text>
+    <text x="516" y="145" fill="#c0caf5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="27">app</text>
+    <circle cx="439" cy="320" r="58" fill="#1e202e" stroke="#9ece6a" stroke-width="6"/>
+    <text x="408" y="333" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700">up</text>
+    <text x="0" y="705" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25">Mousemove self-cancels unless button 1 is still down.</text>
+  </g>
+
+  <g transform="translate(140 1020)">
+    <rect x="0" y="0" width="510" height="74" rx="12" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+    <text x="28" y="46" fill="#7aa2f7" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">primary-button start only</text>
+    <rect x="560" y="0" width="510" height="74" rx="12" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+    <text x="588" y="46" fill="#bb9af7" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">blur / mouseleave cancel</text>
+    <rect x="1120" y="0" width="510" height="74" rx="12" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+    <text x="1148" y="46" fill="#e0af68" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">persist size only after drag ends</text>
+  </g>
+</svg>
