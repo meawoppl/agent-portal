@@ -110,14 +110,35 @@ Install sources:
 
 ```console
 agent-portal plugin install github:i2cjak/backplane
+agent-portal plugin install github:meawoppl/agent-portal-plugins//backplane
 agent-portal plugin install https://github.com/i2cjak/backplane.git
+agent-portal plugin install https://github.com/meawoppl/agent-portal-plugins.git//backplane
 agent-portal plugin install ./local-backplane
+agent-portal plugin install ./agent-portal-plugins/backplane
 ```
 
 `install` clones or copies into `agent-portal-plugins/<name>`, validates the
 manifest, records the install in the launcher config, and runs the plugin's
 declared setup command after explicit confirmation when setup requires network,
 credential, or package-manager access.
+
+Git and local sources may point either at a plugin root or at a plugin
+subdirectory using `//sub/path`. The subdirectory form is the smooth path for a
+shared plugin collection repo:
+
+```text
+github:meawoppl/agent-portal-plugins//backplane
+```
+
+The launcher clones the source repo into an internal source cache, validates the
+manifest at the selected subdirectory, then materializes that plugin at:
+
+```text
+$AGENT_PORTAL_PLUGIN_ROOT/backplane
+```
+
+The installed plugin path is still one directory per plugin; the source may be a
+monorepo.
 
 `open` starts the plugin if needed, registers its web surface through the normal
 forwarding path, and asks the focused session to open that surface.
@@ -393,6 +414,7 @@ The launcher config stores install metadata:
     "backplane": {
       "path": "/home/alice/agent-portal-plugins/backplane",
       "source": "https://github.com/i2cjak/Backplane.git",
+      "source_subdir": ".",
       "ref": "main",
       "enabled": true,
       "installed_at": "2026-09-22T01:00:00Z"
@@ -444,12 +466,14 @@ sandboxing, capability grants, and per-plugin secret stores.
 ## Updates
 
 `agent-portal plugin update` fetches the configured source and checks out the
-requested ref. The first version should support Git sources only. Update should:
+requested ref. Git sources may point at a whole plugin repo or a subdirectory
+inside a plugin collection repo. The first version should support Git sources
+only. Update should:
 
 1. stop active plugin services;
 2. fetch the source;
 3. show old and new revisions;
-4. validate the manifest;
+4. validate the manifest at `source_subdir`;
 5. rerun setup only if the manifest declares setup or dependencies changed, or
    if the user passes `--setup`;
 6. restart services that were previously active.
