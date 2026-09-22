@@ -20,19 +20,17 @@ pub struct FlatRow {
     pub manifest: SessionArchiveManifest,
 }
 
-/// Short session-id length used in tables and URLs, matching the launcher CLI.
-pub const SHORT_ID_LEN: usize = 8;
+/// Short session-id length used in tables and URLs: alias of
+/// [`shared::SHORT_SESSION_ID_LEN`] so the archive reader and every other
+/// short-id call site agree on one value.
+pub const SHORT_ID_LEN: usize = shared::SHORT_SESSION_ID_LEN;
 
 impl FlatRow {
-    /// Hyphen-free session-id prefix for compact display.
+    /// Hyphen-free session-id prefix for compact display, via
+    /// [`shared::short_session_id`] (the manifest id is always a UUID, so the
+    /// hex-prefix branch applies).
     pub fn short_id(&self) -> String {
-        self.manifest
-            .session_id
-            .simple()
-            .to_string()
-            .chars()
-            .take(SHORT_ID_LEN)
-            .collect()
+        shared::short_session_id(&self.manifest.session_id.to_string())
     }
 
     /// Total messages across all roles.
@@ -295,6 +293,17 @@ mod tests {
             row("bob@y.io", "codex spike", "codex", 12),
             row("alice@x.io", "docs pass", "claude", 11),
         ]
+    }
+
+    #[test]
+    fn short_id_matches_shared_short_session_id() {
+        let rows = sample();
+        for r in &rows {
+            let expected = shared::short_session_id(&r.manifest.session_id.to_string());
+            assert_eq!(r.short_id(), expected);
+            assert_eq!(r.short_id().len(), SHORT_ID_LEN);
+        }
+        assert_eq!(SHORT_ID_LEN, shared::SHORT_SESSION_ID_LEN);
     }
 
     #[test]
