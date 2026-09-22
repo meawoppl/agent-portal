@@ -591,7 +591,7 @@ async fn run_single_connection<A: Agent>(session: &mut SessionState<'_, A>) -> C
             }])
             .to_json()
         } else {
-            let short_id = &session.config.session_id.to_string()[..8];
+            let short_id = shared::short_session_id(&session.config.session_id.to_string());
             let text = format!(
                 "{} — `{}` on `{}` in `{}` ({} `{}…`)",
                 status_line,

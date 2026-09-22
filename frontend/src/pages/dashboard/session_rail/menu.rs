@@ -235,7 +235,7 @@ fn render_menu_content(session: &SessionInfo, props: &SessionRailMenuProps) -> H
     } else {
         "Session ID"
     };
-    let short_id = &session.id.to_string()[..8];
+    let short_id = shared::short_session_id(&session.id.to_string());
 
     let leave_option = if session.my_role != SessionRole::Owner {
         menu_option(
@@ -317,7 +317,7 @@ fn render_menu_content(session: &SessionInfo, props: &SessionRailMenuProps) -> H
             { menu_option(
                 classes!("copy-id", props.copied_id.then_some("copied")),
                 copy_label,
-                short_id,
+                &short_id,
                 on_copy_id,
             ) }
             { share_option }

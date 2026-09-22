@@ -38,7 +38,11 @@ pub fn print_deprecation_warning() {
 /// Print session information
 pub fn print_session_info(session_name: &str, session_id: &str, backend_url: &str, resuming: bool) {
     println!("  {} {}", "Session:".dimmed(), session_name.bright_white());
-    println!("  {} {}", "ID:".dimmed(), session_id[..8].bright_cyan());
+    println!(
+        "  {} {}",
+        "ID:".dimmed(),
+        shared::short_session_id(session_id).bright_cyan()
+    );
     println!("  {} {}", "Backend:".dimmed(), backend_url.bright_white());
     println!(
         "  {} {}",
@@ -90,7 +94,7 @@ pub fn print_resuming_session(session_id: &str, created_at: &str) {
     println!(
         "  {} Resuming session {} from {}",
         "→".bright_green(),
-        session_id[..8].bright_cyan(),
+        shared::short_session_id(session_id).bright_cyan(),
         created_at.bright_white()
     );
 }
@@ -142,7 +146,7 @@ pub fn print_session_not_found(session_id: &str) {
     println!(
         "  {} Previous session {} not found locally",
         "⚠".bright_yellow(),
-        session_id[..8].bright_cyan()
+        shared::short_session_id(session_id).bright_cyan()
     );
     println!(
         "  {} Starting a fresh session instead...",

@@ -960,7 +960,7 @@ impl Component for SessionView {
                                 if let Some(source_id) = ctx.props().session.forked_from_session_id {
                                     <div class="fork-lineage-card">
                                         { "Forked from " }
-                                        <a href={format!("/dashboard?session={source_id}")}>{ &source_id.to_string()[..8] }</a>
+                                        <a href={format!("/dashboard?session={source_id}")}>{ shared::short_session_id(&source_id.to_string()) }</a>
                                         if let Some(point) = &ctx.props().session.fork_point_turn_id {
                                             <span>{ format!(" · turn {point}") }</span>
                                         }
