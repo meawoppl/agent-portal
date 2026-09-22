@@ -942,6 +942,16 @@ agent-portal message send {reply_session_id} \"your reply\""
 /// Short session-id display length: first 8 hex chars, dash-stripped.
 pub const SHORT_SESSION_ID_LEN: usize = 8;
 
+/// First [`SHORT_SESSION_ID_LEN`] hex chars of a session [`Uuid`], for display.
+///
+/// Same rendering as [`short_session_id`], but takes the typed id directly so
+/// callers holding a `Uuid` don't format an intermediate `String` first.
+#[must_use]
+pub fn short_uuid(id: &Uuid) -> String {
+    let b = id.as_bytes();
+    format!("{:02x}{:02x}{:02x}{:02x}", b[0], b[1], b[2], b[3])
+}
+
 /// First [`SHORT_SESSION_ID_LEN`] hex chars of a session id, dash-stripped,
 /// for display.
 ///
@@ -1515,6 +1525,23 @@ mod tests {
             "12345678"
         );
         assert_eq!(short_session_id("abcdef123456"), "abcdef12");
+    }
+
+    #[test]
+    fn short_uuid_matches_short_session_id_without_intermediate_string() {
+        for raw in [
+            "12345678-0000-0000-0000-000000000000",
+            "abcdef12-3456-7890-abcd-ef1234567890",
+            "00000000-0000-0000-0000-000000000000",
+        ] {
+            let id = Uuid::parse_str(raw).expect("valid uuid");
+            assert_eq!(short_uuid(&id), short_session_id(raw));
+            assert_eq!(short_uuid(&id).len(), SHORT_SESSION_ID_LEN);
+        }
+        assert_eq!(
+            short_uuid(&Uuid::parse_str("12345678-0000-0000-0000-000000000000").expect("valid")),
+            "12345678"
+        );
     }
 
     #[test]

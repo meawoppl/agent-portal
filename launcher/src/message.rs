@@ -418,7 +418,7 @@ fn format_peek(data: &PeekMessagesResponse, now: chrono::DateTime<chrono::Utc>) 
     let s = &data.session;
     let mut out = format!(
         "{}  {} / {} / {}{}  {}  {}  {}\n",
-        shared::short_session_id(&s.id.to_string()),
+        shared::short_uuid(&s.id),
         full_agent_name(s),
         if session_is_connected(s) {
             "connected"
@@ -481,10 +481,10 @@ fn display_session_id(
     session: &shared::api::AgentSessionInfo,
     sessions: &[shared::api::AgentSessionInfo],
 ) -> String {
-    let short = shared::short_session_id(&session.id.to_string());
+    let short = shared::short_uuid(&session.id);
     let collision = sessions
         .iter()
-        .filter(|candidate| shared::short_session_id(&candidate.id.to_string()) == short)
+        .filter(|candidate| shared::short_uuid(&candidate.id) == short)
         .count()
         > 1;
     if collision {

@@ -27,10 +27,9 @@ pub const SHORT_ID_LEN: usize = shared::SHORT_SESSION_ID_LEN;
 
 impl FlatRow {
     /// Hyphen-free session-id prefix for compact display, via
-    /// [`shared::short_session_id`] (the manifest id is always a UUID, so the
-    /// hex-prefix branch applies).
+    /// [`shared::short_uuid`] (the manifest id is always a UUID).
     pub fn short_id(&self) -> String {
-        shared::short_session_id(&self.manifest.session_id.to_string())
+        shared::short_uuid(&self.manifest.session_id)
     }
 
     /// Total messages across all roles.
@@ -299,7 +298,7 @@ mod tests {
     fn short_id_matches_shared_short_session_id() {
         let rows = sample();
         for r in &rows {
-            let expected = shared::short_session_id(&r.manifest.session_id.to_string());
+            let expected = shared::short_uuid(&r.manifest.session_id);
             assert_eq!(r.short_id(), expected);
             assert_eq!(r.short_id().len(), SHORT_ID_LEN);
         }
