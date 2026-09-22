@@ -10,6 +10,7 @@ mod media;
 mod message;
 mod pastebin;
 mod path_policy;
+mod plugin;
 mod process_manager;
 mod scheduler;
 mod seppuku;
@@ -116,8 +117,60 @@ enum Command {
         /// A port number, `list`, or `close`.
         target: String,
     },
+    /// Install and run local Portal plugins.
+    Plugin {
+        #[command(subcommand)]
+        action: PluginAction,
+    },
     /// Terminate the agent session this command is running inside.
     Seppuku,
+}
+
+#[derive(Subcommand, Debug)]
+enum PluginAction {
+    /// List installed plugins
+    List,
+    /// Install a plugin from GitHub, Git, or a local path
+    Install {
+        /// Source, e.g. github:meawoppl/agent-portal-plugins//backplane
+        source: String,
+        /// Override install name. Must match the manifest name.
+        #[arg(long)]
+        name: Option<String>,
+        /// Git ref to fetch/checkout.
+        #[arg(long = "ref")]
+        reference: Option<String>,
+    },
+    /// Show plugin metadata
+    Info {
+        /// Plugin name
+        name: String,
+    },
+    /// Run the plugin's doctor command
+    Doctor {
+        /// Plugin name
+        name: String,
+    },
+    /// Start the plugin surface and forward it to this session
+    Open {
+        /// Plugin name
+        name: String,
+    },
+    /// Remove an installed plugin
+    Remove {
+        /// Plugin name
+        name: String,
+    },
+    /// Enable an installed plugin
+    Enable {
+        /// Plugin name
+        name: String,
+    },
+    /// Disable an installed plugin
+    Disable {
+        /// Plugin name
+        name: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -320,6 +373,22 @@ async fn main() -> anyhow::Result<()> {
                         "expected a port number, `list`, or `close`, got `{other}`"
                     )),
                 },
+            };
+        }
+        Some(Command::Plugin { action }) => {
+            return match action {
+                PluginAction::List => plugin::list(),
+                PluginAction::Install {
+                    source,
+                    name,
+                    reference,
+                } => plugin::install(&source, name.as_deref(), reference.as_deref()),
+                PluginAction::Info { name } => plugin::info(&name),
+                PluginAction::Doctor { name } => plugin::doctor(&name),
+                PluginAction::Open { name } => plugin::open(&name).await,
+                PluginAction::Remove { name } => plugin::remove(&name),
+                PluginAction::Enable { name } => plugin::set_enabled(&name, true),
+                PluginAction::Disable { name } => plugin::set_enabled(&name, false),
             };
         }
         Some(Command::Seppuku) => return seppuku::run().await,
