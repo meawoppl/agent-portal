@@ -678,6 +678,9 @@ impl Component for SessionView {
             }
             SessionViewMsg::SurfaceResizeStart(event) => {
                 event.prevent_default();
+                if event.button() != 0 {
+                    return false;
+                }
                 if self.active_surface.is_none() {
                     return false;
                 }
@@ -692,6 +695,10 @@ impl Component for SessionView {
                         let Some(event) = event.dyn_ref::<MouseEvent>() else {
                             return;
                         };
+                        if event.buttons() & 1 == 0 {
+                            link.send_message(SessionViewMsg::SurfaceResizeEnd);
+                            return;
+                        }
                         let raw_percent = if vertical {
                             ((rect.bottom() - f64::from(event.client_y())) / rect.height()) * 100.0
                         } else {
@@ -704,7 +711,17 @@ impl Component for SessionView {
                     EventListener::new(&gloo::utils::window(), "mouseup", move |_| {
                         link.send_message(SessionViewMsg::SurfaceResizeEnd);
                     });
-                self.resize_listeners = vec![move_listener, up_listener];
+                let link = ctx.link().clone();
+                let blur_listener = EventListener::new(&gloo::utils::window(), "blur", move |_| {
+                    link.send_message(SessionViewMsg::SurfaceResizeEnd);
+                });
+                let link = ctx.link().clone();
+                let leave_listener =
+                    EventListener::new(&gloo::utils::document(), "mouseleave", move |_| {
+                        link.send_message(SessionViewMsg::SurfaceResizeEnd);
+                    });
+                self.resize_listeners =
+                    vec![move_listener, up_listener, blur_listener, leave_listener];
                 false
             }
             SessionViewMsg::SurfaceResizeTo(percent) => {
