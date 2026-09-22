@@ -14,13 +14,11 @@ use web_sys::{Element, HtmlElement, WheelEvent};
 use yew::prelude::*;
 
 mod broadcast;
-mod hooks;
 mod menu;
 mod pill;
 mod sparkline;
 use broadcast::{render_broadcasts, RailAxis};
 pub use broadcast::{AgentMessageBroadcast, BroadcastRef};
-use hooks::use_scheduled_task_blocker;
 use menu::SessionRailMenu;
 use pill::SessionPill;
 pub use sparkline::ActivityRef;
@@ -282,7 +280,6 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
     let share_session_id = use_state(|| None::<Uuid>);
     let schedule_session = use_state(|| None::<SessionInfo>);
     let fork_session = use_state(|| None::<SessionInfo>);
-    let stop_has_tasks = use_scheduled_task_blocker(*menu_session, props.sessions.clone());
 
     // Independent 100 ms tick that drives sparkline redraws.
     // Accumulation happens externally via ActivityRef mutations; this timer
@@ -588,7 +585,6 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                 position={*menu_pos}
                 is_hidden={is_menu_session_hidden}
                 is_connected={is_menu_session_connected}
-                stop_has_tasks={stop_has_tasks}
                 confirming_stop={*stop_confirm}
                 confirming_delete={*delete_confirm}
                 archive_enabled={props.archive_enabled}
