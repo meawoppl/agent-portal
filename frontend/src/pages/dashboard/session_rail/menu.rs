@@ -12,7 +12,6 @@ pub(super) struct SessionRailMenuProps {
     pub position: (i32, i32),
     pub is_hidden: bool,
     pub is_connected: bool,
-    pub stop_has_tasks: bool,
     pub confirming_stop: bool,
     pub confirming_delete: bool,
     /// Drives the armed close hint: with archiving off, closing a session is
@@ -179,33 +178,24 @@ fn render_menu_content(session: &SessionInfo, props: &SessionRailMenuProps) -> H
 
     let stop_option =
         if is_paused || (is_connected && session.status == shared::SessionStatus::Active) {
-            if props.stop_has_tasks {
-                menu_option(
-                    classes!("stop", "blocked"),
-                    "Delete Scheduled Tasks First",
-                    "Opens task manager",
-                    open_schedule.clone(),
-                )
-            } else {
-                let (stop_label, stop_hint) = if props.confirming_stop {
-                    let hint = if is_paused {
-                        "This will remove the saved launcher entry"
-                    } else {
-                        "This will terminate the process"
-                    };
-                    ("Click again to confirm", hint)
-                } else if is_paused {
-                    ("Stop Session", "Remove saved launcher entry")
+            let (stop_label, stop_hint) = if props.confirming_stop {
+                let hint = if is_paused {
+                    "This will remove the saved launcher entry"
                 } else {
-                    ("Stop Session", "Terminate process")
+                    "This will terminate the process"
                 };
-                menu_option(
-                    classes!("stop", props.confirming_stop.then_some("confirming")),
-                    stop_label,
-                    stop_hint,
-                    on_stop,
-                )
-            }
+                ("Click again to confirm", hint)
+            } else if is_paused {
+                ("Stop Session", "Remove saved launcher entry")
+            } else {
+                ("Stop Session", "Terminate process")
+            };
+            menu_option(
+                classes!("stop", props.confirming_stop.then_some("confirming")),
+                stop_label,
+                stop_hint,
+                on_stop,
+            )
         } else {
             html! {}
         };
