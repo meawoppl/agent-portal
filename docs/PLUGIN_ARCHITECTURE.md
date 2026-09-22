@@ -200,6 +200,60 @@ Placeholders are expanded by the launcher:
 Expansion is argument-aware: command arrays are preferred in the implementation
 so paths and user-controlled values are not interpolated through a shell.
 
+## Repository Config
+
+Repository-owned Portal config lives in `.portal/` at the project root. This is
+where a repo says which plugins it prefers, how they should be configured for
+that checkout, and what workflow defaults agents should follow.
+
+```text
+project/
+  .portal/
+    plugins.toml
+    prompts/
+      onboarding.md
+    workflows/
+      pcb-review.md
+```
+
+The first config file is `.portal/plugins.toml`:
+
+```toml
+schema_version = 1
+
+[[suggested_plugins]]
+name = "backplane"
+source = "github:i2cjak/backplane"
+reason = "This repo contains KiCad board files and uses Backplane for PCB review."
+required = false
+
+[suggested_plugins.config]
+project = "hardware/controller.kicad_pro"
+default_view = "board"
+fabrication_output = "build/fab"
+
+[[suggested_plugins]]
+name = "pastebom"
+source = "github:meawoppl/pastebom-agent-plugin"
+reason = "Manufacturing packages in releases/ should be inspectable in Portal."
+required = false
+```
+
+Semantics:
+
+- `.portal/plugins.toml` is repo intent, not installed code.
+- `name` matches the plugin install name under `agent-portal-plugins/<name>`.
+- `source` tells `agent-portal plugin install` where to fetch a missing plugin.
+- `reason` is user-facing text shown in the suggestion/installer UI.
+- `required = true` means the repo's workflow expects the plugin, but install
+  still requires user confirmation.
+- `suggested_plugins.config` is plugin-specific structured config. Portal stores
+  and passes it through; the plugin validates the keys it understands.
+
+The launcher reads `.portal/plugins.toml` before manifest glob detection. A
+matching repo config should produce a stronger suggestion than inferred file
+patterns because it is explicit project intent.
+
 ## Runtime Model
 
 Plugins run on the launcher host.
@@ -297,14 +351,37 @@ For Backplane, the guidance should say things like:
 Installed plugins can activate in three ways:
 
 1. **Manual**: user or agent runs `agent-portal plugin open backplane`.
-2. **Detected**: launcher sees manifest `detect` rules matching the session cwd
+2. **Repo-suggested**: launcher finds `.portal/plugins.toml` in the session cwd
+   or an ancestor and exposes install/open suggestions for listed plugins.
+3. **Detected**: launcher sees manifest `detect` rules matching the session cwd
    and exposes a suggested surface chip.
-3. **Requested by agent**: the agent follows plugin instructions and asks the
+4. **Requested by agent**: the agent follows plugin instructions and asks the
    launcher to start the plugin.
+
+Suggestion priority:
+
+1. `.portal/plugins.toml` entry for the plugin;
+2. installed plugin manifest `detect` rule;
+3. agent request based on plugin guidance;
+4. manual command.
 
 Detection should be cheap and local. It should not run expensive setup, network
 calls, package-manager installs, or heavyweight scans. Deep analysis belongs to
 the plugin after user or agent activation.
+
+Suggested plugins are represented separately from active plugin services:
+
+```json
+{
+  "name": "backplane",
+  "source": "github:i2cjak/backplane",
+  "installed": true,
+  "enabled": true,
+  "reason": "This repo contains KiCad board files and uses Backplane for PCB review.",
+  "confidence": "explicit",
+  "config_source": ".portal/plugins.toml"
+}
+```
 
 ## Installed State
 
