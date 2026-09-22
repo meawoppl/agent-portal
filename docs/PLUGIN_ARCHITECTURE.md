@@ -87,6 +87,42 @@ The folder name is the installation name. The manifest's `name` must match the
 folder name. This keeps paths stable, makes manual inspection easy, and avoids a
 hidden package-manager cache becoming the source of truth.
 
+Plugin commands run with a plugin-local support home rooted inside that same
+installed directory:
+
+```text
+~/agent-portal-plugins/backplane/.portal/
+  home/
+  cache/
+  config/
+  data/
+  state/
+```
+
+Before invoking any manifest command, the launcher creates those directories and
+sets:
+
+```text
+AGENT_PORTAL_PLUGIN_DIR=$AGENT_PORTAL_PLUGIN_ROOT/backplane
+AGENT_PORTAL_PLUGIN_HOME=$AGENT_PORTAL_PLUGIN_ROOT/backplane/.portal
+HOME=$AGENT_PORTAL_PLUGIN_ROOT/backplane/.portal/home
+XDG_CACHE_HOME=$AGENT_PORTAL_PLUGIN_ROOT/backplane/.portal/cache
+XDG_CONFIG_HOME=$AGENT_PORTAL_PLUGIN_ROOT/backplane/.portal/config
+XDG_DATA_HOME=$AGENT_PORTAL_PLUGIN_ROOT/backplane/.portal/data
+XDG_STATE_HOME=$AGENT_PORTAL_PLUGIN_ROOT/backplane/.portal/state
+```
+
+Installers and plugin runtimes should keep downloaded tools, generated support
+files, caches, and per-plugin state under these paths. They may still read the
+session repository through `{cwd}`, and they may write explicit user-requested
+outputs through `{artifact_dir}` or another path supplied by the user. This is a
+best-effort convention rather than a sandbox: commands can still write elsewhere
+if they ignore `HOME`, `XDG_*`, and the Portal plugin environment.
+
+This plugin-local `.portal/` is different from a repository's `.portal/`
+directory. The repository directory describes project intent, such as suggested
+plugins. The installed plugin directory stores plugin-owned support files.
+
 ## CLI Surface
 
 Add a top-level launcher command group:

@@ -379,6 +379,7 @@ fn copy_dir(src: &Path, dest: &Path) -> Result<()> {
 }
 
 fn run_manifest_command(root: &Path, command: &str) -> Result<()> {
+    prepare_plugin_home(root)?;
     let status = shell_command(root, command)
         .status()
         .with_context(|| format!("failed to run `{command}`"))?;
@@ -390,6 +391,7 @@ fn run_manifest_command(root: &Path, command: &str) -> Result<()> {
 }
 
 fn spawn_manifest_command(root: &Path, command: &str) -> Result<()> {
+    prepare_plugin_home(root)?;
     shell_command(root, command)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -399,10 +401,51 @@ fn spawn_manifest_command(root: &Path, command: &str) -> Result<()> {
     Ok(())
 }
 
+fn prepare_plugin_home(root: &Path) -> Result<()> {
+    let portal_dir = root.join(".portal");
+    for name in ["home", "cache", "config", "data", "state"] {
+        std::fs::create_dir_all(portal_dir.join(name)).with_context(|| {
+            format!(
+                "failed to prepare plugin support directory {}",
+                portal_dir.join(name).display()
+            )
+        })?;
+    }
+    Ok(())
+}
+
 fn shell_command(root: &Path, command: &str) -> Command {
     let mut cmd = Command::new("sh");
-    cmd.arg("-c").arg(command).current_dir(root);
+    cmd.arg("-c")
+        .arg(command)
+        .current_dir(root)
+        .envs(plugin_command_env(root));
     cmd
+}
+
+fn plugin_command_env(root: &Path) -> Vec<(&'static str, String)> {
+    let portal_dir = root.join(".portal");
+    vec![
+        ("AGENT_PORTAL_PLUGIN_DIR", root.display().to_string()),
+        ("AGENT_PORTAL_PLUGIN_HOME", portal_dir.display().to_string()),
+        ("HOME", portal_dir.join("home").display().to_string()),
+        (
+            "XDG_CACHE_HOME",
+            portal_dir.join("cache").display().to_string(),
+        ),
+        (
+            "XDG_CONFIG_HOME",
+            portal_dir.join("config").display().to_string(),
+        ),
+        (
+            "XDG_DATA_HOME",
+            portal_dir.join("data").display().to_string(),
+        ),
+        (
+            "XDG_STATE_HOME",
+            portal_dir.join("state").display().to_string(),
+        ),
+    ]
 }
 
 fn run_cmd(cwd: &Path, program: &str, args: &[&OsStr]) -> Result<()> {
@@ -458,5 +501,53 @@ fn path_display(path: &Path) -> String {
         ".".to_string()
     } else {
         path.display().to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plugin_commands_use_plugin_local_home_and_xdg_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("backplane");
+        std::fs::create_dir_all(&root).unwrap();
+
+        prepare_plugin_home(&root).unwrap();
+
+        for name in ["home", "cache", "config", "data", "state"] {
+            assert!(root.join(".portal").join(name).is_dir());
+        }
+
+        let env = plugin_command_env(&root);
+        let get = |key: &str| {
+            env.iter()
+                .find_map(|(k, v)| (*k == key).then_some(v.as_str()))
+                .unwrap()
+        };
+
+        assert_eq!(get("AGENT_PORTAL_PLUGIN_DIR"), root.display().to_string());
+        assert_eq!(
+            get("AGENT_PORTAL_PLUGIN_HOME"),
+            root.join(".portal").display().to_string()
+        );
+        assert_eq!(get("HOME"), root.join(".portal/home").display().to_string());
+        assert_eq!(
+            get("XDG_CACHE_HOME"),
+            root.join(".portal/cache").display().to_string()
+        );
+        assert_eq!(
+            get("XDG_CONFIG_HOME"),
+            root.join(".portal/config").display().to_string()
+        );
+        assert_eq!(
+            get("XDG_DATA_HOME"),
+            root.join(".portal/data").display().to_string()
+        );
+        assert_eq!(
+            get("XDG_STATE_HOME"),
+            root.join(".portal/state").display().to_string()
+        );
     }
 }
