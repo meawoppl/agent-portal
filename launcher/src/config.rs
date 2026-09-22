@@ -10,6 +10,25 @@ pub struct LauncherConfig {
     pub name: Option<String>,
     #[serde(default)]
     pub sessions: Vec<ExpectedSession>,
+    #[serde(default)]
+    pub plugins: std::collections::BTreeMap<String, InstalledPlugin>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct InstalledPlugin {
+    pub path: String,
+    pub source: String,
+    #[serde(default)]
+    pub source_subdir: Option<String>,
+    #[serde(default)]
+    pub reference: Option<String>,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    pub installed_at: chrono::DateTime<chrono::Utc>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -68,6 +87,41 @@ fn save_config(config: &LauncherConfig) -> anyhow::Result<()> {
     write_config_atomic(&path, &contents)?;
     tracing::debug!("Saved config to {}", path.display());
     Ok(())
+}
+
+pub fn plugin_root() -> PathBuf {
+    std::env::var_os("AGENT_PORTAL_PLUGIN_ROOT")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("agent-portal-plugins")
+        })
+}
+
+pub fn save_installed_plugin(name: &str, plugin: InstalledPlugin) -> anyhow::Result<()> {
+    let mut config = load_config();
+    config.plugins.insert(name.to_string(), plugin);
+    save_config(&config)
+}
+
+pub fn remove_installed_plugin(name: &str) -> anyhow::Result<Option<InstalledPlugin>> {
+    let mut config = load_config();
+    let removed = config.plugins.remove(name);
+    if removed.is_some() {
+        save_config(&config)?;
+    }
+    Ok(removed)
+}
+
+pub fn set_plugin_enabled(name: &str, enabled: bool) -> anyhow::Result<()> {
+    let mut config = load_config();
+    let Some(plugin) = config.plugins.get_mut(name) else {
+        anyhow::bail!("plugin `{name}` is not installed");
+    };
+    plugin.enabled = enabled;
+    save_config(&config)
 }
 
 fn write_config_atomic(path: &Path, contents: &str) -> anyhow::Result<()> {
@@ -296,6 +350,7 @@ mod tests {
                 claude_args: vec!["--verbose".to_string()],
                 session_id: None,
             }],
+            plugins: std::collections::BTreeMap::new(),
         };
         let serialized = serde_json::to_string_pretty(&config).unwrap();
         let deserialized: LauncherConfig = serde_json::from_str(&serialized).unwrap();
@@ -328,6 +383,7 @@ mod tests {
         }"#;
         let config: LauncherConfig = serde_json::from_str(json).unwrap();
         assert_eq!(config.sessions.len(), 2);
+        assert!(config.plugins.is_empty());
 
         assert_eq!(config.sessions[0].working_directory, "/home/user/project-a");
         assert_eq!(
@@ -377,6 +433,7 @@ mod tests {
                 claude_args: vec![],
                 session_id: Some(sid),
             }],
+            plugins: std::collections::BTreeMap::new(),
         };
         let serialized = serde_json::to_string_pretty(&config).unwrap();
         let deserialized: LauncherConfig = serde_json::from_str(&serialized).unwrap();
