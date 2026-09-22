@@ -939,7 +939,11 @@ agent-portal message send {reply_session_id} \"your reply\""
     )
 }
 
-/// First 8 hex chars of a session id, dash-stripped, for display.
+/// Short session-id display length: first 8 hex chars, dash-stripped.
+pub const SHORT_SESSION_ID_LEN: usize = 8;
+
+/// First [`SHORT_SESSION_ID_LEN`] hex chars of a session id, dash-stripped,
+/// for display.
 ///
 /// Single home for the short-id shape so the reply reminder an agent acts on
 /// and the peek summary it reads name the same session the same way.
@@ -948,8 +952,8 @@ agent-portal message send {reply_session_id} \"your reply\""
 #[must_use]
 pub fn short_session_id(session_id: &str) -> String {
     let compact = session_id.replace('-', "");
-    if compact.len() >= 8 && compact.chars().all(|c| c.is_ascii_hexdigit()) {
-        compact.chars().take(8).collect()
+    if compact.len() >= SHORT_SESSION_ID_LEN && compact.chars().all(|c| c.is_ascii_hexdigit()) {
+        compact.chars().take(SHORT_SESSION_ID_LEN).collect()
     } else {
         session_id.to_string()
     }

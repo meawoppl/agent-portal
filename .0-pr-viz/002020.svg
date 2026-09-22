@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-label="Visual summary of PR 2020: the last local short-id copy now delegates to the shared helper.">
+  <rect width="2000" height="1200" fill="#16161e"/>
+  <text x="64" y="112" fill="#e6e9f5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="48" font-weight="700">Last short-id copy joins the shared helper</text>
+  <text x="64" y="162" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25">FlatRow::short_id re-sliced the id locally - now it calls shared::short_session_id.</text>
+
+  <line x1="1000" y1="220" x2="1000" y2="1080" stroke="#565f89" stroke-width="2" stroke-dasharray="10 12"/>
+
+  <text x="100" y="280" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700">Before</text>
+  <g transform="translate(100 330)">
+    <rect x="0" y="0" width="760" height="540" rx="14" fill="#1e202e" stroke="#3d4666" stroke-width="3"/>
+    <text x="40" y="80" fill="#c0caf5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">shared::short_session_id</text>
+    <text x="40" y="120" fill="#565f89" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">guarded take(8), magic number 8</text>
+    <text x="40" y="200" fill="#c0caf5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">archive scan::FlatRow::short_id</text>
+    <text x="40" y="240" fill="#565f89" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">own simple() + take(SHORT_ID_LEN)</text>
+    <text x="40" y="320" fill="#c0caf5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">archive SHORT_ID_LEN = 8</text>
+    <text x="40" y="360" fill="#565f89" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">second copy of the same length</text>
+    <text x="40" y="440" fill="#c0caf5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">two spellings, zero callers shared</text>
+    <text x="40" y="480" fill="#565f89" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">drift risk on every future tweak</text>
+  </g>
+  <text x="100" y="985" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25">Same 8-char output, maintained twice.</text>
+
+  <text x="1120" y="280" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700">After</text>
+  <g transform="translate(1120 330)">
+    <rect x="0" y="0" width="760" height="540" rx="14" fill="#1e202e" stroke="#3d4666" stroke-width="3"/>
+    <rect x="130" y="70" width="500" height="110" rx="12" fill="#16161e" stroke="#9ece6a" stroke-width="3"/>
+    <text x="160" y="115" fill="#9ece6a" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="26" font-weight="700">shared::short_session_id</text>
+    <text x="160" y="150" fill="#a9b1d6" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="22">(&amp;str) -&gt; String</text>
+    <text x="40" y="270" fill="#c0caf5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">new const SHORT_SESSION_ID_LEN</text>
+    <text x="40" y="310" fill="#c0caf5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">FlatRow::short_id delegates to it</text>
+    <text x="40" y="390" fill="#7aa2f7" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">SHORT_ID_LEN kept as alias</text>
+    <text x="40" y="430" fill="#7aa2f7" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">new test pins both spellings equal</text>
+  </g>
+  <text x="1120" y="985" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25">One length, one helper, one pinned test.</text>
+
+  <g transform="translate(140 1020)">
+    <rect x="0" y="0" width="510" height="74" rx="12" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+    <text x="28" y="46" fill="#7aa2f7" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">no behavior change on valid UUIDs</text>
+    <rect x="560" y="0" width="510" height="74" rx="12" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+    <text x="588" y="46" fill="#bb9af7" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">clippy + fmt + tests green</text>
+    <rect x="1120" y="0" width="510" height="74" rx="12" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+    <text x="1148" y="46" fill="#e0af68" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">follows short-id sharing #2017</text>
+  </g>
+</svg>
