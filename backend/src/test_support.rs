@@ -47,10 +47,14 @@ use crate::AppState;
 /// mutation override is deliberate: it needs no builder scaffolding and, unlike
 /// a literal, names only the fields a given test actually cares about.
 pub fn test_app_state(pool: DbPool) -> AppState {
+    let session_manager = SessionManager::new();
     AppState {
         dev_mode: false,
         db_pool: pool,
-        session_manager: SessionManager::new(),
+        forward_http_client: crate::handlers::forward_client::ForwardHttpClient::new(
+            session_manager.clone(),
+        ),
+        session_manager,
         oauth: crate::config::OAuthProviders::default(),
         stt: None,
         max_audio_mb: 25,

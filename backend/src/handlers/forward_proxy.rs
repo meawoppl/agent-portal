@@ -508,7 +508,7 @@ fn note_reachability(
     }
 }
 
-/// Reverse-proxy one request through a fresh tunnel stream.
+/// Reverse-proxy one request through the pooled tunnel client.
 async fn proxy_request(
     app_state: &AppState,
     session_key: &str,
@@ -517,55 +517,10 @@ async fn proxy_request(
     label: &str,
     req: Request,
 ) -> Response {
-    let stream = match app_state
-        .session_manager
-        .open_tunnel(session_key, port)
-        .await
-    {
-        Ok(stream) => {
-            note_reachability(app_state, session_key, session_id, port, true);
-            stream
-        }
-        Err(e) => {
-            let ferr = tunnel_error_to_forward(&e);
-            // Only a genuine "nothing listening" reflects on port health; a
-            // stream-limit, revocation, or transport failure says nothing about
-            // the local service, so it must not tint the chip red.
-            if ferr == ForwardError::NoListener {
-                note_reachability(app_state, session_key, session_id, port, false);
-            }
-            // Surface it to the owning agent (visible on its next `forwards`
-            // poll) so a failure the browser hit isn't invisible to the agent
-            // that caused it (#1476).
-            app_state
-                .session_manager
-                .record_forward_failure(session_id, port, ferr);
-            warn!(
-                "Tunnel open failed for {}:{}: {} ({})",
-                session_id,
-                port,
-                e,
-                ferr.code()
-            );
-            return forward_error(ferr);
-        }
+    let generation = match app_state.session_manager.tunnel_generation(session_key) {
+        Some(generation) => generation,
+        None => return forward_error(ForwardError::AgentOffline),
     };
-
-    let io = hyper_util::rt::TokioIo::new(stream);
-    let (mut sender, conn) = match hyper::client::conn::http1::handshake(io).await {
-        Ok(pair) => pair,
-        Err(e) => {
-            warn!("Tunnel HTTP handshake failed: {}", e);
-            return forward_error(ForwardError::BadOrigin);
-        }
-    };
-    // `with_upgrades` keeps the connection driver alive after a 101 so the
-    // upgraded byte stream (WebSocket) stays readable/writable.
-    tokio::spawn(async move {
-        if let Err(e) = conn.with_upgrades().await {
-            debug!("Tunnel HTTP connection ended: {}", e);
-        }
-    });
 
     let original_host = req
         .headers()
@@ -589,9 +544,33 @@ async fn proxy_request(
         }
     };
 
-    let mut upstream_resp = match sender.send_request(upstream_req).await {
-        Ok(resp) => resp,
+    let mut upstream_resp = match app_state
+        .forward_http_client
+        .request(session_id, session_key, generation, port, upstream_req)
+        .await
+    {
+        Ok(result) => {
+            note_reachability(app_state, session_key, session_id, port, true);
+            result.response
+        }
         Err(e) => {
+            if let Some(tunnel) = super::forward_client::tunnel_error(&e) {
+                let ferr = tunnel_error_to_forward(tunnel);
+                if ferr == ForwardError::NoListener {
+                    note_reachability(app_state, session_key, session_id, port, false);
+                }
+                app_state
+                    .session_manager
+                    .record_forward_failure(session_id, port, ferr);
+                warn!(
+                    "Tunnel open failed for {}:{}: {} ({})",
+                    session_id,
+                    port,
+                    tunnel,
+                    ferr.code()
+                );
+                return forward_error(ferr);
+            }
             warn!("Tunnel upstream request failed: {}", e);
             return forward_error(ForwardError::BadOrigin);
         }

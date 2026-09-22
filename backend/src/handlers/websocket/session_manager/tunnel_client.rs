@@ -187,6 +187,14 @@ pub enum TunnelError {
 }
 
 impl SessionManager {
+    /// Current proxy connection generation for a live session.
+    ///
+    /// Forward HTTP pool keys include this value so connections from a
+    /// replaced proxy socket are never checked out after reconnect.
+    pub(crate) fn tunnel_generation(&self, session_key: &str) -> Option<u64> {
+        self.sessions.get(session_key).map(|conn| conn.gen)
+    }
+
     /// Route an incoming tunnel frame from a proxy socket to its stream's
     /// relay task. Unknown stream ids are post-close races — dropped quietly.
     pub fn tunnel_in(&self, stream_id: Uuid, msg: TunnelIn) {
@@ -299,6 +307,22 @@ impl SessionManager {
         session_key: &str,
         port: u16,
     ) -> Result<tokio::io::DuplexStream, TunnelError> {
+        let generation = self
+            .tunnel_generation(session_key)
+            .ok_or(TunnelError::NotConnected)?;
+        self.open_tunnel_for_generation(session_key, generation, port)
+            .await
+    }
+
+    /// Open a tunnel only if `generation` is still the session's active proxy
+    /// connection. Used by the HTTP pool connector to reject a checkout that
+    /// raced a proxy reconnect.
+    pub(crate) async fn open_tunnel_for_generation(
+        &self,
+        session_key: &str,
+        generation: u64,
+        port: u16,
+    ) -> Result<tokio::io::DuplexStream, TunnelError> {
         // Capture the sender and its connection generation together so the
         // stream is reaped with the exact connection it rode on. Single
         // lookup — sender and gen live in the same entry, so they can't
@@ -320,6 +344,9 @@ impl SessionManager {
                         "open_tunnel: session {} silent since {} — treating as offline",
                         session_key, last_seen
                     );
+                    return Err(TunnelError::NotConnected);
+                }
+                if conn.gen != generation {
                     return Err(TunnelError::NotConnected);
                 }
                 (conn.sender.clone(), conn.gen)
@@ -597,6 +624,32 @@ mod tests {
         // full OPEN_TIMEOUT waiting for a reply that can never arrive.
         assert!(matches!(
             mgr.open_tunnel("k", 8080).await,
+            Err(TunnelError::NotConnected)
+        ));
+    }
+
+    #[tokio::test]
+    async fn generation_bound_open_rejects_reconnected_session() {
+        use crate::handlers::websocket::conn_channel;
+        use shared::ServerToProxy;
+
+        let mgr = SessionManager::new();
+        let (old_tx, _old_rx) = conn_channel::<ServerToProxy>(64);
+        let old_generation = mgr.register_session(
+            SessionId::new("k"),
+            old_tx,
+            tokio_util::sync::CancellationToken::new(),
+        );
+        let (new_tx, _new_rx) = conn_channel::<ServerToProxy>(64);
+        mgr.register_session(
+            SessionId::new("k"),
+            new_tx,
+            tokio_util::sync::CancellationToken::new(),
+        );
+
+        assert!(matches!(
+            mgr.open_tunnel_for_generation("k", old_generation, 8080)
+                .await,
             Err(TunnelError::NotConnected)
         ));
     }
