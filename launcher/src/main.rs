@@ -53,6 +53,10 @@ fn init_tracing() {
                   Report bugs / file issues: https://github.com/meawoppl/agent-portal/issues"
 )]
 struct Args {
+    /// Print version and build information, then exit.
+    #[arg(long, global = true)]
+    version: bool,
+
     /// Backend WebSocket URL (default: wss://txcl.io in release, ws://localhost:3000 in debug)
     #[arg(long)]
     backend_url: Option<String>,
@@ -226,6 +230,16 @@ enum ServiceAction {
 
 pub(crate) const BINARY_PREFIX: &str = "agent-portal";
 
+fn print_version() {
+    println!(
+        "{} {} ({}; built {})",
+        BINARY_PREFIX,
+        shared::VERSION,
+        shared::GIT_HASH,
+        shared::BUILD_TIME
+    );
+}
+
 fn resolve_backend_url(args_url: Option<String>, config_url: Option<String>) -> String {
     args_url
         .or(config_url)
@@ -282,7 +296,8 @@ fn ensure_self_on_path() {}
 
 #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
 mod path_tests {
-    use super::path_has_executable;
+    use super::{path_has_executable, Args};
+    use clap::Parser;
     use std::os::unix::fs::PermissionsExt;
 
     #[test]
@@ -312,6 +327,13 @@ mod path_tests {
             "agent-portal"
         ));
     }
+
+    #[test]
+    fn version_flag_parses_without_subcommand() {
+        let args = Args::parse_from(["agent-portal", "--version"]);
+        assert!(args.version);
+        assert!(args.command.is_none());
+    }
 }
 
 #[tokio::main]
@@ -323,6 +345,11 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|_| anyhow::anyhow!("Failed to install rustls crypto provider"))?;
 
     let args = Args::parse();
+
+    if args.version {
+        print_version();
+        return Ok(());
+    }
 
     init_tracing();
 
