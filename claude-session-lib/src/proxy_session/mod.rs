@@ -1124,11 +1124,7 @@ async fn fail_upload(state: &mut ConnectionState, upload_id: String, reason: Str
         drop(recv_state.file_handle);
         let _ = tokio::fs::remove_file(&recv_state.temp_path).await;
     }
-    error!(
-        "[upload {}] Failed: {}",
-        &upload_id[..8.min(upload_id.len())],
-        reason
-    );
+    error!("[upload {}] Failed: {}", truncate(&upload_id, 8), reason);
     send_upload_result(state, upload_id, false, Some(reason), None).await;
 }
 
@@ -1162,7 +1158,7 @@ async fn handle_file_upload(upload_event: FileUploadEvent, state: &mut Connectio
             if let Some(old) = state.active_uploads.remove(&upload_id) {
                 warn!(
                     "[upload {}] Duplicate start; discarding previous partial",
-                    &upload_id[..8.min(upload_id.len())]
+                    truncate(&upload_id, 8)
                 );
                 drop(old.file_handle);
                 let _ = tokio::fs::remove_file(&old.temp_path).await;
@@ -1226,7 +1222,7 @@ async fn handle_file_upload(upload_event: FileUploadEvent, state: &mut Connectio
             use base64::Engine;
             use tokio::io::AsyncWriteExt;
 
-            let upload_id_short = &upload_id[..8.min(upload_id.len())];
+            let upload_id_short = truncate(&upload_id, 8);
             let Some(recv_state) = state.active_uploads.get_mut(&upload_id) else {
                 // Post-abort stragglers land here; the failure was already
                 // reported when the upload state was dropped.
