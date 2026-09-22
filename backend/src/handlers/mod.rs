@@ -6,6 +6,7 @@ pub mod config;
 pub mod device_flow;
 pub mod downloads;
 pub mod files;
+pub(crate) mod forward_client;
 pub mod forward_proxy;
 pub mod forwards;
 pub mod helpers;

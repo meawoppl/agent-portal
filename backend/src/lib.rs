@@ -63,6 +63,8 @@ pub struct AppState {
     pub dev_mode: bool,
     pub db_pool: DbPool,
     pub session_manager: SessionManager,
+    /// HTTP/1.1 connection pool over session port-forward tunnels.
+    pub(crate) forward_http_client: handlers::forward_client::ForwardHttpClient,
     pub oauth: OAuthProviders,
     pub device_flow_store: Option<DeviceFlowStore>,
     pub public_url: String,
@@ -185,10 +187,13 @@ pub async fn run() -> anyhow::Result<()> {
         push::ConfiguredTransport::from_config(config.vapid_private_key, config.native_push)?;
 
     // Create app state
+    let forward_http_client =
+        handlers::forward_client::ForwardHttpClient::new(session_manager.clone());
     let app_state = Arc::new(AppState {
         dev_mode: args.dev_mode,
         db_pool: pool,
         session_manager,
+        forward_http_client,
         oauth,
         stt,
         device_flow_store: Some(device_flow_store),

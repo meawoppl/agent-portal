@@ -497,13 +497,14 @@ same session and port; the subdomain label rotates only when the port changes.
 Re-running `forward` while debugging no longer retires a URL the user still has
 open (#1476).
 
-**Deferred: data-plane pooling.** Replacing the hand-rolled per-request
-`http1::handshake` with a pooled `hyper_util` client over a tunnel connector is
-tracked in [#1468](https://github.com/meawoppl/agent-portal/issues/1468). It
-carries a real wrinkle (preserving the typed `ForwardError` through the pooling
-client) and touches the WebSocket-upgrade path, and CI exercises none of the
-live forward path — so it must land behind a conformance test **and** a live
-upgrade/concurrency smoke test, not on green CI alone.
+**Upstream connection pooling.** The backend uses a `hyper_util` HTTP/1.1 pool
+over a custom tunnel connector. Pool authorities include session id, proxy
+connection generation, and port, so connections cannot cross a session,
+forward, or proxy reconnect. Completed bursts retain at most eight idle
+connections per forward and reap them after 30 seconds. Connector errors remain
+typed through the pool, preserving the `no-listener` / `at-capacity` /
+`not-forwarded` taxonomy; upgraded connections leave the pool and continue
+through the WebSocket splice path.
 
 ## Security model
 
