@@ -1,11 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
-  <rect width="1600" height="900" fill="#1a1b26"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+  <rect width="2000" height="1200" fill="#1a1b26"/>
   <text x="60" y="62" fill="#565f89" font-family="Arial, sans-serif" font-size="22">PR #2030 · remove stale schedule/session coupling</text>
   <text x="60" y="116" fill="#c0caf5" font-family="Arial, sans-serif" font-size="34">A reusable schedule no longer blocks stopping its source session</text>
-  <line x1="60" y1="154" x2="1540" y2="154" stroke="#565f89" stroke-width="2"/>
+  <line x1="60" y1="154" x2="1940" y2="154" stroke="#565f89" stroke-width="2"/>
 
   <text x="80" y="220" fill="#f7768e" font-family="Arial, sans-serif" font-size="22" font-weight="bold">BEFORE</text>
-  <rect x="70" y="250" width="650" height="470" rx="18" fill="#24283b" stroke="#f7768e" stroke-width="3"/>
+  <rect x="70" y="250" width="650" height="470" rx="18" fill="#1e202e" stroke="#f7768e" stroke-width="3"/>
   <rect x="120" y="310" width="550" height="90" rx="12" fill="#16161e" stroke="#7aa2f7" stroke-width="2"/>
   <text x="155" y="365" fill="#c0caf5" font-family="Arial, sans-serif" font-size="26">Session · /repo/project</text>
   <path d="M395 405 L395 485" stroke="#f7768e" stroke-width="4"/>
@@ -15,15 +15,15 @@
   <text x="155" y="602" fill="#c0caf5" font-family="Arial, sans-serif" font-size="20">matched only by working directory</text>
   <text x="100" y="680" fill="#565f89" font-family="Arial, sans-serif" font-size="19">An obsolete UI guard contradicted the detached data model.</text>
 
-  <text x="880" y="220" fill="#9ece6a" font-family="Arial, sans-serif" font-size="22" font-weight="bold">AFTER</text>
-  <rect x="870" y="250" width="650" height="470" rx="18" fill="#24283b" stroke="#9ece6a" stroke-width="3"/>
-  <rect x="920" y="310" width="550" height="90" rx="12" fill="#16161e" stroke="#7aa2f7" stroke-width="2"/>
-  <text x="955" y="365" fill="#c0caf5" font-family="Arial, sans-serif" font-size="26">Session · can stop or close</text>
-  <rect x="920" y="455" width="550" height="130" rx="12" fill="#16161e" stroke="#bb9af7" stroke-width="2"/>
-  <text x="955" y="505" fill="#bb9af7" font-family="Arial, sans-serif" font-size="24">Schedule · owns LaunchSpec</text>
-  <text x="955" y="548" fill="#c0caf5" font-family="Arial, sans-serif" font-size="20">continues independently</text>
-  <text x="920" y="645" fill="#9ece6a" font-family="Arial, sans-serif" font-size="21">Session action remains a prefilled authoring shortcut.</text>
+  <text x="1080" y="220" fill="#9ece6a" font-family="Arial, sans-serif" font-size="22" font-weight="bold">AFTER</text>
+  <rect x="1070" y="250" width="650" height="470" rx="18" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <rect x="1120" y="310" width="550" height="90" rx="12" fill="#16161e" stroke="#7aa2f7" stroke-width="2"/>
+  <text x="1155" y="365" fill="#c0caf5" font-family="Arial, sans-serif" font-size="26">Session · can stop or close</text>
+  <rect x="1120" y="455" width="550" height="130" rx="12" fill="#16161e" stroke="#bb9af7" stroke-width="2"/>
+  <text x="1155" y="505" fill="#bb9af7" font-family="Arial, sans-serif" font-size="24">Schedule · owns LaunchSpec</text>
+  <text x="1155" y="548" fill="#c0caf5" font-family="Arial, sans-serif" font-size="20">continues independently</text>
+  <text x="1120" y="645" fill="#9ece6a" font-family="Arial, sans-serif" font-size="21">Session action remains a prefilled authoring shortcut.</text>
 
-  <rect x="250" y="780" width="1100" height="70" rx="14" fill="#16161e" stroke="#7dcfff" stroke-width="2"/>
-  <text x="800" y="824" text-anchor="middle" fill="#7dcfff" font-family="Arial, sans-serif" font-size="22">last_session_id already uses ON DELETE SET NULL — no backend or wire change</text>
+  <rect x="350" y="1090" width="1300" height="70" rx="14" fill="#16161e" stroke="#7dcfff" stroke-width="2"/>
+  <text x="1000" y="1134" text-anchor="middle" fill="#7dcfff" font-family="Arial, sans-serif" font-size="22">last_session_id already uses ON DELETE SET NULL — no backend or wire change</text>
 </svg>
