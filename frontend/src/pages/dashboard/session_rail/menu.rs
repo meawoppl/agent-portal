@@ -235,7 +235,7 @@ fn render_menu_content(session: &SessionInfo, props: &SessionRailMenuProps) -> H
     } else {
         "Session ID"
     };
-    let short_id = shared::short_session_id(&session.id.to_string());
+    let short_id = shared::short_uuid(&session.id);
 
     let leave_option = if session.my_role != SessionRole::Owner {
         menu_option(

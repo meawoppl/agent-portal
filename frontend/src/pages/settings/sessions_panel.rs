@@ -42,7 +42,7 @@ fn session_row(props: &SessionRowProps) -> Html {
 
     let is_owner = session.my_role == shared::SessionRole::Owner;
 
-    let short_id = shared::short_session_id(&session.id.to_string());
+    let short_id = shared::short_uuid(&session.id);
 
     html! {
         <tr class="session-row">
