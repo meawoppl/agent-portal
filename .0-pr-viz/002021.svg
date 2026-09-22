@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-label="Visual summary: plugin commands keep support files in the installed plugin home while reading the session repository separately.">
+  <rect width="2000" height="1200" fill="#16161e"/>
+  <text x="72" y="112" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="52" font-weight="700">Plugin support files stay with the install</text>
+  <text x="72" y="166" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="27">Manifest commands get a plugin-local HOME and XDG dirs, while project access still flows through {cwd}.</text>
+
+  <g transform="translate(90 260)">
+    <rect x="0" y="0" width="520" height="660" rx="12" fill="#1e202e" stroke="#565f89" stroke-width="3"/>
+    <text x="36" y="62" fill="#7aa2f7" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="32" font-weight="700">Shared plugin install</text>
+    <rect x="38" y="110" width="444" height="452" rx="10" fill="#16161e" stroke="#3d4666" stroke-width="2"/>
+    <text x="66" y="162" fill="#c0caf5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="23">~/agent-portal-plugins/</text>
+    <text x="96" y="212" fill="#c0caf5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="23">backplane/</text>
+    <text x="126" y="262" fill="#9ece6a" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="23">.portal/</text>
+    <text x="156" y="310" fill="#a9b1d6" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="21">home/</text>
+    <text x="156" y="354" fill="#a9b1d6" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="21">cache/</text>
+    <text x="156" y="398" fill="#a9b1d6" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="21">config/</text>
+    <text x="156" y="442" fill="#a9b1d6" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="21">data/</text>
+    <text x="156" y="486" fill="#a9b1d6" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="21">state/</text>
+    <text x="66" y="622" fill="#7dcfff" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24" font-weight="700">One shared install, many repos</text>
+  </g>
+
+  <g transform="translate(740 260)">
+    <rect x="0" y="0" width="520" height="660" rx="12" fill="#1e202e" stroke="#565f89" stroke-width="3"/>
+    <text x="36" y="62" fill="#bb9af7" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="32" font-weight="700">Command environment</text>
+    <rect x="38" y="112" width="444" height="410" rx="10" fill="#16161e" stroke="#3d4666" stroke-width="2"/>
+    <text x="66" y="164" fill="#c0caf5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="22">HOME=.portal/home</text>
+    <text x="66" y="218" fill="#c0caf5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="22">XDG_CACHE_HOME=.portal/cache</text>
+    <text x="66" y="272" fill="#c0caf5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="22">XDG_CONFIG_HOME=.portal/config</text>
+    <text x="66" y="326" fill="#c0caf5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="22">XDG_DATA_HOME=.portal/data</text>
+    <text x="66" y="380" fill="#c0caf5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="22">XDG_STATE_HOME=.portal/state</text>
+    <text x="66" y="452" fill="#e0af68" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="22">{cwd}=session repository</text>
+    <text x="66" y="622" fill="#bb9af7" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24" font-weight="700">Best-effort convention, not a sandbox</text>
+  </g>
+
+  <g transform="translate(1390 260)">
+    <rect x="0" y="0" width="520" height="660" rx="12" fill="#1e202e" stroke="#565f89" stroke-width="3"/>
+    <text x="36" y="62" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="32" font-weight="700">Backplane today</text>
+    <rect x="38" y="112" width="444" height="330" rx="10" fill="#16161e" stroke="#3d4666" stroke-width="2"/>
+    <text x="66" y="164" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25" font-weight="700">Already close</text>
+    <text x="66" y="218" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">setup: no persistent writes</text>
+    <text x="66" y="266" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">doctor/serve: read repo files</text>
+    <text x="66" y="314" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">export: writes explicit artifacts</text>
+    <text x="66" y="520" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24" font-weight="700">Future helpers inherit local HOME</text>
+    <text x="66" y="566" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22">KiCad helpers and caches can live under the shared install.</text>
+  </g>
+
+  <path d="M610 590 C670 590 685 590 735 590" fill="none" stroke="#7aa2f7" stroke-width="7" stroke-linecap="round"/>
+  <path d="M1260 590 C1320 590 1335 590 1385 590" fill="none" stroke="#9ece6a" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="675" cy="590" r="10" fill="#7aa2f7"/>
+  <circle cx="1325" cy="590" r="10" fill="#9ece6a"/>
+
+  <g transform="translate(310 1010)">
+    <rect x="0" y="0" width="400" height="82" rx="10" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+    <text x="32" y="52" fill="#7aa2f7" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">install creates support dirs</text>
+    <rect x="490" y="0" width="400" height="82" rx="10" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+    <text x="522" y="52" fill="#bb9af7" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">runtime gets local HOME</text>
+    <rect x="980" y="0" width="400" height="82" rx="10" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+    <text x="1012" y="52" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">repos stay cleaner</text>
+  </g>
+</svg>
