@@ -28,6 +28,7 @@ jobs:
           fetch-depth: 0  # full history so build.rs commit-count version is real (#1096)
 
       - name: Setup Rust
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: ./.github/actions/setup-rust
         with:
           cache-key: "container-build"
@@ -36,18 +37,31 @@ jobs:
           trunk: "true"
 
       - name: Build frontend
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         # These assets are embedded in the release backend below. A debug
         # frontend is several times larger and was previously shipped by the
         # production container even though the backend itself was optimized.
         run: cd frontend && trunk build --release
 
       - name: Build backend (embeds frontend assets)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: cargo build --release -p backend
 
-      - name: Prepare build artifacts
+      - name: Prepare release build artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           mkdir -p build-output
           cp target/release/backend build-output/
+
+      # Application compilation is already covered by CI. Pull requests only
+      # need to prove that the Dockerfile and build context still agree about
+      # the packaged binary. The full optimized, frontend-embedding backend is
+      # built below after merge, where the image is actually published.
+      - name: Prepare PR packaging fixture
+        if: github.event_name == 'pull_request'
+        run: |
+          mkdir -p build-output
+          cp /bin/true build-output/backend
 
       - name: Log in to Container Registry
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
