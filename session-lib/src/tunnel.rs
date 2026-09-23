@@ -93,10 +93,9 @@ enum StreamEgress {
 /// knob that needs no cross-version agreement, so it is safe to raise on its own
 /// (unlike the negotiated frame size / window — see [`shared::TunnelSizing`]).
 ///
-/// Every request becomes its own stream because upstream connections are not yet
-/// pooled (#1468), so a resource-heavy page or a polling app can burst through
-/// hundreds at once; past the cap requests fail with `at-capacity`. 512 doubles
-/// the original headroom while keeping the worst case bounded at
+/// Upstream HTTP connections are pooled, but a resource-heavy page or an app
+/// with many long-lived connections can still consume hundreds of streams;
+/// past the cap requests fail with `at-capacity`. 512 keeps the worst case bounded at
 /// `MAX_STREAMS × window` per direction (32 MiB at the V1 window, 128 MiB at
 /// V2) — the pathological all-streams-saturated figure, not steady state.
 /// Pooling is the real fix for the cap; this buys room until it lands.
@@ -920,7 +919,7 @@ async fn run_stream(
 
     let uplink_credit = send_credit.clone();
     let uplink_mgr = mgr.clone();
-    let uplink = tokio::spawn(async move {
+    let mut uplink = tokio::spawn(async move {
         let mut buf = vec![0u8; max_chunk];
         loop {
             let budget = uplink_credit.take(max_chunk).await;
@@ -938,8 +937,16 @@ async fn run_stream(
         }
     });
 
+    let mut uplink_reason = None;
     let close_reason: Option<String> = loop {
-        match inbox.recv().await {
+        let incoming = tokio::select! {
+            result = &mut uplink => {
+                uplink_reason = result.ok().flatten();
+                break None;
+            }
+            incoming = inbox.recv() => incoming,
+        };
+        match incoming {
             Some(StreamMsg::Data(bytes)) => {
                 if let Err(e) = tcp_wr.write_all(&bytes).await {
                     break Some(format!("local write failed: {e}"));
@@ -957,7 +964,7 @@ async fn run_stream(
 
     // If the uplink already ended (TCP EOF/error) prefer its reason.
     let reason = if uplink.is_finished() {
-        uplink.await.ok().flatten()
+        uplink_reason
     } else {
         uplink.abort();
         close_reason
