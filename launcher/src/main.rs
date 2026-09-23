@@ -393,11 +393,12 @@ async fn main() -> anyhow::Result<()> {
         Some(Command::Forward { target }) => {
             return match target.as_str() {
                 "list" => forward::list().await,
+                "connections" => forward::connections().await,
                 "close" => forward::close().await,
                 other => match other.parse::<u16>() {
                     Ok(p) => forward::open(p).await,
                     Err(_) => Err(anyhow::anyhow!(
-                        "expected a port number, `list`, or `close`, got `{other}`"
+                        "expected a port number, `list`, `connections`, or `close`, got `{other}`"
                     )),
                 },
             };

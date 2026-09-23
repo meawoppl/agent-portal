@@ -55,6 +55,10 @@ pub fn forwarding_panel() -> Html {
             });
         })
     };
+    let on_refresh = {
+        let reload = reload.clone();
+        Callback::from(move |_: MouseEvent| reload())
+    };
 
     html! {
         <section class="section-stack forwarding-section">
@@ -64,6 +68,9 @@ pub fn forwarding_panel() -> Html {
                     { "Local HTTP services your agents have exposed. Toggle a forward \
                        public to let anyone with its URL reach it without signing in." }
                 </p>
+                <button type="button" class="btn-secondary" onclick={on_refresh}>
+                    { "Refresh connections" }
+                </button>
             </div>
 
             if *loading {
@@ -95,6 +102,32 @@ pub fn forwarding_panel() -> Html {
                                         target="_blank"
                                         rel="noopener noreferrer"
                                     >{ format!("{}  (:{})", f.url, f.port) }</a>
+                                    <details class="forwarding-connections">
+                                        <summary>{ format!(
+                                            "{} / {} live connections",
+                                            f.connections.len(),
+                                            shared::api::FORWARD_STREAM_LIMIT,
+                                        ) }</summary>
+                                        if f.connections.is_empty() {
+                                            <span class="forwarding-connection-empty">
+                                                { "No live tunnel streams" }
+                                            </span>
+                                        } else {
+                                            <ul>
+                                                { for f.connections.iter().map(|connection| html! {
+                                                    <li key={connection.stream_id.to_string()}>
+                                                        <code>{ connection.stream_id.to_string() }</code>
+                                                        { format!(
+                                                            " · :{} · {} · {}",
+                                                            connection.port,
+                                                            connection.transport,
+                                                            connection.opened_at,
+                                                        ) }
+                                                    </li>
+                                                }) }
+                                            </ul>
+                                        }
+                                    </details>
                                 </div>
                                 <label class="toggle-label forwarding-public">
                                     <span class={classes!(

@@ -282,6 +282,14 @@ Semantics:
   will be dropped at the idle timeout; `EventSource` auto-reconnects, which is
   acceptable.
 
+**Live diagnostics.** `agent-portal forward connections` prints every tunnel
+stream the backend currently attributes to the session: UUID, forwarded port,
+control/binary transport, and open time, plus the total against the 512-stream
+ceiling. Settings ▸ Forwarding exposes the same inventory per session. This is
+the backend's authoritative live registry; if it is well below 512 while the
+proxy reports `at-capacity`, the two sides have diverged and proxy-side stream
+cleanup is the fault rather than legitimate browser concurrency.
+
 `ForwardOpen`/`ForwardClose` keep the proxy's allowed-port set in sync as
 defense-in-depth; the authoritative allowlist is the backend DB (below). After
 a proxy reconnect the backend replays `ForwardOpen` for every active forward
@@ -638,11 +646,6 @@ protocol addition in M1 is a minor bump).
   links** (ngrok-style). Both are auth-model expansions to design separately.
 - **Path-prefix fallback mode** — superseded by subdomains; not worth
   maintaining two schemes.
-- **Pooling upstream tunnel connections** (#1468). Every request still opens its
-  own stream, which is what makes `MAX_STREAMS` reachable at all and adds a
-  round-trip before each request. With the V2 sizing (#1511) landed, this is now
-  the main remaining throughput lever, and it may dominate the frame-size win —
-  worth benchmarking the two together.
 - **A larger sizing profile (`…_v3`)** if V2's 64 KiB/256 KiB proves too small
   once pooling lands. The negotiation (`shared::TunnelSizing`) is in place; a new
   profile is a capability const plus a `TunnelSizing` entry.
