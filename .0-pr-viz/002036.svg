@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#565f89"/>
+    </marker>
+  </defs>
+  <text x="53" y="70" font-family="sans-serif" font-size="24" letter-spacing="1" fill="#565f89">PR #2036 - Dedupe launcher sidecar map load and save</text>
+  <text x="53" y="120" font-family="sans-serif" font-size="28" fill="#c0caf5">Three copies of sidecar JSON io become two generic helpers.</text>
+  <line x1="53" y1="160" x2="1947" y2="160" stroke="#565f89" stroke-opacity="0.35" stroke-width="1"/>
+  <line x1="1000" y1="190" x2="1000" y2="1140" stroke="#565f89" stroke-opacity="0.5" stroke-width="1" stroke-dasharray="8 8"/>
+  <text x="53" y="225" font-family="sans-serif" font-size="20" letter-spacing="2.5" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="225" font-family="sans-serif" font-size="20" letter-spacing="2.5" fill="#9ece6a">AFTER</text>
+  <rect x="70" y="280" width="850" height="160" fill="none" stroke="#f7768e" stroke-width="2"/>
+  <text x="495" y="348" text-anchor="middle" font-family="monospace" font-size="22" fill="#c0caf5">load_codex_threads()</text>
+  <text x="495" y="388" text-anchor="middle" font-family="sans-serif" font-size="18" fill="#565f89">read file, parse JSON, or default</text>
+  <rect x="70" y="500" width="850" height="160" fill="none" stroke="#f7768e" stroke-width="2"/>
+  <text x="495" y="568" text-anchor="middle" font-family="monospace" font-size="22" fill="#c0caf5">load_claude_conversations()</text>
+  <text x="495" y="608" text-anchor="middle" font-family="sans-serif" font-size="18" fill="#565f89">same body, different map type</text>
+  <rect x="70" y="720" width="850" height="160" fill="none" stroke="#f7768e" stroke-width="2"/>
+  <text x="495" y="788" text-anchor="middle" font-family="monospace" font-size="22" fill="#c0caf5">save_codex_threads()</text>
+  <text x="495" y="828" text-anchor="middle" font-family="sans-serif" font-size="18" fill="#565f89">mkdir parent, pretty JSON, write</text>
+  <rect x="70" y="940" width="850" height="160" fill="none" stroke="#f7768e" stroke-width="2"/>
+  <text x="495" y="1008" text-anchor="middle" font-family="monospace" font-size="22" fill="#c0caf5">inline save in sink</text>
+  <text x="495" y="1048" text-anchor="middle" font-family="sans-serif" font-size="18" fill="#565f89">same steps, hand-rolled chain</text>
+  <rect x="1080" y="280" width="850" height="160" fill="none" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1505" y="348" text-anchor="middle" font-family="monospace" font-size="22" fill="#c0caf5">load_sidecar_map&lt;T&gt;()</text>
+  <text x="1505" y="388" text-anchor="middle" font-family="sans-serif" font-size="18" fill="#565f89">one generic loader for both maps</text>
+  <rect x="1080" y="500" width="850" height="160" fill="none" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1505" y="568" text-anchor="middle" font-family="monospace" font-size="22" fill="#c0caf5">save_sidecar_map&lt;T&gt;()</text>
+  <text x="1505" y="608" text-anchor="middle" font-family="sans-serif" font-size="18" fill="#565f89">one generic saver, all three callers</text>
+  <rect x="1080" y="720" width="850" height="160" fill="none" stroke="#7aa2f7" stroke-width="2"/>
+  <text x="1505" y="788" text-anchor="middle" font-family="monospace" font-size="22" fill="#c0caf5">thin one-line wrappers</text>
+  <text x="1505" y="828" text-anchor="middle" font-family="sans-serif" font-size="18" fill="#565f89">same names, same behavior, no logic</text>
+  <rect x="1080" y="940" width="850" height="160" fill="none" stroke="#bb9af7" stroke-width="2"/>
+  <text x="1505" y="1008" text-anchor="middle" font-family="monospace" font-size="22" fill="#c0caf5">sidecar_tests</text>
+  <text x="1505" y="1048" text-anchor="middle" font-family="sans-serif" font-size="18" fill="#565f89">round-trip plus corrupt tolerance</text>
+  <text x="53" y="1175" font-family="sans-serif" font-size="20" fill="#565f89">process_manager.rs: behavior unchanged</text>
+  <text x="1040" y="1175" font-family="sans-serif" font-size="20" fill="#565f89">fmt + clippy clean, 91 launcher tests pass</text>
+</svg>
