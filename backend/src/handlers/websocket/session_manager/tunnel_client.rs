@@ -532,7 +532,7 @@ async fn run_relay(
     // Uplink: bytes hyper writes (requests) → payload frames, credit-gated.
     let uplink_credit = send_credit.clone();
     let uplink_egress = egress.clone();
-    let uplink = tokio::spawn(async move {
+    let mut uplink = tokio::spawn(async move {
         let mut buf = vec![0u8; max_chunk];
         loop {
             let budget = uplink_credit.take(max_chunk).await;
@@ -552,7 +552,15 @@ async fn run_relay(
     // Downlink: TunnelData frames (responses) → the pipe, granting window
     // back as bytes drain.
     loop {
-        match inbox.recv().await {
+        let incoming = tokio::select! {
+            // Hyper dropping/shutting down the duplex is just as terminal as a
+            // Close frame from the proxy. Previously this child could finish
+            // while the parent waited on `inbox` forever, leaking the stream
+            // registry slot until the whole session disconnected.
+            _ = &mut uplink => break,
+            incoming = inbox.recv() => incoming,
+        };
+        match incoming {
             Some(TunnelIn::Data(bytes)) => {
                 if pipe_wr.write_all(&bytes).await.is_err() {
                     break; // hyper side dropped (response consumer gone)
@@ -568,7 +576,9 @@ async fn run_relay(
         }
     }
 
-    uplink.abort();
+    if !uplink.is_finished() {
+        uplink.abort();
+    }
     streams.remove(&stream_id);
     egress.close(stream_id, None);
     debug!("Backend tunnel stream {} closed", stream_id);
@@ -663,6 +673,48 @@ mod tests {
         assert!(connection_silent_too_long(now - deadline - 1, now));
         // A future/garbage last_seen saturates to zero elapsed → never stale.
         assert!(!connection_silent_too_long(now + 100, now));
+    }
+
+    #[tokio::test]
+    async fn relay_reaps_stream_when_http_side_closes() {
+        use crate::handlers::websocket::conn_channel;
+
+        let mgr = SessionManager::new();
+        let (stream_id, inbox) = insert_stream(&mgr, "session", 1);
+        let (egress, mut frames) = conn_channel::<ServerToProxy>(8);
+        let (client_io, relay_io) = tokio::io::duplex(1024);
+
+        tokio::spawn(run_relay(
+            stream_id,
+            TunnelEgress::Control(egress),
+            shared::TunnelSizing::V1,
+            relay_io,
+            inbox,
+            mgr.tunnel_streams.clone(),
+            Arc::new(std::sync::atomic::AtomicI64::new(
+                shared::TunnelSizing::V1.initial_window as i64,
+            )),
+        ));
+
+        // Hyper releases an idle/closed pooled connection by dropping its end
+        // of the duplex. That EOF must terminate the relay even when the proxy
+        // has not independently sent a Close frame.
+        drop(client_io);
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while mgr.tunnel_streams.contains_key(&stream_id) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("relay should reap the stream after HTTP-side EOF");
+
+        assert!(matches!(
+            frames.recv().await,
+            Some(ServerToProxy::TunnelClose(TunnelCloseFields {
+                stream_id: closed,
+                ..
+            })) if closed == stream_id
+        ));
     }
 
     #[tokio::test]
