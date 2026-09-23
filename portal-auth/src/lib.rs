@@ -17,12 +17,6 @@ pub struct DeviceFlowResult {
     pub user_email: String,
 }
 
-/// Convert a WebSocket URL to an HTTP URL for API calls.
-pub fn ws_to_http(url: &str) -> String {
-    url.replace("ws://", "http://")
-        .replace("wss://", "https://")
-}
-
 fn retry_after_delay(headers: &HeaderMap, interval: Duration) -> Duration {
     headers
         .get(RETRY_AFTER)
@@ -56,7 +50,7 @@ pub async fn device_flow_login(
         .and_then(|h| h.into_string().ok())
         .unwrap_or_else(|| "unknown".to_string());
 
-    let auth_base = ws_to_http(backend_url);
+    let auth_base = shared::urls::ws_to_http(backend_url);
     let device_code_url = format!("{}/api/auth/device/code", auth_base);
 
     info!("Requesting device code from {}", device_code_url);
