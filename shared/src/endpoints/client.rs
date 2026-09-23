@@ -331,9 +331,16 @@ pub enum ServerToClient {
 
     /// The session's port-forward set changed (agent registered or revoked a
     /// forward, or a forward died with the session). Frontends refetch
-    /// `GET /api/sessions/{id}/forwards` — the frame carries no payload so
-    /// there is exactly one source of truth (docs/PORT_FORWARDING.md).
-    ForwardsChanged { session_id: Uuid },
+    /// `GET /api/sessions/{id}/forwards`; `open_preview` is only an ephemeral
+    /// UI hint, never a second source of forward metadata.
+    ForwardsChanged {
+        session_id: Uuid,
+        /// Open the session's embedded HTTP surface after the refetch. Set
+        /// only for an explicit forward registration, never for health,
+        /// reconnect, visibility, or revoke updates.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        open_preview: bool,
+    },
 
     /// Ephemeral live tool-progress heartbeat, fanned out from
     /// `ProxyToServer::ToolProgress`. Purely a live-status signal: never

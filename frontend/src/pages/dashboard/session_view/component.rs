@@ -42,7 +42,9 @@ use super::permission_handler::{
     build_permission_response, PermissionHandler, PermissionResponseKind,
 };
 use super::session_surface::{
-    clamp_split_percent, load_split_percent, save_split_percent, SessionSurface, SessionSurfaceMode,
+    clamp_split_percent, clear_open_surface, load_open_surface, load_split_percent,
+    save_open_surface, save_split_percent, ForwardSurfaceMemory, SessionSurface,
+    SessionSurfaceMode,
 };
 use super::state::{
     counts_toward_render_limit, insert_turn_metrics_sorted, push_message_with_cost_limit,
@@ -308,6 +310,12 @@ pub struct SessionView {
     /// Monotonic tick bumped on every `ForwardsChanged` frame; passed to the
     /// forward-chip strip as a prop so it refetches (docs/PORT_FORWARDING.md).
     forwards_refresh: u32,
+    /// One-shot hint from an explicit agent forward registration. The surface
+    /// opens only after the authoritative REST refetch returns its metadata.
+    open_forward_on_load: bool,
+    /// Persisted surface layout waiting for the live forward list to validate
+    /// its port and provide a fresh URL.
+    pending_surface_restore: Option<ForwardSurfaceMemory>,
     active_surface: Option<SessionSurface>,
     surface_split_percent: f64,
     body_ref: NodeRef,
@@ -423,6 +431,8 @@ impl Component for SessionView {
             ephemeral_status: None,
             muse_live_turn: MuseLiveTurn::default(),
             forwards_refresh: 0,
+            open_forward_on_load: false,
+            pending_surface_restore: load_open_surface(session_id),
             active_surface: None,
             surface_split_percent: load_split_percent(session_id),
             body_ref: NodeRef::default(),
@@ -435,6 +445,8 @@ impl Component for SessionView {
     fn changed(&mut self, ctx: &Context<Self>, old_props: &Self::Properties) -> bool {
         if ctx.props().session.id != old_props.session.id {
             self.active_surface = None;
+            self.open_forward_on_load = false;
+            self.pending_surface_restore = load_open_surface(ctx.props().session.id);
             self.surface_split_percent = load_split_percent(ctx.props().session.id);
         }
 
@@ -630,14 +642,40 @@ impl Component for SessionView {
                 } else {
                     SessionSurfaceMode::Split
                 };
-                self.active_surface = Some(SessionSurface::from_forward(
-                    ctx.props().session.id,
-                    forward,
-                    mode,
-                ));
+                let surface = SessionSurface::from_forward(ctx.props().session.id, forward, mode);
+                save_open_surface(&surface);
+                self.active_surface = Some(surface);
                 true
             }
             SessionViewMsg::ForwardsLoaded(forwards) => {
+                if self.open_forward_on_load {
+                    self.open_forward_on_load = false;
+                    if let Some(forward) = forwards.first() {
+                        let mode = if is_mobile_surface_viewport() {
+                            SessionSurfaceMode::Fullscreen
+                        } else {
+                            SessionSurfaceMode::Split
+                        };
+                        let surface = SessionSurface::from_forward(
+                            ctx.props().session.id,
+                            forward.clone(),
+                            mode,
+                        );
+                        save_open_surface(&surface);
+                        self.pending_surface_restore = None;
+                        self.active_surface = Some(surface);
+                        return true;
+                    }
+                }
+                if self.active_surface.is_none() {
+                    if let Some(memory) = self.pending_surface_restore.take() {
+                        if let Some(surface) = memory.restore(ctx.props().session.id, &forwards) {
+                            self.active_surface = Some(surface);
+                            return true;
+                        }
+                        clear_open_surface(ctx.props().session.id);
+                    }
+                }
                 let Some(surface) = self.active_surface.as_mut() else {
                     return false;
                 };
@@ -652,10 +690,13 @@ impl Component for SessionView {
                     return false;
                 }
                 self.active_surface = None;
+                clear_open_surface(ctx.props().session.id);
                 true
             }
             SessionViewMsg::CloseSurface => {
                 self.active_surface = None;
+                self.pending_surface_restore = None;
+                clear_open_surface(ctx.props().session.id);
                 self.resize_listeners.clear();
                 true
             }
@@ -664,6 +705,7 @@ impl Component for SessionView {
                     return false;
                 };
                 surface.collapsed = !surface.collapsed;
+                save_open_surface(surface);
                 true
             }
             SessionViewMsg::ToggleSurfaceMode => {
@@ -674,6 +716,7 @@ impl Component for SessionView {
                     SessionSurfaceMode::Split => SessionSurfaceMode::Fullscreen,
                     SessionSurfaceMode::Fullscreen => SessionSurfaceMode::Split,
                 };
+                save_open_surface(surface);
                 true
             }
             SessionViewMsg::SurfaceResizeStart(event) => {
@@ -739,8 +782,10 @@ impl Component for SessionView {
                 };
                 if surface.mode == SessionSurfaceMode::Fullscreen {
                     surface.mode = SessionSurfaceMode::Split;
+                    save_open_surface(surface);
                 } else {
                     self.active_surface = None;
+                    clear_open_surface(ctx.props().session.id);
                 }
                 true
             }
@@ -1144,9 +1189,10 @@ impl SessionView {
                     .send_message(SessionViewMsg::ContinuationStatus(continuation_id, status));
                 false
             }
-            WsEvent::ForwardsChanged => {
+            WsEvent::ForwardsChanged { open_preview } => {
                 // Bump the counter the chip strip watches; it refetches the
                 // forward list (docs/PORT_FORWARDING.md).
+                self.open_forward_on_load |= open_preview;
                 self.forwards_refresh = self.forwards_refresh.wrapping_add(1);
                 true
             }

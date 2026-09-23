@@ -50,7 +50,9 @@ pub enum WsEvent {
     },
     /// The session's port-forward set changed; the view refetches
     /// `GET /api/sessions/{id}/forwards` (docs/PORT_FORWARDING.md).
-    ForwardsChanged,
+    ForwardsChanged {
+        open_preview: bool,
+    },
     /// Terminal outcome of a file upload (#939 phase 4). The view gates the
     /// prompt referencing the file on this.
     UploadResult(shared::FileUploadResultFields),
@@ -249,8 +251,11 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
                 status,
             });
         }
-        ServerToClient::ForwardsChanged { session_id: _ } => {
-            on_event.emit(WsEvent::ForwardsChanged);
+        ServerToClient::ForwardsChanged {
+            session_id: _,
+            open_preview,
+        } => {
+            on_event.emit(WsEvent::ForwardsChanged { open_preview });
         }
         ServerToClient::ToolProgress {
             tool_use_id,
@@ -626,6 +631,25 @@ mod tests {
         }
     }
 
+    #[test]
+    fn forward_open_hint_survives_websocket_translation() {
+        let (cb, sink) = capture();
+        handle_proxy_message(
+            ServerToClient::ForwardsChanged {
+                session_id: Uuid::nil(),
+                open_preview: true,
+            },
+            &cb,
+        );
+
+        let events = sink.borrow();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            WsEvent::ForwardsChanged { open_preview: true }
+        ));
+    }
+
     /// `WsEvent` doesn't `Debug` (some fields are non-Debug), so use a
     /// hand-rolled variant tag for assertion failure messages.
     fn debug_event(ev: &WsEvent) -> &'static str {
@@ -639,7 +663,7 @@ mod tests {
             WsEvent::ContinuationStatus { .. } => "ContinuationStatus",
             WsEvent::TurnMetrics(_) => "TurnMetrics",
             WsEvent::InputProgress { .. } => "InputProgress",
-            WsEvent::ForwardsChanged => "ForwardsChanged",
+            WsEvent::ForwardsChanged { .. } => "ForwardsChanged",
             WsEvent::UploadResult(_) => "UploadResult",
             WsEvent::ToolProgress { .. } => "ToolProgress",
             WsEvent::Ephemeral(_) => "Ephemeral",

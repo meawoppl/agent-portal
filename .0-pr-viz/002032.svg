@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+  <rect width="2000" height="1200" fill="#16161e"/>
+  <text x="60" y="62" fill="#565f89" font-family="Arial, sans-serif" font-size="22">PR #2032 | agent-launched HTTP surfaces</text>
+  <text x="60" y="116" fill="#c0caf5" font-family="Arial, sans-serif" font-size="34">The forwarded app opens immediately and returns after refresh</text>
+  <line x1="60" y1="154" x2="1940" y2="154" stroke="#565f89" stroke-width="2"/>
+
+  <text x="80" y="220" fill="#7aa2f7" font-family="Arial, sans-serif" font-size="22" font-weight="bold">AGENT LAUNCH</text>
+  <rect x="70" y="250" width="760" height="560" rx="18" fill="#1e202e" stroke="#7aa2f7" stroke-width="3"/>
+  <rect x="120" y="310" width="660" height="92" rx="12" fill="#16161e" stroke="#bb9af7" stroke-width="2"/>
+  <text x="160" y="367" fill="#c0caf5" font-family="Arial, sans-serif" font-size="25">agent-portal forward 3000</text>
+  <path d="M450 410 L450 485" stroke="#7dcfff" stroke-width="4"/>
+  <polygon points="450,505 439,483 461,483" fill="#7dcfff"/>
+  <rect x="120" y="515" width="660" height="205" rx="12" fill="#16161e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="160" y="570" fill="#9ece6a" font-family="Arial, sans-serif" font-size="25">Session surface opens automatically</text>
+  <rect x="160" y="610" width="570" height="70" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="445" y="654" text-anchor="middle" fill="#c0caf5" font-family="Arial, sans-serif" font-size="21">http://localhost:3000/</text>
+  <text x="120" y="770" fill="#565f89" font-family="Arial, sans-serif" font-size="19">Only agent registrations carry the one-shot open hint.</text>
+
+  <text x="1080" y="220" fill="#e0af68" font-family="Arial, sans-serif" font-size="22" font-weight="bold">PAGE REFRESH</text>
+  <rect x="1070" y="250" width="760" height="560" rx="18" fill="#1e202e" stroke="#e0af68" stroke-width="3"/>
+  <rect x="1120" y="305" width="660" height="100" rx="12" fill="#16161e" stroke="#bb9af7" stroke-width="2"/>
+  <text x="1160" y="350" fill="#bb9af7" font-family="Arial, sans-serif" font-size="23">Local memory</text>
+  <text x="1160" y="382" fill="#c0caf5" font-family="Arial, sans-serif" font-size="19">port 3000 | split | expanded</text>
+  <path d="M1450 415 L1450 490" stroke="#7dcfff" stroke-width="4"/>
+  <polygon points="1450,510 1439,488 1461,488" fill="#7dcfff"/>
+  <rect x="1120" y="520" width="660" height="95" rx="12" fill="#16161e" stroke="#7dcfff" stroke-width="2"/>
+  <text x="1450" y="560" text-anchor="middle" fill="#7dcfff" font-family="Arial, sans-serif" font-size="23">Refetch live forward metadata</text>
+  <text x="1450" y="592" text-anchor="middle" fill="#c0caf5" font-family="Arial, sans-serif" font-size="18">match the remembered port</text>
+  <path d="M1450 625 L1450 680" stroke="#9ece6a" stroke-width="4"/>
+  <polygon points="1450,700 1439,678 1461,678" fill="#9ece6a"/>
+  <text x="1450" y="755" text-anchor="middle" fill="#9ece6a" font-family="Arial, sans-serif" font-size="22">Restore with a fresh URL, or discard stale memory</text>
+
+  <rect x="260" y="950" width="1480" height="150" rx="18" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="1000" y="1005" text-anchor="middle" fill="#c0caf5" font-family="Arial, sans-serif" font-size="24">Persisted: port, split/fullscreen mode, collapsed state</text>
+  <text x="1000" y="1050" text-anchor="middle" fill="#f7768e" font-family="Arial, sans-serif" font-size="22">Never persisted: forwarded URL or iframe authority</text>
+</svg>

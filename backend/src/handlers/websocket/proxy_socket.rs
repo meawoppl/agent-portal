@@ -161,7 +161,10 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
                 if let Some(key) = session_key.as_ref() {
                     session_manager.broadcast_to_web_clients(
                         key,
-                        ServerToClient::ForwardsChanged { session_id },
+                        ServerToClient::ForwardsChanged {
+                            session_id,
+                            open_preview: false,
+                        },
                     );
                 }
             }
@@ -557,7 +560,10 @@ fn handle_proxy_message(
                     if let Some(key) = session_key.as_ref() {
                         session_manager.broadcast_to_web_clients(
                             key,
-                            ServerToClient::ForwardsChanged { session_id },
+                            ServerToClient::ForwardsChanged {
+                                session_id,
+                                open_preview: false,
+                            },
                         );
                     }
                 }

@@ -47,6 +47,11 @@ long as the session is alive.
 - **Auth by token handoff**, since a subdomain is a different origin and the
   portal cookie does not follow. The portal origin mints a short-lived JWT and
   redirects; the forward origin exchanges it for its own scoped cookie.
+- **Agent-launched forwards open in the session surface automatically.** The
+  browser still refetches the authoritative forward record before creating the
+  iframe. Open surfaces remember their port and layout across page reloads,
+  then restore only if that port remains in the live forward list; URLs are
+  never restored from browser storage.
 
 ```text
 browser ──HTTP──▶ backend (Host-routed reverse proxy)

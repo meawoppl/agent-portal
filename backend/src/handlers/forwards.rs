@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::{
-    extract::{Path, State},
+    extract::{OriginalUri, Path, State},
     http::{HeaderMap, StatusCode},
     Json,
 };
@@ -247,6 +247,7 @@ fn lock_owned_session(
 pub async fn create_forward(
     State(app_state): State<Arc<AppState>>,
     Path(session_id): Path<Uuid>,
+    OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
     cookies: Cookies,
     Json(req): Json<CreateForwardRequest>,
@@ -354,9 +355,16 @@ pub async fn create_forward(
         (None, None)
     };
 
+    // Only an agent/CLI launch asks the portal to present the app. The browser
+    // mutation route remains a quiet data change, so future management UI can
+    // register a forward without unexpectedly replacing the user's surface.
+    let open_preview = uri.path().starts_with("/api/agent/");
     app_state.session_manager.broadcast_to_web_clients(
         &session.session_key,
-        ServerToClient::ForwardsChanged { session_id },
+        ServerToClient::ForwardsChanged {
+            session_id,
+            open_preview,
+        },
     );
     info!(
         "Forward set: session {} port {} (replaced: {:?}, listening: {:?})",
@@ -458,7 +466,10 @@ pub async fn delete_forward(
     );
     app_state.session_manager.broadcast_to_web_clients(
         &session.session_key,
-        ServerToClient::ForwardsChanged { session_id },
+        ServerToClient::ForwardsChanged {
+            session_id,
+            open_preview: false,
+        },
     );
     info!("Forward revoked: session {} port {}", session_id, port);
 
@@ -541,7 +552,10 @@ pub async fn set_forward_public(
 
     app_state.session_manager.broadcast_to_web_clients(
         &session.session_key,
-        ServerToClient::ForwardsChanged { session_id },
+        ServerToClient::ForwardsChanged {
+            session_id,
+            open_preview: false,
+        },
     );
     info!(
         "Forward visibility: session {} public={}",
