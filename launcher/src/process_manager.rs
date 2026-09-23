@@ -32,21 +32,38 @@ fn codex_threads_path() -> PathBuf {
     session_lib::paths::config_dir().join("codex_threads.json")
 }
 
-fn load_codex_threads() -> HashMap<Uuid, String> {
-    std::fs::read_to_string(codex_threads_path())
+/// Load a launcher sidecar map (`session_id -> value`), tolerating a missing
+/// or corrupt file with an empty map. These files are derived caches, so
+/// losing one degrades to the pre-persisted behavior rather than failing.
+fn load_sidecar_map<T>(path: &std::path::Path) -> HashMap<Uuid, T>
+where
+    T: serde::de::DeserializeOwned,
+{
+    std::fs::read_to_string(path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default()
 }
 
-fn save_codex_threads(map: &HashMap<Uuid, String>) -> std::io::Result<()> {
-    let path = codex_threads_path();
+/// Persist a sidecar map as pretty JSON, creating the parent directory first.
+fn save_sidecar_map<T>(path: &std::path::Path, map: &HashMap<Uuid, T>) -> std::io::Result<()>
+where
+    T: serde::Serialize,
+{
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     let body = serde_json::to_string_pretty(map)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     std::fs::write(path, body)
+}
+
+fn load_codex_threads() -> HashMap<Uuid, String> {
+    load_sidecar_map(&codex_threads_path())
+}
+
+fn save_codex_threads(map: &HashMap<Uuid, String>) -> std::io::Result<()> {
+    save_sidecar_map(&codex_threads_path(), map)
 }
 
 fn load_codex_thread_id(session_id: Uuid) -> Option<String> {
@@ -67,10 +84,7 @@ fn claude_conversations_path() -> PathBuf {
 }
 
 fn load_claude_conversations() -> HashMap<Uuid, Uuid> {
-    std::fs::read_to_string(claude_conversations_path())
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+    load_sidecar_map(&claude_conversations_path())
 }
 
 fn load_claude_conversation_id(session_id: Uuid) -> Option<Uuid> {
@@ -121,17 +135,7 @@ fn make_claude_conversation_id_sink(session_id: Uuid) -> ClaudeConversationIdSin
             return;
         }
         map.insert(session_id, conversation_id);
-        let path = claude_conversations_path();
-        let write = path
-            .parent()
-            .map(std::fs::create_dir_all)
-            .unwrap_or(Ok(()))
-            .and_then(|()| {
-                serde_json::to_string_pretty(&map)
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-            })
-            .and_then(|body| std::fs::write(&path, body));
-        match write {
+        match save_sidecar_map(&claude_conversations_path(), &map) {
             Ok(()) => info!(
                 "Claude conversation for session {} recorded as {}",
                 session_id, conversation_id
@@ -703,5 +707,35 @@ async fn run_session_task(
                 };
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod sidecar_tests {
+    use super::{load_sidecar_map, save_sidecar_map};
+    use std::collections::HashMap;
+    use uuid::Uuid;
+
+    #[test]
+    fn sidecar_map_round_trips_and_tolerates_missing_or_corrupt_files() {
+        let dir = tempfile::tempdir().unwrap();
+        // Nested path proves the save creates missing parent directories.
+        let path = dir.path().join("sub").join("sidecar.json");
+
+        // A missing file reads as empty rather than failing.
+        let empty: HashMap<Uuid, String> = load_sidecar_map(&path);
+        assert!(empty.is_empty());
+
+        let id = Uuid::new_v4();
+        let mut map = HashMap::new();
+        map.insert(id, "thread-1".to_string());
+        save_sidecar_map(&path, &map).unwrap();
+        let loaded: HashMap<Uuid, String> = load_sidecar_map(&path);
+        assert_eq!(loaded.get(&id).map(String::as_str), Some("thread-1"));
+
+        // A corrupt file degrades to empty rather than failing the caller.
+        std::fs::write(&path, "{not json").unwrap();
+        let degraded: HashMap<Uuid, String> = load_sidecar_map(&path);
+        assert!(degraded.is_empty());
     }
 }
