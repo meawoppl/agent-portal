@@ -1097,7 +1097,9 @@ use uuid::Uuid;
   diff, and verify with its `check_svg.py` (this repo's style artifact is
   `.github/visual-pr/style.json`) before pushing — the `Visual PR attached`
   check runs exactly that validator, and its failure output contains the full
-  spec and fetch/run commands if you need them. Label a PR `no-visual` only
+  spec and fetch/run commands if you need them. The check also looks the
+  body's permalink up on GitHub: the SHA must be pushed and carry the same
+  SVG bytes as the PR head, so re-pin after any push that changes the SVG. Label a PR `no-visual` only
   when a diagram is genuinely noise (dependency bumps, typo fixes). Also show
   the SVG inline in your session via `agent-portal show`.
 
