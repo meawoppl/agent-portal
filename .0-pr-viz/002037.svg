@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+  <defs>
+    <marker id="pr2037-arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#565f89"/>
+    </marker>
+    <marker id="pr2037-arr-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#f7768e"/>
+    </marker>
+    <marker id="pr2037-arr-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#9ece6a"/>
+    </marker>
+  </defs>
+  <text x="53" y="70" font-family="sans-serif" font-size="24" letter-spacing="1" fill="#565f89">PR #2037 - Dedupe portal-auth ws_to_http via shared helper</text>
+  <text x="53" y="120" font-family="sans-serif" font-size="28" fill="#c0caf5">Device-flow base URL now uses the shared leading-scheme helper.</text>
+  <line x1="53" y1="160" x2="1947" y2="160" stroke="#565f89" stroke-opacity="0.35" stroke-width="1"/>
+  <line x1="1000" y1="190" x2="1000" y2="1140" stroke="#565f89" stroke-opacity="0.5" stroke-width="1" stroke-dasharray="8 8"/>
+  <text x="53" y="225" font-family="sans-serif" font-size="20" letter-spacing="2.5" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="225" font-family="sans-serif" font-size="20" letter-spacing="2.5" fill="#9ece6a">AFTER</text>
+  <rect x="70" y="280" width="850" height="160" fill="none" stroke="#f7768e" stroke-width="2"/>
+  <text x="495" y="348" text-anchor="middle" font-family="monospace" font-size="22" fill="#c0caf5">portal-auth::ws_to_http()</text>
+  <text x="495" y="388" text-anchor="middle" font-family="sans-serif" font-size="18" fill="#565f89">local copy, whole-string replace</text>
+  <rect x="70" y="500" width="850" height="160" fill="none" stroke="#f7768e" stroke-width="2"/>
+  <text x="495" y="558" text-anchor="middle" font-family="monospace" font-size="20" fill="#c0caf5">wss://a.example/?next=ws://b.example/</text>
+  <text x="495" y="598" text-anchor="middle" font-family="sans-serif" font-size="18" fill="#565f89">input base URL with embedded URL</text>
+  <rect x="70" y="720" width="850" height="160" fill="none" stroke="#f7768e" stroke-width="2"/>
+  <text x="495" y="778" text-anchor="middle" font-family="monospace" font-size="20" fill="#f7768e">https://a.example/?next=http://b.example/</text>
+  <text x="495" y="818" text-anchor="middle" font-family="sans-serif" font-size="18" fill="#565f89">embedded URL rewritten, wrong</text>
+  <rect x="70" y="940" width="850" height="160" fill="none" stroke="#f7768e" stroke-width="2"/>
+  <text x="495" y="1008" text-anchor="middle" font-family="monospace" font-size="22" fill="#c0caf5">device_flow_login()</text>
+  <text x="495" y="1048" text-anchor="middle" font-family="sans-serif" font-size="18" fill="#565f89">calls the local copy for auth_base</text>
+  <rect x="1080" y="280" width="850" height="160" fill="none" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1505" y="348" text-anchor="middle" font-family="monospace" font-size="22" fill="#c0caf5">shared::urls::ws_to_http()</text>
+  <text x="1505" y="388" text-anchor="middle" font-family="sans-serif" font-size="18" fill="#565f89">one leading-scheme swap, all crates</text>
+  <rect x="1080" y="500" width="850" height="160" fill="none" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1505" y="558" text-anchor="middle" font-family="monospace" font-size="20" fill="#c0caf5">wss://a.example/?next=ws://b.example/</text>
+  <text x="1505" y="598" text-anchor="middle" font-family="sans-serif" font-size="18" fill="#565f89">same input URL</text>
+  <rect x="1080" y="720" width="850" height="160" fill="none" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1505" y="778" text-anchor="middle" font-family="monospace" font-size="20" fill="#9ece6a">https://a.example/?next=ws://b.example/</text>
+  <text x="1505" y="818" text-anchor="middle" font-family="sans-serif" font-size="18" fill="#565f89">embedded URL preserved, correct</text>
+  <rect x="1080" y="940" width="850" height="160" fill="none" stroke="#7aa2f7" stroke-width="2"/>
+  <text x="1505" y="1008" text-anchor="middle" font-family="monospace" font-size="22" fill="#c0caf5">device_flow_login()</text>
+  <text x="1505" y="1048" text-anchor="middle" font-family="sans-serif" font-size="18" fill="#565f89">calls shared helper, launcher already does</text>
+  <text x="53" y="1175" font-family="sans-serif" font-size="20" fill="#565f89">portal-auth/src/lib.rs: -7/+1 lines</text>
+  <text x="1040" y="1175" font-family="sans-serif" font-size="20" fill="#565f89">fmt + clippy clean, shared tests pass</text>
+</svg>
