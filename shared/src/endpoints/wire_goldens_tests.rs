@@ -276,6 +276,45 @@ fn server_to_client_input_progress_golden_for_every_stage() {
 }
 
 #[test]
+fn server_to_client_forwards_changed_open_hint_is_backward_compatible() {
+    let session_id = Uuid::from_u128(0x11111111111111111111111111111111);
+    assert_golden(
+        &ServerToClient::ForwardsChanged {
+            session_id,
+            open_preview: false,
+        },
+        json!({
+            "type": "ForwardsChanged",
+            "session_id": "11111111-1111-1111-1111-111111111111"
+        }),
+    );
+    assert_golden(
+        &ServerToClient::ForwardsChanged {
+            session_id,
+            open_preview: true,
+        },
+        json!({
+            "type": "ForwardsChanged",
+            "session_id": "11111111-1111-1111-1111-111111111111",
+            "open_preview": true
+        }),
+    );
+
+    let legacy: ServerToClient = serde_json::from_value(json!({
+        "type": "ForwardsChanged",
+        "session_id": "11111111-1111-1111-1111-111111111111"
+    }))
+    .unwrap();
+    assert!(matches!(
+        legacy,
+        ServerToClient::ForwardsChanged {
+            open_preview: false,
+            ..
+        }
+    ));
+}
+
+#[test]
 fn server_to_client_error_golden() {
     let msg = ServerToClient::Error {
         message: "boom".into(),

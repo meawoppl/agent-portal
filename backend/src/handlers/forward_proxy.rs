@@ -503,7 +503,10 @@ fn note_reachability(
     {
         app_state.session_manager.broadcast_to_web_clients(
             session_key,
-            shared::ServerToClient::ForwardsChanged { session_id },
+            shared::ServerToClient::ForwardsChanged {
+                session_id,
+                open_preview: false,
+            },
         );
     }
 }
