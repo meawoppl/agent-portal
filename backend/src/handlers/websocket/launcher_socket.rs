@@ -2,13 +2,13 @@ use axum::extract::ws::WebSocket;
 use diesel::prelude::*;
 use shared::{
     LauncherEndpoint, LauncherRejectReason, LauncherToServer, ServerToClient, ServerToLauncher,
-    ServerToProxy, SessionStatus,
+    SessionStatus,
 };
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use super::LauncherConnection;
+use super::{EnqueueInput, LauncherConnection};
 use crate::{
     handlers::proxy_tokens::{
         issue_proxy_token, verify_and_get_user_with_token, TokenPersist, VerifiedProxyToken,
@@ -857,40 +857,23 @@ fn handle_launcher_message(
                 "Scheduler".to_string(),
             );
 
-            // Sequence and send (same pipeline as web client input)
-            use crate::schema::{pending_inputs, sessions};
-
-            let next_seq: i64 = diesel::update(sessions::table.find(session_id))
-                .set(sessions::input_seq.eq(sessions::input_seq + 1))
-                .returning(sessions::input_seq)
-                .get_result(&mut db_conn)
-                .unwrap_or(0);
-
-            if next_seq > 0 {
-                let new_input = crate::models::NewPendingInput {
-                    session_id,
-                    seq_num: next_seq,
-                    content: serde_json::to_string(&content_value).unwrap_or_default(),
-                    send_mode: shared::SendMode::Normal.as_str().to_string(),
-                    client_msg_id: None,
+            // Sequence, persist, and deliver through the shared input pipeline
+            // (same as web-client and agent-messaging input) so the paths
+            // can't drift in their seq/persist/deliver semantics (see
+            // SessionManager::enqueue_input). `send_mode: None` persists the
+            // `Normal` default and sends the same untagged wire frame this
+            // handler built by hand before.
+            app_state.session_manager.enqueue_input(
+                &app_state.db_pool,
+                &session_key,
+                session_id,
+                EnqueueInput {
+                    content: content_value,
+                    send_mode: None,
                     reasoning_effort: None,
-                };
-                let _ = diesel::insert_into(pending_inputs::table)
-                    .values(&new_input)
-                    .execute(&mut db_conn);
-
-                app_state.session_manager.send_to_session(
-                    &session_key,
-                    ServerToProxy::SequencedInput {
-                        session_id,
-                        seq: next_seq,
-                        content: content_value,
-                        send_mode: None,
-                        reasoning_effort: None,
-                        client_msg_id: None,
-                    },
-                );
-            }
+                    client_msg_id: None,
+                },
+            );
         }
         LauncherToServer::ContinuationFired {
             continuation_id,
@@ -1542,5 +1525,106 @@ mod tests {
             .unwrap();
 
         assert_eq!(recent_refresh_cutoff(now), now - chrono::Duration::hours(1));
+    }
+
+    /// `InjectInput` routes through the shared input pipeline.
+    ///
+    /// The scheduler path used to carry its own seq-bump/persist/send copy;
+    /// sharing `SessionManager::enqueue_input` with the web-client and
+    /// agent-messaging paths keeps the three on one definition. Pins the
+    /// equivalence the routing relies on: `send_mode: None` persists the
+    /// `Normal` default, and the live frame carries the sequence the row was
+    /// persisted with.
+    #[test]
+    fn inject_input_uses_shared_enqueue_pipeline() {
+        use crate::schema::{pending_inputs, sessions};
+        use diesel::prelude::*;
+        use shared::{LauncherToServer, ServerToProxy};
+        use uuid::Uuid;
+
+        let Some(pool) = crate::test_support::shared_pool() else {
+            return;
+        };
+        let mut conn = pool.get().expect("conn");
+
+        let owner = crate::test_support::insert_user(&mut conn, "inject_pipeline");
+        let launcher_id = Uuid::new_v4();
+        let session_id = Uuid::new_v4();
+        let session_key = session_id.to_string();
+        diesel::insert_into(sessions::table)
+            .values((
+                sessions::id.eq(session_id),
+                sessions::user_id.eq(owner.id),
+                sessions::session_name.eq("inject-pipeline"),
+                sessions::session_key.eq(session_key.clone()),
+                sessions::working_directory.eq("/tmp"),
+                sessions::status.eq(shared::SessionStatus::Active.as_str()),
+                sessions::hostname.eq("test-host"),
+                sessions::launcher_id.eq(launcher_id),
+                sessions::agent_type.eq("claude"),
+                sessions::paused.eq(false),
+            ))
+            .execute(&mut conn)
+            .expect("insert session");
+
+        let app_state = crate::test_support::test_app_state(pool);
+        let (tx, mut rx) = crate::handlers::websocket::conn_channel::<ServerToProxy>(64);
+        app_state.session_manager.register_session(
+            session_key.as_str().into(),
+            tx,
+            tokio_util::sync::CancellationToken::new(),
+        );
+
+        super::handle_launcher_message(
+            LauncherToServer::InjectInput {
+                session_id,
+                content: "scheduled nudge".to_string(),
+            },
+            launcher_id,
+            owner.id,
+            None,
+            &app_state,
+        );
+
+        // Live proxy got the sequenced frame for the injected content...
+        let frame = rx.try_recv().expect("sequenced input delivered");
+        let seq = match &frame {
+            ServerToProxy::SequencedInput {
+                seq,
+                content,
+                send_mode,
+                ..
+            } => {
+                assert_eq!(
+                    content,
+                    &serde_json::Value::String("scheduled nudge".to_string())
+                );
+                assert_eq!(*send_mode, None);
+                *seq
+            }
+            other => panic!("expected SequencedInput, got {other:?}"),
+        };
+
+        // ...backed by the persisted row under the `Normal` default...
+        let mut conn = app_state.db_pool.get().expect("conn");
+        let row: crate::models::PendingInput = pending_inputs::table
+            .filter(pending_inputs::session_id.eq(session_id))
+            .first(&mut conn)
+            .expect("pending row");
+        assert_eq!(row.seq_num, seq);
+        assert_eq!(row.send_mode, "normal");
+
+        // ...with Scheduler attribution for the sender chip.
+        assert_eq!(
+            app_state.session_manager.take_last_input_sender(session_id),
+            Some((owner.id, "Scheduler".to_string()))
+        );
+
+        // Cleanup (reverse FK order).
+        let _ =
+            diesel::delete(pending_inputs::table.filter(pending_inputs::session_id.eq(session_id)))
+                .execute(&mut conn);
+        let _ = diesel::delete(sessions::table.find(session_id)).execute(&mut conn);
+        let _ = diesel::delete(crate::schema::users::table.find(owner.id)).execute(&mut conn);
     }
 }
