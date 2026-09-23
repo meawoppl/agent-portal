@@ -84,6 +84,9 @@ pub(super) struct BackendStreamEntry {
     /// connection.
     session_key: String,
     gen: u64,
+    port: u16,
+    opened_at_epoch: u64,
+    transport: shared::api::ForwardConnectionTransport,
 }
 
 /// Registry of live backend tunnel streams, keyed by stream id.
@@ -187,6 +190,37 @@ pub enum TunnelError {
 }
 
 impl SessionManager {
+    /// Snapshot live streams for one session without holding registry guards
+    /// while callers serialize or query the database.
+    pub fn forward_connections(
+        &self,
+        session_key: &str,
+        port: Option<u16>,
+    ) -> Vec<shared::api::ForwardConnectionInfo> {
+        let mut connections: Vec<_> = self
+            .tunnel_streams
+            .iter()
+            .filter(|entry| {
+                entry.value().session_key == session_key
+                    && port.is_none_or(|port| entry.value().port == port)
+            })
+            .filter_map(|entry| {
+                chrono::DateTime::<chrono::Utc>::from_timestamp(
+                    entry.value().opened_at_epoch as i64,
+                    0,
+                )
+                .map(|opened_at| shared::api::ForwardConnectionInfo {
+                    stream_id: *entry.key(),
+                    port: entry.value().port,
+                    opened_at: opened_at.to_rfc3339(),
+                    transport: entry.value().transport,
+                })
+            })
+            .collect();
+        connections.sort_by(|a, b| a.opened_at.cmp(&b.opened_at));
+        connections
+    }
+
     /// Current proxy connection generation for a live session.
     ///
     /// Forward HTTP pool keys include this value so connections from a
@@ -381,6 +415,12 @@ impl SessionManager {
                 max_chunk: sizing.max_chunk as usize,
                 session_key: session_key.to_string(),
                 gen,
+                port,
+                opened_at_epoch: super::liveness::epoch_secs(),
+                transport: match &egress {
+                    TunnelEgress::Control(_) => shared::api::ForwardConnectionTransport::Control,
+                    TunnelEgress::Binary(_) => shared::api::ForwardConnectionTransport::Binary,
+                },
             },
         );
 
@@ -559,6 +599,9 @@ mod tests {
                 max_chunk: shared::TunnelSizing::V1.max_chunk as usize,
                 session_key: key.to_string(),
                 gen,
+                port: 8080,
+                opened_at_epoch: 1,
+                transport: shared::api::ForwardConnectionTransport::Binary,
             },
         );
         (id, rx)
@@ -583,6 +626,30 @@ mod tests {
         // The newer connection's stream and the other session are untouched.
         assert!(new_rx.try_recv().is_err());
         assert!(other_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn forward_connections_are_scoped_to_session_and_port() {
+        let mgr = SessionManager::new();
+        let (wanted, _wanted_rx) = insert_stream(&mgr, "s1", 1);
+        let (other_session, _other_rx) = insert_stream(&mgr, "s2", 1);
+        let (other_port, _other_port_rx) = insert_stream(&mgr, "s1", 1);
+        if let Some(mut entry) = mgr.tunnel_streams.get_mut(&other_port) {
+            entry.port = 9090;
+        } else {
+            panic!("inserted stream disappeared");
+        }
+
+        let connections = mgr.forward_connections("s1", Some(8080));
+
+        assert_eq!(connections.len(), 1);
+        assert_eq!(connections[0].stream_id, wanted);
+        assert_ne!(connections[0].stream_id, other_session);
+        assert_eq!(connections[0].port, 8080);
+        assert_eq!(
+            connections[0].transport,
+            shared::api::ForwardConnectionTransport::Binary
+        );
     }
 
     #[test]

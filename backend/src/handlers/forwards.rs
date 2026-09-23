@@ -389,12 +389,14 @@ pub async fn list_forwards(
 ) -> Result<Json<SessionForwardsResponse>, AppError> {
     let user_id = resolve_user(&app_state, &headers, &cookies)?;
     let mut conn = app_state.conn()?;
-    member_session(&mut conn, session_id, user_id)?;
+    let session = member_session(&mut conn, session_id, user_id)?;
 
     if app_state.forward_domain.is_none() {
         return Ok(Json(SessionForwardsResponse {
             forwards: vec![],
             recent_failures: vec![],
+            connections: vec![],
+            connection_limit: shared::api::FORWARD_STREAM_LIMIT,
         }));
     }
 
@@ -411,6 +413,10 @@ pub async fn list_forwards(
     Ok(Json(SessionForwardsResponse {
         forwards,
         recent_failures: recent_failures(&app_state, session_id),
+        connections: app_state
+            .session_manager
+            .forward_connections(&session.session_key, None),
+        connection_limit: shared::api::FORWARD_STREAM_LIMIT,
     }))
 }
 
@@ -493,7 +499,7 @@ pub async fn list_user_forwards(
     }
 
     use crate::schema::{forward_subdomains, session_forwards, sessions};
-    let rows: Vec<(SessionForward, String, String)> = session_forwards::table
+    let rows: Vec<(SessionForward, String, String, String)> = session_forwards::table
         .inner_join(sessions::table.on(sessions::id.eq(session_forwards::session_id)))
         .inner_join(
             forward_subdomains::table
@@ -503,6 +509,7 @@ pub async fn list_user_forwards(
         .select((
             SessionForward::as_select(),
             sessions::session_name,
+            sessions::session_key,
             forward_subdomains::label,
         ))
         .order(session_forwards::created_at.desc())
@@ -510,13 +517,16 @@ pub async fn list_user_forwards(
 
     let forwards = rows
         .into_iter()
-        .map(|(row, session_name, label)| {
+        .map(|(row, session_name, session_key, label)| {
             Ok(shared::api::UserForwardInfo {
                 session_id: row.session_id,
                 session_name,
                 port: row.port as u16,
                 url: forward_url(&app_state, &label)?,
                 public: row.public,
+                connections: app_state
+                    .session_manager
+                    .forward_connections(&session_key, Some(row.port as u16)),
             })
         })
         .collect::<Result<Vec<_>, AppError>>()?;

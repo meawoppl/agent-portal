@@ -1510,6 +1510,31 @@
     text-decoration: underline;
 }
 
+.forwarding-connections {
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+}
+
+.forwarding-connections summary {
+    cursor: pointer;
+    width: fit-content;
+}
+
+.forwarding-connections ul {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin: 0.45rem 0 0;
+    padding-left: 1.25rem;
+    max-height: 12rem;
+    overflow: auto;
+}
+
+.forwarding-connections li,
+.forwarding-connection-empty {
+    overflow-wrap: anywhere;
+}
+
 .forwarding-public {
     flex-shrink: 0;
 }

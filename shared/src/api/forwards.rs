@@ -7,6 +7,37 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Proxy-side ceiling for simultaneously live tunnel streams in one session.
+pub const FORWARD_STREAM_LIMIT: usize = 512;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ForwardConnectionTransport {
+    Control,
+    Binary,
+}
+
+impl std::fmt::Display for ForwardConnectionTransport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Control => "control",
+            Self::Binary => "binary",
+        })
+    }
+}
+
+/// One live backend-to-proxy tunnel connection for a forwarded service.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ForwardConnectionInfo {
+    pub stream_id: Uuid,
+    pub port: u16,
+    /// When the backend allocated the stream, RFC 3339.
+    pub opened_at: String,
+    /// `binary` for the dedicated data plane, `control` for the compatibility
+    /// path sharing the session socket.
+    pub transport: ForwardConnectionTransport,
+}
+
 /// The session's single active forward.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ForwardInfo {
@@ -41,6 +72,9 @@ pub struct UserForwardInfo {
     /// Fully-formed public URL (`{scheme}://{label}.{domain}/`).
     pub url: String,
     pub public: bool,
+    /// Live tunnel streams currently attributed to this session and port.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub connections: Vec<ForwardConnectionInfo>,
 }
 
 /// Response for `GET /api/forwards` — the caller's active forwards.
@@ -150,6 +184,17 @@ pub struct SessionForwardsResponse {
     /// been none since the backend last (re)started.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recent_failures: Vec<ForwardFailure>,
+    /// Live streams known to the backend. This is intentionally detailed so a
+    /// saturated forward can be diagnosed without restarting the session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub connections: Vec<ForwardConnectionInfo>,
+    /// The proxy-side per-session stream ceiling.
+    #[serde(default = "forward_stream_limit")]
+    pub connection_limit: usize,
+}
+
+fn forward_stream_limit() -> usize {
+    FORWARD_STREAM_LIMIT
 }
 
 /// The single taxonomy of forward failures (docs/PORT_FORWARDING.md).

@@ -100,7 +100,7 @@ enum StreamEgress {
 /// `MAX_STREAMS × window` per direction (32 MiB at the V1 window, 128 MiB at
 /// V2) — the pathological all-streams-saturated figure, not steady state.
 /// Pooling is the real fix for the cap; this buys room until it lands.
-pub const MAX_STREAMS: usize = 512;
+pub const MAX_STREAMS: usize = shared::api::FORWARD_STREAM_LIMIT;
 /// How long a single dial to loopback may take before it is treated as a
 /// timeout (service hung, not down).
 const DIAL_TIMEOUT: Duration = Duration::from_secs(2);

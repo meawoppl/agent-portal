@@ -216,7 +216,13 @@ pub async fn list() -> Result<()> {
         println!("No active forwards.");
     } else {
         for f in &data.forwards {
-            println!(":{}  {}", f.port, f.url);
+            println!(
+                ":{}  {}  ({} / {} connections)",
+                f.port,
+                f.url,
+                data.connections.len(),
+                data.connection_limit
+            );
         }
     }
     // Recent failures go to stderr (diagnostic) so they don't pollute the URL
@@ -226,6 +232,51 @@ pub async fn list() -> Result<()> {
         for fail in &data.recent_failures {
             eprintln!("  {}  :{}  {}", fail.at, fail.port, fail.code);
         }
+    }
+    Ok(())
+}
+
+/// `agent-portal forward connections` — live tunnel inventory for this session.
+pub async fn connections() -> Result<()> {
+    let (base, token) = crate::message::api_base()?;
+    let client = reqwest::Client::new();
+    let session = session_id(&client, &base, &token).await?;
+    let resp = client
+        .get(format!("{base}/api/agent/sessions/{session}/forwards"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .context("request to backend failed")?;
+    let status = resp.status();
+    if !status.is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(crate::message::backend_http_error(status, &body));
+    }
+    let data: SessionForwardsResponse = resp.json().await.context("malformed response")?;
+    println!(
+        "{} / {} live tunnel connections",
+        data.connections.len(),
+        data.connection_limit
+    );
+    for connection in &data.connections {
+        println!(
+            "{}  :{}  {}  {}",
+            connection.stream_id, connection.port, connection.transport, connection.opened_at
+        );
+    }
+    if data.connections.is_empty() {
+        println!("No live tunnel connections.");
+    }
+    if data
+        .recent_failures
+        .iter()
+        .any(|failure| failure.code == "at-capacity")
+        && data.connections.len() < data.connection_limit
+    {
+        eprintln!(
+            "warning: the proxy recently reported at-capacity, but the backend tracks only {} \n+             live streams; the registries diverged. Restart this session to clear leaked \n+             proxy streams and report this diagnostic.",
+            data.connections.len()
+        );
     }
     Ok(())
 }
