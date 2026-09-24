@@ -90,14 +90,11 @@ pub fn get_base_url() -> String {
 }
 
 /// Get the WebSocket URL (e.g., "ws://localhost:3000" or "wss://myapp.com")
+///
+/// Derived from [`get_base_url`] through the shared `http(s)` -> `ws(s)`
+/// scheme helper so the swap lives in one place.
 pub fn get_ws_url() -> String {
-    match location_parts() {
-        Some((protocol, host)) => {
-            let ws_protocol = if protocol == "https:" { "wss:" } else { "ws:" };
-            format!("{}//{}", ws_protocol, host)
-        }
-        None => "ws://localhost:3000".to_string(),
-    }
+    shared::urls::http_to_ws(&get_base_url())
 }
 
 /// Build a full API URL from a path (e.g., "/api/sessions" -> "http://localhost:3000/api/sessions")
