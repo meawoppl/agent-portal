@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="arr-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+    <marker id="arr-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/>
+    </marker>
+  </defs>
+
+  <!-- Header -->
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2046 · Render task notification summaries as plain text</text>
+
+  <!-- Thesis -->
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">Task Completed cards ran shell commands through markdown + KaTeX, so $(...)</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">pairs became math; now the summary is plain text and reads exactly as written.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+  <!-- Panel labels + center divider -->
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <!-- ==================== BEFORE panel ==================== -->
+  <g>
+    <rect x="80" y="250" width="860" height="150" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="290" font-size="26" fill="#c0caf5">system.task_notification summary</text>
+    <text x="104" y="330" font-size="23" fill="#a9b1d6">sha=$(git rev-parse HEAD) &amp;&amp; body=$(gh pr view ...)</text>
+    <text x="104" y="366" font-size="22" fill="#565f89">background Bash task: the summary is the raw command</text>
+  </g>
+
+  <line x1="320" y1="400" x2="320" y2="490" stroke="#565f89" stroke-width="1.5" marker-end="url(#arr-dim)"/>
+
+  <g>
+    <rect x="80" y="500" width="860" height="150" fill="#1e202e" stroke="#7aa2f7" stroke-width="1.5"/>
+    <text x="104" y="540" font-size="26" fill="#7aa2f7">render_task_notification</text>
+    <text x="104" y="580" font-size="23" fill="#a9b1d6">.task-summary { render_markdown(summary) }</text>
+    <text x="104" y="616" font-size="22" fill="#565f89">renderers/system.rs</text>
+  </g>
+
+  <line x1="320" y1="650" x2="320" y2="740" stroke="#f7768e" stroke-width="1.5" marker-end="url(#arr-red)"/>
+
+  <g>
+    <rect x="80" y="750" width="860" height="160" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+    <text x="104" y="790" font-size="26" fill="#f7768e">$...$ typeset as math, ![..](..) as an image</text>
+    <text x="104" y="830" font-size="23" fill="#a9b1d6">"(git rev-parse HEAD) &amp;&amp; body=" rendered in italics</text>
+    <text x="104" y="866" font-size="22" fill="#565f89">printf format string replaced by a broken image</text>
+  </g>
+
+  <g>
+    <rect x="80" y="960" width="860" height="120" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="1006" font-size="26" fill="#c0caf5">card shows a command that was never run</text>
+    <text x="104" y="1046" font-size="23" fill="#f7768e">symbols dropped, text reshaped</text>
+  </g>
+
+  <!-- ==================== AFTER panel ==================== -->
+  <g>
+    <rect x="1060" y="250" width="860" height="150" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="1084" y="290" font-size="26" fill="#c0caf5">system.task_notification summary</text>
+    <text x="1084" y="330" font-size="23" fill="#a9b1d6">sha=$(git rev-parse HEAD) &amp;&amp; body=$(gh pr view ...)</text>
+    <text x="1084" y="366" font-size="22" fill="#565f89">unchanged input</text>
+  </g>
+
+  <line x1="1300" y1="400" x2="1300" y2="490" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+
+  <g>
+    <rect x="1060" y="500" width="860" height="150" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1084" y="540" font-size="26" fill="#9ece6a">.task-summary { summary }</text>
+    <text x="1084" y="580" font-size="23" fill="#a9b1d6">plain text node; white-space: pre-wrap keeps lines</text>
+    <text x="1084" y="616" font-size="22" fill="#565f89">same rule CollapsibleNoticeBar already follows</text>
+  </g>
+
+  <line x1="1300" y1="650" x2="1300" y2="740" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+
+  <g>
+    <rect x="1060" y="750" width="860" height="160" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1084" y="790" font-size="26" fill="#9ece6a">every character shown literally</text>
+    <text x="1084" y="830" font-size="23" fill="#a9b1d6">$, !, [, ], backticks and &lt;tags&gt; all survive</text>
+    <text x="1084" y="866" font-size="22" fill="#565f89">no math, no images, no emphasis</text>
+  </g>
+
+  <g>
+    <rect x="1060" y="960" width="860" height="120" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1084" y="1006" font-size="26" fill="#c0caf5">card matches the command that ran</text>
+    <text x="1084" y="1046" font-size="23" fill="#9ece6a">compaction summary still renders markdown</text>
+  </g>
+
+  <!-- Footer -->
+  <text x="55" y="1172" font-size="22" fill="#565f89">Scope: only the task card. Assistant prose still uses the $...$ math heuristic, so dollar amounts in chat can still mistrigger.</text>
+</svg>
