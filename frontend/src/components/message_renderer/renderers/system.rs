@@ -259,7 +259,11 @@ fn render_task_notification(msg: &shared::SystemMessage, timestamp: Option<&str>
                 if let Some(summary) = summary_text {
                     html! {
                         <div class="message-body">
-                            <div class="task-summary">{ render_markdown(summary) }</div>
+                            // Plain text, not markdown: the summary is often the
+                            // raw shell command of a background task, where
+                            // `$(...)` pairs typeset as math and `![..](..)`
+                            // becomes an image.
+                            <div class="task-summary">{ summary }</div>
                         </div>
                     }
                 } else { html! {} }
