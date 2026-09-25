@@ -10,6 +10,7 @@
 //! derives the typed [`TaskEvent`] and forwards it into this handler via
 //! the dispatcher callback registered at mount.
 
+use crate::components::turn_metrics_display::compact_metric_count;
 use gloo::timers::callback::Interval;
 use std::collections::HashMap;
 use wasm_bindgen_futures::spawn_local;
@@ -500,12 +501,7 @@ fn render_task_pill(task: &TaskEntry) -> Html {
                 }
                 {
                     if let Some(tokens) = task.total_tokens {
-                        let label = if tokens >= 1000 {
-                            format!("{:.1}k tok", tokens as f64 / 1000.0)
-                        } else {
-                            format!("{} tok", tokens)
-                        };
-                        html! { <span class="task-pill-stat">{ label }</span> }
+                        html! { <span class="task-pill-stat">{ format_task_tokens(tokens) }</span> }
                     } else {
                         html! {}
                     }
@@ -525,6 +521,11 @@ fn format_elapsed(task: &TaskEntry) -> String {
         },
     };
     format_secs(secs)
+}
+
+/// Task pill token text, e.g. `"547 tok"`, `"1.5k tok"`.
+fn format_task_tokens(tokens: u64) -> String {
+    format!("{} tok", compact_metric_count(tokens as f64))
 }
 
 /// Render `secs` as either `"{m}m {s}s"` (>= 60 s) or `"{s}s"`. Pulled
@@ -873,6 +874,20 @@ mod tests {
         entry.completed_at = None;
         entry.duration_ms = None;
         assert_eq!(format_elapsed(&entry), "0s");
+    }
+
+    // --- task token formatting ---
+
+    #[test]
+    fn task_tokens_keep_exact_count_below_1000() {
+        assert_eq!(format_task_tokens(547), "547 tok");
+        assert_eq!(format_task_tokens(0), "0 tok");
+    }
+
+    #[test]
+    fn task_tokens_use_one_decimal_k_at_or_above_1000() {
+        assert_eq!(format_task_tokens(1000), "1.0k tok");
+        assert_eq!(format_task_tokens(1500), "1.5k tok");
     }
 
     // --- running_count ---
