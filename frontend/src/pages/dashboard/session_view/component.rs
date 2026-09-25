@@ -25,7 +25,7 @@ use uuid::Uuid;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
-use web_sys::{Element, KeyboardEvent, MouseEvent};
+use web_sys::{Element, KeyboardEvent, MouseEvent, PointerEvent};
 use yew::prelude::*;
 
 use super::forward_chips::ForwardChips;
@@ -182,7 +182,7 @@ pub enum SessionViewMsg {
     CloseSurface,
     ToggleSurfaceCollapsed,
     ToggleSurfaceMode,
-    SurfaceResizeStart(MouseEvent),
+    SurfaceResizeStart(PointerEvent),
     SurfaceResizeTo(f64),
     SurfaceResizeEnd,
     EscapeSurface,
@@ -730,42 +730,39 @@ impl Component for SessionView {
                 let Some(element) = self.body_ref.cast::<Element>() else {
                     return false;
                 };
+                // Capture the pointer on the handle. The surface next to it is
+                // an iframe, and without capture the parent document stops
+                // receiving move/up events the moment the cursor crosses into
+                // it, which ends the drag after a pixel or two.
+                let Some(handle) = event.target().and_then(|t| t.dyn_into::<Element>().ok()) else {
+                    return false;
+                };
+                if handle.set_pointer_capture(event.pointer_id()).is_err() {
+                    return false;
+                }
                 let rect = element.get_bounding_client_rect();
                 let vertical = rect.width() < 900.0;
                 let link = ctx.link().clone();
-                let move_listener =
-                    EventListener::new(&gloo::utils::window(), "mousemove", move |event| {
-                        let Some(event) = event.dyn_ref::<MouseEvent>() else {
-                            return;
-                        };
-                        if event.buttons() & 1 == 0 {
-                            link.send_message(SessionViewMsg::SurfaceResizeEnd);
-                            return;
-                        }
-                        let raw_percent = if vertical {
-                            ((rect.bottom() - f64::from(event.client_y())) / rect.height()) * 100.0
-                        } else {
-                            ((rect.right() - f64::from(event.client_x())) / rect.width()) * 100.0
-                        };
-                        link.send_message(SessionViewMsg::SurfaceResizeTo(raw_percent));
-                    });
+                let move_listener = EventListener::new(&handle, "pointermove", move |event| {
+                    let Some(event) = event.dyn_ref::<PointerEvent>() else {
+                        return;
+                    };
+                    let raw_percent = if vertical {
+                        ((rect.bottom() - f64::from(event.client_y())) / rect.height()) * 100.0
+                    } else {
+                        ((rect.right() - f64::from(event.client_x())) / rect.width()) * 100.0
+                    };
+                    link.send_message(SessionViewMsg::SurfaceResizeTo(raw_percent));
+                });
+                // `lostpointercapture` fires after pointerup/pointercancel and
+                // whenever the browser revokes capture, so it is the one
+                // reliable end-of-drag signal.
                 let link = ctx.link().clone();
-                let up_listener =
-                    EventListener::new(&gloo::utils::window(), "mouseup", move |_| {
-                        link.send_message(SessionViewMsg::SurfaceResizeEnd);
-                    });
-                let link = ctx.link().clone();
-                let blur_listener = EventListener::new(&gloo::utils::window(), "blur", move |_| {
+                let end_listener = EventListener::new(&handle, "lostpointercapture", move |_| {
                     link.send_message(SessionViewMsg::SurfaceResizeEnd);
                 });
-                let link = ctx.link().clone();
-                let leave_listener =
-                    EventListener::new(&gloo::utils::document(), "mouseleave", move |_| {
-                        link.send_message(SessionViewMsg::SurfaceResizeEnd);
-                    });
-                self.resize_listeners =
-                    vec![move_listener, up_listener, blur_listener, leave_listener];
-                false
+                self.resize_listeners = vec![move_listener, end_listener];
+                true
             }
             SessionViewMsg::SurfaceResizeTo(percent) => {
                 self.surface_split_percent = clamp_split_percent(percent);
@@ -774,7 +771,7 @@ impl Component for SessionView {
             SessionViewMsg::SurfaceResizeEnd => {
                 self.resize_listeners.clear();
                 save_split_percent(ctx.props().session.id, self.surface_split_percent);
-                false
+                true
             }
             SessionViewMsg::EscapeSurface => {
                 let Some(surface) = self.active_surface.as_mut() else {
@@ -996,6 +993,7 @@ impl Component for SessionView {
                     self.active_surface.as_ref().and_then(|surface| {
                         surface.collapsed.then_some("surface-collapsed")
                     }),
+                    (!self.resize_listeners.is_empty()).then_some("surface-resizing"),
                     )}
                     style={format!("--surface-basis: {:.1}%;", self.surface_split_percent)}
                 >
@@ -1059,7 +1057,7 @@ impl Component for SessionView {
                                 role="separator"
                                 aria-orientation="vertical"
                                 title="Resize surface"
-                                onmousedown={ctx.link().callback(SessionViewMsg::SurfaceResizeStart)}
+                                onpointerdown={ctx.link().callback(SessionViewMsg::SurfaceResizeStart)}
                             />
                         }
                         if let Some(forward) = surface.forward().cloned() {

@@ -71,6 +71,15 @@
     cursor: col-resize;
     position: relative;
     background: transparent;
+
+    /* Touch drags resize instead of scrolling the page. */
+    touch-action: none;
+}
+
+/* Belt and braces for pointer capture: keep the iframe from claiming the
+   cursor while a resize is in flight. */
+.session-view-body.surface-resizing .session-forward-frame {
+    pointer-events: none;
 }
 
 .session-surface-resize-handle::before {
