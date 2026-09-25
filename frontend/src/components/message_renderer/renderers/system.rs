@@ -1,7 +1,13 @@
 use super::super::shorten_model_name;
 use crate::components::markdown::render_markdown;
+use crate::components::turn_metrics_display::compact_metric_count;
 use shared::fmt::format_duration;
 use yew::prelude::*;
+
+/// Task chip text, e.g. `"547 tokens"`, `"1.5k tokens"`.
+fn format_task_tokens(tokens: u64) -> String {
+    format!("{} tokens", compact_metric_count(tokens as f64))
+}
 
 pub fn render_system_message(msg: &shared::SystemMessage, timestamp: Option<&str>) -> Html {
     let subtype = msg.subtype.as_str();
@@ -251,7 +257,7 @@ fn render_task_notification(msg: &shared::SystemMessage, timestamp: Option<&str>
                 }
                 {
                     if let Some(tokens) = total_tokens {
-                        html! { <span class="task-stat" title="Total tokens">{ format!("{}k tokens", tokens / 1000) }</span> }
+                        html! { <span class="task-stat" title="Total tokens">{ format_task_tokens(tokens) }</span> }
                     } else { html! {} }
                 }
             </div>
@@ -320,6 +326,18 @@ mod tests {
         }));
 
         assert!(!is_compaction_beginning(&msg));
+    }
+
+    #[test]
+    fn task_tokens_keep_exact_count_below_1000() {
+        assert_eq!(format_task_tokens(547), "547 tokens");
+        assert_eq!(format_task_tokens(0), "0 tokens");
+    }
+
+    #[test]
+    fn task_tokens_use_one_decimal_k_at_or_above_1000() {
+        assert_eq!(format_task_tokens(1000), "1.0k tokens");
+        assert_eq!(format_task_tokens(1500), "1.5k tokens");
     }
 
     #[test]
