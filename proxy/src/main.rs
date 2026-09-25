@@ -834,6 +834,7 @@ async fn create_claude_session(config: &ProxySessionConfig) -> Result<ClaudeSess
         } else {
             config.claude_args.clone()
         },
+        plugin_skill_reminder: None,
         muse_yolo: config.agent_type == shared::AgentType::Muse
             && config.claude_args.iter().any(|arg| arg == "--yolo"),
         agent_type: config.agent_type,

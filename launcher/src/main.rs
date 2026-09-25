@@ -150,6 +150,11 @@ enum PluginAction {
         /// Plugin name
         name: String,
     },
+    /// List skills provided by installed plugins
+    Skills {
+        /// Optional plugin name
+        name: Option<String>,
+    },
     /// Run the plugin's doctor command
     Doctor {
         /// Plugin name
@@ -412,6 +417,7 @@ async fn main() -> anyhow::Result<()> {
                     reference,
                 } => plugin::install(&source, name.as_deref(), reference.as_deref()),
                 PluginAction::Info { name } => plugin::info(&name),
+                PluginAction::Skills { name } => plugin::skills(name.as_deref()),
                 PluginAction::Doctor { name } => plugin::doctor(&name),
                 PluginAction::Open { name } => plugin::open(&name).await,
                 PluginAction::Remove { name } => plugin::remove(&name),

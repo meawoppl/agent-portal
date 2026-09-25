@@ -23,6 +23,10 @@ pub struct SessionConfig {
     /// Extra arguments to pass to the claude CLI
     #[serde(default)]
     pub extra_args: Vec<String>,
+    /// Optional session-scoped plugin skill reminder appended to the Portal
+    /// reminder for agents without a native plugin skill loader.
+    #[serde(default)]
+    pub plugin_skill_reminder: Option<String>,
     /// Whether Muse should disable tool approval and sandboxing and trust the
     /// workspace. Ignored by other agents and safe by default.
     #[serde(default)]
@@ -157,6 +161,7 @@ mod tests {
             resume: false,
             claude_path: None,
             extra_args: vec![],
+            plugin_skill_reminder: None,
             muse_yolo: false,
             agent_type: Default::default(),
             codex_thread_id: None,

@@ -30,6 +30,10 @@ struct PluginManifest {
     install: InstallSection,
     #[serde(default)]
     surface: Option<SurfaceSection>,
+    #[serde(default)]
+    skills: Vec<SkillSection>,
+    #[serde(default)]
+    prompts: Vec<PromptSection>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -48,6 +52,20 @@ struct SurfaceSection {
     start: Option<String>,
     #[serde(default)]
     health_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SkillSection {
+    name: String,
+    path: PathBuf,
+    #[serde(default)]
+    agents: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct PromptSection {
+    name: String,
+    path: PathBuf,
 }
 
 #[derive(Debug)]
@@ -107,6 +125,66 @@ pub fn info(name: &str) -> Result<()> {
             "disabled"
         }
     );
+    if !manifest.skills.is_empty() {
+        println!("skills:");
+        for skill in manifest.skills {
+            println!(
+                "  - {} [{}] {}",
+                skill.name,
+                if skill.agents.is_empty() {
+                    "all".to_string()
+                } else {
+                    skill.agents.join(",")
+                },
+                skill.path.display()
+            );
+        }
+    }
+    if !manifest.prompts.is_empty() {
+        println!("prompts:");
+        for prompt in manifest.prompts {
+            println!("  - {} {}", prompt.name, prompt.path.display());
+        }
+    }
+    Ok(())
+}
+
+pub fn skills(name: Option<&str>) -> Result<()> {
+    let config = config::load_config();
+    let mut rows = Vec::new();
+    for (plugin_name, installed) in config.plugins {
+        if let Some(name) = name {
+            if plugin_name != name {
+                continue;
+            }
+        }
+        if !installed.enabled {
+            continue;
+        }
+        let root = PathBuf::from(&installed.path);
+        let manifest = load_manifest(&root)?;
+        for skill in manifest.skills {
+            let path = root.join(&skill.path);
+            rows.push((
+                plugin_name.clone(),
+                skill.name,
+                skill.agents,
+                path.display().to_string(),
+            ));
+        }
+    }
+    if rows.is_empty() {
+        println!("No plugin skills found.");
+        return Ok(());
+    }
+    for (plugin, skill, agents, path) in rows {
+        let agents = if agents.is_empty() {
+            "all".to_string()
+        } else {
+            agents.join(",")
+        };
+        println!("{plugin}:{skill}\t{agents}\t{path}");
+    }
     Ok(())
 }
 
