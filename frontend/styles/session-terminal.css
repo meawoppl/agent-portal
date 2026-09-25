@@ -71,6 +71,7 @@
     cursor: col-resize;
     position: relative;
     background: transparent;
+
     /* Touch drags resize instead of scrolling the page. */
     touch-action: none;
 }
