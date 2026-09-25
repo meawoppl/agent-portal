@@ -16,6 +16,7 @@ pub(crate) struct FrameRenderContext<'a> {
     pub turn_metrics: Option<&'a shared::TurnMetrics>,
     pub continuation_statuses: &'a HashMap<Uuid, String>,
     pub on_schedule_continuation: Callback<Uuid>,
+    pub on_claude_login: Option<Callback<()>>,
 }
 
 pub(crate) fn render_frame(ctx: FrameRenderContext<'_>) -> Html {
@@ -69,7 +70,7 @@ pub(crate) fn render_frame(ctx: FrameRenderContext<'_>) -> Html {
                 )
             }
             AgentFrame::Claude(ClaudeMessage::Error(msg)) => {
-                renderers::render_error_message(&msg, ctx.timestamp)
+                renderers::render_error_message(&msg, ctx.timestamp, ctx.on_claude_login)
             }
             AgentFrame::Claude(ClaudeMessage::Portal(msg)) => renderers::render_portal_message(
                 &msg,

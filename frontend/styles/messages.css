@@ -1231,6 +1231,22 @@
     color: var(--error);
 }
 
+.error-recovery-button {
+    margin-top: 0.75rem;
+    padding: 0.45rem 0.8rem;
+    border: 1px solid var(--accent, #7aa2f7);
+    border-radius: 0.4rem;
+    background: color-mix(in srgb, var(--accent, #7aa2f7) 14%, transparent);
+    color: var(--text-primary);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.error-recovery-button:hover {
+    background: color-mix(in srgb, var(--accent, #7aa2f7) 24%, transparent);
+}
+
 .error-type {
     font-family: var(--font-mono);
     font-size: 0.75rem;

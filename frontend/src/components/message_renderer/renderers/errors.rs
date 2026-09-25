@@ -5,7 +5,18 @@ use crate::components::copy_button::CopyButton;
 use serde::Deserialize;
 use yew::prelude::*;
 
-pub fn render_error_message(msg: &shared::AnthropicError, timestamp: Option<&str>) -> Html {
+const EXPIRED_OAUTH_MESSAGE: &str =
+    "Failed to authenticate: OAuth session expired and could not be refreshed";
+
+fn is_expired_oauth_error(message: &str) -> bool {
+    message.contains(EXPIRED_OAUTH_MESSAGE)
+}
+
+pub fn render_error_message(
+    msg: &shared::AnthropicError,
+    timestamp: Option<&str>,
+    on_claude_login: Option<Callback<()>>,
+) -> Html {
     if msg.is_overloaded() {
         return render_overload_error(msg, timestamp);
     }
@@ -24,8 +35,36 @@ pub fn render_error_message(msg: &shared::AnthropicError, timestamp: Option<&str
             </div>
             <div class="message-body">
                 <div class="error-text">{ crate::components::markdown::linkify_urls(message) }</div>
+                if is_expired_oauth_error(message) {
+                    if let Some(on_login) = on_claude_login {
+                        <button
+                            type="button"
+                            class="error-recovery-button"
+                            onclick={on_login.reform(|_: MouseEvent| ())}
+                        >
+                            { "Sign in to Claude" }
+                        </button>
+                    }
+                }
             </div>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod auth_error_tests {
+    use super::is_expired_oauth_error;
+
+    #[test]
+    fn recognizes_expired_oauth_failure_with_surrounding_context() {
+        assert!(is_expired_oauth_error(
+            "Error: Failed to authenticate: OAuth session expired and could not be refreshed."
+        ));
+    }
+
+    #[test]
+    fn does_not_offer_login_for_unrelated_errors() {
+        assert!(!is_expired_oauth_error("Claude API is overloaded"));
     }
 }
 

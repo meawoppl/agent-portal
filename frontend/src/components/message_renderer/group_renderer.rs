@@ -26,6 +26,8 @@ pub struct MessageGroupRendererProps {
     pub continuation_statuses: HashMap<Uuid, String>,
     #[prop_or_default]
     pub on_schedule_continuation: Callback<Uuid>,
+    #[prop_or_default]
+    pub on_claude_login: Option<Callback<()>>,
     /// Odometer seed for `Thinking` groups: the running thinking-token max
     /// across earlier bursts in the same turn (see
     /// `grouping::thinking_chip_starts`). Keeps the count continuous when a
@@ -97,7 +99,7 @@ pub(super) fn render_connection_cycle_run(durations: &[String]) -> Html {
 pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
     match &props.group {
         MessageGroup::Single(json) => {
-            html! { <super::MessageRenderer message={json.clone()} session_id={props.session_id} agent_type={props.agent_type} current_user_id={props.current_user_id.clone()} turn_metrics={props.turn_metrics.clone()} continuation_statuses={props.continuation_statuses.clone()} on_schedule_continuation={props.on_schedule_continuation.clone()} /> }
+            html! { <super::MessageRenderer message={json.clone()} session_id={props.session_id} agent_type={props.agent_type} current_user_id={props.current_user_id.clone()} turn_metrics={props.turn_metrics.clone()} continuation_statuses={props.continuation_statuses.clone()} on_schedule_continuation={props.on_schedule_continuation.clone()} on_claude_login={props.on_claude_login.clone()} /> }
         }
         MessageGroup::IdentityGroup {
             category,

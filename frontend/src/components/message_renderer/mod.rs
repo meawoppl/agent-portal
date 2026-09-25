@@ -53,6 +53,11 @@ pub struct MessageRendererProps {
     pub continuation_statuses: HashMap<Uuid, String>,
     #[prop_or_default]
     pub on_schedule_continuation: Callback<Uuid>,
+    /// Starts the launcher-mediated Claude sign-in flow when an authentication
+    /// failure card offers recovery. Absent for non-Claude, shared, or
+    /// launcher-detached sessions.
+    #[prop_or_default]
+    pub on_claude_login: Option<Callback<()>>,
 }
 
 #[function_component(MessageRenderer)]
@@ -68,6 +73,7 @@ pub fn message_renderer(props: &MessageRendererProps) -> Html {
         turn_metrics: props.turn_metrics.as_ref(),
         continuation_statuses: &props.continuation_statuses,
         on_schedule_continuation: props.on_schedule_continuation.clone(),
+        on_claude_login: props.on_claude_login.clone(),
     })
 }
 
