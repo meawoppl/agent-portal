@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#565f89">PR #2048 · Muse 1.4.0 credential detection</text>
+<text x="55" y="108" font-family="sans-serif" font-size="34" fill="#e6e9f5">Missing credential files no longer imply that Muse is logged out.</text>
+<text x="55" y="152" font-family="sans-serif" font-size="34" fill="#e6e9f5">The probe reports unknown when keychain credentials cannot be inspected.</text>
+<path d="M55 180 H1945" stroke="#565f89"/>
+<path d="M1000 205 V1120" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="55" y="240" font-family="sans-serif" font-size="22" fill="#f7768e">BEFORE</text>
+<rect x="55" y="290" width="880" height="180" rx="12" fill="#1e202e" stroke="#565f89"/>
+<rect x="55" y="540" width="880" height="180" rx="12" fill="#1e202e" stroke="#565f89"/>
+<rect x="55" y="790" width="880" height="180" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="335" font-family="sans-serif" font-size="28" fill="#7aa2f7">probe_muse_login()</text>
+<text x="80" y="385" font-family="sans-serif" font-size="26" fill="#c0caf5">No META_API_KEY; no saved file credentials</text>
+<text x="80" y="585" font-family="sans-serif" font-size="28" fill="#7aa2f7">muse_codes::auth::credentials_present()</text>
+<text x="80" y="635" font-family="sans-serif" font-size="26" fill="#e0af68">Cannot inspect the OS keychain</text>
+<text x="80" y="835" font-family="sans-serif" font-size="28" fill="#f7768e">AgentLoginStatus::LoggedOut</text>
+<text x="80" y="885" font-family="sans-serif" font-size="26" fill="#c0caf5">May misreport a signed-in keychain user</text>
+<path d="M495 470 v60 m-8 -10 l8 10 l8 -10" fill="none" stroke="#565f89" stroke-width="3"/>
+<path d="M495 720 v60 m-8 -10 l8 10 l8 -10" fill="none" stroke="#565f89" stroke-width="3"/>
+<text x="1055" y="240" font-family="sans-serif" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="1055" y="290" width="880" height="180" rx="12" fill="#1e202e" stroke="#565f89"/>
+<rect x="1055" y="540" width="880" height="180" rx="12" fill="#1e202e" stroke="#565f89"/>
+<rect x="1055" y="790" width="880" height="180" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1080" y="335" font-family="sans-serif" font-size="28" fill="#7aa2f7">probe_muse_login()</text>
+<text x="1080" y="385" font-family="sans-serif" font-size="26" fill="#c0caf5">No META_API_KEY; no saved file credentials</text>
+<text x="1080" y="585" font-family="sans-serif" font-size="28" fill="#7aa2f7">muse_codes::auth::credentials_present()</text>
+<text x="1080" y="635" font-family="sans-serif" font-size="26" fill="#e0af68">Cannot inspect the OS keychain</text>
+<text x="1080" y="835" font-family="sans-serif" font-size="28" fill="#9ece6a">AgentLoginStatus::Unknown</text>
+<text x="1080" y="885" font-family="sans-serif" font-size="26" fill="#c0caf5">LoggedOut only with explicit file backend</text>
+<path d="M1495 470 v60 m-8 -10 l8 10 l8 -10" fill="none" stroke="#565f89" stroke-width="3"/>
+<path d="M1495 720 v60 m-8 -10 l8 10 l8 -10" fill="none" stroke="#565f89" stroke-width="3"/>
+<text x="55" y="1170" font-family="sans-serif" font-size="22" fill="#565f89">Scope: keychain state remains unreadable; positive environment/file detection is preserved.</text>
+</svg>

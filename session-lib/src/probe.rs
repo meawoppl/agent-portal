@@ -122,12 +122,24 @@ pub fn probe_muse_sandbox() -> Option<bool> {
     }
 }
 
-/// Presence-only login probe for Muse: the CLI persists no account
-/// identity (no `whoami` at 0.1.0), so a logged-in cell carries a provider
-/// label instead of a name, annotated when the credential comes from the
-/// environment rather than the saved file.
+/// Presence-only login probe for Muse. Environment and file credentials carry
+/// a provider label rather than an account identity. The SDK cannot inspect
+/// the OS keychain (Muse's default credential store), so absent file credentials
+/// imply logged-out only when the host explicitly selects the file backend.
 pub fn probe_muse_login() -> shared::AgentLoginStatus {
     let via_env = std::env::var("META_API_KEY").is_ok_and(|v| is_non_blank(&v));
+    muse_login_status(
+        via_env,
+        muse_codes::auth::credentials_present(),
+        std::env::var(muse_codes::auth::CREDENTIAL_BACKEND_ENV).as_deref() == Ok("file"),
+    )
+}
+
+fn muse_login_status(
+    via_env: bool,
+    credentials_present: bool,
+    file_backend: bool,
+) -> shared::AgentLoginStatus {
     if via_env {
         return shared::AgentLoginStatus::LoggedIn {
             label: Some("meta".to_string()),
@@ -135,14 +147,16 @@ pub fn probe_muse_login() -> shared::AgentLoginStatus {
             via: Some("env".to_string()),
         };
     }
-    if muse_codes::auth::credentials_present() {
+    if credentials_present {
         shared::AgentLoginStatus::LoggedIn {
             label: Some("meta".to_string()),
             plan: None,
             via: None,
         }
-    } else {
+    } else if file_backend {
         shared::AgentLoginStatus::LoggedOut
+    } else {
+        shared::AgentLoginStatus::Unknown
     }
 }
 
@@ -198,10 +212,29 @@ mod muse_probe_tests {
                 assert_eq!(plan, None, "muse exposes no plan/subscription");
                 assert!(via.is_none() || via.as_deref() == Some("env"));
             }
-            shared::AgentLoginStatus::LoggedOut => {}
-            shared::AgentLoginStatus::Unknown => {
-                panic!("probe should decide presence, not return Unknown")
-            }
+            shared::AgentLoginStatus::LoggedOut | shared::AgentLoginStatus::Unknown => {}
+        }
+    }
+
+    #[test]
+    fn muse_keychain_credentials_are_not_misreported_as_logged_out() {
+        use shared::AgentLoginStatus;
+        assert_eq!(
+            muse_login_status(false, false, false),
+            AgentLoginStatus::Unknown
+        );
+        assert_eq!(
+            muse_login_status(false, false, true),
+            AgentLoginStatus::LoggedOut
+        );
+        for file_backend in [false, true] {
+            assert!(matches!(
+                muse_login_status(false, true, file_backend),
+                AgentLoginStatus::LoggedIn { via: None, .. }
+            ));
+            assert!(
+                matches!(muse_login_status(true, false, file_backend), AgentLoginStatus::LoggedIn { via: Some(via), .. } if via == "env")
+            );
         }
     }
 }
