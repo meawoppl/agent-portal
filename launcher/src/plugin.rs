@@ -121,7 +121,7 @@ struct PluginRuntimeDirs {
     surfaces: PathBuf,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct SurfaceState {
     plugin: String,
     port: u16,
@@ -131,6 +131,62 @@ pub(crate) struct SurfaceState {
     session_id: String,
     health_path: Option<String>,
     started_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Serialize)]
+struct RuntimeJson {
+    name: String,
+    display_name: Option<String>,
+    description: Option<String>,
+    path: PathBuf,
+    enabled: bool,
+    plugin_home: PathBuf,
+    toolchain_root: PathBuf,
+    surface: Option<RuntimeSurfaceJson>,
+    skills: Vec<RuntimeSkillJson>,
+    commands: Vec<RuntimeCommandJson>,
+    toolchains: Vec<RuntimeToolchainJson>,
+    capabilities: std::collections::BTreeMap<String, toml::Value>,
+}
+
+#[derive(Debug, Serialize)]
+struct RuntimeSurfaceJson {
+    default_title: Option<String>,
+    health_path: Option<String>,
+    default_width_percent: Option<u8>,
+    has_start: bool,
+    has_stop: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct RuntimeSkillJson {
+    name: String,
+    path: PathBuf,
+    agents: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct RuntimeCommandJson {
+    name: String,
+    description: Option<String>,
+    run: String,
+}
+
+#[derive(Debug, Serialize)]
+struct RuntimeToolchainJson {
+    name: String,
+    description: Option<String>,
+    home: PathBuf,
+    has_install: bool,
+    has_doctor: bool,
+    env: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Debug, Serialize)]
+struct SurfaceStatusJson {
+    plugin: String,
+    surface: Option<SurfaceState>,
+    healthy: bool,
 }
 
 #[derive(Debug)]
@@ -247,40 +303,60 @@ pub fn runtime(name: &str, json: bool) -> Result<()> {
     let runtime = load_runtime(name)?;
     ensure_enabled(name, &runtime.installed)?;
     if json {
-        let value = serde_json::json!({
-            "name": runtime.name,
-            "display_name": runtime.manifest.display_name,
-            "description": runtime.manifest.description,
-            "path": runtime.root,
-            "enabled": runtime.installed.enabled,
-            "plugin_home": runtime.dirs.portal,
-            "toolchain_root": runtime.dirs.toolchains,
-            "surface": runtime.manifest.surface.as_ref().map(|surface| serde_json::json!({
-                "default_title": surface.default_title,
-                "health_path": surface.health_path,
-                "default_width_percent": surface.default_width_percent,
-                "has_start": surface.start.is_some(),
-                "has_stop": surface.stop.is_some(),
-            })),
-            "skills": runtime.manifest.skills.iter().map(|skill| serde_json::json!({
-                "name": skill.name,
-                "path": runtime.root.join(&skill.path),
-                "agents": skill.agents,
-            })).collect::<Vec<_>>(),
-            "commands": runtime.manifest.commands.iter().map(|command| serde_json::json!({
-                "name": command.name,
-                "description": command.description,
-                "run": command.run,
-            })).collect::<Vec<_>>(),
-            "toolchains": runtime.manifest.toolchains.iter().map(|toolchain| serde_json::json!({
-                "name": toolchain.name,
-                "description": toolchain.description,
-                "home": toolchain_home(&runtime, toolchain),
-                "has_install": toolchain.install.is_some(),
-                "has_doctor": toolchain.doctor.is_some(),
-            })).collect::<Vec<_>>(),
-            "capabilities": runtime.manifest.capabilities,
-        });
+        let value = RuntimeJson {
+            name: runtime.name.clone(),
+            display_name: runtime.manifest.display_name.clone(),
+            description: runtime.manifest.description.clone(),
+            path: runtime.root.clone(),
+            enabled: runtime.installed.enabled,
+            plugin_home: runtime.dirs.portal.clone(),
+            toolchain_root: runtime.dirs.toolchains.clone(),
+            surface: runtime
+                .manifest
+                .surface
+                .as_ref()
+                .map(|surface| RuntimeSurfaceJson {
+                    default_title: surface.default_title.clone(),
+                    health_path: surface.health_path.clone(),
+                    default_width_percent: surface.default_width_percent,
+                    has_start: surface.start.is_some(),
+                    has_stop: surface.stop.is_some(),
+                }),
+            skills: runtime
+                .manifest
+                .skills
+                .iter()
+                .map(|skill| RuntimeSkillJson {
+                    name: skill.name.clone(),
+                    path: runtime.root.join(&skill.path),
+                    agents: skill.agents.clone(),
+                })
+                .collect(),
+            commands: runtime
+                .manifest
+                .commands
+                .iter()
+                .map(|command| RuntimeCommandJson {
+                    name: command.name.clone(),
+                    description: command.description.clone(),
+                    run: command.run.clone(),
+                })
+                .collect(),
+            toolchains: runtime
+                .manifest
+                .toolchains
+                .iter()
+                .map(|toolchain| RuntimeToolchainJson {
+                    name: toolchain.name.clone(),
+                    description: toolchain.description.clone(),
+                    home: toolchain_home(&runtime, toolchain),
+                    has_install: toolchain.install.is_some(),
+                    has_doctor: toolchain.doctor.is_some(),
+                    env: toolchain.env.clone(),
+                })
+                .collect(),
+            capabilities: runtime.manifest.capabilities.clone(),
+        };
         println!("{}", serde_json::to_string_pretty(&value)?);
     } else {
         info(name)?;
@@ -351,15 +427,13 @@ pub fn toolchains(name: &str, json: bool) -> Result<()> {
             .manifest
             .toolchains
             .iter()
-            .map(|toolchain| {
-                serde_json::json!({
-                    "name": toolchain.name,
-                    "description": toolchain.description,
-                    "home": toolchain_home(&runtime, toolchain),
-                    "has_install": toolchain.install.is_some(),
-                    "has_doctor": toolchain.doctor.is_some(),
-                    "env": toolchain.env,
-                })
+            .map(|toolchain| RuntimeToolchainJson {
+                name: toolchain.name.clone(),
+                description: toolchain.description.clone(),
+                home: toolchain_home(&runtime, toolchain),
+                has_install: toolchain.install.is_some(),
+                has_doctor: toolchain.doctor.is_some(),
+                env: toolchain.env.clone(),
             })
             .collect::<Vec<_>>();
         println!("{}", serde_json::to_string_pretty(&value)?);
@@ -554,14 +628,12 @@ pub async fn status(name: &str, json: bool) -> Result<()> {
         None => false,
     };
     if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "plugin": name,
-                "surface": state,
-                "healthy": healthy,
-            }))?
-        );
+        let value = SurfaceStatusJson {
+            plugin: name.to_string(),
+            surface: state,
+            healthy,
+        };
+        println!("{}", serde_json::to_string_pretty(&value)?);
     } else if let Some(state) = state {
         println!(
             "{}\t{}\t127.0.0.1:{}\tpid={}",
