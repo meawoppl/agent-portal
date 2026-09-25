@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="arr-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+    <marker id="arr-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/>
+    </marker>
+  </defs>
+
+  <!-- Header -->
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2052 - task pill token stat joins the shared compact formatter</text>
+
+  <!-- Thesis -->
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">The tasks-panel pill formatted its own one-decimal k suffix inline;</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">now it calls format_task_tokens, so the suffix has one fewer definition.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+  <!-- Panel labels + center divider (keep) -->
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <!-- ==================== BEFORE panel: x 55-945 ==================== -->
+  <g>
+    <rect x="80" y="250" width="860" height="150" fill="#1e202e" stroke="#7aa2f7" stroke-width="1.5"/>
+    <text x="104" y="290" font-size="26" fill="#7aa2f7">render_task_pill (tasks_panel.rs)</text>
+    <text x="104" y="330" font-size="23" fill="#a9b1d6">inline if/else: "{:.1}k tok" vs "{} tok" - own copy</text>
+    <text x="104" y="366" font-size="22" fill="#565f89">hand-rolled at the call site, beside the markup</text>
+  </g>
+
+  <line x1="320" y1="400" x2="320" y2="490" stroke="#565f89" stroke-width="1.5" marker-end="url(#arr-dim)"/>
+  <text x="336" y="450" font-size="22" fill="#565f89">same suffix, third copy</text>
+
+  <g>
+    <rect x="80" y="495" width="860" height="200" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+    <text x="104" y="535" font-size="26" fill="#f7768e">547 tokens -&gt; "547 tok" (correct today)</text>
+    <text x="104" y="575" font-size="26" fill="#f7768e">1500 tokens -&gt; "1.5k tok" (correct today)</text>
+    <text x="104" y="615" font-size="23" fill="#a9b1d6">outputs match - but the next rounding tweak must land 3x</text>
+    <text x="104" y="651" font-size="22" fill="#565f89">compact_metric_count, system.rs, and this inline branch</text>
+  </g>
+
+  <g>
+    <rect x="80" y="745" width="860" height="150" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="791" font-size="26" fill="#c0caf5">one suffix, 3 definitions</text>
+    <text x="104" y="831" font-size="23" fill="#f7768e">copies drift - pills disagree on large counts</text>
+    <text x="104" y="867" font-size="22" fill="#565f89">tasks_panel.rs - last inline holdout after #2050</text>
+  </g>
+
+  <g>
+    <rect x="80" y="945" width="860" height="120" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="991" font-size="26" fill="#c0caf5">no bug today, just duplication</text>
+    <text x="104" y="1031" font-size="23" fill="#a9b1d6">every rendering already matches the shared helper</text>
+  </g>
+
+  <!-- ==================== AFTER panel: x 1040-1945 ==================== -->
+  <g>
+    <rect x="1065" y="250" width="860" height="150" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1089" y="290" font-size="26" fill="#9ece6a">format_task_tokens(tokens: u64)</text>
+    <text x="1089" y="330" font-size="23" fill="#a9b1d6">format!("{} tok", compact_metric_count(...))</text>
+    <text x="1089" y="366" font-size="22" fill="#565f89">thin helper - mirrors the system.rs naming</text>
+  </g>
+
+  <line x1="1305" y1="400" x2="1305" y2="490" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+  <text x="1321" y="450" font-size="22" fill="#565f89">delegates</text>
+
+  <g>
+    <rect x="1065" y="495" width="860" height="160" fill="#1e202e" stroke="#7aa2f7" stroke-width="1.5"/>
+    <text x="1089" y="535" font-size="26" fill="#7aa2f7">compact_metric_count(v: f64)</text>
+    <text x="1089" y="575" font-size="23" fill="#a9b1d6">sole owner of the "{:.1}k" suffix - body untouched</text>
+    <text x="1089" y="611" font-size="22" fill="#565f89">turn_metrics_display.rs - shared by every chip now</text>
+  </g>
+
+  <line x1="1305" y1="655" x2="1305" y2="745" stroke="#565f89" stroke-width="1.5" marker-end="url(#arr-dim)"/>
+  <text x="1321" y="705" font-size="22" fill="#565f89">renders</text>
+
+  <g>
+    <rect x="1065" y="750" width="860" height="150" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1089" y="790" font-size="26" fill="#c0caf5">547 tokens -&gt; "547 tok" (unchanged)</text>
+    <text x="1089" y="830" font-size="26" fill="#c0caf5">1500 tokens -&gt; "1.5k tok" (unchanged)</text>
+    <text x="1089" y="866" font-size="22" fill="#565f89">exact below 1000, one-decimal-k at or above</text>
+  </g>
+
+  <g>
+    <rect x="1065" y="960" width="860" height="120" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1089" y="1006" font-size="26" fill="#c0caf5">one suffix, 2 definitions</text>
+    <text x="1089" y="1046" font-size="23" fill="#9ece6a">one rounding fix now covers every token chip</text>
+  </g>
+
+  <!-- Footer -->
+  <text x="55" y="1172" font-size="22" fill="#565f89">No rendered output changes: 547 -&gt; "547 tok", 1000 -&gt; "1.0k tok", exactly as before.</text>
+</svg>
