@@ -532,6 +532,7 @@ mod tests {
             first_stream_post_wall_ms: None,
             frame_received_wall_ms: None,
             frame_enqueued_wall_ms: None,
+            frame_intake_phases_ms: None,
             turn_started_wall_ms: None,
             first_text_post_ms: None,
             first_text_post_wall_ms: None,
