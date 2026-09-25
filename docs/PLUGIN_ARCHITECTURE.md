@@ -1,6 +1,8 @@
 # Agent Portal Plugin Architecture
 
-Status: planning spec.
+Status: implemented launcher-local plugin runtime with manifest-described
+extensions. Frontend suggestion UI and stronger sandboxing are still separate
+work.
 
 This document defines Portal plugins as repo-adjacent capabilities installed by
 the `agent-portal` launcher. A plugin gives a session a domain-specific work
@@ -97,6 +99,8 @@ installed directory:
   config/
   data/
   state/
+    surfaces/
+  toolchains/
 ```
 
 Before invoking any manifest command, the launcher creates those directories and
@@ -110,6 +114,7 @@ XDG_CACHE_HOME=$AGENT_PORTAL_PLUGIN_ROOT/backplane/.portal/cache
 XDG_CONFIG_HOME=$AGENT_PORTAL_PLUGIN_ROOT/backplane/.portal/config
 XDG_DATA_HOME=$AGENT_PORTAL_PLUGIN_ROOT/backplane/.portal/data
 XDG_STATE_HOME=$AGENT_PORTAL_PLUGIN_ROOT/backplane/.portal/state
+AGENT_PORTAL_PLUGIN_TOOLCHAIN_ROOT=$AGENT_PORTAL_PLUGIN_ROOT/backplane/.portal/toolchains
 ```
 
 Installers and plugin runtimes should keep downloaded tools, generated support
@@ -134,12 +139,16 @@ agent-portal plugin install <source> [--name <name>] [--ref <git-ref>]
 agent-portal plugin update [<name>]
 agent-portal plugin remove <name>
 agent-portal plugin info <name>
+agent-portal plugin runtime <name> [--json]
+agent-portal plugin toolchains <name> [--json]
+agent-portal plugin setup <name> [toolchain-name]
 agent-portal plugin doctor [<name>]
 agent-portal plugin enable <name>
 agent-portal plugin disable <name>
-agent-portal plugin start <name> [--session <session-id>] [--cwd <path>]
-agent-portal plugin stop <name> [--session <session-id>]
-agent-portal plugin open <name> [--session <session-id>]
+agent-portal plugin start <name>
+agent-portal plugin stop <name>
+agent-portal plugin status <name> [--json]
+agent-portal plugin open <name>
 ```
 
 Install sources:
@@ -179,6 +188,15 @@ monorepo.
 `open` starts the plugin if needed, registers its web surface through the normal
 forwarding path, and asks the focused session to open that surface.
 
+`runtime --json` is the stable machine-readable entry point for agents and
+future UI: it reports the install path, plugin-local directories, surface
+metadata, skills, commands, managed toolchains, and declared capabilities.
+
+`setup <name>` runs the plugin's `[install].setup`; `setup <name> <toolchain>`
+runs one `[[toolchains]].install` command. Setup commands execute with the
+plugin-local `HOME`, `XDG_*`, and toolchain-root environment described above, so
+installers can keep package caches and downloaded SDKs under the plugin install.
+
 ## Manifest
 
 Every plugin has `agent-portal-plugin.toml` at its root.
@@ -205,6 +223,7 @@ default_title = "Backplane"
 default_width_percent = 50
 health_path = "/healthz"
 start = "bin/backplane serve --port {port} --session {session_id} --cwd {cwd}"
+stop = "bin/backplane stop --session {session_id}"
 ready_url = "http://127.0.0.1:{port}/"
 
 [surface.env]
@@ -219,6 +238,35 @@ run = "bin/backplane drc --cwd {cwd} --json"
 name = "export-gerbers"
 description = "Export fabrication artifacts for review."
 run = "bin/backplane export gerbers --cwd {cwd} --out {artifact_dir}"
+
+[[toolchains]]
+name = "kicad"
+description = "Managed KiCad runtime used for deterministic ERC, DRC, and export."
+home = ".portal/toolchains/kicad"
+install = "bin/backplane setup --install-kicad --prefix {toolchain_home}"
+doctor = "bin/backplane doctor --toolchain kicad --prefix {toolchain_home} --json"
+
+[toolchains.env]
+KICAD_CONFIG_HOME = "{toolchain_home}/config"
+
+[capabilities]
+domain = "electronics-manufacturing"
+surface = "pcb-workbench"
+```
+
+Plugin commands may use these placeholders:
+
+| Placeholder | Meaning |
+| --- | --- |
+| `{plugin_dir}` | Absolute plugin install directory |
+| `{plugin_home}` | `.portal/` support directory in the plugin install |
+| `{toolchain_root}` | `.portal/toolchains/` directory |
+| `{toolchain_home}` | selected toolchain's home, for toolchain setup commands |
+| `{cwd}` | Session working directory |
+| `{session_id}` | Portal session UUID when known |
+| `{port}` | Launcher-assigned localhost port |
+| `{artifact_dir}` | Session-scoped scratch/artifact directory |
+| `{backend_url}` | Portal backend URL known to the launcher |
 
 [[skills]]
 name = "pcb-workflow"
@@ -242,6 +290,11 @@ name = "backplane"
 command = "bin/backplane"
 args = ["mcp", "--cwd", "{cwd}"]
 ```
+
+`[[commands]]` entries are intentionally thin wrappers around plugin-owned CLIs.
+The launcher does not need to understand every subcommand a domain tool supports;
+plugins can evolve their own command surfaces and agents can inspect the
+manifest/runtime metadata before invoking them.
 
 ## Agent Skills
 
@@ -279,19 +332,9 @@ Codex. Agents must read the file completely before using it. If Codex grows a
 stable `--plugin-dir` equivalent, prefer that native path and keep the reminder
 as a fallback only.
 
-Placeholders are expanded by the launcher:
-
-| Placeholder | Meaning |
-| --- | --- |
-| `{plugin_dir}` | Absolute plugin install directory |
-| `{cwd}` | Session working directory |
-| `{session_id}` | Portal session UUID |
-| `{port}` | Launcher-assigned localhost port |
-| `{artifact_dir}` | Session-scoped scratch/artifact directory |
-| `{backend_url}` | Portal backend URL known to the launcher |
-
-Expansion is argument-aware: command arrays are preferred in the implementation
-so paths and user-controlled values are not interpolated through a shell.
+Placeholders are expanded by the launcher as documented in the manifest section.
+Keep command strings narrowly scoped to plugin-owned binaries and avoid relying
+on ambient shell state.
 
 ## Repository Config
 
@@ -495,22 +538,34 @@ The launcher config stores install metadata:
 }
 ```
 
-Runtime state is per session and ephemeral:
+Surface runtime state is local to the installed plugin:
 
 ```json
 {
-  "session_id": "...",
   "plugin": "backplane",
-  "pid": 12345,
   "port": 43817,
-  "status": "starting|ready|failed|stopped",
-  "surface_url": "http://...",
-  "last_error": null
+  "pid": 12345,
+  "command": "bin/backplane serve --port 43817 --session ... --cwd ...",
+  "cwd": "/home/alice/repo",
+  "session_id": "...",
+  "health_path": "/healthz",
+  "started_at": "2026-09-22T01:00:00Z"
 }
 ```
 
-Do not store runtime state in the backend database until a frontend or API needs
-cross-device visibility beyond the existing forward status.
+It is written to:
+
+```text
+$AGENT_PORTAL_PLUGIN_ROOT/backplane/.portal/state/surfaces/surface.json
+```
+
+`agent-portal plugin start` reuses that process when the health check still
+passes. Stale state is discarded and the surface is started again. `status
+--json` reports the same state with a `healthy` flag; `stop` runs
+`[surface].stop` when declared, otherwise it terminates the stored pid on
+platforms where the launcher can do so. Do not store this lifecycle state in the
+backend database until a frontend or API needs cross-device visibility beyond
+the existing forward status.
 
 ## Security and Permissions
 
@@ -539,8 +594,7 @@ sandboxing, capability grants, and per-plugin secret stores.
 
 `agent-portal plugin update` fetches the configured source and checks out the
 requested ref. Git sources may point at a whole plugin repo or a subdirectory
-inside a plugin collection repo. The first version should support Git sources
-only. Update should:
+inside a plugin collection repo. Update should:
 
 1. stop active plugin services;
 2. fetch the source;
@@ -585,46 +639,21 @@ Agent Portal owns:
 This gives PCB work the feel of a native Portal ability without making the
 Portal backend or frontend PCB-aware.
 
-## Implementation PR DAG
+## First-Class Runtime Follow-Ups
 
-```text
-P0 docs/spec
- |
- +-- P1 manifest parser + plugin root config
- |    |
- |    +-- P2 `agent-portal plugin list/info/install/remove`
- |    |    |
- |    |    +-- P3 setup/doctor/update lifecycle
- |    |
- |    +-- P4 session plugin runtime state
- |         |
- |         +-- P5 start/stop/open surface via existing forwarder
- |              |
- |              +-- P6 frontend suggested plugin surface chips
- |              |
- |              +-- P7 agent reminder injection for installed skills/prompts
- |                   |
- |                   +-- P8 MCP/tool command registration
- |
- +-- P9 Backplane plugin package spike
-      |
-      +-- P10 Backplane workbench surface
-      |
-      +-- P11 PCB workflow skills and verification commands
-```
+The launcher-side primitive is in place. The next platform layer should make it
+visible in the session UI:
 
-## Acceptance Criteria
+- show installed and repo-suggested plugins as session affordances;
+- let the user start, stop, and switch plugin panes without dropping to a
+  terminal;
+- expose `runtime --json`, `status --json`, and `toolchains --json` through a
+  typed API rather than shelling out from agents;
+- add a plugin capability grant UI for network setup, package-manager setup,
+  local credentials, and manufacturing uploads;
+- make plugin-supplied skill names and descriptions visible in the session's
+  agent context inspector.
 
-The first complete plugin slice is done when:
-
-- `agent-portal plugin install github:i2cjak/backplane` installs into
-  `~/agent-portal-plugins/backplane`;
-- `agent-portal plugin list` shows it enabled;
-- a KiCad repo causes the launcher to suggest Backplane for that session;
-- `agent-portal plugin open backplane` starts the Backplane web service,
-  forwards it, and opens it in the session split surface;
-- the agent receives Backplane instructions for that session;
-- `agent-portal plugin doctor backplane` reports missing KiCad or other local
-  dependencies clearly;
-- removing the plugin stops running services and deletes only the plugin
-  checkout after confirmation.
+That is the path that makes an ESP32/FPGA development plugin feel like a native
+Portal ability: the plugin owns domain tools and workflows, while Agent Portal
+owns lifecycle, permissioning, panes, and agent context.
