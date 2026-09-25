@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="arr-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+    <marker id="arr-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/>
+    </marker>
+  </defs>
+
+  <!-- Header -->
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2044 · Surface plugin skills to agents</text>
+
+  <!-- Thesis -->
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">Installed plugins could ship SKILL.md files that no agent ever saw; now each</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">launch loads them natively (Claude) or lists them in the reminder (Codex/Muse).</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+  <!-- Panel labels + center divider -->
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <!-- ==================== BEFORE panel ==================== -->
+  <g>
+    <rect x="80" y="250" width="860" height="150" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="290" font-size="26" fill="#c0caf5">agent-portal-plugin.toml</text>
+    <text x="104" y="330" font-size="23" fill="#a9b1d6">name, install, surface - no skills section</text>
+    <text x="104" y="366" font-size="22" fill="#565f89">skill files in the plugin dir are just files</text>
+  </g>
+
+  <line x1="320" y1="400" x2="320" y2="490" stroke="#565f89" stroke-width="1.5" marker-end="url(#arr-dim)"/>
+
+  <g>
+    <rect x="80" y="500" width="860" height="150" fill="#1e202e" stroke="#7aa2f7" stroke-width="1.5"/>
+    <text x="104" y="540" font-size="26" fill="#7aa2f7">run_session_task</text>
+    <text x="104" y="580" font-size="23" fill="#a9b1d6">SessionConfig { extra_args = claude_args }</text>
+    <text x="104" y="616" font-size="22" fill="#565f89">launcher/src/process_manager.rs</text>
+  </g>
+
+  <line x1="320" y1="650" x2="320" y2="740" stroke="#f7768e" stroke-width="1.5" marker-end="url(#arr-red)"/>
+
+  <g>
+    <rect x="80" y="750" width="860" height="160" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+    <text x="104" y="790" font-size="26" fill="#f7768e">claude / codex / muse spawn</text>
+    <text x="104" y="830" font-size="23" fill="#a9b1d6">no --plugin-dir, reminder has only the portal body</text>
+    <text x="104" y="866" font-size="22" fill="#565f89">agent has no idea the plugin's skills exist</text>
+  </g>
+
+  <g>
+    <rect x="80" y="960" width="860" height="120" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="1006" font-size="26" fill="#c0caf5">plugin skills: invisible</text>
+    <text x="104" y="1046" font-size="23" fill="#f7768e">to every agent type</text>
+  </g>
+
+  <!-- ==================== AFTER panel ==================== -->
+  <g>
+    <rect x="1060" y="250" width="860" height="150" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1084" y="290" font-size="26" fill="#9ece6a">[[skills]] name, path, agents</text>
+    <text x="1084" y="330" font-size="23" fill="#a9b1d6">plugin_skill_context(agent_type, session_id)</text>
+    <text x="1084" y="366" font-size="22" fill="#565f89">+ SKILL.md frontmatter name / description</text>
+  </g>
+
+  <line x1="1270" y1="400" x2="1270" y2="490" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+  <line x1="1710" y1="400" x2="1710" y2="490" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+
+  <g>
+    <rect x="1060" y="500" width="420" height="250" fill="#1e202e" stroke="#7aa2f7" stroke-width="1.5"/>
+    <text x="1084" y="540" font-size="26" fill="#7aa2f7">Claude</text>
+    <text x="1084" y="580" font-size="22" fill="#a9b1d6">skills-only root at</text>
+    <text x="1084" y="612" font-size="22" fill="#a9b1d6">plugin-skill-roots/</text>
+    <text x="1084" y="644" font-size="22" fill="#a9b1d6">  &lt;session_id&gt;/&lt;plugin&gt;</text>
+    <text x="1084" y="690" font-size="22" fill="#9ece6a">--plugin-dir &lt;root&gt;</text>
+    <text x="1084" y="724" font-size="21" fill="#565f89">no reminder copy</text>
+  </g>
+
+  <g>
+    <rect x="1500" y="500" width="420" height="250" fill="#1e202e" stroke="#7aa2f7" stroke-width="1.5"/>
+    <text x="1524" y="540" font-size="26" fill="#7aa2f7">Codex / Muse</text>
+    <text x="1524" y="580" font-size="22" fill="#a9b1d6">"## Plugin Skills" list</text>
+    <text x="1524" y="612" font-size="22" fill="#a9b1d6">filtered to this agent</text>
+    <text x="1524" y="644" font-size="22" fill="#a9b1d6">name - description: path</text>
+    <text x="1524" y="690" font-size="22" fill="#9ece6a">plugin_skill_reminder</text>
+    <text x="1524" y="724" font-size="21" fill="#565f89">folded into portal reminder</text>
+  </g>
+
+  <line x1="1270" y1="750" x2="1270" y2="840" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+  <line x1="1710" y1="750" x2="1710" y2="840" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+
+  <g>
+    <rect x="1060" y="850" width="860" height="110" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1084" y="892" font-size="26" fill="#9ece6a">skills reach the agent as &lt;plugin&gt;:&lt;skill&gt;</text>
+    <text x="1084" y="932" font-size="23" fill="#a9b1d6">hooks / .mcp / commands in the plugin are not enabled</text>
+  </g>
+
+  <g>
+    <rect x="1060" y="990" width="860" height="110" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1084" y="1032" font-size="26" fill="#c0caf5">cleanup_plugin_skill_root on exit</text>
+    <text x="1084" y="1072" font-size="23" fill="#9ece6a">one session's relaunch never wipes another's root</text>
+  </g>
+
+  <!-- Footer -->
+  <text x="55" y="1172" font-size="22" fill="#565f89">Not covered: standalone claude-portal shim reads no launcher config; Codex/Muse get a path list, not native loading; a killed launcher leaves roots behind.</text>
+</svg>
