@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200" font-family="'Segoe UI','Noto Sans',sans-serif">
+  <rect width="2000" height="1200" fill="#16161e"/>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0L10 5L0 10z" fill="#9ece6a"/></marker>
+  </defs>
+  <text x="55" y="58" font-size="24" fill="#565f89">PR #2051 · recover from expired Claude credentials in context</text>
+  <text x="55" y="116" font-size="38" fill="#e6e9f5">An expired OAuth error is now an actionable recovery point.</text>
+  <text x="55" y="158" font-size="25" fill="#a9b1d6">The transcript reuses the same launcher-mediated sign-in flow already trusted by Settings.</text>
+  <line x1="55" y1="190" x2="1945" y2="190" stroke="#3d4666"/>
+
+  <rect x="70" y="250" width="680" height="610" rx="18" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+  <text x="105" y="305" font-size="24" font-weight="700" fill="#f7768e">BEFORE</text>
+  <rect x="110" y="355" width="600" height="245" rx="12" fill="#1a1b26" stroke="#565f89"/>
+  <text x="145" y="410" font-size="23" fill="#f7768e">Error</text>
+  <text x="145" y="468" font-size="25" fill="#c0caf5">Failed to authenticate:</text>
+  <text x="145" y="508" font-size="25" fill="#c0caf5">OAuth session expired and could</text>
+  <text x="145" y="548" font-size="25" fill="#c0caf5">not be refreshed</text>
+  <text x="110" y="675" font-size="25" fill="#a9b1d6">Recovery required leaving the session,</text>
+  <text x="110" y="715" font-size="25" fill="#a9b1d6">finding Settings → Computers, then</text>
+  <text x="110" y="755" font-size="25" fill="#a9b1d6">matching the right launcher.</text>
+
+  <path d="M790 550H1120" stroke="#9ece6a" stroke-width="4" marker-end="url(#arrow)"/>
+  <text x="825" y="520" font-size="24" fill="#9ece6a">typed error recognition</text>
+
+  <rect x="1160" y="250" width="770" height="610" rx="18" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1195" y="305" font-size="24" font-weight="700" fill="#9ece6a">AFTER</text>
+  <rect x="1200" y="355" width="690" height="335" rx="12" fill="#1a1b26" stroke="#7aa2f7"/>
+  <text x="1235" y="410" font-size="23" fill="#f7768e">Error</text>
+  <text x="1235" y="468" font-size="25" fill="#c0caf5">Failed to authenticate:</text>
+  <text x="1235" y="508" font-size="25" fill="#c0caf5">OAuth session expired and could not be refreshed</text>
+  <rect x="1235" y="570" width="250" height="62" rx="9" fill="#3d4666" stroke="#7aa2f7" stroke-width="2"/>
+  <text x="1262" y="610" font-size="24" font-weight="700" fill="#e6e9f5">Sign in to Claude</text>
+  <text x="1200" y="750" font-size="25" fill="#9ece6a">One click opens AgentLoginModal</text>
+  <text x="1200" y="792" font-size="23" fill="#a9b1d6">against this session's authoritative launcher.</text>
+
+  <rect x="70" y="920" width="1860" height="170" rx="16" fill="#1e202e" stroke="#3d4666"/>
+  <text x="105" y="970" font-size="25" fill="#7dcfff">Guardrails</text>
+  <text x="105" y="1018" font-size="24" fill="#c0caf5">Claude only  ·  owner only  ·  launcher-backed sessions only  ·  unrelated errors unchanged</text>
+  <text x="105" y="1060" font-size="22" fill="#565f89">No second auth path: the transcript action delegates to the existing start / submit-code / cancel flow.</text>
+  <text x="55" y="1170" font-size="22" fill="#565f89">Frontend-only change · typed callback propagation · focused recognition tests</text>
+</svg>
