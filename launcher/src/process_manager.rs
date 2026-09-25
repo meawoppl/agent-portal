@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
@@ -18,6 +18,7 @@ use session_lib::git_metadata::get_git_branch;
 use session_lib::{Session, SessionConfig};
 use shared::SessionExitReason;
 
+use crate::config;
 use crate::path_policy;
 
 /// A `NormalExit` that lands faster than this after spawn is treated as a crash
@@ -520,6 +521,17 @@ async fn run_session_task(
         } else {
             config.claude_args.clone()
         };
+        let plugin_skill_context =
+            config::plugin_skill_context(config.agent_type, config.session_id);
+        let plugin_skill_cleanup_dir = plugin_skill_context.cleanup_dir.clone();
+        let plugin_skill = plugin_skill_launch_policy(
+            config.agent_type,
+            extra_args,
+            plugin_skill_context.claude_plugin_dirs,
+            plugin_skill_context.reminder,
+        );
+        let extra_args = plugin_skill.extra_args;
+        let plugin_skill_reminder = plugin_skill.reminder;
 
         let session_config = SessionConfig {
             session_id: config.session_id,
@@ -528,6 +540,7 @@ async fn run_session_task(
             resume: config.resume,
             claude_path: None,
             extra_args,
+            plugin_skill_reminder,
             muse_yolo,
             agent_type: config.agent_type,
             codex_thread_id,
@@ -549,6 +562,7 @@ async fn run_session_task(
             Ok(s) => s,
             Err(e) => {
                 error!("Failed to create {} session: {}", config.agent_type, e);
+                cleanup_plugin_skill_root(plugin_skill_cleanup_dir.as_deref());
                 return TaskOutcome {
                     exit_code: Some(1),
                     reason: SessionExitReason::Error,
@@ -589,6 +603,7 @@ async fn run_session_task(
                 if let Err(e) = session.stop().await {
                     warn!("Session {} stop failed on cancel: {}", config.session_id, e);
                 }
+                cleanup_plugin_skill_root(plugin_skill_cleanup_dir.as_deref());
                 return TaskOutcome {
                     exit_code: Some(0),
                     reason: SessionExitReason::Stopped,
@@ -599,6 +614,7 @@ async fn run_session_task(
         if let Err(e) = session.stop().await {
             warn!("Session {} stop failed: {}", config.session_id, e);
         }
+        cleanup_plugin_skill_root(plugin_skill_cleanup_dir.as_deref());
 
         let alive = started.elapsed();
         match result {
@@ -737,5 +753,89 @@ mod sidecar_tests {
         std::fs::write(&path, "{not json").unwrap();
         let degraded: HashMap<Uuid, String> = load_sidecar_map(&path);
         assert!(degraded.is_empty());
+    }
+}
+
+fn cleanup_plugin_skill_root(path: Option<&Path>) {
+    if let Some(path) = path {
+        let _ = std::fs::remove_dir_all(path);
+    }
+}
+
+struct PluginSkillLaunchPolicy {
+    extra_args: Vec<String>,
+    reminder: Option<String>,
+}
+
+fn plugin_skill_launch_policy(
+    agent_type: shared::AgentType,
+    mut extra_args: Vec<String>,
+    skill_roots: Vec<PathBuf>,
+    reminder: Option<String>,
+) -> PluginSkillLaunchPolicy {
+    match agent_type {
+        shared::AgentType::Claude => {
+            for root in skill_roots {
+                extra_args.push("--plugin-dir".to_string());
+                extra_args.push(root.display().to_string());
+            }
+            PluginSkillLaunchPolicy {
+                extra_args,
+                reminder: None,
+            }
+        }
+        shared::AgentType::Codex | shared::AgentType::Muse => PluginSkillLaunchPolicy {
+            extra_args,
+            reminder,
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn skill_roots() -> Vec<PathBuf> {
+        vec![
+            PathBuf::from("/plugins/kicad-pcb"),
+            PathBuf::from("/plugins/other"),
+        ]
+    }
+
+    #[test]
+    fn claude_gets_plugin_dirs_for_enabled_plugin_skills() {
+        let policy = plugin_skill_launch_policy(
+            shared::AgentType::Claude,
+            vec!["--some-arg".to_string()],
+            skill_roots(),
+            Some("plugin skills reminder".to_string()),
+        );
+
+        assert_eq!(
+            policy.extra_args,
+            vec![
+                "--some-arg",
+                "--plugin-dir",
+                "/plugins/kicad-pcb",
+                "--plugin-dir",
+                "/plugins/other"
+            ]
+        );
+        assert!(policy.reminder.is_none());
+    }
+
+    #[test]
+    fn codex_and_muse_get_skill_reminders_not_claude_plugin_dirs() {
+        for agent_type in [shared::AgentType::Codex, shared::AgentType::Muse] {
+            let policy = plugin_skill_launch_policy(
+                agent_type,
+                vec!["--some-arg".to_string()],
+                skill_roots(),
+                Some("plugin skills reminder".to_string()),
+            );
+
+            assert_eq!(policy.extra_args, vec!["--some-arg"]);
+            assert_eq!(policy.reminder.as_deref(), Some("plugin skills reminder"));
+        }
     }
 }

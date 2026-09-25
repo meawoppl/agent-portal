@@ -27,6 +27,27 @@ pub struct InstalledPlugin {
     pub installed_at: chrono::DateTime<chrono::Utc>,
 }
 
+#[derive(Debug, Deserialize, Default)]
+struct PluginManifest {
+    #[serde(default)]
+    skills: Vec<SkillSection>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SkillSection {
+    name: String,
+    path: PathBuf,
+    #[serde(default)]
+    agents: Vec<String>,
+}
+
+#[derive(Debug, Default)]
+pub struct PluginSkillContext {
+    pub claude_plugin_dirs: Vec<PathBuf>,
+    pub reminder: Option<String>,
+    pub cleanup_dir: Option<PathBuf>,
+}
+
 fn default_true() -> bool {
     true
 }
@@ -122,6 +143,179 @@ pub fn set_plugin_enabled(name: &str, enabled: bool) -> anyhow::Result<()> {
     };
     plugin.enabled = enabled;
     save_config(&config)
+}
+
+pub fn plugin_skill_context(agent_type: AgentType, session_id: Uuid) -> PluginSkillContext {
+    plugin_skill_context_from_config(
+        &load_config(),
+        &config_dir()
+            .join("plugin-skill-roots")
+            .join(session_id.to_string()),
+        agent_type,
+    )
+}
+
+fn plugin_skill_context_from_config(
+    config: &LauncherConfig,
+    generated_root: &Path,
+    agent_type: AgentType,
+) -> PluginSkillContext {
+    let mut context = PluginSkillContext::default();
+    let mut lines = Vec::new();
+    if agent_type == AgentType::Claude {
+        let _ = std::fs::remove_dir_all(generated_root);
+    }
+
+    for (plugin_name, plugin) in &config.plugins {
+        if !plugin.enabled {
+            continue;
+        }
+        let root = PathBuf::from(&plugin.path);
+        let Some(manifest) = read_plugin_manifest(&root) else {
+            continue;
+        };
+        let claude_root = generated_root.join(plugin_name);
+        let mut has_claude_skill = false;
+        for skill in manifest.skills {
+            let path = root.join(&skill.path);
+            if !path.is_file() {
+                continue;
+            }
+            let metadata = read_skill_metadata(&path);
+            let skill_name = metadata.name.unwrap_or_else(|| skill.name.clone());
+            let description = metadata.description;
+            if agent_type == AgentType::Claude
+                && skill_applies_to(&skill, "claude")
+                && materialize_claude_skill(&claude_root, &skill_name, &path).is_ok()
+            {
+                has_claude_skill = true;
+            }
+            let reminder_agent = match agent_type {
+                AgentType::Codex => Some("codex"),
+                AgentType::Muse => Some("muse"),
+                AgentType::Claude => None,
+            };
+            if reminder_agent.is_some_and(|agent| skill_applies_to(&skill, agent)) {
+                let description = description
+                    .as_deref()
+                    .map(|description| format!(" - {description}"))
+                    .unwrap_or_default();
+                lines.push(format!(
+                    "- `{plugin_name}:{skill_name}`{description}: {}",
+                    path.display()
+                ));
+            }
+        }
+        if has_claude_skill {
+            context.claude_plugin_dirs.push(claude_root);
+        }
+    }
+    if !context.claude_plugin_dirs.is_empty() {
+        context.cleanup_dir = Some(generated_root.to_path_buf());
+    }
+    if !lines.is_empty() {
+        lines.sort();
+        context.reminder = Some(format!(
+            "## Plugin Skills\n\nInstalled Agent Portal plugins provide these skills. When a user task matches one, read its `SKILL.md` completely before acting, then follow its instructions:\n\n{}",
+            lines.join("\n")
+        ));
+    }
+    context
+}
+
+fn read_plugin_manifest(root: &Path) -> Option<PluginManifest> {
+    let contents = std::fs::read_to_string(root.join("agent-portal-plugin.toml")).ok()?;
+    toml::from_str(&contents).ok()
+}
+
+fn skill_applies_to(skill: &SkillSection, agent: &str) -> bool {
+    skill.agents.is_empty()
+        || skill
+            .agents
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(agent))
+}
+
+#[derive(Default)]
+struct SkillMetadata {
+    name: Option<String>,
+    description: Option<String>,
+}
+
+fn read_skill_metadata(path: &Path) -> SkillMetadata {
+    let Ok(contents) = std::fs::read_to_string(path) else {
+        return SkillMetadata::default();
+    };
+    let mut lines = contents.lines();
+    if lines.next() != Some("---") {
+        return SkillMetadata::default();
+    }
+    let mut metadata = SkillMetadata::default();
+    for line in lines {
+        if line == "---" {
+            break;
+        }
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        let value = value
+            .trim()
+            .trim_matches('"')
+            .trim_matches('\'')
+            .to_string();
+        match key.trim() {
+            "name" if !value.is_empty() => metadata.name = Some(value),
+            "description" if !value.is_empty() => metadata.description = Some(value),
+            _ => {}
+        }
+    }
+    metadata
+}
+
+fn materialize_claude_skill(
+    claude_root: &Path,
+    skill_name: &str,
+    skill_path: &Path,
+) -> anyhow::Result<()> {
+    let skill_dir = claude_root.join("skills").join(skill_name);
+    if let Some(parent) = skill_dir.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let source_dir = skill_path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("skill path has no parent: {}", skill_path.display()))?;
+    symlink_or_copy_dir(source_dir, &skill_dir)
+}
+
+fn symlink_or_copy_dir(source: &Path, dest: &Path) -> anyhow::Result<()> {
+    if dest.exists() {
+        std::fs::remove_dir_all(dest)?;
+    }
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(source, dest)?;
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        copy_dir_recursive(source, dest)
+    }
+}
+
+#[cfg(not(unix))]
+fn copy_dir_recursive(source: &Path, dest: &Path) -> anyhow::Result<()> {
+    std::fs::create_dir_all(dest)?;
+    for entry in std::fs::read_dir(source)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        let dest_path = dest.join(entry.file_name());
+        if source_path.is_dir() {
+            copy_dir_recursive(&source_path, &dest_path)?;
+        } else {
+            std::fs::copy(&source_path, &dest_path)?;
+        }
+    }
+    Ok(())
 }
 
 fn write_config_atomic(path: &Path, contents: &str) -> anyhow::Result<()> {
@@ -417,6 +611,82 @@ mod tests {
             config.sessions[0].session_id,
             Some(Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap())
         );
+    }
+
+    #[test]
+    fn plugin_skill_context_uses_manifest_frontmatter_and_generated_claude_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let plugin_root = dir.path().join("plugins").join("kicad-pcb");
+        let skill_dir = plugin_root.join("nested").join("layout");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            plugin_root.join("agent-portal-plugin.toml"),
+            r#"
+[[skills]]
+name = "manifest-layout"
+path = "nested/layout/SKILL.md"
+agents = ["claude", "codex"]
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            r#"---
+name: kicad-layout
+description: Route KiCad PCB layouts.
+---
+
+# Layout
+"#,
+        )
+        .unwrap();
+
+        let mut plugins = std::collections::BTreeMap::new();
+        plugins.insert(
+            "kicad-pcb".to_string(),
+            InstalledPlugin {
+                path: plugin_root.display().to_string(),
+                source: "local".to_string(),
+                source_subdir: None,
+                reference: None,
+                enabled: true,
+                installed_at: chrono::Utc::now(),
+            },
+        );
+        let config = LauncherConfig {
+            plugins,
+            ..Default::default()
+        };
+        let generated_root = dir.path().join("generated");
+
+        let context = plugin_skill_context_from_config(&config, &generated_root, AgentType::Claude);
+
+        assert_eq!(
+            context.claude_plugin_dirs,
+            vec![generated_root.join("kicad-pcb")]
+        );
+        assert_eq!(
+            context.cleanup_dir.as_deref(),
+            Some(generated_root.as_path())
+        );
+        assert!(generated_root
+            .join("kicad-pcb")
+            .join("skills")
+            .join("kicad-layout")
+            .join("SKILL.md")
+            .is_file());
+        assert!(context.reminder.is_none());
+
+        let context = plugin_skill_context_from_config(&config, &generated_root, AgentType::Codex);
+        assert!(context.claude_plugin_dirs.is_empty());
+        assert!(context.cleanup_dir.is_none());
+        let reminder = context.reminder.unwrap();
+        assert!(reminder.contains("`kicad-pcb:kicad-layout`"));
+        assert!(reminder.contains("Route KiCad PCB layouts."));
+        assert!(reminder.contains("nested/layout/SKILL.md"));
+
+        let context = plugin_skill_context_from_config(&config, &generated_root, AgentType::Muse);
+        assert!(context.reminder.is_none());
     }
 
     #[test]

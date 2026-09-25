@@ -49,6 +49,7 @@ where
         portal_reminder::fold_session_start_reminder(
             input.text,
             input.display_event,
+            claude_session.config().plugin_skill_reminder.as_deref(),
             default_display,
         )
     } else {

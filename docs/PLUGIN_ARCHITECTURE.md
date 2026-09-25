@@ -243,6 +243,42 @@ command = "bin/backplane"
 args = ["mcp", "--cwd", "{cwd}"]
 ```
 
+## Agent Skills
+
+Plugin skills are repository-local instruction bundles declared with
+`[[skills]]`. The `path` points at a `SKILL.md` inside the installed plugin and
+`agents` optionally narrows which agent families should use it. Agents should
+prefer the skill's `name` and `description` frontmatter when present; the
+manifest name is the fallback identifier.
+
+Installed skills are visible with:
+
+```console
+agent-portal plugin skills
+agent-portal plugin skills kicad-pcb
+```
+
+Claude has native skill loading. When the launcher spawns a Claude session, it
+materializes a per-session, skills-only Claude plugin view under the Portal
+config directory and adds `--plugin-dir <generated-plugin-root>` once for each
+enabled plugin with Claude-applicable skills. Each generated root contains only
+`skills/<skill-name>/...` entries from the plugin manifest, preserving the
+source skill directory by symlink where possible so relative references still
+work. The generated directory is removed when that session task exits. This
+intentionally does not pass the full Portal plugin root to Claude: future
+`hooks/`, `.mcp.json`, `commands/`, or `agents/` files in a Portal plugin must
+not silently become Claude runtime behavior for every session.
+
+Codex and Muse do not currently get plugin roots through a native launcher hook,
+so the launcher adds a compact plugin-skill list to the existing Portal
+system-reminder for those agents. The reminder names each skill as
+`plugin:skill`, includes the frontmatter description when available, and gives
+the absolute `SKILL.md` path. The list is filtered by the session's agent type,
+so Codex-only skills are not shown to Muse and Muse-only skills are not shown to
+Codex. Agents must read the file completely before using it. If Codex grows a
+stable `--plugin-dir` equivalent, prefer that native path and keep the reminder
+as a fallback only.
+
 Placeholders are expanded by the launcher:
 
 | Placeholder | Meaning |

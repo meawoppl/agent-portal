@@ -62,6 +62,18 @@ fn agent_facing(body: &str) -> String {
     )
 }
 
+fn body_with_plugin_skills(plugin_skill_reminder: Option<&str>) -> String {
+    let mut body = load_reminder_body();
+    if let Some(extra) = plugin_skill_reminder
+        .map(str::trim)
+        .filter(|extra| !extra.is_empty())
+    {
+        body.push_str("\n\n");
+        body.push_str(extra);
+    }
+    body
+}
+
 /// Fold the reminder into the session's **first** user input rather than
 /// sending it as an input of its own.
 ///
@@ -86,10 +98,15 @@ fn agent_facing(body: &str) -> String {
 pub fn fold_session_start_reminder(
     text: String,
     display_event: Option<serde_json::Value>,
+    plugin_skill_reminder: Option<&str>,
     default_display: impl FnOnce(&str) -> serde_json::Value,
 ) -> (String, Option<serde_json::Value>) {
     let display_event = display_event.or_else(|| Some(default_display(&text)));
-    let prefixed = format!("{}\n\n{}", agent_facing(&load_reminder_body()), text);
+    let prefixed = format!(
+        "{}\n\n{}",
+        agent_facing(&body_with_plugin_skills(plugin_skill_reminder)),
+        text
+    );
     (prefixed, display_event)
 }
 
@@ -100,7 +117,7 @@ pub fn fold_session_start_reminder(
 /// output forwarder also filters Claude's user-message echo of the
 /// `<system-reminder>` text so the wrapper doesn't leak into the transcript.
 pub async fn inject_portal_reminder<A: Agent>(claude_session: &mut Session<A>) {
-    let body = load_reminder_body();
+    let body = body_with_plugin_skills(claude_session.config().plugin_skill_reminder.as_deref());
 
     if let Err(e) = claude_session
         .send_input(serde_json::Value::String(agent_facing(&body)))
@@ -122,6 +139,7 @@ mod tests {
         let (text, _) = fold_session_start_reminder(
             "do the thing".to_string(),
             None,
+            None,
             |t| serde_json::json!({"echo": t}),
         );
 
@@ -140,6 +158,7 @@ mod tests {
     fn fold_supplies_a_display_event_so_the_user_message_still_renders() {
         let (_, display) = fold_session_start_reminder(
             "hello agent".to_string(),
+            None,
             None,
             |t| serde_json::json!({"type": "user", "text": t}),
         );
@@ -161,12 +180,28 @@ mod tests {
     #[test]
     fn fold_preserves_an_existing_display_event() {
         let provenance = serde_json::json!({"type": "portal", "content": [{"agent": "codex"}]});
-        let (text, display) =
-            fold_session_start_reminder("relayed".to_string(), Some(provenance.clone()), |_| {
-                unreachable!("display provided")
-            });
+        let (text, display) = fold_session_start_reminder(
+            "relayed".to_string(),
+            Some(provenance.clone()),
+            None,
+            |_| unreachable!("display provided"),
+        );
 
         assert_eq!(display, Some(provenance));
         assert!(text.ends_with("relayed"));
+    }
+
+    #[test]
+    fn fold_includes_plugin_skill_reminder_when_present() {
+        let (text, _) = fold_session_start_reminder(
+            "route this board".to_string(),
+            None,
+            Some("## Plugin Skills\n\n- `kicad-pcb:pcb-workflow`: /tmp/SKILL.md"),
+            |t| serde_json::json!({"echo": t}),
+        );
+
+        assert!(text.contains("## Plugin Skills"));
+        assert!(text.contains("kicad-pcb:pcb-workflow"));
+        assert!(text.ends_with("route this board"));
     }
 }
