@@ -13,7 +13,7 @@ use web_sys::Element;
 use yew::prelude::*;
 
 use super::sparkline::Sparkline;
-use super::turn_metrics_display::{compact_metric_count, format_compact_model_tier_label};
+use super::turn_metrics_display::{compact_count, format_compact_model_tier_label};
 
 /// Which metric the sparkline plots. Selectable via the dropdown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -144,8 +144,8 @@ fn format_current_value(metric: SparklineMetric, value: f64) -> String {
         SparklineMetric::Ttft => format!("TTFT {value:.2}s"),
         SparklineMetric::MaxGap => format!("gap {value:.1}s"),
         SparklineMetric::CacheHit => format!("cache {:.0}%", value),
-        SparklineMetric::Thinking => format!("{} thinking", compact_metric_count(value)),
-        SparklineMetric::Subagent => format!("{} subagent", compact_metric_count(value)),
+        SparklineMetric::Thinking => format!("{} thinking", compact_count(value as i64)),
+        SparklineMetric::Subagent => format!("{} subagent", compact_count(value as i64)),
     }
 }
 
