@@ -54,6 +54,7 @@ use super::tasks_panel::{derive_task_events, TasksInbound, TasksPanel};
 use super::types::{PendingPermission, WsSender, MAX_MESSAGES_PER_SESSION};
 use super::websocket::{connect_websocket, send_message, WsEvent};
 use crate::pages::dashboard::types::{MessageData, MessagesResponse};
+use crate::pages::settings::agent_login::AgentLoginModal;
 use crate::utils::calculate_backoff;
 
 /// Props for the SessionView component
@@ -213,6 +214,8 @@ pub enum SessionViewMsg {
     ContinuationStatus(Uuid, String),
     ShowForkDialog,
     HideForkDialog,
+    ShowClaudeLogin,
+    HideClaudeLogin,
 }
 
 /// SessionView - Main terminal view for a single session
@@ -323,6 +326,7 @@ pub struct SessionView {
     #[allow(dead_code)]
     surface_escape_listener: Option<EventListener>,
     show_fork_dialog: bool,
+    show_claude_login: bool,
 }
 
 impl Component for SessionView {
@@ -439,6 +443,7 @@ impl Component for SessionView {
             resize_listeners: Vec::new(),
             surface_escape_listener,
             show_fork_dialog: false,
+            show_claude_login: false,
         }
     }
 
@@ -509,6 +514,14 @@ impl Component for SessionView {
             }
             SessionViewMsg::HideForkDialog => {
                 self.show_fork_dialog = false;
+                true
+            }
+            SessionViewMsg::ShowClaudeLogin => {
+                self.show_claude_login = true;
+                true
+            }
+            SessionViewMsg::HideClaudeLogin => {
+                self.show_claude_login = false;
                 true
             }
             SessionViewMsg::LoadHistory(messages, last_timestamp) => {
@@ -1016,11 +1029,12 @@ impl Component for SessionView {
                                         let metrics = group_metrics.get(i).cloned().flatten();
                                         let thinking_start = thinking_starts.get(i).copied().unwrap_or(0);
                                         let muse_live_events = if live_muse_group == Some(i) { self.muse_live_turn.events.clone() } else { Vec::new() };
-                                        html! { <MessageGroupRenderer {key} group={group} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} turn_metrics={metrics} {thinking_start} {muse_live_events} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} /> }
+                                        let on_claude_login = self.claude_login_callback(ctx);
+                                        html! { <MessageGroupRenderer {key} group={group} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} turn_metrics={metrics} {thinking_start} {muse_live_events} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} {on_claude_login} /> }
                                     }).collect::<Html>()
                                 }
                                 { for self.pending_sends.iter().enumerate().map(|(i, message)| {
-                                    html! { <MessageRenderer key={format!("p{}", i)} message={message.clone()} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} /> }
+                                    html! { <MessageRenderer key={format!("p{}", i)} message={message.clone()} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} on_claude_login={self.claude_login_callback(ctx)} /> }
                                 })}
                                 if let Some(tree) = unmatched_muse_tree {
                                     <div class="claude-message muse-message muse-task-card muse-live-card">
@@ -1079,6 +1093,17 @@ impl Component for SessionView {
                         on_close={ctx.link().callback(|_| SessionViewMsg::HideForkDialog)}
                     />
                 }
+                if self.show_claude_login {
+                    if let Some(launcher_id) = ctx.props().session.launcher_id {
+                        <AgentLoginModal
+                            {launcher_id}
+                            agent_type={shared::AgentType::Claude}
+                            agent_name={"Claude"}
+                            on_close={ctx.link().callback(|_| SessionViewMsg::HideClaudeLogin)}
+                            on_success={Callback::noop()}
+                        />
+                    }
+                }
             </div>
         }
     }
@@ -1086,6 +1111,13 @@ impl Component for SessionView {
 
 // Helper methods extracted from the main impl
 impl SessionView {
+    fn claude_login_callback(&self, ctx: &Context<Self>) -> Option<Callback<()>> {
+        (ctx.props().session.agent_type == shared::AgentType::Claude
+            && ctx.props().session.my_role == shared::SessionRole::Owner
+            && ctx.props().session.launcher_id.is_some())
+        .then(|| ctx.link().callback(|_| SessionViewMsg::ShowClaudeLogin))
+    }
+
     fn handle_ws_event(&mut self, ctx: &Context<Self>, event: WsEvent) -> bool {
         match event {
             WsEvent::Connected(sender) => {
