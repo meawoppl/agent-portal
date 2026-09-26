@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#1a1b26"/>
+
+  <defs>
+    <marker id="arr-dim-2061" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+    </marker>
+    <marker id="arr-green-2061" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+    <marker id="arr-red-2061" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/>
+    </marker>
+  </defs>
+
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2061 - compact count with unit helper</text>
+
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">Four sites format compact_count plus a unit string.</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">Now one helper owns the pattern, output unchanged.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <g>
+    <rect x="80" y="250" width="860" height="150" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="290" font-size="26" fill="#c0caf5">turn_metrics_pill.rs, two arms</text>
+    <text x="104" y="330" font-size="23" fill="#a9b1d6">format!("{} thinking", compact_count(..))</text>
+    <text x="104" y="366" font-size="22" fill="#565f89">format!("{} subagent", compact_count(..))</text>
+  </g>
+
+  <line x1="320" y1="400" x2="320" y2="490" stroke="#565f89" stroke-width="1.5" marker-end="url(#arr-dim-2061)"/>
+
+  <g>
+    <rect x="80" y="500" width="860" height="165" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+    <text x="104" y="540" font-size="26" fill="#f7768e">two format_task_tokens, two units</text>
+    <text x="104" y="580" font-size="23" fill="#a9b1d6">system.rs: "{} tokens" - tasks_panel.rs: "{} tok"</text>
+    <text x="104" y="616" font-size="22" fill="#565f89">same shape, spelled out four times</text>
+  </g>
+
+  <line x1="320" y1="665" x2="320" y2="750" stroke="#f7768e" stroke-width="1.5" marker-end="url(#arr-red-2061)"/>
+
+  <g>
+    <rect x="80" y="760" width="860" height="150" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="800" font-size="26" fill="#c0caf5">a fifth spelling drifts unnoticed</text>
+    <text x="104" y="840" font-size="23" fill="#a9b1d6">no single home, each site hand-rolls spacing</text>
+    <text x="104" y="876" font-size="22" fill="#565f89">output identical today, fragile tomorrow</text>
+  </g>
+
+  <g>
+    <rect x="80" y="965" width="860" height="120" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="1011" font-size="26" fill="#c0caf5">net +22 lines for the helper + tests</text>
+    <text x="104" y="1051" font-size="23" fill="#a9b1d6">each future unit is one call, not one format</text>
+  </g>
+
+  <g>
+    <rect x="1060" y="250" width="860" height="150" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1084" y="290" font-size="26" fill="#9ece6a">compact_labeled(n, unit) added</text>
+    <text x="1084" y="330" font-size="23" fill="#a9b1d6">turn_metrics_display.rs, beside compact_count</text>
+    <text x="1084" y="366" font-size="22" fill="#565f89">one format, "{compact} {unit}", tested</text>
+  </g>
+
+  <line x1="1285" y1="400" x2="1285" y2="490" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green-2061)"/>
+  <line x1="1725" y1="400" x2="1725" y2="490" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green-2061)"/>
+
+  <g>
+    <rect x="1060" y="500" width="420" height="240" fill="#1e202e" stroke="#7aa2f7" stroke-width="1.5"/>
+    <text x="1084" y="540" font-size="26" fill="#7aa2f7">pill simplified</text>
+    <text x="1084" y="580" font-size="22" fill="#a9b1d6">Thinking / Subagent arms</text>
+    <text x="1084" y="612" font-size="22" fill="#a9b1d6">are one-liners now,</text>
+    <text x="1084" y="644" font-size="22" fill="#a9b1d6">import shrinks to</text>
+    <text x="1084" y="690" font-size="22" fill="#9ece6a">compact_labeled only</text>
+  </g>
+
+  <g>
+    <rect x="1500" y="500" width="420" height="240" fill="#1e202e" stroke="#7aa2f7" stroke-width="1.5"/>
+    <text x="1524" y="540" font-size="26" fill="#7aa2f7">chips unified</text>
+    <text x="1524" y="580" font-size="22" fill="#a9b1d6">system "tokens" and</text>
+    <text x="1524" y="612" font-size="22" fill="#a9b1d6">tasks "tok" route</text>
+    <text x="1524" y="644" font-size="22" fill="#a9b1d6">through the helper,</text>
+    <text x="1524" y="690" font-size="22" fill="#9ece6a">strings byte-identical</text>
+  </g>
+
+  <line x1="1285" y1="740" x2="1285" y2="825" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green-2061)"/>
+  <line x1="1725" y1="740" x2="1725" y2="825" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green-2061)"/>
+
+  <g>
+    <rect x="1060" y="835" width="860" height="135" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1084" y="878" font-size="26" fill="#9ece6a">four hand-rolled formats become four calls</text>
+    <text x="1084" y="918" font-size="23" fill="#a9b1d6">pill x2, system chip, tasks chip - same bytes out</text>
+    <text x="1084" y="950" font-size="21" fill="#565f89">DRY with zero behavior change</text>
+  </g>
+
+  <g>
+    <rect x="1060" y="1000" width="860" height="105" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1084" y="1042" font-size="26" fill="#c0caf5">708 frontend tests pass, clippy + fmt clean</text>
+    <text x="1084" y="1078" font-size="23" fill="#9ece6a">2 new unit tests pin the helper output</text>
+  </g>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">Verified: cargo fmt --all --check; cargo clippy -p frontend --all-targets; cargo test -p frontend.</text>
+</svg>
