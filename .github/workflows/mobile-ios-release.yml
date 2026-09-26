@@ -176,7 +176,7 @@ jobs:
           echo "IPA_PATH=artifacts/ios/$(basename "$ipa")" >> "$GITHUB_ENV"
 
       - name: Upload signed IPA
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: agent-portal-ios-signed-ipa
           path: ${{ env.IPA_PATH }}
