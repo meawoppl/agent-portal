@@ -44,8 +44,15 @@ where
 
     // First input of this agent process carries the portal-features reminder.
     // `swap` makes the claim atomic, so a burst of queued inputs prefixes
-    // exactly one of them.
-    let (text, display_event) = if reminder_pending.swap(false, Ordering::SeqCst) {
+    // exactly one of them. Slash commands never carry it (the prefix would stop
+    // the CLI from recognising the command), and `/clear` re-arms it because
+    // the conversation it starts has never seen the reminder.
+    let slash_command = portal_reminder::is_slash_command(&input.text);
+    if slash_command && portal_reminder::is_clear_command(&input.text) {
+        reminder_pending.store(true, Ordering::SeqCst);
+    }
+    let (text, display_event) = if !slash_command && reminder_pending.swap(false, Ordering::SeqCst)
+    {
         portal_reminder::fold_session_start_reminder(
             input.text,
             input.display_event,

@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="arr-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+    <marker id="arr-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/>
+    </marker>
+  </defs>
+
+  <!-- Header -->
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2057 · Keep the session-start reminder off slash commands</text>
+
+  <!-- Thesis -->
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">A /clear sent right after a restart got the reminder prepended and ran as prose;</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">now slash commands skip the fold, so they always reach the CLI as commands.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+  <!-- Panel labels + center divider -->
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <!-- ==================== BEFORE panel ==================== -->
+  <g>
+    <rect x="80" y="250" width="860" height="150" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="290" font-size="26" fill="#c0caf5">first input after restart: "/clear"</text>
+    <text x="104" y="330" font-size="23" fill="#a9b1d6">reminder_pending == true</text>
+    <text x="104" y="366" font-size="22" fill="#565f89">every deploy / relaunch re-arms it</text>
+  </g>
+
+  <line x1="320" y1="400" x2="320" y2="490" stroke="#565f89" stroke-width="1.5" marker-end="url(#arr-dim)"/>
+
+  <g>
+    <rect x="80" y="500" width="860" height="150" fill="#1e202e" stroke="#7aa2f7" stroke-width="1.5"/>
+    <text x="104" y="540" font-size="26" fill="#7aa2f7">handle_input -> fold_session_start_reminder</text>
+    <text x="104" y="580" font-size="23" fill="#a9b1d6">"&lt;system-reminder&gt;...&lt;/system-reminder&gt;\n\n/clear"</text>
+    <text x="104" y="616" font-size="22" fill="#565f89">session-lib/src/proxy_session/input_delivery.rs</text>
+  </g>
+
+  <line x1="320" y1="650" x2="320" y2="740" stroke="#f7768e" stroke-width="1.5" marker-end="url(#arr-red)"/>
+
+  <g>
+    <rect x="80" y="750" width="860" height="160" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+    <text x="104" y="790" font-size="26" fill="#f7768e">input no longer starts with "/"</text>
+    <text x="104" y="830" font-size="23" fill="#a9b1d6">CLI treats it as a prompt; the model answers it</text>
+    <text x="104" y="866" font-size="22" fill="#565f89">same for /cost, /status, /compact ...</text>
+  </g>
+
+  <g>
+    <rect x="80" y="960" width="860" height="120" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="1006" font-size="26" fill="#c0caf5">/clear silently does nothing</text>
+    <text x="104" y="1046" font-size="23" fill="#f7768e">and a mid-session clear drops the reminder</text>
+  </g>
+
+  <!-- ==================== AFTER panel ==================== -->
+  <g>
+    <rect x="1060" y="250" width="860" height="150" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="1084" y="290" font-size="26" fill="#c0caf5">first input after restart: "/clear"</text>
+    <text x="1084" y="330" font-size="23" fill="#a9b1d6">reminder_pending == true</text>
+    <text x="1084" y="366" font-size="22" fill="#565f89">unchanged input</text>
+  </g>
+
+  <line x1="1300" y1="400" x2="1300" y2="490" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+
+  <g>
+    <rect x="1060" y="500" width="860" height="150" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1084" y="540" font-size="26" fill="#9ece6a">is_slash_command(text) -> skip the fold</text>
+    <text x="1084" y="580" font-size="23" fill="#a9b1d6">is_clear_command(text) -> reminder_pending = true</text>
+    <text x="1084" y="616" font-size="22" fill="#565f89">portal_reminder.rs predicates, unit-tested</text>
+  </g>
+
+  <line x1="1300" y1="650" x2="1300" y2="740" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+
+  <g>
+    <rect x="1060" y="750" width="860" height="160" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1084" y="790" font-size="26" fill="#9ece6a">"/clear" reaches the CLI verbatim</text>
+    <text x="1084" y="830" font-size="23" fill="#a9b1d6">command runs; reminder waits for the next message</text>
+    <text x="1084" y="866" font-size="22" fill="#565f89">swap stays atomic: one real input still claims it</text>
+  </g>
+
+  <g>
+    <rect x="1060" y="960" width="860" height="120" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1084" y="1006" font-size="26" fill="#c0caf5">slash commands work after any restart</text>
+    <text x="1084" y="1046" font-size="23" fill="#9ece6a">post-clear conversation gets the reminder too</text>
+  </g>
+
+  <!-- Footer -->
+  <text x="55" y="1172" font-size="22" fill="#565f89">Caveat: any input starting with "/" (e.g. a bare path) defers the reminder one message; Wiggum prompts are framed prose and unchanged.</text>
+</svg>
