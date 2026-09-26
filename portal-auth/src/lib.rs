@@ -5,7 +5,6 @@ use reqwest::{
     StatusCode,
 };
 use shared::api::{DeviceClientType, DeviceCodeRequest, DeviceCodeResponse, DeviceFlowPollRequest};
-use shared::urls::ws_to_http;
 use shared::DevicePollResponse;
 use std::time::Duration;
 use tokio::time::sleep;
