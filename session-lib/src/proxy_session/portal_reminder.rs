@@ -74,6 +74,21 @@ fn body_with_plugin_skills(plugin_skill_reminder: Option<&str>) -> String {
     body
 }
 
+/// Whether `text` is a CLI slash command (`/clear`, `/cost`, ...).
+///
+/// The CLI only recognises a command when the input *starts* with `/`, so the
+/// session-start reminder must never be folded in front of one: the command
+/// would reach the model as prose instead of running.
+pub fn is_slash_command(text: &str) -> bool {
+    text.trim_start().starts_with('/')
+}
+
+/// Whether `text` is `/clear`, which starts a fresh conversation that has not
+/// seen the reminder.
+pub fn is_clear_command(text: &str) -> bool {
+    text.split_whitespace().next() == Some("/clear")
+}
+
 /// Fold the reminder into the session's **first** user input rather than
 /// sending it as an input of its own.
 ///
@@ -130,6 +145,22 @@ pub async fn inject_portal_reminder<A: Agent>(claude_session: &mut Session<A>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn slash_commands_are_detected_by_their_leading_slash() {
+        assert!(is_slash_command("/clear"));
+        assert!(is_slash_command("  /cost"));
+        assert!(!is_slash_command("please /clear later"));
+        assert!(!is_slash_command("hello"));
+    }
+
+    #[test]
+    fn only_clear_counts_as_clear() {
+        assert!(is_clear_command("/clear"));
+        assert!(is_clear_command(" /clear \n"));
+        assert!(!is_clear_command("/clearly"));
+        assert!(!is_clear_command("/cost"));
+    }
 
     /// The agent must receive the reminder AND the user's words, in that
     /// order, from a single input — the point of folding rather than sending
