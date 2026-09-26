@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#1a1b26"/>
+
+  <defs>
+    <marker id="arr-dim-2060" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+    </marker>
+    <marker id="arr-green-2060" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+    <marker id="arr-red-2060" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/>
+    </marker>
+  </defs>
+
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2060 - finish the #1426 tier-label dedupe</text>
+
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">The pill kept a one-line wrapper around the canonical helper,</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">plus a stale copy of its docs. Now callers use the one home.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <g>
+    <rect x="80" y="250" width="860" height="150" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="290" font-size="26" fill="#c0caf5">turn_metrics_pill.rs</text>
+    <text x="104" y="330" font-size="23" fill="#a9b1d6">format_model_tier_label(model, tier)</text>
+    <text x="104" y="366" font-size="22" fill="#565f89">body: one call to format_compact_model_tier_label</text>
+  </g>
+
+  <line x1="320" y1="400" x2="320" y2="490" stroke="#565f89" stroke-width="1.5" marker-end="url(#arr-dim-2060)"/>
+
+  <g>
+    <rect x="80" y="500" width="860" height="165" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+    <text x="104" y="540" font-size="26" fill="#f7768e">six-line doc comment restates the logic</text>
+    <text x="104" y="580" font-size="23" fill="#a9b1d6">vendor prefixes, date stamps, tier casing</text>
+    <text x="104" y="616" font-size="22" fill="#565f89">all documented again on the canonical helper</text>
+  </g>
+
+  <line x1="320" y1="665" x2="320" y2="750" stroke="#f7768e" stroke-width="1.5" marker-end="url(#arr-red-2060)"/>
+
+  <g>
+    <rect x="80" y="760" width="860" height="150" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="800" font-size="26" fill="#c0caf5">settings panel doc names the wrapper</text>
+    <text x="104" y="840" font-size="23" fill="#a9b1d6">performance_panel/model.rs contrast comment</text>
+    <text x="104" y="876" font-size="22" fill="#565f89">points at a name that adds nothing</text>
+  </g>
+
+  <g>
+    <rect x="80" y="965" width="860" height="120" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="1011" font-size="26" fill="#c0caf5">output byte-identical throughout</text>
+    <text x="104" y="1051" font-size="23" fill="#a9b1d6">same function under the hood, then and now</text>
+  </g>
+
+  <g>
+    <rect x="1060" y="250" width="860" height="150" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1084" y="290" font-size="26" fill="#9ece6a">wrapper deleted, callers go direct</text>
+    <text x="1084" y="330" font-size="23" fill="#a9b1d6">pill label + 3 tests use the canonical name</text>
+    <text x="1084" y="366" font-size="22" fill="#565f89">net -10 lines across 2 files</text>
+  </g>
+
+  <line x1="1285" y1="400" x2="1285" y2="490" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green-2060)"/>
+  <line x1="1725" y1="400" x2="1725" y2="490" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green-2060)"/>
+
+  <g>
+    <rect x="1060" y="500" width="420" height="240" fill="#1e202e" stroke="#7aa2f7" stroke-width="1.5"/>
+    <text x="1084" y="540" font-size="26" fill="#7aa2f7">one documented home</text>
+    <text x="1084" y="580" font-size="22" fill="#a9b1d6">turn_metrics_display.rs</text>
+    <text x="1084" y="612" font-size="22" fill="#a9b1d6">format_compact_model_tier_label</text>
+    <text x="1084" y="644" font-size="22" fill="#a9b1d6">docs live here only</text>
+    <text x="1084" y="690" font-size="22" fill="#9ece6a">no stale-copy risk</text>
+  </g>
+
+  <g>
+    <rect x="1500" y="500" width="420" height="240" fill="#1e202e" stroke="#7aa2f7" stroke-width="1.5"/>
+    <text x="1524" y="540" font-size="26" fill="#7aa2f7">settings doc fixed</text>
+    <text x="1524" y="580" font-size="22" fill="#a9b1d6">contrast comment now</text>
+    <text x="1524" y="612" font-size="22" fill="#a9b1d6">names the canonical</text>
+    <text x="1524" y="644" font-size="22" fill="#a9b1d6">helper, not the alias</text>
+    <text x="1524" y="690" font-size="22" fill="#9ece6a">accurate pointer</text>
+  </g>
+
+  <line x1="1285" y1="740" x2="1285" y2="825" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green-2060)"/>
+  <line x1="1725" y1="740" x2="1725" y2="825" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green-2060)"/>
+
+  <g>
+    <rect x="1060" y="835" width="860" height="135" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1084" y="878" font-size="26" fill="#9ece6a">indirection with no behavioral difference, gone</text>
+    <text x="1084" y="918" font-size="23" fill="#a9b1d6">#1426 unified the bodies; this removes the shell</text>
+    <text x="1084" y="950" font-size="21" fill="#565f89">pill, footer, settings labels all agree</text>
+  </g>
+
+  <g>
+    <rect x="1060" y="1000" width="860" height="105" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1084" y="1042" font-size="26" fill="#c0caf5">706 frontend tests pass, clippy + fmt clean</text>
+    <text x="1084" y="1078" font-size="23" fill="#9ece6a">zero behavior change, verified by existing tests</text>
+  </g>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">Verified: cargo fmt --all --check; cargo clippy -p frontend --all-targets; cargo test -p frontend.</text>
+</svg>
