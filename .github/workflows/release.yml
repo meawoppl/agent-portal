@@ -45,7 +45,7 @@ jobs:
             ext: .exe
             target-dir: target/release
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0  # full history so build.rs commit-count version is real (#1096)
 
@@ -94,7 +94,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0  # full history so build.rs commit-count version is real (#1096)
 
