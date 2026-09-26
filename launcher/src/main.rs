@@ -150,15 +150,56 @@ enum PluginAction {
         /// Plugin name
         name: String,
     },
+    /// Show resolved plugin runtime context
+    Runtime {
+        /// Plugin name
+        name: String,
+        /// Print JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// List skills provided by installed plugins
     Skills {
         /// Optional plugin name
         name: Option<String>,
     },
+    /// List managed toolchains declared by a plugin
+    Toolchains {
+        /// Plugin name
+        name: String,
+        /// Print JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Run plugin setup, or setup a named managed toolchain
+    Setup {
+        /// Plugin name
+        name: String,
+        /// Optional managed toolchain name
+        toolchain: Option<String>,
+    },
     /// Run the plugin's doctor command
     Doctor {
         /// Plugin name
         name: String,
+    },
+    /// Start the plugin surface without opening/forwarding it
+    Start {
+        /// Plugin name
+        name: String,
+    },
+    /// Stop a running plugin surface
+    Stop {
+        /// Plugin name
+        name: String,
+    },
+    /// Show plugin surface status
+    Status {
+        /// Plugin name
+        name: String,
+        /// Print JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Start the plugin surface and forward it to this session
     Open {
@@ -417,8 +458,16 @@ async fn main() -> anyhow::Result<()> {
                     reference,
                 } => plugin::install(&source, name.as_deref(), reference.as_deref()),
                 PluginAction::Info { name } => plugin::info(&name),
+                PluginAction::Runtime { name, json } => plugin::runtime(&name, json),
                 PluginAction::Skills { name } => plugin::skills(name.as_deref()),
+                PluginAction::Toolchains { name, json } => plugin::toolchains(&name, json),
+                PluginAction::Setup { name, toolchain } => {
+                    plugin::setup(&name, toolchain.as_deref())
+                }
                 PluginAction::Doctor { name } => plugin::doctor(&name),
+                PluginAction::Start { name } => plugin::start(&name).await.map(|_| ()),
+                PluginAction::Stop { name } => plugin::stop(&name),
+                PluginAction::Status { name, json } => plugin::status(&name, json).await,
                 PluginAction::Open { name } => plugin::open(&name).await,
                 PluginAction::Remove { name } => plugin::remove(&name),
                 PluginAction::Enable { name } => plugin::set_enabled(&name, true),
