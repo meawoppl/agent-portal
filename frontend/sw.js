@@ -4,10 +4,13 @@
 //   - navigation requests / index.html: network-first, fall back to cache when
 //     offline (so a backend deploy is picked up immediately, but the installed
 //     app still opens with no network).
-//   - Trunk's hashed assets (*.wasm / *.js / *.css — filenames carry a content
-//     hash): cache-first (immutable, safe to serve from cache forever).
-//   - everything else (images, fonts, cross-origin CDN): pass through to the
-//     network untouched.
+//   - Trunk's hashed assets (*.wasm / *.js / *.css whose filename ends in a
+//     content hash, e.g. base-545c8725d321f26d.css): cache-first (immutable,
+//     safe to serve from cache forever).
+//   - everything else — including stable-URL scripts like katex-helper.js and
+//     wasm-bindgen snippets (/snippets/<crate>-<hash>/rizzma-host.js, where the
+//     hash is the crate's, not the file's) — passes through to the network, so
+//     a changed file never fails the integrity check in a fresh index.html.
 //
 // NEVER intercepted: /api/*, /ws/*, and any non-GET request. Those must always
 // hit the network directly — caching them would break auth, WS upgrades, and
@@ -17,7 +20,7 @@
 // always fetched network-first with the HTTP cache bypassed, and activation
 // removes cache layouts created by older workers.
 
-const CACHE_NAME = "agent-portal-bootstrap-v2";
+const CACHE_NAME = "agent-portal-bootstrap-v3";
 const APP_SHELL = "/index.html";
 
 // Precache the app shell so navigations work offline right after install.
@@ -48,7 +51,8 @@ self.addEventListener("activate", (event) => {
 });
 
 function isHashedAsset(url) {
-  return /\.(wasm|js|css)$/.test(url.pathname);
+  // Keep in sync with is_content_hashed_asset in backend/src/routes.rs.
+  return /\/[^/]+-[0-9a-f]{12,16}(_bg)?\.(wasm|js|css)$/.test(url.pathname);
 }
 
 self.addEventListener("fetch", (event) => {
