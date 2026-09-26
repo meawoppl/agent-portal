@@ -1,7 +1,7 @@
 //! Launcher-side registry of in-flight interactive agent logins.
 //!
 //! A login spans several backend RPCs — start (present a URL/code), then either
-//! a code submission (claude) or polling for browser completion (codex) — so
+//! a fallback code submission (claude) or polling for browser completion — so
 //! the flow must live *between* messages, keyed by a `flow_id` the backend
 //! mints. This holds those parked sessions and adapts each agent's mechanics to
 //! one interface:

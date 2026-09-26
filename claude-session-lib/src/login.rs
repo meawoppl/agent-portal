@@ -2,9 +2,8 @@
 //!
 //! Wraps claude-codes' PTY-backed [`LoginFlow`] as a *parkable* session: `start`
 //! drives `claude auth login --claudeai` (persisted subscription login) far
-//! enough to hand back the OAuth URL, then the flow waits — on its own thread —
-//! for the code the user pastes back from the browser, which [`submit_code`]
-//! feeds in.
+//! enough to hand back the OAuth URL, then watches browser approval on its own
+//! thread while accepting a pasted fallback code through [`submit_code`].
 //!
 //! Two rules from the login contract are load-bearing here:
 //! - the flow's blocking PTY calls run on a dedicated `std::thread`, never on
@@ -20,17 +19,20 @@
 //!
 //! [`submit_code`]: ClaudeLoginSession::submit_code
 
-use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use claude_codes::auth::{LoginFlow, LoginMode};
 use shared::{AgentLoginOutcome, LoginInteraction, LoginPresentable};
 
 /// Wait for the CLI to emit its OAuth URL after start.
 const AUTH_URL_TIMEOUT: Duration = Duration::from_secs(30);
-/// How long the parked flow waits for the user to paste a code back.
-const CODE_WAIT: Duration = Duration::from_secs(300);
+/// How long the flow waits for browser approval or a fallback code.
+const LOGIN_WAIT: Duration = Duration::from_secs(300);
+/// Allow the SDK's three-second credential/token grace period to finish even
+/// when the subscription login persists credentials without emitting a token.
+const APPROVAL_POLL_WAIT: Duration = Duration::from_secs(4);
 /// Wait for the CLI to settle after a code submission.
 const SUBMIT_TIMEOUT: Duration = Duration::from_secs(60);
 /// Longest failure detail we relay — enough of the CLI transcript to diagnose,
@@ -42,9 +44,14 @@ pub struct ClaudeLoginSession {
     /// Send the pasted code once. Dropping this (session drop) disconnects the
     /// worker's recv, which drops the `LoginFlow` and reaps its PTY child.
     code_tx: Sender<String>,
-    /// The settled outcome, delivered once by the worker. Behind a `Mutex<Option<>>`
-    /// so `submit_code` can consume it exactly once.
-    outcome_rx: Mutex<Option<Receiver<AgentLoginOutcome>>>,
+    /// Cache completion so a browser poll and a fallback submission see the
+    /// same result even if approval lands while the user is pasting a code.
+    outcome: Mutex<LoginOutcomeState>,
+}
+
+struct LoginOutcomeState {
+    rx: Receiver<AgentLoginOutcome>,
+    settled: Option<AgentLoginOutcome>,
 }
 
 impl ClaudeLoginSession {
@@ -64,7 +71,10 @@ impl ClaudeLoginSession {
             Ok(Ok(url)) => Ok((
                 Self {
                     code_tx,
-                    outcome_rx: Mutex::new(Some(outcome_rx)),
+                    outcome: Mutex::new(LoginOutcomeState {
+                        rx: outcome_rx,
+                        settled: None,
+                    }),
                 },
                 LoginPresentable::AuthUrl { url },
                 LoginInteraction::SubmitCode,
@@ -80,28 +90,45 @@ impl ClaudeLoginSession {
     /// Blocks until the CLI confirms or rejects (bounded by [`SUBMIT_TIMEOUT`]);
     /// call it from a `spawn_blocking` context.
     pub fn submit_code(&self, code: String) -> AgentLoginOutcome {
-        if self.code_tx.send(code).is_err() {
-            return failed("the sign-in session ended before the code was submitted");
+        let outcome = self.poll();
+        if outcome.done {
+            return outcome;
         }
-        let rx = self.outcome_rx.lock().unwrap().take();
-        match rx {
-            Some(rx) => match rx.recv_timeout(SUBMIT_TIMEOUT + Duration::from_secs(5)) {
-                Ok(outcome) => outcome,
-                Err(_) => failed("timed out waiting for the sign-in to complete"),
-            },
-            // A second submit against an already-consumed session.
-            None => failed("the code was already submitted for this session"),
+        if self.code_tx.send(code).is_err() {
+            return self.poll();
+        }
+        let deadline =
+            Instant::now() + SUBMIT_TIMEOUT + APPROVAL_POLL_WAIT + Duration::from_secs(5);
+        loop {
+            let outcome = self.poll();
+            if outcome.done {
+                return outcome;
+            }
+            if Instant::now() >= deadline {
+                return failed("timed out waiting for the sign-in to complete");
+            }
+            std::thread::sleep(Duration::from_millis(100));
         }
     }
 
-    /// Claude has no in-browser completion — it settles only via
-    /// [`submit_code`](Self::submit_code) — so a poll before then is "pending".
+    /// Observe either browser approval or code completion without blocking the
+    /// launcher's async runtime. Keep the terminal result for concurrent callers.
     pub fn poll(&self) -> AgentLoginOutcome {
-        AgentLoginOutcome {
+        let mut state = self.outcome.lock().unwrap();
+        if state.settled.is_none() {
+            state.settled = match state.rx.try_recv() {
+                Ok(outcome) => Some(outcome),
+                Err(TryRecvError::Empty) => None,
+                Err(TryRecvError::Disconnected) => {
+                    Some(failed("the sign-in worker ended without an outcome"))
+                }
+            };
+        }
+        state.settled.clone().unwrap_or(AgentLoginOutcome {
             done: false,
             success: false,
             message: None,
-        }
+        })
     }
 }
 
@@ -130,43 +157,44 @@ fn run_flow(
         return;
     }
 
-    let outcome = match code_rx.recv_timeout(CODE_WAIT) {
-        Ok(code) => match flow.submit_code_and_wait(&code, SUBMIT_TIMEOUT) {
-            // `credentials_updated` is the authoritative success signal
-            // (the creds store was written), independent of screen scraping.
-            Ok(out) if out.credentials_updated => AgentLoginOutcome {
-                done: true,
-                success: true,
-                message: None,
-            },
-            Ok(out) => AgentLoginOutcome {
-                done: true,
-                success: false,
-                message: Some(transcript_tail(&out.transcript)),
-            },
-            // CodeRejected / LoginTimeout / LoginChildExited all Display as
-            // self-describing text — relay it verbatim (login contract). A
-            // rejected code additionally gets recovery guidance: codes are
-            // single-use, expire within minutes, and are PKCE-bound to the
-            // sign-in window that minted their URL, so the fix is always a
-            // fresh sign-in — never re-pasting the old code.
-            Err(e) => {
-                let mut message = e.to_string();
-                if matches!(e, claude_codes::Error::CodeRejected { .. }) {
-                    message.push_str(
-                        " — the code may have expired, been used already, or come \
-                         from an earlier sign-in window. Start a new sign-in and \
-                         paste the fresh code promptly.",
-                    );
-                }
-                failed(&message)
-            }
+    let deadline = Instant::now() + LOGIN_WAIT;
+    let result = loop {
+        match code_rx.try_recv() {
+            Ok(code) => break flow.submit_code_and_wait(&code, SUBMIT_TIMEOUT),
+            // Cancel drops the flow and reaps the PTY child.
+            Err(TryRecvError::Disconnected) => return,
+            Err(TryRecvError::Empty) => {}
+        }
+        if Instant::now() >= deadline {
+            let _ = outcome_tx.send(failed("timed out waiting for sign-in approval or a code"));
+            return;
+        }
+        // Browser approval normally writes credentials without a pasted code.
+        // A full grace window is needed by poll_outcome for tokenless logins.
+        match flow.poll_outcome(APPROVAL_POLL_WAIT) {
+            Ok(Some(outcome)) => break Ok(outcome),
+            Ok(None) => {}
+            Err(error) => break Err(error),
+        }
+    };
+    let outcome = match result {
+        Ok(out) if out.credentials_updated => AgentLoginOutcome {
+            done: true,
+            success: true,
+            message: None,
         },
-        // Disconnected = session dropped (cancel); Timeout = user wandered off.
-        // Either way `flow` drops on return → PTY child reaped. Nobody is
-        // listening on a cancel, so the send is best-effort.
-        Err(RecvTimeoutError::Disconnected) => return,
-        Err(RecvTimeoutError::Timeout) => failed("timed out waiting for the sign-in code"),
+        Ok(out) => failed(&transcript_tail(&out.transcript)),
+        Err(e) => {
+            let mut message = e.to_string();
+            if matches!(e, claude_codes::Error::CodeRejected { .. }) {
+                message.push_str(
+                    " — the code may have expired, been used already, or come \
+                     from an earlier sign-in window. Start a new sign-in and \
+                     paste the fresh code promptly.",
+                );
+            }
+            failed(&message)
+        }
     };
     let _ = outcome_tx.send(outcome);
 }
@@ -198,6 +226,74 @@ fn transcript_tail(transcript: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn session() -> (
+        ClaudeLoginSession,
+        Sender<AgentLoginOutcome>,
+        Receiver<String>,
+    ) {
+        let (code_tx, code_rx) = std::sync::mpsc::channel();
+        let (outcome_tx, rx) = std::sync::mpsc::channel();
+        (
+            ClaudeLoginSession {
+                code_tx,
+                outcome: Mutex::new(LoginOutcomeState { rx, settled: None }),
+            },
+            outcome_tx,
+            code_rx,
+        )
+    }
+
+    #[test]
+    fn browser_approval_completes_without_a_code_and_is_cached() {
+        let (session, tx, code_rx) = session();
+        assert!(!session.poll().done);
+        let success = AgentLoginOutcome {
+            done: true,
+            success: true,
+            message: None,
+        };
+        tx.send(success.clone()).unwrap();
+        drop(tx);
+        assert_eq!(session.poll(), success);
+        assert_eq!(session.poll(), success);
+        assert_eq!(session.submit_code("late fallback".into()), success);
+        assert!(matches!(code_rx.try_recv(), Err(TryRecvError::Empty)));
+    }
+
+    #[test]
+    fn fallback_submission_and_poll_share_the_result() {
+        let (session, tx, code_rx) = session();
+        let worker = std::thread::spawn(move || {
+            assert_eq!(code_rx.recv().unwrap(), "fallback");
+            tx.send(failed("rejected code")).unwrap();
+        });
+        assert_eq!(
+            session.submit_code("fallback".into()),
+            failed("rejected code")
+        );
+        assert_eq!(session.poll(), failed("rejected code"));
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn worker_exit_is_terminal_instead_of_pending_forever() {
+        let (session, tx, _code_rx) = session();
+        drop(tx);
+        let outcome = session.poll();
+        assert!(outcome.done && !outcome.success);
+        assert_eq!(session.poll(), outcome);
+    }
+
+    #[test]
+    fn dropping_session_disconnects_code_receiver() {
+        let (session, _tx, code_rx) = session();
+        drop(session);
+        assert!(matches!(
+            code_rx.try_recv(),
+            Err(TryRecvError::Disconnected)
+        ));
+    }
 
     #[test]
     fn transcript_tail_keeps_the_end_and_is_char_safe() {

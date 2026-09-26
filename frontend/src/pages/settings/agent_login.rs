@@ -5,7 +5,7 @@
 //! different shapes, expressed by [`LoginInteraction`]:
 //!
 //! - **claude** ([`LoginInteraction::SubmitCode`]): show the auth URL, let the
-//!   user paste the code the browser hands back, POST it, await the outcome.
+//!   user approve in the browser or paste a fallback code, and poll completion.
 //! - **codex** ([`LoginInteraction::AwaitCompletion`]): show the device code +
 //!   verification URL, then poll until the browser approval lands.
 //!
@@ -25,7 +25,7 @@ use crate::components::DismissibleBackdrop;
 
 use crate::utils;
 
-/// How often to poll a browser-completion (codex) flow, in milliseconds.
+/// How often to poll browser approval, in milliseconds.
 const POLL_INTERVAL_MS: u32 = 2000;
 
 #[derive(Properties, PartialEq)]
@@ -45,8 +45,7 @@ pub struct AgentLoginModalProps {
 enum Stage {
     /// `POST /start` in flight.
     Starting,
-    /// Flow started; waiting on the user. For claude this is the paste-a-code
-    /// step; for codex it's the poll-until-approved wait.
+    /// Flow started; waiting on browser approval or a fallback code.
     Presenting {
         presentable: LoginPresentable,
         interaction: LoginInteraction,
@@ -100,10 +99,8 @@ impl Component for AgentLoginModal {
         match msg {
             Msg::Started(Ok(resp)) => {
                 self.flow_id = Some(resp.flow_id);
-                // Codex completes in the browser — start polling immediately.
-                if resp.interaction == LoginInteraction::AwaitCompletion {
-                    self.schedule_poll(ctx);
-                }
+                // Both agents can complete in the browser without a pasted code.
+                self.schedule_poll(ctx);
                 self.stage = Stage::Presenting {
                     presentable: resp.presentable,
                     interaction: resp.interaction,
@@ -141,6 +138,9 @@ impl Component for AgentLoginModal {
                 true
             }
             Msg::Poll => {
+                if !matches!(self.stage, Stage::Presenting { .. }) || self.submitting {
+                    return false;
+                }
                 let Some(flow_id) = self.flow_id else {
                     return false;
                 };
@@ -148,6 +148,18 @@ impl Component for AgentLoginModal {
                 ctx.link().send_future(async move {
                     Msg::Polled(poll_login(launcher_id, flow_id).await)
                 });
+                false
+            }
+            // A successful poll may race a fallback submission. The launcher
+            // removes completed flows, so the other request can report "gone";
+            // preserve the confirmed approval regardless of response order.
+            Msg::Polled(Ok(outcome)) if outcome.done && outcome.success => {
+                self.settle(ctx, outcome);
+                true
+            }
+            Msg::Polled(_)
+                if !matches!(self.stage, Stage::Presenting { .. }) || self.submitting =>
+            {
                 false
             }
             Msg::Polled(Ok(outcome)) => {
@@ -166,6 +178,7 @@ impl Component for AgentLoginModal {
                 self.schedule_poll(ctx);
                 false
             }
+            Msg::Settled(_) if matches!(self.stage, Stage::Settled(_)) => false,
             Msg::Settled(outcome) => {
                 self.submitting = false;
                 self.settle(ctx, outcome);
@@ -274,7 +287,7 @@ impl AgentLoginModal {
                 html! {
                     <>
                         <p class="agent-login-instr">
-                            { "Open this URL, approve the sign-in, then paste the code it gives you:" }
+                            { "Open this URL and approve the sign-in. This window will update automatically. If prompted, paste the code below:" }
                         </p>
                         <a class="agent-login-url" href={url.clone()} target="_blank" rel="noopener">
                             { url }
@@ -283,7 +296,7 @@ impl AgentLoginModal {
                             <input
                                 type="text"
                                 class="agent-login-code-input"
-                                placeholder="Paste code here"
+                                placeholder="Paste code here if prompted"
                                 value={self.code_input.clone()}
                                 oninput={on_input}
                                 onkeypress={on_key}
