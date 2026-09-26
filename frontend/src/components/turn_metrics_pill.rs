@@ -67,16 +67,6 @@ pub(crate) fn pick_most_recent_model_tier(
         .map(|metric| (metric.model.clone(), metric.service_tier.clone()))
 }
 
-/// Build a human-readable label from a (model, tier) pair. The model name
-/// is cheap-shortened by stripping a leading vendor prefix (`claude-`,
-/// `gpt-`, `o-`) and a trailing date stamp (`-2026-…`) so the chip stays
-/// compact in the dashboard header. The tier is appended in lowercase
-/// when present and not `"standard"` (the default tier is never worth
-/// chip space).
-pub(crate) fn format_model_tier_label(model: &Option<String>, tier: &Option<String>) -> String {
-    format_compact_model_tier_label(model, tier)
-}
-
 /// Filter the buffer to turns that match the chosen (model, tier) pair,
 /// then project the chosen metric per turn, skipping turns where the
 /// metric is `None` or zero (so the sparkline doesn't render misleading
@@ -199,7 +189,7 @@ pub fn turn_metrics_header_pill(props: &TurnMetricsHeaderPillProps) -> Html {
     };
 
     let values = project_metric(&props.metrics, &model, &tier, *selected_metric);
-    let label = format_model_tier_label(&model, &tier);
+    let label = format_compact_model_tier_label(&model, &tier);
     let current_value = values.last().copied();
 
     let on_toggle = {
@@ -340,21 +330,21 @@ mod tests {
     #[test]
     fn format_label_skips_standard_tier_appends_others() {
         assert_eq!(
-            format_model_tier_label(
+            format_compact_model_tier_label(
                 &Some("claude-sonnet-4-5".to_string()),
                 &Some("standard".to_string())
             ),
             "sonnet-4-5"
         );
         assert_eq!(
-            format_model_tier_label(
+            format_compact_model_tier_label(
                 &Some("claude-opus-4-7".to_string()),
                 &Some("priority".to_string())
             ),
             "opus-4-7 priority"
         );
         assert_eq!(
-            format_model_tier_label(&None, &Some("priority".to_string())),
+            format_compact_model_tier_label(&None, &Some("priority".to_string())),
             "unknown priority"
         );
     }

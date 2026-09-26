@@ -41,9 +41,9 @@ fn visible_model(model: Option<&str>) -> Option<&str> {
 /// Format an (agent, model, tier) group as a human-readable label for the
 /// dropdown and legend.
 ///
-/// Deliberately not `turn_metrics_pill::format_model_tier_label`: this page
-/// shows the full model id (no vendor-prefix shortening), keeps the tier's
-/// original case, and adds codex / agent-without-model handling.
+/// Deliberately not `turn_metrics_display::format_compact_model_tier_label`:
+/// this page shows the full model id (no vendor-prefix shortening), keeps
+/// the tier's original case, and adds codex / agent-without-model handling.
 pub(super) fn pair_label(pair: &GroupKey) -> String {
     format_agent_model_tier_label(pair.0, &pair.1, &pair.2)
 }
