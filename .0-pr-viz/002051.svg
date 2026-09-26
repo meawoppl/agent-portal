@@ -16,7 +16,7 @@
   <text x="145" y="508" font-size="25" fill="#c0caf5">OAuth session expired and could</text>
   <text x="145" y="548" font-size="25" fill="#c0caf5">not be refreshed</text>
   <text x="110" y="675" font-size="25" fill="#a9b1d6">Recovery required leaving the session,</text>
-  <text x="110" y="715" font-size="25" fill="#a9b1d6">finding Settings → Computers, then</text>
+  <text x="110" y="715" font-size="25" fill="#a9b1d6">finding Settings -&gt; Computers, then</text>
   <text x="110" y="755" font-size="25" fill="#a9b1d6">matching the right launcher.</text>
 
   <path d="M790 550H1120" stroke="#9ece6a" stroke-width="4" marker-end="url(#arrow)"/>
