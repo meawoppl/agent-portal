@@ -50,11 +50,6 @@ fn detected_timezone() -> String {
     .unwrap_or_else(|| "UTC".to_string())
 }
 
-fn non_blank(value: &str) -> Option<String> {
-    let value = value.trim();
-    (!value.is_empty()).then(|| value.to_string())
-}
-
 #[derive(Properties, PartialEq)]
 pub struct ScheduleDialogProps {
     #[prop_or_default]
@@ -300,18 +295,22 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                                 timezone: shared::timezone::canonicalize_timezone(&data.timezone),
                                 launch: shared::LaunchSpec {
                                     working_directory: wd,
-                                    session_name: non_blank(&data.session_name),
+                                    session_name: utils::owned_non_blank(&data.session_name),
                                     claude_args: claude_args.clone(),
                                     agent_type,
                                     worktree: match data.worktree {
                                         shared::WorktreeMode::Repo { .. } => {
                                             shared::WorktreeMode::Repo {
-                                                branch: non_blank(&data.worktree_branch),
+                                                branch: utils::owned_non_blank(
+                                                    &data.worktree_branch,
+                                                ),
                                             }
                                         }
                                         shared::WorktreeMode::Scratch { .. } => {
                                             shared::WorktreeMode::Scratch {
-                                                branch: non_blank(&data.worktree_branch),
+                                                branch: utils::owned_non_blank(
+                                                    &data.worktree_branch,
+                                                ),
                                             }
                                         }
                                         shared::WorktreeMode::None => shared::WorktreeMode::None,
@@ -344,11 +343,11 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                             worktree: Some(match data.worktree {
                                 shared::WorktreeMode::None => shared::WorktreeMode::None,
                                 shared::WorktreeMode::Repo { .. } => shared::WorktreeMode::Repo {
-                                    branch: non_blank(&data.worktree_branch),
+                                    branch: utils::owned_non_blank(&data.worktree_branch),
                                 },
                                 shared::WorktreeMode::Scratch { .. } => {
                                     shared::WorktreeMode::Scratch {
-                                        branch: non_blank(&data.worktree_branch),
+                                        branch: utils::owned_non_blank(&data.worktree_branch),
                                     }
                                 }
                             }),
