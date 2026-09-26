@@ -94,6 +94,28 @@ pub struct MessagesListResponse<T> {
 
 // ---- Inter-agent messaging --------------------------------------------------
 
+/// Live agent activity, separate from the persisted session lifecycle
+/// `status`. This is what peer agents use to decide whether another session is
+/// free, actively working, or temporarily rate-limited.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SessionActivityState {
+    #[default]
+    Idle,
+    Busy,
+    Throttled,
+}
+
+impl SessionActivityState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Busy => "busy",
+            Self::Throttled => "throttled",
+        }
+    }
+}
+
 /// One of the caller's sessions, as listed for the agent-messaging page/API
 /// and mobile status surfaces (`GET /api/agent/sessions`). A lightweight
 /// summary — enough to pick a recipient or render a widget row — not the
@@ -114,8 +136,14 @@ pub struct AgentSessionInfo {
     /// status string retained above for wire compatibility.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connected: Option<bool>,
+    /// Live activity state derived from the latest significant transcript
+    /// event. Absent when talking to older backends; callers can fall back to
+    /// the legacy `busy` boolean.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<SessionActivityState>,
     /// True while the latest significant transcript event belongs to an
-    /// in-progress turn. Meaningful only while `connected` is true.
+    /// in-progress turn. Legacy field retained for older clients; prefer
+    /// `state` for new status surfaces.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub busy: Option<bool>,
     /// True when the session has a pending permission request waiting on the
@@ -231,7 +259,16 @@ mod agent_session_wire_tests {
             "hostname": "h"
         }"#;
         let parsed: AgentSessionInfo = serde_json::from_str(old_wire).unwrap();
+        assert_eq!(parsed.state, None);
         assert!(!parsed.awaiting_permission);
         assert!(parsed.last_activity.is_empty());
+    }
+
+    #[test]
+    fn session_activity_state_serializes_as_lowercase_wire_values() {
+        assert_eq!(
+            serde_json::to_string(&SessionActivityState::Throttled).unwrap(),
+            r#""throttled""#
+        );
     }
 }
