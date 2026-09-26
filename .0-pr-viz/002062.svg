@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-labelledby="title desc">
+  <title id="title">PR 2062 stop caching unhashed JS forever so snippet updates load</title>
+  <desc id="desc">Before, the service worker and backend treated every js, css and wasm URL as content-hashed, so a changed rizzma-host.js snippet stayed stale, failed the integrity check and blocked startup. After, only content-hashed filenames are cache-first and immutable; stable-URL assets revalidate.</desc>
+  <rect width="2000" height="1200" fill="#16161e"/>
+  <text x="55" y="52" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24" letter-spacing="1">PR #2062 · Stop caching unhashed JS forever so snippet updates load</text>
+  <text x="55" y="100" fill="#e6e9f5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700">Every .js was cached forever, so a changed snippet failed its integrity check;</text>
+  <text x="55" y="140" fill="#e6e9f5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700">now only content-hashed filenames are immutable, so stable URLs revalidate.</text>
+  <line x1="55" y1="170" x2="1945" y2="170" stroke="#3d4666" stroke-width="2"/>
+  <line x1="1000" y1="205" x2="1000" y2="1120" stroke="#3d4666" stroke-width="2" stroke-dasharray="12 14"/>
+  <text x="70" y="240" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" letter-spacing="4">BEFORE</text>
+  <text x="1070" y="240" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" letter-spacing="4">AFTER</text>
+
+  <rect x="70" y="275" width="860" height="360" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="105" y="330" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">Any .js / .css / .wasm counts as hashed</text>
+  <text x="105" y="390" fill="#7aa2f7" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="23">sw.js isHashedAsset: /\.(wasm|js|css)$/</text>
+  <text x="105" y="435" fill="#7aa2f7" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="23">routes.rs: CacheControl::Long (immutable)</text>
+  <text x="105" y="480" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">only /sw.js got no-cache (service_worker_no_cache)</text>
+  <text x="105" y="540" fill="#e0af68" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="23">/snippets/frontend-f623259064c03830/</text>
+  <text x="105" y="575" fill="#e0af68" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="23">    rizzma-host.js  (crate hash, not file hash)</text>
+
+  <rect x="70" y="675" width="860" height="400" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="105" y="730" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">After a deploy that edits rizzma-host.js</text>
+  <text x="105" y="790" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">fresh index.html expects sha384-eq6Co3lL...</text>
+  <text x="105" y="835" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">cache-first SW serves old bytes: sha384-EX22dJ8j...</text>
+  <text x="105" y="900" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25" font-weight="700">Integrity check fails, module blocked</text>
+  <text x="105" y="960" fill="#f7768e" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="23">[portal-startup] recovery_offered</text>
+  <text x="105" y="995" fill="#f7768e" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="23">  detail=application start timed out</text>
+  <text x="105" y="1050" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">Stuck until the user clears site data by hand.</text>
+
+  <rect x="1070" y="275" width="860" height="360" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="1105" y="330" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">Hash must be in the filename</text>
+  <text x="1105" y="390" fill="#9ece6a" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="23">-[0-9a-f]{12,16}(_bg)?\.(wasm|js|css)$</text>
+  <text x="1105" y="435" fill="#7aa2f7" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="23">is_content_hashed_asset() + isHashedAsset()</text>
+  <text x="1105" y="480" fill="#9ece6a" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="23">unhashed_assets_no_cache -> no-cache</text>
+  <text x="1105" y="540" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">no-cache: sw.js, katex-helper.js, /snippets/...</text>
+  <text x="1105" y="585" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">immutable: 36 Trunk-hashed files (read-85951eaaefd4723.css)</text>
+
+  <rect x="1070" y="675" width="860" height="400" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="1105" y="730" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">After a deploy that edits rizzma-host.js</text>
+  <text x="1105" y="790" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">SW passes the snippet through to the network</text>
+  <text x="1105" y="835" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">server revalidates instead of sending immutable</text>
+  <text x="1105" y="900" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25" font-weight="700">Bytes match index.html, app starts</text>
+  <text x="1105" y="960" fill="#9ece6a" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="23">CACHE_NAME = "agent-portal-bootstrap-v3"</text>
+  <text x="1105" y="1010" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">activate deletes v2, purging stale snippet copies</text>
+  <text x="1105" y="1050" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">already held by existing clients.</text>
+
+  <text x="55" y="1172" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22">Scope: stable-URL assets lose offline caching; the hash rule is duplicated in sw.js and routes.rs and must be kept in sync.</text>
+</svg>

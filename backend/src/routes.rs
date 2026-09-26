@@ -35,13 +35,39 @@ pub const AUTH_LOGOUT: &str = "/api/auth/logout";
 pub const AUTH_DEV_LOGIN: &str = "/api/auth/dev-login";
 pub const AUTH_DEVICE_LOGIN: &str = "/api/auth/device-login";
 
-/// The service-worker script is a stable URL whose bytes change across
-/// deploys. It must revalidate; marking it immutable can strand a browser on a
-/// worker that is responsible for choosing every subsequent cached asset.
-async fn service_worker_no_cache(request: Request, next: Next) -> Response {
-    let is_service_worker = request.uri().path() == "/sw.js";
+/// Whether a script/style/wasm path carries Trunk's content hash in its
+/// filename (`base-545c8725d321f26d.css`, `frontend-664e49a7ece9c11e_bg.wasm`).
+/// Trunk trims leading zeros, so the hash can be shorter than 16 hex digits.
+/// Snippet files (`/snippets/frontend-<crate hash>/rizzma-host.js`) only hash
+/// the directory by crate, not the file contents, so they are not hashed.
+pub(crate) fn is_content_hashed_asset(path: &str) -> bool {
+    let file = path.rsplit('/').next().unwrap_or(path);
+    let Some(stem) = [".js", ".css", ".wasm"]
+        .iter()
+        .find_map(|ext| file.strip_suffix(ext))
+    else {
+        return false;
+    };
+    let stem = stem.strip_suffix("_bg").unwrap_or(stem);
+    stem.rsplit_once('-').is_some_and(|(name, hash)| {
+        !name.is_empty()
+            && (12..=16).contains(&hash.len())
+            && hash.bytes().all(|b| b.is_ascii_hexdigit())
+    })
+}
+
+/// Script, style and wasm assets whose URL does not change with their bytes
+/// (the service worker, `katex-helper.js`, wasm-bindgen snippets) must
+/// revalidate. Marking them immutable strands browsers on stale copies, which
+/// then fail the `integrity` check in a fresh `index.html` and block startup.
+async fn unhashed_assets_no_cache(request: Request, next: Next) -> Response {
+    let path = request.uri().path();
+    let unhashed = [".js", ".css", ".wasm"]
+        .iter()
+        .any(|ext| path.ends_with(ext))
+        && !is_content_hashed_asset(path);
     let mut response = next.run(request).await;
-    if is_service_worker {
+    if unhashed {
         response
             .headers_mut()
             .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
@@ -491,7 +517,7 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
                 .cache_control(memory_serve::CacheControl::Long)
                 .into_router(),
         )
-        .layer(axum::middleware::from_fn(service_worker_no_cache))
+        .layer(axum::middleware::from_fn(unhashed_assets_no_cache))
         // Add CORS and cookie management
         .layer(CookieManagerLayer::new())
         .layer(cors)
@@ -502,4 +528,32 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
             app_state_for_forward_gate,
             handlers::forward_proxy::forward_host_gate,
         )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_content_hashed_asset;
+
+    #[test]
+    fn trunk_hashed_assets_are_hashed() {
+        assert!(is_content_hashed_asset("/frontend-664e49a7ece9c11e.js"));
+        assert!(is_content_hashed_asset(
+            "/frontend-664e49a7ece9c11e_bg.wasm"
+        ));
+        assert!(is_content_hashed_asset("/base-545c8725d321f26d.css"));
+        assert!(is_content_hashed_asset(
+            "/session-rail-d36d37f1824f48ad.css"
+        ));
+        assert!(is_content_hashed_asset("/read-85951eaaefd4723.css"));
+    }
+
+    #[test]
+    fn stable_url_assets_are_not_hashed() {
+        assert!(!is_content_hashed_asset("/sw.js"));
+        assert!(!is_content_hashed_asset("/katex-helper.js"));
+        assert!(!is_content_hashed_asset(
+            "/snippets/frontend-f623259064c03830/rizzma-host.js"
+        ));
+        assert!(!is_content_hashed_asset("/index.html"));
+    }
 }
