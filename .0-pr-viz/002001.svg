@@ -1,7 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="pr2001-title pr2001-desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-labelledby="pr2001-title pr2001-desc">
   <title id="pr2001-title">PR 2001 shared truncate_with_ellipsis</title>
   <desc id="pr2001-desc">Push snippets and peek summaries each hand-inlined the same take-and-ellipsis cap; now shared::strings owns it once.</desc>
-  <rect x="0" y="0" width="1200" height="720" fill="#1a1b26"/>
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
   <defs>
     <marker id="pr2001-arrow-green" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
       <path d="M0,0 L8,3 L0,6 Z" fill="#9ece6a"/>
@@ -16,12 +16,12 @@
   <text x="32" y="130" fill="#f7768e" font-family="sans-serif" font-size="12" letter-spacing="1.6">BEFORE</text>
   <rect x="48" y="150" width="512" height="170" rx="8" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
   <text x="68" y="182" fill="#7aa2f7" font-family="monospace" font-size="15">push/mod.rs cap_snippet</text>
-  <text x="68" y="214" fill="#c0caf5" font-family="monospace" font-size="14">take(120 - 1) + push('…')</text>
+  <text x="68" y="214" fill="#c0caf5" font-family="monospace" font-size="14">take(120 - 1) + push('...')</text>
   <text x="68" y="244" fill="#c0caf5" font-family="monospace" font-size="14">output at most 120 chars</text>
   <text x="68" y="282" fill="#565f89" font-family="sans-serif" font-size="13">Notification snippet cap, hand-inlined.</text>
   <rect x="48" y="340" width="512" height="170" rx="8" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
   <text x="68" y="372" fill="#7aa2f7" font-family="monospace" font-size="15">peek_summary.rs cap</text>
-  <text x="68" y="404" fill="#c0caf5" font-family="monospace" font-size="14">take(240 - 1) + push('…')</text>
+  <text x="68" y="404" fill="#c0caf5" font-family="monospace" font-size="14">take(240 - 1) + push('...')</text>
   <text x="68" y="434" fill="#c0caf5" font-family="monospace" font-size="14">output at most 240 chars</text>
   <text x="68" y="472" fill="#565f89" font-family="sans-serif" font-size="13">Collapse to one line, then the same shape.</text>
   <rect x="48" y="530" width="512" height="120" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="1"/>
@@ -33,7 +33,7 @@
   <rect x="640" y="150" width="512" height="170" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
   <text x="660" y="182" fill="#7aa2f7" font-family="monospace" font-size="15">shared::strings</text>
   <text x="660" y="214" fill="#9ece6a" font-family="monospace" font-size="14">pub fn truncate_with_ellipsis</text>
-  <text x="660" y="244" fill="#c0caf5" font-family="monospace" font-size="14">take(max - 1) + push('…')</text>
+  <text x="660" y="244" fill="#c0caf5" font-family="monospace" font-size="14">take(max - 1) + push('...')</text>
   <text x="660" y="282" fill="#565f89" font-family="sans-serif" font-size="13">Single home, std-only, WASM-safe, tested.</text>
   <line x1="768" y1="320" x2="768" y2="352" stroke="#9ece6a" stroke-width="2" marker-end="url(#pr2001-arrow-green)"/>
   <line x1="1024" y1="320" x2="1024" y2="352" stroke="#9ece6a" stroke-width="2" marker-end="url(#pr2001-arrow-green)"/>
