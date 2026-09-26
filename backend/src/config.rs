@@ -646,13 +646,9 @@ fn mobile_app_links_config_from_env() -> MobileAppLinksConfig {
 }
 
 fn optional_non_empty(name: &str) -> Option<String> {
-    env::var(name).ok().and_then(|value| {
-        if shared::strings::is_non_blank(&value) {
-            Some(value.trim().to_string())
-        } else {
-            None
-        }
-    })
+    env::var(name)
+        .ok()
+        .and_then(|value| shared::strings::owned_non_blank(&value))
 }
 
 fn native_push_config_from_env(errors: &mut Vec<String>) -> crate::push::NativePushConfig {
