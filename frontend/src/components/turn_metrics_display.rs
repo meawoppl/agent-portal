@@ -16,6 +16,13 @@ pub(crate) fn compact_count(n: i64) -> String {
     }
 }
 
+/// Compact count with a unit suffix, e.g. `"547 tokens"`, `"1.5k tok"`.
+/// Single home for the `"{compact} {unit}"` pattern shared by the task
+/// chips and the metrics pill.
+pub(crate) fn compact_labeled(n: i64, unit: &str) -> String {
+    format!("{} {unit}", compact_count(n))
+}
+
 /// Strip a vendor prefix and trailing dated suffix so a model name fits a
 /// compact dashboard chip.
 pub(crate) fn compact_model_label(model: &str) -> String {
@@ -110,4 +117,19 @@ pub(crate) fn format_max_gap(max_inter_token_gap_ms: Option<i64>) -> Option<Stri
         return None;
     }
     Some(format!("max gap {:.1}s", ms as f64 / 1000.0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compact_labeled;
+
+    #[test]
+    fn compact_labeled_below_threshold() {
+        assert_eq!(compact_labeled(547, "tokens"), "547 tokens");
+    }
+
+    #[test]
+    fn compact_labeled_at_k_threshold() {
+        assert_eq!(compact_labeled(1500, "tok"), "1.5k tok");
+    }
 }
