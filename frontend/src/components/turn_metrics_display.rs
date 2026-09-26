@@ -5,22 +5,14 @@ use shared::AgentType;
 
 /// Compact integer for `"2.1k in / 547 out"` chips.
 ///
-/// Integer-typed sibling of [`compact_metric_count`]: values below 1000 keep
-/// their exact integer rendering, while anything at or above 1000 shares the
-/// float one-decimal-`k` formatting (single home for that suffix).
+/// Values below 1000 keep their exact integer rendering, while anything at
+/// or above 1000 uses one-decimal-`k` formatting. Single home for that
+/// suffix — all token-count chips route through here.
 pub(crate) fn compact_count(n: i64) -> String {
     if n < 1000 {
         n.to_string()
     } else {
-        compact_metric_count(n as f64)
-    }
-}
-
-pub(crate) fn compact_metric_count(value: f64) -> String {
-    if value < 1000.0 {
-        format!("{value:.0}")
-    } else {
-        format!("{:.1}k", value / 1000.0)
+        format!("{:.1}k", n as f64 / 1000.0)
     }
 }
 

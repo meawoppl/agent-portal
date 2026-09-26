@@ -10,7 +10,7 @@
 //! derives the typed [`TaskEvent`] and forwards it into this handler via
 //! the dispatcher callback registered at mount.
 
-use crate::components::turn_metrics_display::compact_metric_count;
+use crate::components::turn_metrics_display::compact_count;
 use gloo::timers::callback::Interval;
 use std::collections::HashMap;
 use wasm_bindgen_futures::spawn_local;
@@ -525,7 +525,7 @@ fn format_elapsed(task: &TaskEntry) -> String {
 
 /// Task pill token text, e.g. `"547 tok"`, `"1.5k tok"`.
 fn format_task_tokens(tokens: u64) -> String {
-    format!("{} tok", compact_metric_count(tokens as f64))
+    format!("{} tok", compact_count(tokens as i64))
 }
 
 /// Render `secs` as either `"{m}m {s}s"` (>= 60 s) or `"{s}s"`. Pulled

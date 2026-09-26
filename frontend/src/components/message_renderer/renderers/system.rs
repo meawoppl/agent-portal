@@ -1,12 +1,12 @@
 use super::super::shorten_model_name;
 use crate::components::markdown::render_markdown;
-use crate::components::turn_metrics_display::compact_metric_count;
+use crate::components::turn_metrics_display::compact_count;
 use shared::fmt::format_duration;
 use yew::prelude::*;
 
 /// Task chip text, e.g. `"547 tokens"`, `"1.5k tokens"`.
 fn format_task_tokens(tokens: u64) -> String {
-    format!("{} tokens", compact_metric_count(tokens as f64))
+    format!("{} tokens", compact_count(tokens as i64))
 }
 
 pub fn render_system_message(msg: &shared::SystemMessage, timestamp: Option<&str>) -> Html {

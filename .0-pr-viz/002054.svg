@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#1a1b26"/>
+
+  <defs>
+    <marker id="arr-dim-2054" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+    </marker>
+    <marker id="arr-green-2054" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+    <marker id="arr-red-2054" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/>
+    </marker>
+  </defs>
+
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2054 - one home for compact token counts</text>
+
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">Two helpers formatted the same k-suffix; every caller held an integer</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">and cast it to float. Now there is one integer helper.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <g>
+    <rect x="80" y="250" width="860" height="150" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="290" font-size="26" fill="#c0caf5">turn_metrics_display.rs</text>
+    <text x="104" y="330" font-size="23" fill="#a9b1d6">compact_count(i64) + compact_metric_count(f64)</text>
+    <text x="104" y="366" font-size="22" fill="#565f89">two homes for one one-decimal-k suffix</text>
+  </g>
+
+  <line x1="320" y1="400" x2="320" y2="490" stroke="#565f89" stroke-width="1.5" marker-end="url(#arr-dim-2054)"/>
+
+  <g>
+    <rect x="80" y="500" width="860" height="165" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+    <text x="104" y="540" font-size="26" fill="#f7768e">three call sites cast int to float</text>
+    <text x="104" y="580" font-size="23" fill="#a9b1d6">tasks_panel, system renderer, metrics pill</text>
+    <text x="104" y="616" font-size="22" fill="#565f89">tokens as f64 just to reach the float helper</text>
+  </g>
+
+  <line x1="320" y1="665" x2="320" y2="750" stroke="#f7768e" stroke-width="1.5" marker-end="url(#arr-red-2054)"/>
+
+  <g>
+    <rect x="80" y="760" width="860" height="150" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="800" font-size="26" fill="#c0caf5">doc link spans the split</text>
+    <text x="104" y="840" font-size="23" fill="#f7768e">sibling of ... shares the float formatting</text>
+    <text x="104" y="876" font-size="22" fill="#565f89">indirection with no behavioral difference</text>
+  </g>
+
+  <g>
+    <rect x="80" y="965" width="860" height="120" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="1011" font-size="26" fill="#c0caf5">output byte-identical throughout</text>
+    <text x="104" y="1051" font-size="23" fill="#a9b1d6">lowercase-k and stay-on-k behavior preserved</text>
+  </g>
+
+  <g>
+    <rect x="1060" y="250" width="860" height="150" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1084" y="290" font-size="26" fill="#9ece6a">single compact_count(i64)</text>
+    <text x="1084" y="330" font-size="23" fill="#a9b1d6">float body inlined, helper deleted</text>
+    <text x="1084" y="366" font-size="22" fill="#565f89">net -8 lines across 4 files</text>
+  </g>
+
+  <line x1="1285" y1="400" x2="1285" y2="490" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green-2054)"/>
+  <line x1="1725" y1="400" x2="1725" y2="490" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green-2054)"/>
+
+  <g>
+    <rect x="1060" y="500" width="420" height="240" fill="#1e202e" stroke="#7aa2f7" stroke-width="1.5"/>
+    <text x="1084" y="540" font-size="26" fill="#7aa2f7">integer call sites</text>
+    <text x="1084" y="580" font-size="22" fill="#a9b1d6">compact_count(tokens as i64)</text>
+    <text x="1084" y="612" font-size="22" fill="#a9b1d6">tasks_panel + system</text>
+    <text x="1084" y="644" font-size="22" fill="#a9b1d6">no f64 detour</text>
+    <text x="1084" y="690" font-size="22" fill="#9ece6a">casts match field types</text>
+  </g>
+
+  <g>
+    <rect x="1500" y="500" width="420" height="240" fill="#1e202e" stroke="#7aa2f7" stroke-width="1.5"/>
+    <text x="1524" y="540" font-size="26" fill="#7aa2f7">metrics pill</text>
+    <text x="1524" y="580" font-size="22" fill="#a9b1d6">compact_count(value as i64)</text>
+    <text x="1524" y="612" font-size="22" fill="#a9b1d6">thinking + subagent chips</text>
+    <text x="1524" y="644" font-size="22" fill="#a9b1d6">values are integer-valued</text>
+    <text x="1524" y="690" font-size="22" fill="#9ece6a">same rendered text</text>
+  </g>
+
+  <line x1="1285" y1="740" x2="1285" y2="825" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green-2054)"/>
+  <line x1="1725" y1="740" x2="1725" y2="825" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green-2054)"/>
+
+  <g>
+    <rect x="1060" y="835" width="860" height="135" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1084" y="878" font-size="26" fill="#9ece6a">one documented home for the suffix</text>
+    <text x="1084" y="918" font-size="23" fill="#a9b1d6">all token-count chips route through here</text>
+    <text x="1084" y="950" font-size="21" fill="#565f89">footer, count-up, tasks, pill, system chips agree</text>
+  </g>
+
+  <g>
+    <rect x="1060" y="1000" width="860" height="105" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1084" y="1042" font-size="26" fill="#c0caf5">706 frontend tests pass, clippy + fmt clean</text>
+    <text x="1084" y="1078" font-size="23" fill="#9ece6a">zero behavior change, verified by existing tests</text>
+  </g>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">Verified: cargo fmt --all --check; cargo clippy -p frontend --all-targets; cargo test -p frontend.</text>
+</svg>
