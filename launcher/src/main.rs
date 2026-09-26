@@ -136,7 +136,7 @@ enum PluginAction {
     List,
     /// Install a plugin from GitHub, Git, or a local path
     Install {
-        /// Source, e.g. github:meawoppl/agent-portal-plugins//backplane
+        /// Source, e.g. github:meawoppl/agent-portal-plugins//kicad-pcb
         source: String,
         /// Override install name. Must match the manifest name.
         #[arg(long)]

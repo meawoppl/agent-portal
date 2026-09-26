@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-labelledby="title desc">
+  <title id="title">Plugin authoring guide map</title>
+  <desc id="desc">A diagram showing an installed plugin manifest, skills, surface, commands, and toolchains feeding Agent Portal sessions and agents.</desc>
+  <rect width="2000" height="1200" fill="#1a1b26"/>
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#7aa2f7"/>
+    </marker>
+    <style>
+      .title { fill: #e6e9f5; font: 700 58px sans-serif; }
+      .subtitle { fill: #a9b1d6; font: 30px sans-serif; }
+      .h { fill: #e6e9f5; font: 700 34px sans-serif; }
+      .t { fill: #c0caf5; font: 25px sans-serif; }
+      .s { fill: #a9b1d6; font: 22px sans-serif; }
+      .mono { fill: #7dcfff; font: 23px monospace; }
+      .box { fill: #1e202e; stroke: #565f89; stroke-width: 3; rx: 18; }
+      .box2 { fill: #16161e; stroke: #3d4666; stroke-width: 3; rx: 16; }
+      .accent { stroke: #7aa2f7; stroke-width: 5; fill: none; marker-end: url(#arrow); }
+      .green { stroke: #9ece6a; }
+      .orange { stroke: #e0af68; }
+      .pink { stroke: #f7768e; }
+      .tag { fill: #3d4666; rx: 12; }
+    </style>
+  </defs>
+
+  <text x="80" y="105" class="title">Agent Portal Plugin Authoring</text>
+  <text x="82" y="155" class="subtitle">New guide documents the folder layout, manifest contract, agent abilities, and runtime lifecycle.</text>
+
+  <rect x="80" y="230" width="500" height="750" class="box"/>
+  <text x="120" y="290" class="h">Installed plugin</text>
+  <text x="120" y="335" class="mono">agent-portal-plugins/name/</text>
+  <text x="140" y="392" class="t">agent-portal-plugin.toml</text>
+  <text x="140" y="437" class="t">skills/*/SKILL.md</text>
+  <text x="140" y="482" class="t">bin/plugin</text>
+  <text x="140" y="527" class="t">prompts/ and assets/</text>
+  <text x="140" y="572" class="t">examples/</text>
+  <text x="140" y="617" class="t">.portal/</text>
+  <text x="180" y="657" class="s">home, cache, config</text>
+  <text x="180" y="692" class="s">state/surfaces</text>
+  <text x="180" y="727" class="s">toolchains</text>
+  <rect x="120" y="795" width="390" height="90" class="box2"/>
+  <text x="150" y="835" class="s">Installers keep support files</text>
+  <text x="150" y="868" class="s">inside plugin-local .portal/.</text>
+
+  <rect x="760" y="220" width="480" height="820" class="box"/>
+  <text x="800" y="280" class="h">Declared abilities</text>
+  <rect x="810" y="330" width="360" height="76" class="tag"/>
+  <text x="835" y="378" class="t">Skills</text>
+  <text x="930" y="378" class="s">agent procedures</text>
+  <rect x="810" y="430" width="360" height="76" class="tag"/>
+  <text x="835" y="478" class="t">Surface</text>
+  <text x="950" y="478" class="s">docked web app</text>
+  <rect x="810" y="530" width="360" height="76" class="tag"/>
+  <text x="835" y="578" class="t">Commands</text>
+  <text x="980" y="578" class="s">CLI verbs</text>
+  <rect x="810" y="630" width="360" height="76" class="tag"/>
+  <text x="835" y="678" class="t">Toolchains</text>
+  <text x="1015" y="678" class="s">managed SDKs</text>
+  <rect x="810" y="730" width="360" height="76" class="tag"/>
+  <text x="835" y="778" class="t">Detection</text>
+  <text x="990" y="778" class="s">repo hints</text>
+  <rect x="810" y="850" width="360" height="100" class="box2"/>
+  <text x="840" y="892" class="mono">runtime --json</text>
+  <text x="840" y="925" class="s">stable machine view</text>
+
+  <rect x="1420" y="230" width="500" height="750" class="box"/>
+  <text x="1460" y="290" class="h">Session runtime</text>
+  <text x="1460" y="350" class="t">Claude</text>
+  <text x="1580" y="350" class="s">native skills-only root</text>
+  <text x="1460" y="410" class="t">Codex / Muse</text>
+  <text x="1645" y="410" class="s">Plugin Skills reminder</text>
+  <text x="1460" y="500" class="t">Launcher</text>
+  <text x="1590" y="500" class="s">starts, stops, doctors</text>
+  <text x="1460" y="560" class="t">Forwarder</text>
+  <text x="1608" y="560" class="s">opens split surface</text>
+  <text x="1460" y="650" class="t">Agent</text>
+  <text x="1570" y="650" class="s">reads SKILL.md, runs tools</text>
+  <text x="1460" y="710" class="t">User</text>
+  <text x="1560" y="710" class="s">reviews panes and output</text>
+  <rect x="1460" y="795" width="390" height="90" class="box2"/>
+  <text x="1490" y="835" class="s">Portal stays generic:</text>
+  <text x="1490" y="868" class="s">lifecycle, permissions, panes.</text>
+
+  <path d="M580 510 C660 510, 680 510, 760 510" class="accent"/>
+  <path d="M1240 510 C1320 510, 1340 510, 1420 510" class="accent green"/>
+  <path d="M1000 1040 C1000 1100, 330 1100, 330 980" class="accent orange"/>
+  <path d="M1000 1040 C1000 1100, 1670 1100, 1670 980" class="accent pink"/>
+
+  <text x="642" y="475" class="s">manifest</text>
+  <text x="1302" y="475" class="s">injected / opened</text>
+  <text x="690" y="1132" class="s">Guide also covers authoring flow, repo .portal/plugins.toml, security, and publishing checklist.</text>
+</svg>

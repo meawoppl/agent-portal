@@ -1100,7 +1100,7 @@ mod tests {
 
     fn test_runtime(root: PathBuf) -> PluginRuntime {
         PluginRuntime {
-            name: "backplane".to_string(),
+            name: "kicad-pcb".to_string(),
             root: root.clone(),
             installed: InstalledPlugin {
                 path: root.display().to_string(),
@@ -1111,7 +1111,7 @@ mod tests {
                 installed_at: chrono::Utc::now(),
             },
             manifest: PluginManifest {
-                name: "backplane".to_string(),
+                name: "kicad-pcb".to_string(),
                 display_name: None,
                 description: None,
                 homepage: None,
@@ -1130,7 +1130,7 @@ mod tests {
     #[test]
     fn plugin_commands_use_plugin_local_home_and_xdg_dirs() {
         let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().join("backplane");
+        let root = dir.path().join("kicad-pcb");
         std::fs::create_dir_all(&root).unwrap();
         let runtime = test_runtime(root.clone());
 
@@ -1179,7 +1179,7 @@ mod tests {
     #[test]
     fn toolchain_placeholder_expands_to_managed_home() {
         let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().join("backplane");
+        let root = dir.path().join("kicad-pcb");
         std::fs::create_dir_all(&root).unwrap();
         let runtime = test_runtime(root.clone());
         let toolchain = ToolchainSection {
