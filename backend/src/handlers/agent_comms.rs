@@ -11,7 +11,8 @@ use std::sync::Arc;
 use axum::{
     body::Bytes,
     extract::{Path, Query, State},
-    http::HeaderMap,
+    http::{header, HeaderMap, HeaderValue},
+    response::{IntoResponse, Response},
     Json,
 };
 use diesel::prelude::*;
@@ -274,6 +275,103 @@ pub async fn peek_agent_messages(
         messages: peek_messages,
         total_messages,
     }))
+}
+
+/// GET /api/agent/sessions/{id}/history — the caller-visible session's full
+/// known transcript as canonical NDJSON.
+///
+/// Archived rows and newer hot-DB rows are unioned by message UUID using the
+/// same merge primitive as the archive sweep. That makes a download useful
+/// while a session is still active and prevents retention from erasing rows
+/// that already reached the archive. `X-Portal-History-Complete` is true only
+/// when a durable transcript archive exists; without one we return the
+/// retained DB rows but cannot prove that an older retention trim never ran.
+pub async fn download_agent_history(
+    State(app_state): State<Arc<AppState>>,
+    Path(target_id): Path<Uuid>,
+    headers: HeaderMap,
+    cookies: Cookies,
+) -> Result<Response, AppError> {
+    let user_id = resolve_user(&app_state, &headers, &cookies)?;
+    let mut conn = app_state.conn()?;
+    use crate::schema::{messages, session_members, sessions};
+
+    let session: Session = sessions::table
+        .inner_join(session_members::table.on(session_members::session_id.eq(sessions::id)))
+        .filter(sessions::id.eq(target_id))
+        .filter(session_members::user_id.eq(user_id))
+        .select(Session::as_select())
+        .first(&mut conn)
+        .map_err(|_| AppError::NotFound("session"))?;
+
+    type MessageRow = (Uuid, String, String, chrono::NaiveDateTime, String);
+    let rows: Vec<MessageRow> = messages::table
+        .filter(messages::session_id.eq(target_id))
+        .order(messages::created_at.asc())
+        .select((
+            messages::id,
+            messages::role,
+            messages::content,
+            messages::created_at,
+            messages::agent_type,
+        ))
+        .load(&mut conn)?;
+    let current = rows
+        .into_iter()
+        .map(
+            |(id, role, content, created_at, agent_type)| archive_format::ArchiveMessageLine {
+                id,
+                role,
+                created_at,
+                agent_type,
+                content: serde_json::from_str(&content)
+                    .unwrap_or(serde_json::Value::String(content)),
+            },
+        )
+        .collect();
+
+    let (archived, complete) = if let Some(runtime) = app_state.archive.clone() {
+        let owner_id = session.user_id;
+        let archived = super::history::on_blocking(move || {
+            runtime.store.read_transcript_lines(owner_id, target_id)
+        })
+        .await?;
+        let complete = archived.is_some();
+        (archived.unwrap_or_default(), complete)
+    } else {
+        (Vec::new(), false)
+    };
+    let merged = archive_format::merge_transcript_lines(archived, current);
+    let mut body = Vec::new();
+    for line in &merged {
+        serde_json::to_writer(&mut body, line)
+            .map_err(|e| AppError::Internal(format!("could not serialize transcript: {e}")))?;
+        body.push(b'\n');
+    }
+
+    let mut response = body.into_response();
+    let response_headers = response.headers_mut();
+    response_headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/x-ndjson"),
+    );
+    response_headers.insert(
+        header::CONTENT_DISPOSITION,
+        HeaderValue::from_str(&format!(
+            "attachment; filename=\"{target_id}.history.ndjson\""
+        ))
+        .map_err(|e| AppError::Internal(format!("invalid history filename header: {e}")))?,
+    );
+    response_headers.insert(
+        "x-portal-history-complete",
+        HeaderValue::from_static(if complete { "true" } else { "false" }),
+    );
+    response_headers.insert(
+        "x-portal-history-messages",
+        HeaderValue::from_str(&merged.len().to_string())
+            .map_err(|e| AppError::Internal(format!("invalid history count header: {e}")))?,
+    );
+    Ok(response)
 }
 
 /// POST /api/agent/sessions/{id}/message — inject a message into a session as

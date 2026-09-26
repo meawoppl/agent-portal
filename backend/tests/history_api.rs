@@ -399,6 +399,25 @@ async fn history_per_session_endpoints_enforce_visibility() {
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 }
 
+#[tokio::test]
+async fn agent_history_download_reports_archive_completeness_and_hides_non_members() {
+    let Some(pool) = test_pool() else { return };
+    let f = build_fixture(pool);
+    let uri = format!("/api/agent/sessions/{}/history", f.live_shared_session);
+
+    // Live membership is the same read boundary used by transcript peeks.
+    // This fixture's archive is metadata-only, so the response is useful but
+    // explicitly refuses to claim completeness.
+    let resp = get(&f, Some(&f.live_member_auth), &uri).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(resp.headers()["content-type"], "application/x-ndjson");
+    assert_eq!(resp.headers()["x-portal-history-complete"], "false");
+    assert_eq!(resp.headers()["x-portal-history-messages"], "0");
+
+    let resp = get(&f, Some(&f.outsider_auth), &uri).await;
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
 /// Close = archive-then-delete: DELETE `/api/sessions/{id}` on a session the
 /// sweep never archived must take a final snapshot first, so the transcript
 /// stays readable in History after the hot rows are gone.

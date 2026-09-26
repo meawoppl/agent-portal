@@ -18,6 +18,7 @@ mod service;
 mod worktree;
 
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 use tracing::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -245,6 +246,20 @@ enum MessageAction {
         #[arg(long)]
         json: bool,
     },
+    /// Download a session's complete known transcript as NDJSON
+    History {
+        /// Target session id (a unique prefix works)
+        agent_id: String,
+        /// Destination path (defaults to <session-id>.history.ndjson)
+        #[arg(short, long, conflicts_with = "stdout")]
+        output: Option<PathBuf>,
+        /// Write NDJSON to stdout instead of a file
+        #[arg(long, conflicts_with = "output")]
+        stdout: bool,
+        /// Replace an existing destination file
+        #[arg(long, conflicts_with = "stdout")]
+        force: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -431,6 +446,12 @@ async fn main() -> anyhow::Result<()> {
                     count,
                     json,
                 } => message::peek(&agent_id, count, json).await,
+                MessageAction::History {
+                    agent_id,
+                    output,
+                    stdout,
+                    force,
+                } => message::history(&agent_id, output.as_deref(), stdout, force).await,
             };
         }
         Some(Command::Show { file }) => {
