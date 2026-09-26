@@ -253,6 +253,7 @@ the typed Rust parsers for the agent CLIs' JSON protocols.
 | [Port Forwarding](docs/PORT_FORWARDING.md) | Tunnel design, subdomains, public forwards |
 | [Scheduled Tasks](docs/SCHEDULED_TASKS.md) | Cron tasks owned by the launcher |
 | [File Downloads](docs/PORTAL_FILE_DOWNLOADS.md) | `portal://file` links |
+| [Plugin Authoring](docs/PLUGIN_AUTHORING.md) | Writing plugins, skills, surfaces, commands, and toolchains |
 | [Codex Support](docs/CODEX_SUPPORT.md) | Codex integration notes |
 | [Deployment Guide](docs/DEPLOYING.md) | Production deployment and OAuth setup |
 | [Docker Guide](docs/DOCKER.md) | Docker and Kubernetes with 1Password |

@@ -9,9 +9,13 @@ the `agent-portal` launcher. A plugin gives a session a domain-specific work
 surface, agent instructions, and optional local tools without baking that domain
 into Agent Portal core.
 
-The motivating example is Backplane: a PCB workflow should appear beside chat as
-a polished workbench, but the PCB-specific parser, viewer, KiCad automation,
-and agent guidance should live outside this repo.
+For a practical plugin-author guide, including a complete manifest example and
+the contract for skills, surfaces, commands, and toolchains, see
+[`PLUGIN_AUTHORING.md`](PLUGIN_AUTHORING.md).
+
+The motivating example is the KiCad PCB plugin: a PCB workflow should appear
+beside chat as a polished workbench, but the PCB-specific parser, viewer, KiCad
+automation, and agent guidance should live outside this repo.
 
 ## Goals
 
@@ -60,11 +64,11 @@ The launcher owns a plugin root next to normal source checkouts:
 
 ```text
 ~/agent-portal-plugins/
-  backplane/
+  kicad-pcb/
     agent-portal-plugin.toml
     README.md
     bin/
-      backplane
+      kicad-pcb
     skills/
       pcb-workflow/SKILL.md
     prompts/
@@ -93,7 +97,7 @@ Plugin commands run with a plugin-local support home rooted inside that same
 installed directory:
 
 ```text
-~/agent-portal-plugins/backplane/.portal/
+~/agent-portal-plugins/kicad-pcb/.portal/
   home/
   cache/
   config/
@@ -107,14 +111,14 @@ Before invoking any manifest command, the launcher creates those directories and
 sets:
 
 ```text
-AGENT_PORTAL_PLUGIN_DIR=$AGENT_PORTAL_PLUGIN_ROOT/backplane
-AGENT_PORTAL_PLUGIN_HOME=$AGENT_PORTAL_PLUGIN_ROOT/backplane/.portal
-HOME=$AGENT_PORTAL_PLUGIN_ROOT/backplane/.portal/home
-XDG_CACHE_HOME=$AGENT_PORTAL_PLUGIN_ROOT/backplane/.portal/cache
-XDG_CONFIG_HOME=$AGENT_PORTAL_PLUGIN_ROOT/backplane/.portal/config
-XDG_DATA_HOME=$AGENT_PORTAL_PLUGIN_ROOT/backplane/.portal/data
-XDG_STATE_HOME=$AGENT_PORTAL_PLUGIN_ROOT/backplane/.portal/state
-AGENT_PORTAL_PLUGIN_TOOLCHAIN_ROOT=$AGENT_PORTAL_PLUGIN_ROOT/backplane/.portal/toolchains
+AGENT_PORTAL_PLUGIN_DIR=$AGENT_PORTAL_PLUGIN_ROOT/kicad-pcb
+AGENT_PORTAL_PLUGIN_HOME=$AGENT_PORTAL_PLUGIN_ROOT/kicad-pcb/.portal
+HOME=$AGENT_PORTAL_PLUGIN_ROOT/kicad-pcb/.portal/home
+XDG_CACHE_HOME=$AGENT_PORTAL_PLUGIN_ROOT/kicad-pcb/.portal/cache
+XDG_CONFIG_HOME=$AGENT_PORTAL_PLUGIN_ROOT/kicad-pcb/.portal/config
+XDG_DATA_HOME=$AGENT_PORTAL_PLUGIN_ROOT/kicad-pcb/.portal/data
+XDG_STATE_HOME=$AGENT_PORTAL_PLUGIN_ROOT/kicad-pcb/.portal/state
+AGENT_PORTAL_PLUGIN_TOOLCHAIN_ROOT=$AGENT_PORTAL_PLUGIN_ROOT/kicad-pcb/.portal/toolchains
 ```
 
 Installers and plugin runtimes should keep downloaded tools, generated support
@@ -154,12 +158,10 @@ agent-portal plugin open <name>
 Install sources:
 
 ```console
-agent-portal plugin install github:i2cjak/backplane
-agent-portal plugin install github:meawoppl/agent-portal-plugins//backplane
-agent-portal plugin install https://github.com/i2cjak/backplane.git
-agent-portal plugin install https://github.com/meawoppl/agent-portal-plugins.git//backplane
-agent-portal plugin install ./local-backplane
-agent-portal plugin install ./agent-portal-plugins/backplane
+agent-portal plugin install github:meawoppl/agent-portal-plugins//kicad-pcb
+agent-portal plugin install https://github.com/meawoppl/agent-portal-plugins.git//kicad-pcb
+agent-portal plugin install ./local-kicad-pcb
+agent-portal plugin install ./agent-portal-plugins/kicad-pcb
 ```
 
 `install` clones or copies into `agent-portal-plugins/<name>`, validates the
@@ -172,14 +174,14 @@ subdirectory using `//sub/path`. The subdirectory form is the smooth path for a
 shared plugin collection repo:
 
 ```text
-github:meawoppl/agent-portal-plugins//backplane
+github:meawoppl/agent-portal-plugins//kicad-pcb
 ```
 
 The launcher clones the source repo into an internal source cache, validates the
 manifest at the selected subdirectory, then materializes that plugin at:
 
 ```text
-$AGENT_PORTAL_PLUGIN_ROOT/backplane
+$AGENT_PORTAL_PLUGIN_ROOT/kicad-pcb
 ```
 
 The installed plugin path is still one directory per plugin; the source may be a
@@ -203,10 +205,10 @@ Every plugin has `agent-portal-plugin.toml` at its root.
 
 ```toml
 schema_version = 1
-name = "backplane"
-display_name = "Backplane"
+name = "kicad-pcb"
+display_name = "KiCad PCB"
 description = "PCB review, KiCad checks, Gerber export, and board visualization."
-homepage = "https://github.com/i2cjak/Backplane"
+homepage = "https://github.com/meawoppl/agent-portal-plugins/tree/main/kicad-pcb"
 license = "MIT"
 
 [compat]
@@ -215,36 +217,36 @@ platforms = ["linux", "macos"]
 
 [install]
 setup = "scripts/setup.sh"
-doctor = "bin/backplane doctor --json"
+doctor = "bin/kicad-pcb doctor --json"
 
 [surface]
 kind = "http"
-default_title = "Backplane"
+default_title = "KiCad PCB"
 default_width_percent = 50
 health_path = "/healthz"
-start = "bin/backplane serve --port {port} --session {session_id} --cwd {cwd}"
-stop = "bin/backplane stop --session {session_id}"
+start = "bin/kicad-pcb serve --port {port} --session {session_id} --cwd {cwd}"
+stop = "bin/kicad-pcb stop --session {session_id}"
 ready_url = "http://127.0.0.1:{port}/"
 
 [surface.env]
-AGENT_PORTAL_PLUGIN = "backplane"
+AGENT_PORTAL_PLUGIN = "kicad-pcb"
 
 [[commands]]
 name = "drc"
 description = "Run design-rule checks for the active board."
-run = "bin/backplane drc --cwd {cwd} --json"
+run = "bin/kicad-pcb drc --cwd {cwd} --json"
 
 [[commands]]
 name = "export-gerbers"
 description = "Export fabrication artifacts for review."
-run = "bin/backplane export gerbers --cwd {cwd} --out {artifact_dir}"
+run = "bin/kicad-pcb export gerbers --cwd {cwd} --out {artifact_dir}"
 
 [[toolchains]]
 name = "kicad"
 description = "Managed KiCad runtime used for deterministic ERC, DRC, and export."
 home = ".portal/toolchains/kicad"
-install = "bin/backplane setup --install-kicad --prefix {toolchain_home}"
-doctor = "bin/backplane doctor --toolchain kicad --prefix {toolchain_home} --json"
+install = "bin/kicad-pcb setup --install-kicad --prefix {toolchain_home}"
+doctor = "bin/kicad-pcb doctor --toolchain kicad --prefix {toolchain_home} --json"
 
 [toolchains.env]
 KICAD_CONFIG_HOME = "{toolchain_home}/config"
@@ -286,8 +288,8 @@ name = "gerber-package"
 any = ["*.gbr", "*.gtl", "*.gbl", "*.drl", "*.zip"]
 
 [[mcp]]
-name = "backplane"
-command = "bin/backplane"
+name = "kicad-pcb"
+command = "bin/kicad-pcb"
 args = ["mcp", "--cwd", "{cwd}"]
 ```
 
@@ -358,9 +360,9 @@ The first config file is `.portal/plugins.toml`:
 schema_version = 1
 
 [[suggested_plugins]]
-name = "backplane"
-source = "github:i2cjak/backplane"
-reason = "This repo contains KiCad board files and uses Backplane for PCB review."
+name = "kicad-pcb"
+source = "github:meawoppl/agent-portal-plugins//kicad-pcb"
+reason = "This repo contains KiCad board files and uses KiCad PCB for board review."
 required = false
 
 [suggested_plugins.config]
@@ -472,10 +474,10 @@ Plugin guidance should tell the agent:
 - what user approvals are required;
 - how to summarize plugin output in PRs.
 
-For Backplane, the guidance should say things like:
+For the KiCad PCB plugin, the guidance should say things like:
 
 - detect KiCad and Gerber projects;
-- open the Backplane surface before explaining visual board state;
+- open the KiCad PCB surface before explaining visual board state;
 - run DRC/ERC before declaring PCB work complete;
 - export Gerbers/BOM/position files into an artifact directory;
 - show rendered images or the live surface rather than only textual claims;
@@ -486,7 +488,7 @@ For Backplane, the guidance should say things like:
 
 Installed plugins can activate in three ways:
 
-1. **Manual**: user or agent runs `agent-portal plugin open backplane`.
+1. **Manual**: user or agent runs `agent-portal plugin open kicad-pcb`.
 2. **Repo-suggested**: launcher finds `.portal/plugins.toml` in the session cwd
    or an ancestor and exposes install/open suggestions for listed plugins.
 3. **Detected**: launcher sees manifest `detect` rules matching the session cwd
@@ -509,11 +511,11 @@ Suggested plugins are represented separately from active plugin services:
 
 ```json
 {
-  "name": "backplane",
-  "source": "github:i2cjak/backplane",
+  "name": "kicad-pcb",
+  "source": "github:meawoppl/agent-portal-plugins//kicad-pcb",
   "installed": true,
   "enabled": true,
-  "reason": "This repo contains KiCad board files and uses Backplane for PCB review.",
+  "reason": "This repo contains KiCad board files and uses KiCad PCB for board review.",
   "confidence": "explicit",
   "config_source": ".portal/plugins.toml"
 }
@@ -526,9 +528,9 @@ The launcher config stores install metadata:
 ```json
 {
   "plugins": {
-    "backplane": {
-      "path": "/home/alice/agent-portal-plugins/backplane",
-      "source": "https://github.com/i2cjak/Backplane.git",
+    "kicad-pcb": {
+      "path": "/home/alice/agent-portal-plugins/kicad-pcb",
+      "source": "https://github.com/meawoppl/agent-portal-plugins.git//kicad-pcb",
       "source_subdir": ".",
       "ref": "main",
       "enabled": true,
@@ -542,10 +544,10 @@ Surface runtime state is local to the installed plugin:
 
 ```json
 {
-  "plugin": "backplane",
+  "plugin": "kicad-pcb",
   "port": 43817,
   "pid": 12345,
-  "command": "bin/backplane serve --port 43817 --session ... --cwd ...",
+  "command": "bin/kicad-pcb serve --port 43817 --session ... --cwd ...",
   "cwd": "/home/alice/repo",
   "session_id": "...",
   "health_path": "/healthz",
@@ -556,7 +558,7 @@ Surface runtime state is local to the installed plugin:
 It is written to:
 
 ```text
-$AGENT_PORTAL_PLUGIN_ROOT/backplane/.portal/state/surfaces/surface.json
+$AGENT_PORTAL_PLUGIN_ROOT/kicad-pcb/.portal/state/surfaces/surface.json
 ```
 
 `agent-portal plugin start` reuses that process when the health check still
@@ -606,14 +608,14 @@ inside a plugin collection repo. Update should:
 
 Pinned refs should not move unless the user asks. Branch refs can move.
 
-## Backplane Mapping
+## KiCad PCB Mapping
 
-Backplane should be packaged as:
+The KiCad PCB plugin should be packaged as:
 
 ```text
-agent-portal-plugins/backplane/
+agent-portal-plugins/kicad-pcb/
   agent-portal-plugin.toml
-  bin/backplane
+  bin/kicad-pcb
   skills/pcb-workflow/SKILL.md
   prompts/session.md
 ```

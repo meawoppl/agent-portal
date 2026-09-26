@@ -1,8 +1,8 @@
 # Split Forwarder and Electronics Session Plan
 
 This document lays out the durable session work surface used by forwarded apps
-today and the path toward PCB/electronics workflows inspired by Backplane and
-PasteBOM.
+today and the path toward PCB/electronics workflows inspired by the KiCad PCB
+plugin and PasteBOM.
 
 ## Objective
 
@@ -151,9 +151,10 @@ proxy rewriting, and tunnel transport should not change in the split-view PR.
 
 ## Electronics Synthesis
 
-Backplane's useful pattern is not merely a PCB viewer. It is an environment
-runtime: the machine that owns the checkout owns tools, terminals, Git, provider
-credentials, and local files. Remote clients view and control that environment.
+The KiCad PCB plugin's useful pattern is not merely a PCB viewer. It is an
+environment runtime: the machine that owns the checkout owns tools, terminals,
+Git, provider credentials, and local files. Remote clients view and control that
+environment.
 
 Agent Portal already has the right architecture for this through launchers,
 sessions, forwards, file download, media display, and per-session agent context.
@@ -167,9 +168,9 @@ PasteBOM contributes a concrete artifact pipeline:
 4. render a browser viewer with BOM, layers, nets, search, pan/zoom, and
    thumbnails.
 
-Backplane contributes workflow coverage:
+The KiCad PCB plugin contributes workflow coverage:
 
-- `.backplane.json` project assignment;
+- `.kicad-pcb.json` project assignment;
 - KiCad/schematic/Gerber/3D/BOM/footprint/symbol/panelization views;
 - KiCad CLI and Python tool probing;
 - ERC/DRC/export loops;
@@ -177,13 +178,13 @@ Backplane contributes workflow coverage:
 - source-control and PR flow after inspection.
 
 Agent Portal should synthesize these into an `Electronics Workspace` capability
-rather than vendoring all of Backplane.
+rather than making the core product electronics-specific.
 
 ## Electronics Session Flow
 
 1. Session starts in a repo.
 2. Launcher probes the checkout for hardware signals:
-   - `.backplane.json`;
+   - `.kicad-pcb.json`;
    - `.kicad_pro`, `.kicad_pcb`, `.kicad_sch`;
    - Gerber ZIPs;
    - ODB++ archives;
@@ -389,14 +390,14 @@ Exit criteria:
 
 Scope:
 
-- Support `.backplane.json` as a read-only project manifest.
+- Support `.kicad-pcb.json` as a read-only project manifest.
 - Detect common board/schematic/manufacturing files when no manifest exists.
 - Expose detected electronics state in the UI.
 - Add agent-facing instructions for detected electronics repos.
 
 Exit criteria:
 
-- A Backplane-configured repo opens the expected board file.
+- A `.kicad-pcb.json` configured repo opens the expected board file.
 - A plain KiCad repo is discovered without manual configuration.
 - The user can override the selected board/schematic for the session.
 
@@ -555,8 +556,8 @@ Electronics tests, once implemented:
   always unmount when returning to chat to save memory?
 - Should electronics artifacts use the existing media archive path or a distinct
   artifact table with metadata and lifecycle rules?
-- Should `.backplane.json` be supported as the canonical electronics manifest,
-  or should Portal create its own manifest while importing Backplane fields?
+- Should `.kicad-pcb.json` be supported as the canonical electronics manifest,
+  or should Portal create its own manifest while importing compatible fields?
 - Should the first PCB viewer be a forwarded sidecar app, a native Portal WASM
   component, or both?
 - What is the retention policy for generated board JSON, thumbnails, and
