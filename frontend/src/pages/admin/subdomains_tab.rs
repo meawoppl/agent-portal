@@ -105,12 +105,7 @@ pub fn admin_subdomains_tab() -> Html {
                     }
                     Ok(resp) => {
                         // Deconfliction / validation message from the backend.
-                        let msg = resp.text().await.unwrap_or_default();
-                        error.set(Some(if msg.is_empty() {
-                            format!("Failed (HTTP {})", resp.status())
-                        } else {
-                            msg
-                        }));
+                        error.set(Some(utils::error_body(resp).await));
                     }
                     Err(e) => error.set(Some(format!("Request failed: {e}"))),
                 }
