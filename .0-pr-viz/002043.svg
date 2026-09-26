@@ -1,24 +1,24 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" font-family="'Segoe UI','Noto Sans',sans-serif">
-  <rect width="1600" height="900" fill="#1a1b26"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200" font-family="'Segoe UI','Noto Sans',sans-serif">
+  <rect width="2000" height="1200" fill="#16161e"/>
   <text x="60" y="65" font-size="24" fill="#565f89">PR #2043 - deterministic Codex fork startup</text>
   <text x="60" y="125" font-size="38" fill="#c0caf5">The child sees its fork notice before it can act.</text>
   <text x="60" y="170" font-size="24" fill="#a9b1d6">codex-session-lib gates queued input until the portal notice is delivered.</text>
-  <rect x="70" y="260" width="410" height="330" rx="18" fill="#202334" stroke="#7aa2f7" stroke-width="3"/>
+  <rect x="70" y="260" width="410" height="330" rx="18" fill="#1e202e" stroke="#7aa2f7" stroke-width="3"/>
   <text x="110" y="325" font-size="26" fill="#7aa2f7">Thread starts</text>
   <text x="110" y="395" font-size="23" fill="#c0caf5">app-server connected</text>
   <text x="110" y="445" font-size="23" fill="#c0caf5">forked thread ready</text>
   <path d="M500 425H660" stroke="#bb9af7" stroke-width="5"/>
-  <rect x="680" y="260" width="410" height="330" rx="18" fill="#202334" stroke="#bb9af7" stroke-width="3"/>
+  <rect x="680" y="260" width="410" height="330" rx="18" fill="#1e202e" stroke="#bb9af7" stroke-width="3"/>
   <text x="720" y="325" font-size="26" fill="#bb9af7">Portal notice</text>
   <text x="720" y="395" font-size="23" fill="#c0caf5">child identity</text>
   <text x="720" y="445" font-size="23" fill="#c0caf5">parent continues</text>
   <text x="720" y="500" font-size="22" fill="#9ece6a">delivery acknowledged</text>
   <path d="M1110 425H1270" stroke="#9ece6a" stroke-width="5"/>
-  <rect x="1290" y="260" width="240" height="330" rx="18" fill="#202334" stroke="#9ece6a" stroke-width="3"/>
+  <rect x="1290" y="260" width="240" height="330" rx="18" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
   <text x="1330" y="325" font-size="26" fill="#9ece6a">Inputs</text>
   <text x="1330" y="405" font-size="23" fill="#c0caf5">released</text>
   <text x="1330" y="455" font-size="23" fill="#c0caf5">in order</text>
-  <rect x="70" y="690" width="1460" height="125" rx="16" fill="#202334" stroke="#565f89"/>
+  <rect x="70" y="690" width="1460" height="125" rx="16" fill="#1e202e" stroke="#565f89"/>
   <text x="110" y="745" font-size="25" fill="#7dcfff">Invariant</text>
   <text x="255" y="745" font-size="24" fill="#c0caf5">No user direction can overtake the injected fork context.</text>
   <text x="110" y="785" font-size="21" fill="#565f89">The child always knows it is the child before processing divergent work.</text>
