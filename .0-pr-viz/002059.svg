@@ -24,7 +24,7 @@
   <rect x="795" y="365" width="410" height="120" rx="10" fill="#1a1b26" stroke="#e0af68"/>
   <text x="825" y="415" font-size="25" fill="#e0af68">durable archive</text>
   <text x="825" y="452" font-size="21" fill="#a9b1d6">rows surviving retention</text>
-  <text x="980" y="550" font-size="38" fill="#bb9af7">∪</text>
+  <text x="980" y="550" font-size="38" fill="#bb9af7">+</text>
   <rect x="795" y="605" width="410" height="120" rx="10" fill="#1a1b26" stroke="#7dcfff"/>
   <text x="825" y="655" font-size="25" fill="#7dcfff">current database</text>
   <text x="825" y="692" font-size="21" fill="#a9b1d6">new rows after archive</text>
@@ -35,7 +35,7 @@
   <rect x="1470" y="255" width="470" height="610" rx="18" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
   <text x="1505" y="310" font-size="24" font-weight="700" fill="#9ece6a">DOWNLOAD</text>
   <text x="1505" y="375" font-size="25" fill="#c0caf5">canonical NDJSON</text>
-  <text x="1505" y="420" font-size="22" fill="#a9b1d6">chunked response → .part file</text>
+  <text x="1505" y="420" font-size="22" fill="#a9b1d6">chunked response -&gt; .part file</text>
   <text x="1505" y="460" font-size="22" fill="#a9b1d6">rename only after success</text>
   <rect x="1505" y="530" width="390" height="105" rx="10" fill="#1a1b26" stroke="#565f89"/>
   <text x="1530" y="575" font-size="21" fill="#c0caf5">&lt;uuid&gt;.history.ndjson</text>
@@ -46,7 +46,7 @@
 
   <rect x="60" y="930" width="1880" height="165" rx="16" fill="#1e202e" stroke="#3d4666"/>
   <text x="95" y="980" font-size="25" fill="#7dcfff">The honesty contract</text>
-  <text x="95" y="1025" font-size="24" fill="#c0caf5">Archive present → complete archive + hot tail. No transcript archive → retained rows exported with a loud warning.</text>
-  <text x="95" y="1065" font-size="22" fill="#565f89">The CLI never labels a possibly retention-trimmed transcript “complete,” and never overwrites a prior download silently.</text>
+  <text x="95" y="1025" font-size="24" fill="#c0caf5">Archive present -&gt; complete archive + hot tail. No transcript archive -&gt; retained rows plus a warning.</text>
+  <text x="95" y="1065" font-size="22" fill="#565f89">The CLI never labels a possibly retention-trimmed transcript "complete," and never overwrites silently.</text>
   <text x="55" y="1170" font-size="22" fill="#565f89">Read-only · authenticated with the existing launcher token · discoverable in every injected portal reminder</text>
 </svg>
