@@ -43,6 +43,14 @@ pub fn contains_case_insensitive(haystack: &str, needle: &str) -> bool {
         .contains(&needle.to_ascii_lowercase())
 }
 
+/// The trimmed text when `value` holds non-whitespace text; `None` when it is
+/// absent or blank. Single home for the repeated
+/// `.map(str::trim).filter(|s| !s.is_empty())` chain on optional inputs.
+#[must_use]
+pub fn trimmed_non_blank(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|s| !s.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -76,5 +84,17 @@ mod tests {
     #[test]
     fn contains_case_insensitive_empty_needle_matches_everything() {
         assert!(contains_case_insensitive("anything", ""));
+    }
+
+    #[test]
+    fn trimmed_non_blank_trims_or_rejects() {
+        assert_eq!(
+            trimmed_non_blank(Some("  api-refactor  ")),
+            Some("api-refactor")
+        );
+        assert_eq!(trimmed_non_blank(Some("hi")), Some("hi"));
+        assert_eq!(trimmed_non_blank(Some("   ")), None);
+        assert_eq!(trimmed_non_blank(Some("")), None);
+        assert_eq!(trimmed_non_blank(None), None);
     }
 }
