@@ -10,7 +10,7 @@
 
   <rect x="70" y="250" width="680" height="610" rx="18" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
   <text x="105" y="305" font-size="24" font-weight="700" fill="#f7768e">BEFORE</text>
-  <rect x="110" y="355" width="600" height="245" rx="12" fill="#1a1b26" stroke="#565f89"/>
+  <rect x="110" y="355" width="600" height="245" rx="12" fill="#16161e" stroke="#565f89"/>
   <text x="145" y="410" font-size="23" fill="#f7768e">Error</text>
   <text x="145" y="468" font-size="25" fill="#c0caf5">Failed to authenticate:</text>
   <text x="145" y="508" font-size="25" fill="#c0caf5">OAuth session expired and could</text>
@@ -24,7 +24,7 @@
 
   <rect x="1160" y="250" width="770" height="610" rx="18" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
   <text x="1195" y="305" font-size="24" font-weight="700" fill="#9ece6a">AFTER</text>
-  <rect x="1200" y="355" width="690" height="335" rx="12" fill="#1a1b26" stroke="#7aa2f7"/>
+  <rect x="1200" y="355" width="690" height="335" rx="12" fill="#16161e" stroke="#7aa2f7"/>
   <text x="1235" y="410" font-size="23" fill="#f7768e">Error</text>
   <text x="1235" y="468" font-size="25" fill="#c0caf5">Failed to authenticate:</text>
   <text x="1235" y="508" font-size="25" fill="#c0caf5">OAuth session expired and could not be refreshed</text>
