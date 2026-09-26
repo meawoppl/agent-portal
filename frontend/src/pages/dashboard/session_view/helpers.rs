@@ -11,6 +11,7 @@
 use crate::components::message_renderer::types::ClaudeMessage;
 use crate::components::message_renderer::RenderedMessage;
 use crate::pages::dashboard::types::PendingPermission;
+use crate::utils::non_empty;
 use codex_codes::io::items::{FileUpdateChange, ThreadItem};
 use std::collections::HashSet;
 
@@ -770,31 +771,20 @@ pub(crate) fn format_tool_elapsed(seconds: f64) -> String {
 pub(crate) fn ephemeral_summary(payload: &serde_json::Value) -> Option<String> {
     let inner = payload.get("payload");
     // Streaming output text (muse `run.output.delta`).
-    if let Some(text) = inner
-        .and_then(|p| p.get("text"))
-        .and_then(|t| t.as_str())
-        .map(str::trim)
-        .filter(|t| !t.is_empty())
-    {
+    if let Some(text) = non_empty(inner.and_then(|p| p.get("text")).and_then(|t| t.as_str())) {
         return Some(text.to_string());
     }
     // Status message (muse `task.lifecycle.status`).
-    if let Some(msg) = inner
-        .and_then(|p| p.get("event"))
-        .and_then(|e| e.get("message"))
-        .and_then(|m| m.as_str())
-        .map(str::trim)
-        .filter(|m| !m.is_empty())
-    {
+    if let Some(msg) = non_empty(
+        inner
+            .and_then(|p| p.get("event"))
+            .and_then(|e| e.get("message"))
+            .and_then(|m| m.as_str()),
+    ) {
         return Some(msg.to_string());
     }
     // Fallback: name the frame by its type rather than showing nothing.
-    payload
-        .get("payload_type")
-        .and_then(|t| t.as_str())
-        .map(str::trim)
-        .filter(|t| !t.is_empty())
-        .map(str::to_string)
+    non_empty(payload.get("payload_type").and_then(|t| t.as_str())).map(str::to_string)
 }
 
 /// Transient Muse records for the currently-running turn. Durable journal
