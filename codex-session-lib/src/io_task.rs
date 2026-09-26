@@ -455,6 +455,11 @@ pub(crate) async fn codex_io_task(
     let mut current_turn_context_window: Option<i64> = None;
     let mut current_turn_model: Option<String> = None;
     let mut subagent_token_tracker = CodexSubagentTokenTracker::new(thread_id.clone());
+    // A native Codex `thread/fork` can have late or active-turn frames ready
+    // before the portal websocket has replayed the durable fork notice. For a
+    // forked session, the first portal input is the semantic branch point, so
+    // wait for it before draining unsolicited app-server messages.
+    let mut awaiting_initial_fork_input = !config.resume && config.fork_from_session_id.is_some();
 
     loop {
         if state.turn_active() {
@@ -904,6 +909,56 @@ pub(crate) async fn codex_io_task(
                 }
             }
         } else {
+            if awaiting_initial_fork_input {
+                match command_rx.recv().await {
+                    Some(IoCommand::UserInput {
+                        text,
+                        reasoning_effort,
+                        delivered,
+                        display_event,
+                    }) => {
+                        if text.is_empty() {
+                            if let Some(delivered) = delivered {
+                                let _ = delivered.send(Ok(()));
+                            }
+                            continue;
+                        }
+                        awaiting_initial_fork_input = false;
+                        turn_tracker.start(Instant::now(), chrono::Utc::now());
+                        let started = start_codex_turn(
+                            &mut client,
+                            &thread_id,
+                            text,
+                            display_event,
+                            reasoning_effort,
+                            delivered,
+                            &event_tx,
+                        )
+                        .await;
+                        state.set_turn_active(started);
+                    }
+                    Some(IoCommand::Permission {
+                        request_id,
+                        decision,
+                    }) => {
+                        let rid = parse_request_id(&request_id);
+                        let kind = state.take_approval_kind(&request_id);
+                        let result = codex_approval_result(&decision, kind);
+                        if let Err(e) = client.respond(rid, &result).await {
+                            tracing::error!("Failed to send pre-fork-input Codex approval: {}", e);
+                        }
+                    }
+                    Some(IoCommand::Interrupt) => {
+                        // No active turn — nothing to interrupt.
+                    }
+                    None => {
+                        let _ = event_tx.send(IoEvent::Exited { code: 0 });
+                        break;
+                    }
+                }
+                continue;
+            }
+
             // Keep draining app-server messages while idle. `turn/completed`
             // ends the active state, but Codex may have already queued a final
             // item/notice behind it. Waiting only on `command_rx` here strands
