@@ -673,11 +673,13 @@ pub fn stop(name: &str) -> Result<()> {
                 ("cwd", state.cwd.clone()),
             ]),
         )?;
-    } else if let Some(pid) = state.pid {
+    } else if state.pid.is_some() {
         #[cfg(unix)]
-        {
+        if let Some(pid) = state.pid {
             let _ = Command::new("kill").arg(pid.to_string()).status();
         }
+        #[cfg(not(unix))]
+        eprintln!("plugin `{name}` declares no stop command; removing stale surface state only");
     }
     let _ = std::fs::remove_file(surface_state_path(&runtime));
     println!("stopped `{name}` surface.");
