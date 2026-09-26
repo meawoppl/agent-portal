@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200" font-family="'Segoe UI','Noto Sans',sans-serif">
+  <rect width="2000" height="1200" fill="#16161e"/>
+  <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0L10 5L0 10z" fill="#7aa2f7"/></marker></defs>
+  <text x="55" y="58" font-size="24" fill="#565f89">PR #2059 · complete session history for agents</text>
+  <text x="55" y="118" font-size="38" fill="#e6e9f5">Inspect the whole durable conversation without flooding agent context.</text>
+  <text x="55" y="160" font-size="25" fill="#a9b1d6">One read-only command spans live rows, durable archives, and archive-only sessions.</text>
+  <line x1="55" y1="194" x2="1945" y2="194" stroke="#3d4666"/>
+
+  <rect x="60" y="255" width="470" height="610" rx="18" fill="#1e202e" stroke="#7aa2f7" stroke-width="2"/>
+  <text x="95" y="310" font-size="24" font-weight="700" fill="#7aa2f7">RESOLVE</text>
+  <text x="95" y="370" font-size="26" fill="#c0caf5">message history 0c24805b</text>
+  <text x="95" y="425" font-size="23" fill="#a9b1d6">unique short or full UUID</text>
+  <text x="95" y="465" font-size="23" fill="#a9b1d6">live session index first</text>
+  <text x="95" y="505" font-size="23" fill="#a9b1d6">paged archive index fallback</text>
+  <rect x="95" y="580" width="390" height="160" rx="12" fill="#1a1b26" stroke="#565f89"/>
+  <text x="120" y="625" font-size="22" fill="#9ece6a">same-user membership ACL</text>
+  <text x="120" y="665" font-size="22" fill="#9ece6a">shared archive ACL</text>
+  <text x="120" y="705" font-size="22" fill="#9ece6a">no existence leak</text>
+
+  <path d="M550 560H720" stroke="#7aa2f7" stroke-width="4" marker-end="url(#a)"/>
+
+  <rect x="750" y="255" width="500" height="610" rx="18" fill="#1e202e" stroke="#bb9af7" stroke-width="2"/>
+  <text x="785" y="310" font-size="24" font-weight="700" fill="#bb9af7">MERGE</text>
+  <rect x="795" y="365" width="410" height="120" rx="10" fill="#1a1b26" stroke="#e0af68"/>
+  <text x="825" y="415" font-size="25" fill="#e0af68">durable archive</text>
+  <text x="825" y="452" font-size="21" fill="#a9b1d6">rows surviving retention</text>
+  <text x="980" y="550" font-size="38" fill="#bb9af7">+</text>
+  <rect x="795" y="605" width="410" height="120" rx="10" fill="#1a1b26" stroke="#7dcfff"/>
+  <text x="825" y="655" font-size="25" fill="#7dcfff">current database</text>
+  <text x="825" y="692" font-size="21" fill="#a9b1d6">new rows after archive</text>
+  <text x="810" y="800" font-size="22" fill="#9ece6a">UUID dedupe · chronological order</text>
+
+  <path d="M1270 560H1440" stroke="#7aa2f7" stroke-width="4" marker-end="url(#a)"/>
+
+  <rect x="1470" y="255" width="470" height="610" rx="18" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1505" y="310" font-size="24" font-weight="700" fill="#9ece6a">DOWNLOAD</text>
+  <text x="1505" y="375" font-size="25" fill="#c0caf5">canonical NDJSON</text>
+  <text x="1505" y="420" font-size="22" fill="#a9b1d6">chunked response -&gt; .part file</text>
+  <text x="1505" y="460" font-size="22" fill="#a9b1d6">rename only after success</text>
+  <rect x="1505" y="530" width="390" height="105" rx="10" fill="#1a1b26" stroke="#565f89"/>
+  <text x="1530" y="575" font-size="21" fill="#c0caf5">&lt;uuid&gt;.history.ndjson</text>
+  <text x="1530" y="608" font-size="19" fill="#565f89">protected unless --force</text>
+  <text x="1505" y="710" font-size="22" fill="#7dcfff">--stdout is explicit</text>
+  <text x="1505" y="752" font-size="22" fill="#e0af68">partial-history warning</text>
+  <text x="1505" y="794" font-size="22" fill="#a9b1d6">message count reported</text>
+
+  <rect x="60" y="930" width="1880" height="165" rx="16" fill="#1e202e" stroke="#3d4666"/>
+  <text x="95" y="980" font-size="25" fill="#7dcfff">The honesty contract</text>
+  <text x="95" y="1025" font-size="24" fill="#c0caf5">Archive present -&gt; complete archive + hot tail. No transcript archive -&gt; retained rows plus a warning.</text>
+  <text x="95" y="1065" font-size="22" fill="#565f89">The CLI never labels a possibly retention-trimmed transcript "complete," and never overwrites silently.</text>
+  <text x="55" y="1170" font-size="22" fill="#565f89">Read-only · authenticated with the existing launcher token · discoverable in every injected portal reminder</text>
+</svg>

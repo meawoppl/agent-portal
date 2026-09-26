@@ -50,7 +50,7 @@ use crate::handlers::media_store::{parse_range, RangeOutcome};
 use crate::models::User;
 use crate::AppState;
 
-fn archive_runtime(app_state: &AppState) -> Result<Arc<ArchiveRuntime>, AppError> {
+pub(crate) fn archive_runtime(app_state: &AppState) -> Result<Arc<ArchiveRuntime>, AppError> {
     app_state
         .archive
         .clone()
@@ -59,7 +59,7 @@ fn archive_runtime(app_state: &AppState) -> Result<Arc<ArchiveRuntime>, AppError
 
 /// Run a blocking archive-store closure on the blocking pool, mapping both
 /// the join failure and the store's io::Error to [`AppError`].
-async fn on_blocking<T: Send + 'static>(
+pub(crate) async fn on_blocking<T: Send + 'static>(
     f: impl FnOnce() -> std::io::Result<T> + Send + 'static,
 ) -> Result<T, AppError> {
     tokio::task::spawn_blocking(f)
@@ -305,6 +305,7 @@ fn session_summary(row: &scan::FlatRow) -> HistorySessionSummary {
         message_count: row.message_count(),
         user_message_count: m.user_message_count,
         media_count: row.media_count() as i64,
+        transcript_available: m.transcript.is_some(),
         models: m.turns.models.clone(),
     }
 }

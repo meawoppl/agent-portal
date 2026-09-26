@@ -106,6 +106,10 @@ pub struct HistorySessionSummary {
     pub user_message_count: Option<i64>,
     #[serde(default)]
     pub media_count: i64,
+    /// Whether the archive contains a durable transcript body rather than
+    /// metadata only.
+    #[serde(default)]
+    pub transcript_available: bool,
     #[serde(default)]
     pub models: Vec<String>,
 }

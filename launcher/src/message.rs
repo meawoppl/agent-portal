@@ -6,9 +6,13 @@
 //! input turn, attributed with the sender's session id.
 
 use anyhow::{anyhow, Context, Result};
+use std::path::{Path, PathBuf};
+use tokio::io::AsyncWriteExt;
+use uuid::Uuid;
 
 use shared::api::{
-    AgentSessionsResponse, PeekMessagesResponse, SendAgentMessageRequest, SendAgentMessageResponse,
+    AgentSessionsResponse, HistorySessionSummary, HistorySessionsResponse, PeekMessagesResponse,
+    SendAgentMessageRequest, SendAgentMessageResponse,
 };
 
 /// The calling agent's own portal session id, read from whatever the agent
@@ -411,6 +415,188 @@ pub async fn peek(agent_id: &str, count: i64, json: bool) -> Result<()> {
     Ok(())
 }
 
+/// `agent-portal message history <agent-id>` — download the full known raw
+/// transcript without injecting it into the caller's context by default.
+pub async fn history(
+    agent_id: &str,
+    output: Option<&Path>,
+    stdout: bool,
+    force: bool,
+) -> Result<()> {
+    let (base, token) = api_base()?;
+    let client = reqwest::Client::new();
+    let sessions = fetch_sessions(&client, &base, &token).await?;
+    let prefix = normalize_session_id_prefix(agent_id)?;
+    let live_matches: Vec<_> = sessions
+        .sessions
+        .iter()
+        .filter(|session| shared::uuid_matches_prefix(&session.id, &prefix))
+        .collect();
+    let (resolved, archived_match) = match live_matches.as_slice() {
+        [session] => (session.id, None),
+        [] => {
+            let archives = fetch_archived_sessions(&client, &base, &token).await?;
+            let archived = resolve_archived_session(agent_id, &archives)?.clone();
+            let id = Uuid::parse_str(&archived.session_id)
+                .context("backend returned an invalid archived session id")?;
+            (id, Some(archived))
+        }
+        _ => {
+            return Err(anyhow!(
+                "session id prefix `{}` is ambiguous; use more characters or a full id",
+                agent_id.trim()
+            ));
+        }
+    };
+    let request_url = archived_match.as_ref().map_or_else(
+        || format!("{base}/api/agent/sessions/{resolved}/history"),
+        |archived| {
+            format!(
+                "{base}/api/history/sessions/{}/{}/messages",
+                archived.user_id, archived.session_id
+            )
+        },
+    );
+    let mut resp =
+        request_with_retry(true, || client.get(&request_url).bearer_auth(&token).send()).await?;
+    let (complete, count) = archived_match.as_ref().map_or_else(
+        || {
+            (
+                resp.headers()
+                    .get("x-portal-history-complete")
+                    .and_then(|value| value.to_str().ok())
+                    == Some("true"),
+                resp.headers()
+                    .get("x-portal-history-messages")
+                    .and_then(|value| value.to_str().ok())
+                    .unwrap_or("unknown")
+                    .to_string(),
+            )
+        },
+        |archived| {
+            (
+                archived.transcript_available,
+                archived.message_count.to_string(),
+            )
+        },
+    );
+
+    if stdout {
+        let mut destination = tokio::io::stdout();
+        while let Some(chunk) = resp.chunk().await.context("history download failed")? {
+            destination.write_all(&chunk).await?;
+        }
+        destination.flush().await?;
+    } else {
+        let destination = output
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from(format!("{resolved}.history.ndjson")));
+        write_history_atomically(&mut resp, &destination, force).await?;
+        println!("Downloaded {count} messages to {}.", destination.display());
+    }
+    if !complete {
+        eprintln!(
+            "warning: no durable transcript archive exists for this session; the download contains all retained messages, but older retention-trimmed rows may be unavailable"
+        );
+    }
+    Ok(())
+}
+
+async fn fetch_archived_sessions(
+    client: &reqwest::Client,
+    base: &str,
+    token: &str,
+) -> Result<Vec<HistorySessionSummary>> {
+    let mut sessions = Vec::new();
+    let mut offset = 0usize;
+    loop {
+        let resp = request_with_retry(true, || {
+            client
+                .get(format!("{base}/api/history/sessions"))
+                .query(&[
+                    ("limit", shared::api::MAX_HISTORY_PAGE_SIZE),
+                    ("offset", offset),
+                ])
+                .bearer_auth(token)
+                .send()
+        })
+        .await?;
+        let page: HistorySessionsResponse = resp.json().await.context("malformed response")?;
+        let fetched = page.sessions.len();
+        sessions.extend(page.sessions);
+        offset += fetched;
+        if fetched == 0 || offset >= page.total.max(0) as usize {
+            break;
+        }
+    }
+    Ok(sessions)
+}
+
+fn resolve_archived_session<'a>(
+    input: &str,
+    sessions: &'a [HistorySessionSummary],
+) -> Result<&'a HistorySessionSummary> {
+    let prefix = normalize_session_id_prefix(input)?;
+    let matches: Vec<_> = sessions
+        .iter()
+        .filter(|session| session.session_id.replace('-', "").starts_with(&prefix))
+        .collect();
+    match matches.as_slice() {
+        [session] => Ok(session),
+        [] => Err(anyhow!(
+            "no live or archived session id matches `{}`",
+            input.trim()
+        )),
+        _ => Err(anyhow!(
+            "archived session id prefix `{}` is ambiguous; use more characters or a full id",
+            input.trim()
+        )),
+    }
+}
+
+async fn write_history_atomically(
+    response: &mut reqwest::Response,
+    destination: &Path,
+    force: bool,
+) -> Result<()> {
+    if destination.exists() && !force {
+        return Err(anyhow!(
+            "{} already exists; choose --output or pass --force",
+            destination.display()
+        ));
+    }
+    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = destination
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| anyhow!("destination must have a UTF-8 file name"))?;
+    let temporary = parent.join(format!(".{file_name}.{}.part", std::process::id()));
+    let result = async {
+        let mut file = tokio::fs::File::create(&temporary)
+            .await
+            .with_context(|| format!("could not create {}", temporary.display()))?;
+        while let Some(chunk) = response.chunk().await.context("history download failed")? {
+            file.write_all(&chunk).await?;
+        }
+        file.flush().await?;
+        drop(file);
+        if force && destination.exists() {
+            tokio::fs::remove_file(destination)
+                .await
+                .with_context(|| format!("could not replace {}", destination.display()))?;
+        }
+        tokio::fs::rename(&temporary, destination)
+            .await
+            .with_context(|| format!("could not finalize {}", destination.display()))?;
+        Ok::<_, anyhow::Error>(())
+    }
+    .await;
+    if result.is_err() {
+        let _ = tokio::fs::remove_file(&temporary).await;
+    }
+    result
+}
+
 /// Render a peek response: a one-line status header, then one line per
 /// message (oldest first) with a relative age, the coarse kind, and the
 /// backend's capped summary.
@@ -553,6 +739,33 @@ mod tests {
             awaiting_permission: false,
             last_activity: String::new(),
         }
+    }
+
+    fn archived_session(id: &str) -> HistorySessionSummary {
+        serde_json::from_str(&format!(
+            r#"{{"session_id":"{id}","user_id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","transcript_available":true}}"#
+        ))
+        .expect("valid archived session")
+    }
+
+    #[test]
+    fn archived_session_resolution_accepts_unique_prefix_and_rejects_ambiguity() {
+        let sessions = vec![
+            archived_session("12345678-0000-0000-0000-000000000000"),
+            archived_session("abcdef12-0000-0000-0000-000000000000"),
+        ];
+        assert_eq!(
+            resolve_archived_session("12345678", &sessions)
+                .expect("unique archive")
+                .session_id,
+            "12345678-0000-0000-0000-000000000000"
+        );
+
+        let colliding = vec![
+            archived_session("12345678-0000-0000-0000-000000000000"),
+            archived_session("12345678-1111-0000-0000-000000000000"),
+        ];
+        assert!(resolve_archived_session("12345678", &colliding).is_err());
     }
 
     #[test]
