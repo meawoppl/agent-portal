@@ -581,8 +581,8 @@ pub enum LoginPresentable {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum LoginInteraction {
-    /// The provider shows the user a code to paste back into the portal
-    /// (claude has no device-code mode): present a code field, then submit.
+    /// Present a code field as a fallback alongside polling for browser
+    /// approval (Claude). Submit only when the provider asks for a code.
     SubmitCode,
     /// Sign-in completes entirely in the provider's browser/device page
     /// (codex): the portal polls for the async completion.

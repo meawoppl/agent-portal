@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2055 · Update claude-codes and detect browser sign-in completion</text>
+<text x="55" y="108" font-family="sans-serif" font-size="34" fill="#e6e9f5">Claude sign-in waited for a pasted code after browser approval.</text>
+<text x="55" y="153" font-family="sans-serif" font-size="34" fill="#e6e9f5">Poll saved credentials so approval completes, with code entry as a fallback.</text>
+<path d="M 55 183 H 1945" stroke="#565f89"/>
+<path d="M 1000 190 V 1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="65" y="235" font-family="sans-serif" font-size="26" fill="#f7768e">BEFORE</text>
+<text x="1060" y="235" font-family="sans-serif" font-size="26" fill="#9ece6a">AFTER</text>
+<rect x="65" y="280" width="840" height="170" rx="12" fill="#1e202e" stroke="#7aa2f7" stroke-width="2"/>
+<text x="89" y="322" font-family="sans-serif" font-size="28" fill="#7aa2f7">claude-codes 2.1.282</text>
+<text x="89" y="365" font-family="sans-serif" font-size="25" fill="#c0caf5">Browser approval writes credentials.</text>
+<text x="89" y="399" font-family="sans-serif" font-size="25" fill="#c0caf5">Portal waits for code_rx.recv_timeout.</text>
+<rect x="1060" y="280" width="840" height="170" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1084" y="322" font-family="sans-serif" font-size="28" fill="#9ece6a">claude-codes 2.1.284</text>
+<text x="1084" y="365" font-family="sans-serif" font-size="25" fill="#c0caf5">LoginFlow::poll_outcome watches approval.</text>
+<text x="1084" y="399" font-family="sans-serif" font-size="25" fill="#c0caf5">submit_code_and_wait keeps the fallback.</text>
+<path d="M 485 465 v 43 m -9 -10 l 9 10 l 9 -10" fill="none" stroke="#565f89" stroke-width="3"/>
+<path d="M 1480 465 v 43 m -9 -10 l 9 10 l 9 -10" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="65" y="525" width="840" height="170" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="89" y="567" font-family="sans-serif" font-size="28" fill="#f7768e">ClaudeLoginSession::poll</text>
+<text x="89" y="610" font-family="sans-serif" font-size="25" fill="#c0caf5">Always returns a pending outcome.</text>
+<text x="89" y="644" font-family="sans-serif" font-size="25" fill="#c0caf5">Approval alone cannot settle the dialog.</text>
+<rect x="1060" y="525" width="840" height="170" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1084" y="567" font-family="sans-serif" font-size="28" fill="#9ece6a">ClaudeLoginSession::poll</text>
+<text x="1084" y="610" font-family="sans-serif" font-size="25" fill="#c0caf5">Reads the worker outcome without blocking.</text>
+<text x="1084" y="644" font-family="sans-serif" font-size="25" fill="#c0caf5">Caches completion for repeated callers.</text>
+<path d="M 485 710 v 43 m -9 -10 l 9 10 l 9 -10" fill="none" stroke="#565f89" stroke-width="3"/>
+<path d="M 1480 710 v 43 m -9 -10 l 9 10 l 9 -10" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="65" y="770" width="840" height="170" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="89" y="812" font-family="sans-serif" font-size="28" fill="#f7768e">AgentLoginModal</text>
+<text x="89" y="855" font-family="sans-serif" font-size="25" fill="#c0caf5">Only AwaitCompletion starts polling.</text>
+<text x="89" y="889" font-family="sans-serif" font-size="25" fill="#c0caf5">Claude requires a pasted code.</text>
+<rect x="1060" y="770" width="840" height="170" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1084" y="812" font-family="sans-serif" font-size="28" fill="#9ece6a">AgentLoginModal</text>
+<text x="1084" y="855" font-family="sans-serif" font-size="25" fill="#c0caf5">Polls both agents; code entry stays optional.</text>
+<text x="1084" y="889" font-family="sans-serif" font-size="25" fill="#c0caf5">Confirmed approval survives late responses.</text>
+<text x="65" y="1025" font-family="sans-serif" font-size="27" fill="#f7768e">Browser approval can leave the portal waiting.</text>
+<text x="1060" y="1025" font-family="sans-serif" font-size="27" fill="#9ece6a">Browser approval completes the portal flow.</text>
+<text x="55" y="1172" font-family="sans-serif" font-size="22" fill="#a9b1d6">Scope: five-minute approval window; a rejected fallback code still requires a fresh sign-in.</text>
+</svg>

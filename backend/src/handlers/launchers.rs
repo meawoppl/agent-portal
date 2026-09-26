@@ -782,7 +782,7 @@ pub async fn submit_agent_login_code(
 }
 
 /// GET /api/launchers/:id/agent-login/:flow_id — poll an in-browser login
-/// (codex) for completion. `outcome.done == false` = keep polling.
+/// for completion. `outcome.done == false` = keep polling.
 pub async fn poll_agent_login(
     State(app_state): State<Arc<AppState>>,
     CurrentUserId(user_id): CurrentUserId,
