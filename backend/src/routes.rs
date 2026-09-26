@@ -300,6 +300,10 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
             "/api/metrics/turns",
             get(handlers::turn_metrics::list_aggregated_turn_metrics),
         )
+        .route(
+            "/api/metrics/turns/figure",
+            get(handlers::performance_figures::get_performance_figure),
+        )
         // Proxy token management endpoints
         .route(
             "/api/proxy/resolve-session",

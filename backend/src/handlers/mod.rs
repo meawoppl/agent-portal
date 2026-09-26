@@ -20,6 +20,7 @@ pub mod media_store;
 pub mod messages;
 pub mod mobile_links;
 pub mod peek_summary;
+pub mod performance_figures;
 pub mod privacy;
 pub mod profile;
 pub mod proxy_tokens;

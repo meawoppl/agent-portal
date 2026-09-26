@@ -2,16 +2,13 @@
 
 use yew::prelude::*;
 
-use crate::components::charts::AxisScale;
-
 use super::charts::render_charts;
-use super::model::{GroupBy, GroupKey, TimeWindow};
+use super::model::{AxisScale, GroupBy, TimeWindow};
 use super::use_metrics::PerformanceMetrics;
 
 pub(super) fn render_performance_body(
     metrics: &PerformanceMetrics,
     group_by: &GroupBy,
-    pairs: &[GroupKey],
     window: TimeWindow,
     axis_scale: AxisScale,
     show_p95: bool,
@@ -31,13 +28,6 @@ pub(super) fn render_performance_body(
             </div>
         }
     } else {
-        render_charts(
-            &metrics.buckets,
-            group_by,
-            pairs,
-            window,
-            axis_scale,
-            show_p95,
-        )
+        render_charts(group_by, window, axis_scale, show_p95)
     }
 }

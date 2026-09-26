@@ -1,12 +1,38 @@
 //! View-model helpers for the Performance settings panel.
 
-use chrono::{DateTime, Utc};
 use shared::api::MetricBucket;
 use shared::AgentType;
 
 use crate::components::turn_metrics_display::{
     format_agent_model_tier_label, is_displayable_model,
 };
+
+/// Y-axis projection requested from the server-side Rizzma builder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum AxisScale {
+    Linear,
+    Log,
+}
+
+impl AxisScale {
+    pub(super) const fn all() -> [Self; 2] {
+        [Self::Linear, Self::Log]
+    }
+
+    pub(super) const fn label(self) -> &'static str {
+        match self {
+            Self::Linear => "Linear",
+            Self::Log => "Log",
+        }
+    }
+
+    pub(super) const fn wire_name(self) -> &'static str {
+        match self {
+            Self::Linear => "linear",
+            Self::Log => "log",
+        }
+    }
+}
 
 /// (agent_type, model, service_tier) tuple used as the group-by key. Codex
 /// currently reports no model or tier; keeping the agent in the key lets the
@@ -46,37 +72,6 @@ fn visible_model(model: Option<&str>) -> Option<&str> {
 /// the tier's original case, and adds codex / agent-without-model handling.
 pub(super) fn pair_label(pair: &GroupKey) -> String {
     format_agent_model_tier_label(pair.0, &pair.1, &pair.2)
-}
-
-/// Pick a stable color from the Tokyo-Night palette. We cycle through a
-/// fixed palette by pair-index so the same pair always gets the same color
-/// across re-renders.
-pub(super) fn pair_color(idx: usize) -> &'static str {
-    const PALETTE: &[&str] = &[
-        shared::palette::ACCENT_BLUE,
-        shared::palette::ACCENT_PURPLE,
-        shared::palette::ACCENT_GREEN,
-        shared::palette::ACCENT_ORANGE,
-        shared::palette::ACCENT_RED,
-        shared::palette::ACCENT_TEAL,
-        "#ff9e64", // orange
-    ];
-    PALETTE[idx % PALETTE.len()]
-}
-
-/// Build distinct bucket-start timestamps (the x-axis) preserving order.
-pub(super) fn distinct_bucket_starts(buckets: &[MetricBucket]) -> Vec<DateTime<Utc>> {
-    let mut seen: std::collections::BTreeSet<DateTime<Utc>> = std::collections::BTreeSet::new();
-    for b in buckets {
-        seen.insert(b.bucket_start);
-    }
-    seen.into_iter().collect()
-}
-
-/// Index a bucket-start timestamp to its position in the x-axis, returning
-/// `None` if missing.
-pub(super) fn bucket_index(buckets: &[DateTime<Utc>], ts: DateTime<Utc>) -> Option<usize> {
-    buckets.iter().position(|b| *b == ts)
 }
 
 /// Build the bucket-granularity query string for the selected window.
