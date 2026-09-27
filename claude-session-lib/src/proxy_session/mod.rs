@@ -1091,7 +1091,6 @@ fn is_codex_compaction_event(value: &serde_json::Value) -> bool {
         .is_some_and(|t| t == "thread/compacted")
 }
 
-/// Handle a file upload event (start or chunk)
 /// Report an upload's terminal outcome to the backend (relayed to the web
 /// client, which gates the prompt referencing the file on it — #939).
 async fn send_upload_result(
@@ -1128,6 +1127,20 @@ async fn fail_upload(state: &mut ConnectionState, upload_id: String, reason: Str
     send_upload_result(state, upload_id, false, Some(reason), None).await;
 }
 
+/// Average upload receive rate in KB/s for the progress and completion logs.
+///
+/// Zero elapsed (a same-instant completion, reachable in tests) reports 0
+/// instead of dividing by zero. Single home for the rate math so the
+/// milestone and completion logs cannot drift.
+fn upload_rate_kbps(received_bytes: u64, elapsed_s: f64) -> f64 {
+    if elapsed_s > 0.0 {
+        received_bytes as f64 / elapsed_s / 1024.0
+    } else {
+        0.0
+    }
+}
+
+/// Handle a file upload event (start or chunk)
 async fn handle_file_upload(upload_event: FileUploadEvent, state: &mut ConnectionState) {
     match upload_event {
         FileUploadEvent::Start {
@@ -1259,11 +1272,7 @@ async fn handle_file_upload(upload_event: FileUploadEvent, state: &mut Connectio
             let log_threshold = (percent / 10) * 10;
             if log_threshold > recv_state.last_log_percent {
                 let elapsed = recv_state.start_time.elapsed().as_secs_f64();
-                let rate_kb = if elapsed > 0.0 {
-                    recv_state.received_bytes as f64 / elapsed / 1024.0
-                } else {
-                    0.0
-                };
+                let rate_kb = upload_rate_kbps(recv_state.received_bytes, elapsed);
                 info!(
                     "[upload {}] {} - {}% ({}/{} bytes) - {:.1} KB/s",
                     upload_id_short,
@@ -1281,11 +1290,7 @@ async fn handle_file_upload(upload_event: FileUploadEvent, state: &mut Connectio
                 use tokio::io::AsyncWriteExt;
 
                 let elapsed = recv_state.start_time.elapsed().as_secs_f64();
-                let rate_kb = if elapsed > 0.0 {
-                    recv_state.received_bytes as f64 / elapsed / 1024.0
-                } else {
-                    0.0
-                };
+                let rate_kb = upload_rate_kbps(recv_state.received_bytes, elapsed);
 
                 // Flush + close, then commit: rename the temp file to its
                 // real name. Only a successful rename counts as delivered.
@@ -1629,5 +1634,13 @@ mod tests {
             resp.error.as_deref(),
             Some("path escapes working directory")
         );
+    }
+
+    #[test]
+    fn upload_rate_kbps_matches_milestone_math_and_guards_zero_elapsed() {
+        assert_eq!(upload_rate_kbps(0, 1.0), 0.0);
+        assert_eq!(upload_rate_kbps(1024, 0.0), 0.0);
+        assert_eq!(upload_rate_kbps(1024, 1.0), 1.0);
+        assert_eq!(upload_rate_kbps(2048, 0.5), 4.0);
     }
 }

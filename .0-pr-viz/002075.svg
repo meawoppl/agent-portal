@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="monospace">
+  <rect x="0" y="0" width="2000" height="1200" fill="#1a1b26"/>
+
+  <defs>
+    <marker id="pr2075-arr-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+    </marker>
+    <marker id="pr2075-arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+    <marker id="pr2075-arr-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/>
+    </marker>
+    <marker id="pr2075-arr-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7aa2f7"/>
+    </marker>
+  </defs>
+
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89" font-family="sans-serif">PR #2075 - Dedupe upload rate math in proxy session</text>
+
+  <text x="55" y="100" font-size="34" fill="#e6e9f5" font-family="sans-serif">Two identical rate blocks in handle_file_upload share one helper.</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5" font-family="sans-serif">Log output unchanged, zero-elapsed guard pinned by a test.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e" font-family="sans-serif">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a" font-family="sans-serif">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <g>
+    <rect x="80" y="250" width="860" height="165" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="290" font-size="26" fill="#c0caf5" font-family="sans-serif">milestone log block</text>
+    <text x="104" y="330" font-size="23" fill="#a9b1d6">if elapsed &gt; 0.0 &#123; bytes / elapsed / 1024.0 &#125;</text>
+    <text x="104" y="366" font-size="23" fill="#a9b1d6">else &#123; 0.0 &#125;  -  10% progress line</text>
+  </g>
+
+  <line x1="320" y1="415" x2="320" y2="490" stroke="#565f89" stroke-width="1.5" marker-end="url(#pr2075-arr-dim)"/>
+
+  <g>
+    <rect x="80" y="500" width="860" height="165" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+    <text x="104" y="540" font-size="26" fill="#f7768e" font-family="sans-serif">completion log block</text>
+    <text x="104" y="580" font-size="23" fill="#a9b1d6">if elapsed &gt; 0.0 &#123; bytes / elapsed / 1024.0 &#125;</text>
+    <text x="104" y="616" font-size="23" fill="#a9b1d6">else &#123; 0.0 &#125;  -  same 6 lines, 20 lines down</text>
+  </g>
+
+  <line x1="320" y1="665" x2="320" y2="750" stroke="#f7768e" stroke-width="1.5" marker-end="url(#pr2075-arr-red)"/>
+
+  <g>
+    <rect x="80" y="760" width="860" height="150" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="800" font-size="26" fill="#c0caf5" font-family="sans-serif">one formula, two homes</text>
+    <text x="104" y="840" font-size="23" fill="#a9b1d6">a guard fix in one must be remembered in the other</text>
+    <text x="104" y="876" font-size="22" fill="#565f89">plus a stray doc line on the wrong function</text>
+  </g>
+
+  <g>
+    <rect x="80" y="965" width="860" height="120" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="1011" font-size="26" fill="#c0caf5" font-family="sans-serif">net -8 lines of rate math</text>
+    <text x="104" y="1051" font-size="23" fill="#a9b1d6">identical bytes on the wire, identical log lines</text>
+  </g>
+
+  <g>
+    <rect x="1060" y="250" width="860" height="165" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1084" y="290" font-size="26" fill="#9ece6a" font-family="sans-serif">upload_rate_kbps helper</text>
+    <text x="1084" y="330" font-size="23" fill="#a9b1d6">fn(bytes: u64, elapsed_s: f64) -&gt; f64</text>
+    <text x="1084" y="366" font-size="22" fill="#565f89">single home for the rate math</text>
+  </g>
+
+  <line x1="1285" y1="415" x2="1285" y2="490" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#pr2075-arr-green)"/>
+  <line x1="1725" y1="415" x2="1725" y2="490" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#pr2075-arr-green)"/>
+
+  <g>
+    <rect x="1060" y="500" width="420" height="240" fill="#1e202e" stroke="#7aa2f7" stroke-width="1.5"/>
+    <text x="1084" y="540" font-size="26" fill="#7aa2f7" font-family="sans-serif">milestone log</text>
+    <text x="1084" y="580" font-size="22" fill="#a9b1d6">let rate_kb =</text>
+    <text x="1084" y="612" font-size="22" fill="#a9b1d6">upload_rate_kbps(</text>
+    <text x="1084" y="644" font-size="22" fill="#a9b1d6">received_bytes,</text>
+    <text x="1084" y="676" font-size="22" fill="#a9b1d6">elapsed);</text>
+    <text x="1084" y="712" font-size="22" fill="#9ece6a">one line</text>
+  </g>
+
+  <g>
+    <rect x="1500" y="500" width="420" height="240" fill="#1e202e" stroke="#7aa2f7" stroke-width="1.5"/>
+    <text x="1524" y="540" font-size="26" fill="#7aa2f7" font-family="sans-serif">completion log</text>
+    <text x="1524" y="580" font-size="22" fill="#a9b1d6">let rate_kb =</text>
+    <text x="1524" y="612" font-size="22" fill="#a9b1d6">upload_rate_kbps(</text>
+    <text x="1524" y="644" font-size="22" fill="#a9b1d6">received_bytes,</text>
+    <text x="1524" y="676" font-size="22" fill="#a9b1d6">elapsed);</text>
+    <text x="1524" y="712" font-size="22" fill="#9ece6a">one line</text>
+  </g>
+
+  <line x1="1285" y1="740" x2="1285" y2="825" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#pr2075-arr-green)"/>
+  <line x1="1725" y1="740" x2="1725" y2="825" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#pr2075-arr-green)"/>
+
+  <g>
+    <rect x="1060" y="835" width="860" height="135" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1084" y="878" font-size="26" fill="#9ece6a" font-family="sans-serif">unit test pins math + zero guard</text>
+    <text x="1084" y="918" font-size="23" fill="#a9b1d6">1024 B / 1.0 s = 1.0, 0.0 s elapsed = 0.0</text>
+    <text x="1084" y="950" font-size="21" fill="#565f89">stray doc line moved onto handle_file_upload</text>
+  </g>
+
+  <g>
+    <rect x="1060" y="1000" width="860" height="105" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1084" y="1042" font-size="26" fill="#c0caf5" font-family="sans-serif">41 proxy_session tests pass, clippy + fmt clean</text>
+    <text x="1084" y="1078" font-size="23" fill="#9ece6a" font-family="sans-serif">no behavior change, logs byte-identical</text>
+  </g>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89" font-family="sans-serif">Verified: cargo fmt; cargo clippy -p claude-session-lib --all-targets; cargo test -p claude-session-lib --lib proxy_session.</text>
+</svg>
