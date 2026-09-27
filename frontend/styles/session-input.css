@@ -48,8 +48,17 @@
     border: 1px solid var(--accent);
 }
 
-.session-view-input .message-input {
+.message-input-stack {
     flex: 1;
+    min-width: 0;
+    display: grid;
+}
+
+.session-view-input .message-input {
+    grid-area: 1 / 1;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
     background: rgba(0, 0, 0, 0.3);
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -352,13 +361,12 @@
 
 /* Interim transcription display during voice recording */
 .interim-transcription {
-    position: absolute;
-    left: 48px;
-    right: 100px;
-
-    /* Top-aligned to the textarea's padding rather than vertically centered on
-       one line, so multi-sentence dictation reads as paragraphs from the top. */
-    top: 0.5rem;
+    grid-area: 1 / 1;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid transparent;
+    border-radius: 6px;
     color: var(--text-muted);
     font-style: italic;
     font-size: 0.9rem;
@@ -374,6 +382,7 @@
        preview stays inside the composer instead of overrunning the controls. */
     max-height: 10em;
     overflow-y: auto;
+    overflow-x: hidden;
     z-index: 1;
 }
 
