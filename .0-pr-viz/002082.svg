@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200" font-family="'Segoe UI','Noto Sans',sans-serif">
+  <rect width="2000" height="1200" fill="#16161e"/>
+  <text x="55" y="72" font-size="24" fill="#565f89">PR #2082 - startup reminder handling</text>
+  <text x="55" y="125" font-size="34" fill="#e6e9f5">Portal base instructions no longer arrive as their own user task.</text>
+  <text x="55" y="168" font-size="34" fill="#e6e9f5">They ride with the first real user turn, so idle sessions stay idle.</text>
+  <line x1="55" y1="188" x2="1945" y2="188" stroke="#3d4666" stroke-width="2"/>
+
+  <text x="105" y="242" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1090" y="242" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1140" stroke="#3d4666" stroke-width="2" stroke-dasharray="12 14"/>
+
+  <rect x="105" y="295" width="330" height="180" rx="8" fill="#1e202e" stroke="#7aa2f7" stroke-width="3"/>
+  <text x="135" y="350" font-size="26" fill="#7aa2f7">Claude starts</text>
+  <text x="135" y="402" font-size="23" fill="#c0caf5">process is ready</text>
+  <text x="135" y="440" font-size="23" fill="#c0caf5">no user has typed</text>
+
+  <path d="M455 385H575" stroke="#bb9af7" stroke-width="5"/>
+  <polygon points="575,385 552,372 552,398" fill="#bb9af7"/>
+
+  <rect x="600" y="295" width="330" height="180" rx="8" fill="#1e202e" stroke="#bb9af7" stroke-width="3"/>
+  <text x="630" y="350" font-size="26" fill="#bb9af7">Standalone reminder</text>
+  <text x="630" y="402" font-size="23" fill="#c0caf5">hidden SDK user turn</text>
+  <text x="630" y="440" font-size="23" fill="#c0caf5">can spark work</text>
+
+  <rect x="210" y="595" width="520" height="170" rx="8" fill="#1e202e" stroke="#f7768e" stroke-width="3"/>
+  <text x="240" y="650" font-size="26" fill="#f7768e">Observed failure</text>
+  <text x="240" y="704" font-size="23" fill="#c0caf5">Fresh zodiacal session invented</text>
+  <text x="240" y="742" font-size="23" fill="#c0caf5">a cone-search request before input.</text>
+
+  <rect x="1090" y="295" width="360" height="180" rx="8" fill="#1e202e" stroke="#7aa2f7" stroke-width="3"/>
+  <text x="1120" y="350" font-size="26" fill="#7aa2f7">Session starts</text>
+  <text x="1120" y="402" font-size="23" fill="#c0caf5">reminder_pending is set</text>
+  <text x="1120" y="440" font-size="23" fill="#c0caf5">no input is sent yet</text>
+
+  <path d="M1470 385H1590" stroke="#9ece6a" stroke-width="5"/>
+  <polygon points="1590,385 1567,372 1567,398" fill="#9ece6a"/>
+
+  <rect x="1615" y="295" width="330" height="180" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1645" y="350" font-size="26" fill="#9ece6a">First real turn</text>
+  <text x="1645" y="402" font-size="23" fill="#c0caf5">folds instructions in</text>
+  <text x="1645" y="440" font-size="23" fill="#c0caf5">with visible notice</text>
+
+  <rect x="1165" y="595" width="560" height="170" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1195" y="650" font-size="26" fill="#9ece6a">New invariant</text>
+  <text x="1195" y="704" font-size="23" fill="#c0caf5">Base context is attached only to</text>
+  <text x="1195" y="742" font-size="23" fill="#c0caf5">a user-supplied message.</text>
+
+  <rect x="360" y="900" width="1280" height="145" rx="8" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="400" y="958" font-size="25" fill="#7dcfff">Reviewer-visible disclosure</text>
+  <text x="400" y="1012" font-size="23" fill="#c0caf5">The first displayed user turn says Agent Portal attached base session instructions.</text>
+  <text x="400" y="1050" font-size="21" fill="#565f89">It also says this was not a separate task and not an old queued message.</text>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">Scope: compaction reminders still inject directly; this changes fresh-session startup behavior.</text>
+</svg>

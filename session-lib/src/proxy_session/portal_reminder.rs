@@ -1,12 +1,14 @@
-//! Portal features reminder injected at session start and after each
-//! compaction boundary.
+//! Portal features reminder delivered to the agent at session start and after
+//! each compaction boundary.
 //!
-//! The reminder is sent to the agent only — wrapped in
-//! `<system-reminder>…</system-reminder>` tags so Claude treats it as
-//! out-of-band context. The user-facing copy was removed in #692: it ate too
-//! much vertical scrollback for content the user already knows (they built
-//! the portal), and the reminder's value is the agent recovering its
-//! affordance knowledge after a fresh start / compaction.
+//! At session start the reminder is folded into the first real user input,
+//! rather than sent as a standalone turn. After a compaction boundary it is
+//! injected directly to re-prime the shortened agent context. In both cases
+//! the agent-facing copy is wrapped in `<system-reminder>…</system-reminder>`
+//! tags so Claude treats it as out-of-band context. The user-facing copy was
+//! removed in #692: it ate too much vertical scrollback for content the user
+//! already knows (they built the portal), and the reminder's value is the
+//! agent recovering its affordance knowledge after a fresh start / compaction.
 //!
 //! The reminder body lives in `session-lib/portal_reminder.md` as a
 //! readable markdown file and is baked into the binary via `include_str!`.
@@ -109,20 +111,36 @@ pub fn is_clear_command(text: &str) -> bool {
 /// agent-specific "echo the user's own text" synthesizer. Taken as a closure
 /// (rather than calling one agent's synthesizer here) because this module is
 /// agent-agnostic (#1657); it runs only when `display_event` is `None`, with
-/// the ORIGINAL text, before the reminder prefix is applied.
+/// the original text plus a short collapsed notice, before the reminder prefix
+/// is applied.
 pub fn fold_session_start_reminder(
     text: String,
     display_event: Option<serde_json::Value>,
     plugin_skill_reminder: Option<&str>,
     default_display: impl FnOnce(&str) -> serde_json::Value,
 ) -> (String, Option<serde_json::Value>) {
-    let display_event = display_event.or_else(|| Some(default_display(&text)));
+    let display_event = display_event.or_else(|| {
+        Some(default_display(&visible_text_with_base_session_notice(
+            &text,
+        )))
+    });
     let prefixed = format!(
         "{}\n\n{}",
         agent_facing(&body_with_plugin_skills(plugin_skill_reminder)),
         text
     );
     (prefixed, display_event)
+}
+
+fn visible_text_with_base_session_notice(text: &str) -> String {
+    format!(
+        "{text}\n\n<system-reminder>\n\
+Agent Portal attached its base session instructions to this first message. \
+The agent sees those instructions together with your message; this does not \
+create a separate task or come from an old session queue. They include Portal \
+UI affordances, available local tools, and enabled plugin skills.\n\
+</system-reminder>"
+    )
 }
 
 /// Inject the reminder into the agent's stdin only. The user-bound copy was
@@ -201,8 +219,12 @@ mod tests {
             "display event must echo the user's text, got {display}"
         );
         assert!(
-            !display.to_string().contains("system-reminder"),
-            "the reminder must not leak into the transcript: {display}"
+            display.to_string().contains("base session instructions"),
+            "display event should disclose that base instructions were attached: {display}"
+        );
+        assert!(
+            !display.to_string().contains("Agent Portal version"),
+            "the full reminder body must not leak into the transcript: {display}"
         );
     }
 
