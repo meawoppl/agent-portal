@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200" font-family="sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#1a1b26"/>
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2076 - Contain streaming voice transcription</text>
+  <text x="55" y="105" font-size="38" fill="#e6e9f5">Voice text stays inside its input box while it streams.</text>
+  <text x="55" y="148" font-size="25" fill="#a9b1d6">The preview and textarea now share one responsive grid cell.</text>
+  <line x1="55" y1="175" x2="1945" y2="175" stroke="#3d4666" stroke-width="2"/>
+  <line x1="1000" y1="205" x2="1000" y2="1125" stroke="#3d4666" stroke-width="2" stroke-dasharray="8 10"/>
+
+  <text x="80" y="235" font-size="24" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1060" y="235" font-size="24" letter-spacing="4" fill="#9ece6a">AFTER</text>
+
+  <rect x="80" y="285" width="820" height="190" rx="18" fill="#1e202e" stroke="#565f89" stroke-width="3"/>
+  <text x="115" y="335" font-size="25" fill="#c0caf5">composer form</text>
+  <rect x="125" y="370" width="650" height="68" rx="10" fill="#16161e" stroke="#7aa2f7" stroke-width="3"/>
+  <text x="150" y="414" font-size="24" fill="#a9b1d6">textarea</text>
+  <rect x="790" y="370" width="75" height="68" rx="10" fill="#16161e" stroke="#565f89" stroke-width="2"/>
+  <text x="814" y="414" font-size="23" fill="#c0caf5">go</text>
+
+  <rect x="125" y="390" width="900" height="190" rx="10" fill="none" stroke="#f7768e" stroke-width="4" stroke-dasharray="12 9"/>
+  <text x="150" y="490" font-size="27" fill="#f7768e">streaming transcription paints past textarea</text>
+  <text x="150" y="530" font-size="23" fill="#a9b1d6">absolute offsets are relative to the whole form</text>
+  <path d="M900 485 L970 485" stroke="#f7768e" stroke-width="5"/>
+  <path d="M958 472 L985 485 L958 498" fill="none" stroke="#f7768e" stroke-width="5"/>
+
+  <rect x="80" y="650" width="820" height="330" rx="18" fill="#1e202e" stroke="#f7768e" stroke-width="3"/>
+  <text x="115" y="705" font-size="28" fill="#f7768e">Unstable geometry</text>
+  <text x="115" y="760" font-size="24" fill="#a9b1d6">left: 48px; right: 100px</text>
+  <text x="115" y="810" font-size="24" fill="#a9b1d6">neighboring controls change available width</text>
+  <text x="115" y="860" font-size="24" fill="#a9b1d6">narrow screens expose the overflow</text>
+  <text x="115" y="930" font-size="23" fill="#565f89">preview has no textarea-owned clipping boundary</text>
+
+  <rect x="1080" y="285" width="820" height="430" rx="18" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1115" y="335" font-size="25" fill="#c0caf5">message-input-stack</text>
+  <rect x="1130" y="380" width="720" height="280" rx="12" fill="#16161e" stroke="#7aa2f7" stroke-width="4"/>
+  <text x="1160" y="425" font-size="22" fill="#565f89">shared grid cell</text>
+  <text x="1160" y="485" font-size="27" fill="#a9b1d6">this is a long streaming voice transcription</text>
+  <text x="1160" y="530" font-size="27" fill="#a9b1d6">that wraps inside the same responsive box</text>
+  <text x="1160" y="575" font-size="27" fill="#a9b1d6">as the textarea without covering controls</text>
+  <line x1="1130" y1="620" x2="1850" y2="620" stroke="#9ece6a" stroke-width="5"/>
+  <text x="1410" y="650" font-size="21" fill="#9ece6a">hard clipping edge</text>
+
+  <rect x="1080" y="765" width="820" height="215" rx="18" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1115" y="820" font-size="28" fill="#9ece6a">Stable containment</text>
+  <text x="1115" y="870" font-size="24" fill="#a9b1d6">min-width: 0 + width: 100%</text>
+  <text x="1115" y="915" font-size="24" fill="#a9b1d6">overflow-wrap: anywhere + overflow-x: hidden</text>
+  <text x="1115" y="955" font-size="22" fill="#565f89">preview can grow vertically up to the existing 10em cap</text>
+
+  <rect x="80" y="1040" width="1820" height="85" rx="12" fill="#16161e" stroke="#3d4666" stroke-width="2"/>
+  <text x="115" y="1093" font-size="25" fill="#c0caf5">Verified: cargo fmt --check; cargo test -p frontend</text>
+  <text x="1945" y="1170" text-anchor="end" font-size="21" fill="#565f89">input_bar.rs + session-input.css</text>
+</svg>
