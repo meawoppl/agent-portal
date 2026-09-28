@@ -906,15 +906,10 @@ async fn run_message_loop<A: Agent>(
         media_display_sink: config.media_display_sink.clone(),
     };
 
-    // On the very first connection of this session, inject the portal
-    // features reminder. It primes the agent with a `<system-reminder>` on
-    // its stdin and emits a collapsed portal message for the user. On
-    // reconnects we skip — the agent's context is unchanged so the agent
-    // already has it; subsequent re-injections happen at compaction
-    // boundaries from inside `output_forwarder`.
-    if session.first_connection {
-        inject_portal_reminder(session.claude_session).await;
-    }
+    // Do not send the session-start reminder as a standalone input here. The
+    // first user turn claims `reminder_pending` and folds the reminder into
+    // that real input; sending it before the user types gives the agent an
+    // invisible prompt to answer.
 
     // Main loop
     let result = run_main_loop(session.claude_session, session.input_rx, &mut conn_state).await;
