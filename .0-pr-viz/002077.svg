@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="monospace">
+  <rect x="0" y="0" width="2000" height="1200" fill="#1a1b26"/>
+
+  <defs>
+    <marker id="pr2077-arr-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+    </marker>
+    <marker id="pr2077-arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+    <marker id="pr2077-arr-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/>
+    </marker>
+    <marker id="pr2077-arr-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7aa2f7"/>
+    </marker>
+  </defs>
+
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89" font-family="sans-serif">PR #2077 - Dedupe upload id shortening and milestone math</text>
+
+  <text x="55" y="100" font-size="34" fill="#e6e9f5" font-family="sans-serif">Three scattered id truncations and the inline milestone math</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5" font-family="sans-serif">share two tested helpers. Log output unchanged.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e" font-family="sans-serif">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a" font-family="sans-serif">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <g>
+    <rect x="80" y="250" width="860" height="200" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="290" font-size="26" fill="#c0caf5" font-family="sans-serif">3x truncate(&amp;upload_id, 8)</text>
+    <text x="104" y="330" font-size="23" fill="#a9b1d6">fail_upload ... error!  -  line 1126</text>
+    <text x="104" y="366" font-size="23" fill="#a9b1d6">duplicate start ... warn!  -  line 1174</text>
+    <text x="104" y="402" font-size="23" fill="#a9b1d6">chunk arm ... let binding  -  line 1238</text>
+  </g>
+
+  <line x1="320" y1="450" x2="320" y2="510" stroke="#565f89" stroke-width="1.5" marker-end="url(#pr2077-arr-dim)"/>
+
+  <g>
+    <rect x="80" y="520" width="860" height="200" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+    <text x="104" y="560" font-size="26" fill="#f7768e" font-family="sans-serif">inline milestone math</text>
+    <text x="104" y="600" font-size="23" fill="#a9b1d6">if total_size &gt; 0 &#123; ... &#125; else &#123; 100 &#125;</text>
+    <text x="104" y="636" font-size="23" fill="#a9b1d6">(percent / 10) * 10  -  chunk arm only</text>
+    <text x="104" y="672" font-size="22" fill="#565f89">untestable inline, bucket logic adrift</text>
+  </g>
+
+  <line x1="320" y1="720" x2="320" y2="790" stroke="#f7768e" stroke-width="1.5" marker-end="url(#pr2077-arr-red)"/>
+
+  <g>
+    <rect x="80" y="800" width="860" height="150" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="840" font-size="26" fill="#c0caf5" font-family="sans-serif">width in three places, formula in one</text>
+    <text x="104" y="880" font-size="23" fill="#a9b1d6">a width tweak must be repeated three times</text>
+    <text x="104" y="916" font-size="22" fill="#565f89">follow-up to the #2075 rate-math dedupe</text>
+  </g>
+
+  <g>
+    <rect x="80" y="975" width="860" height="120" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="1021" font-size="26" fill="#c0caf5" font-family="sans-serif">net -6 lines of upload log math</text>
+    <text x="104" y="1061" font-size="23" fill="#a9b1d6">identical bytes on the wire, identical log lines</text>
+  </g>
+
+  <g>
+    <rect x="1060" y="250" width="860" height="200" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1084" y="290" font-size="26" fill="#9ece6a" font-family="sans-serif">two helpers beside upload_rate_kbps</text>
+    <text x="1084" y="330" font-size="23" fill="#a9b1d6">upload_id_log(&amp;str) -&gt; &amp;str</text>
+    <text x="1084" y="366" font-size="23" fill="#a9b1d6">upload_milestone_percent(u64, u64) -&gt; u32</text>
+    <text x="1084" y="402" font-size="22" fill="#565f89">single home for width and bucket math</text>
+  </g>
+
+  <line x1="1285" y1="450" x2="1285" y2="510" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#pr2077-arr-green)"/>
+  <line x1="1725" y1="450" x2="1725" y2="510" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#pr2077-arr-green)"/>
+
+  <g>
+    <rect x="1060" y="520" width="420" height="240" fill="#1e202e" stroke="#7aa2f7" stroke-width="1.5"/>
+    <text x="1084" y="560" font-size="26" fill="#7aa2f7" font-family="sans-serif">id sites</text>
+    <text x="1084" y="600" font-size="22" fill="#a9b1d6">upload_id_log(</text>
+    <text x="1084" y="632" font-size="22" fill="#a9b1d6">&amp;upload_id)</text>
+    <text x="1084" y="672" font-size="22" fill="#a9b1d6">at all three</text>
+    <text x="1084" y="712" font-size="22" fill="#9ece6a">one line each</text>
+  </g>
+
+  <g>
+    <rect x="1500" y="520" width="420" height="240" fill="#1e202e" stroke="#7aa2f7" stroke-width="1.5"/>
+    <text x="1524" y="560" font-size="26" fill="#7aa2f7" font-family="sans-serif">milestone site</text>
+    <text x="1524" y="600" font-size="22" fill="#a9b1d6">upload_milestone</text>
+    <text x="1524" y="632" font-size="22" fill="#a9b1d6">_percent(...)</text>
+    <text x="1524" y="672" font-size="22" fill="#a9b1d6">chunk arm only</text>
+    <text x="1524" y="712" font-size="22" fill="#9ece6a">one line</text>
+  </g>
+
+  <line x1="1285" y1="760" x2="1285" y2="830" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#pr2077-arr-green)"/>
+  <line x1="1725" y1="760" x2="1725" y2="830" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#pr2077-arr-green)"/>
+
+  <g>
+    <rect x="1060" y="840" width="860" height="135" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1084" y="883" font-size="26" fill="#9ece6a" font-family="sans-serif">two unit tests pin width + buckets</text>
+    <text x="1084" y="923" font-size="23" fill="#a9b1d6">9-char id -&gt; 8 chars, 149/1000 -&gt; 10</text>
+    <text x="1084" y="955" font-size="21" fill="#565f89">unknown total (0) still reports 100</text>
+  </g>
+
+  <g>
+    <rect x="1060" y="1000" width="860" height="105" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1084" y="1042" font-size="26" fill="#c0caf5" font-family="sans-serif">43 proxy_session tests pass, clippy + fmt clean</text>
+    <text x="1084" y="1078" font-size="23" fill="#9ece6a" font-family="sans-serif">no behavior change, logs byte-identical</text>
+  </g>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89" font-family="sans-serif">Verified: cargo fmt; cargo clippy -p claude-session-lib --all-targets; cargo test -p claude-session-lib proxy_session.</text>
+</svg>
