@@ -24,13 +24,14 @@ use crate::pages::admin::AdminPage;
 use crate::pages::history::{HistoryBrowserPage, HistoryTranscriptPage};
 use crate::pages::settings::SettingsPage;
 use crate::utils;
+use gloo::events::EventListener;
 use gloo_net::http::Request;
 use serde::Deserialize;
 use shared::SessionInfo;
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
-use web_sys::MouseEvent;
+use web_sys::{HtmlSelectElement, MouseEvent};
 use yew::prelude::*;
 use yew_router::prelude::*;
 
@@ -49,8 +50,38 @@ struct DeepLinkQuery {
     session: Option<String>,
 }
 
+const MOBILE_DASHBOARD_BREAKPOINT_PX: f64 = 768.0;
+
+fn mobile_dashboard_viewport() -> bool {
+    web_sys::window()
+        .and_then(|window| window.inner_width().ok())
+        .and_then(|width| width.as_f64())
+        .is_some_and(|width| width <= MOBILE_DASHBOARD_BREAKPOINT_PX)
+}
+
+/// Mirror the dashboard's CSS breakpoint in component state because mobile
+/// session selection controls whether a SessionView (and therefore its REST
+/// hydration and websocket subscription) exists at all.
+#[hook]
+fn use_mobile_dashboard() -> bool {
+    let is_mobile = use_state_eq(mobile_dashboard_viewport);
+    {
+        let is_mobile = is_mobile.clone();
+        use_effect_with((), move |_| {
+            let listener = web_sys::window().map(|window| {
+                EventListener::new(&window.clone(), "resize", move |_| {
+                    is_mobile.set(mobile_dashboard_viewport());
+                })
+            });
+            move || drop(listener)
+        });
+    }
+    *is_mobile
+}
+
 #[function_component(DashboardPage)]
 pub fn dashboard_page() -> Html {
+    let is_mobile_dashboard = use_mobile_dashboard();
     // Use the sessions hook for fetching and polling
     let sessions_hook = use_sessions();
     let sessions = sessions_hook.sessions.clone();
@@ -166,6 +197,7 @@ pub fn dashboard_page() -> Html {
         active_sessions.clone(),
         effective_hidden_sessions.clone(),
         loading,
+        is_mobile_dashboard,
         session_state.clone(),
     );
 
@@ -625,6 +657,16 @@ pub fn dashboard_page() -> Html {
     // recently messaged before colder background sessions.
     let session_view_order: Vec<usize> = if active_sessions.is_empty() {
         Vec::new()
+    } else if is_mobile_dashboard {
+        session_state
+            .focused_id
+            .and_then(|focused_id| {
+                active_sessions
+                    .iter()
+                    .position(|session| session.id == focused_id)
+            })
+            .into_iter()
+            .collect()
     } else {
         let focused_index = focus.focused_index.min(active_sessions.len() - 1);
         let mut indices = Vec::with_capacity(active_sessions.len());
@@ -800,8 +842,66 @@ pub fn dashboard_page() -> Html {
                 </div>
             } else {
                 <>
-                    <div class={classes!("dashboard-body", ui_state.rail_position.body_class())}>
+                    <div class={classes!(
+                        "dashboard-body",
+                        ui_state.rail_position.body_class(),
+                        if is_mobile_dashboard { Some("mobile-session-mode") } else { None },
+                    )}>
                     // Session Rail
+                    if is_mobile_dashboard {
+                        <div class={classes!(
+                            "mobile-session-selector",
+                            if session_state.focused_id.is_none() { Some("empty") } else { None },
+                        )}>
+                            <label for="mobile-session-select">
+                                { if session_state.focused_id.is_none() { "Choose a session" } else { "Session" } }
+                            </label>
+                            <select
+                                id="mobile-session-select"
+                                value={session_state.focused_id.map(|id| id.to_string()).unwrap_or_default()}
+                                onchange={{
+                                    let sessions = active_sessions.clone();
+                                    let on_select = focus.on_select_session.clone();
+                                    let on_clear = focus.on_clear_selection.clone();
+                                    Callback::from(move |event: Event| {
+                                        let value = event.target_unchecked_into::<HtmlSelectElement>().value();
+                                        if value.is_empty() {
+                                            on_clear.emit(());
+                                        } else if let Ok(id) = Uuid::parse_str(&value) {
+                                            if let Some(index) = sessions.iter().position(|session| session.id == id) {
+                                                on_select.emit(index);
+                                            }
+                                        }
+                                    })
+                                }}
+                                aria-label="Select a session to open"
+                            >
+                                <option value="">{ "Select a session…" }</option>
+                                { for active_sessions.iter().map(|session| {
+                                    let connection = if session.paused {
+                                        "paused"
+                                    } else if session_state.connected_sessions.contains(&session.id) {
+                                        "connected"
+                                    } else {
+                                        session.status.as_str()
+                                    };
+                                    let location = if session.hostname.is_empty() {
+                                        session.working_directory.as_str()
+                                    } else {
+                                        session.hostname.as_str()
+                                    };
+                                    html! {
+                                        <option value={session.id.to_string()}>
+                                            { format!("{} — {} ({connection})", session.session_name, location) }
+                                        </option>
+                                    }
+                                }) }
+                            </select>
+                            if session_state.focused_id.is_none() {
+                                <p>{ "Select a session to load its history and connect to its live stream." }</p>
+                            }
+                        </div>
+                    } else {
                     <SessionRail
                         sessions={active_sessions.clone()}
                         focused_index={focus.focused_index}
@@ -825,9 +925,18 @@ pub fn dashboard_page() -> Html {
                         on_stop={on_stop.clone()}
                         on_toggle_pause={on_toggle_pause.clone()}
                     />
+                    }
 
                     // Session views
-                    <div class={classes!("session-views-container", if keyboard_nav.nav_mode { Some("nav-mode") } else { None })}>
+                    <div class={classes!(
+                        "session-views-container",
+                        if keyboard_nav.nav_mode { Some("nav-mode") } else { None },
+                        if is_mobile_dashboard && session_state.focused_id.is_none() {
+                            Some("mobile-empty")
+                        } else {
+                            None
+                        },
+                    )}>
                         {
                             session_view_order.iter().filter_map(|&index| {
                                 let session = active_sessions.get(index)?;

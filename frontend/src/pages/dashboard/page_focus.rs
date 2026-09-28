@@ -17,6 +17,7 @@ const HYDRATION_DRIP_MS: u32 = 400;
 pub(super) struct DashboardFocus {
     pub focused_index: usize,
     pub on_select_session: Callback<usize>,
+    pub on_clear_selection: Callback<()>,
     pub on_activate: Callback<Uuid>,
     pub on_interrupt: Callback<()>,
     pub interrupt_signal: u32,
@@ -37,6 +38,7 @@ pub(super) fn use_dashboard_focus(
     active_sessions: Vec<SessionInfo>,
     effective_hidden_sessions: HashSet<Uuid>,
     loading: bool,
+    mobile_session_selector: bool,
     session_state: UseReducerHandle<DashboardSessionState>,
 ) -> DashboardFocus {
     // Derive the focused display index from the focused session id against the
@@ -86,6 +88,7 @@ pub(super) fn use_dashboard_focus(
                     .collect::<Vec<_>>(),
                 connected_sessions.clone(),
                 hidden_sessions.clone(),
+                mobile_session_selector,
             ),
             move |_| {
                 if let Some(focused_id) = focused_id {
@@ -104,8 +107,11 @@ pub(super) fn use_dashboard_focus(
                             &hidden_sessions,
                             &connected_sessions,
                         ) {
-                            session_state
-                                .dispatch(DashboardSessionAction::FocusAndActivate(next_id));
+                            session_state.dispatch(if mobile_session_selector {
+                                DashboardSessionAction::FocusExclusively(next_id)
+                            } else {
+                                DashboardSessionAction::FocusAndActivate(next_id)
+                            });
                         }
                     }
                 } else {
@@ -116,11 +122,10 @@ pub(super) fn use_dashboard_focus(
         );
     }
 
-    // On initial load, focus the saved (or first non-hidden) session and
-    // activate ONLY it (#1915). Background sessions hydrate through the drip
-    // effect below instead of all at once — the reload thundering herd was
-    // every visible session firing its history fetch, socket connect, and
-    // transcript parse in a single render flush.
+    // Desktop focuses the saved (or first non-hidden) session and activates it
+    // before the hydration drip below. Mobile deliberately starts without a
+    // selection: SessionView mount owns history loading and its websocket, so
+    // no session work starts until the user chooses one.
     {
         let active_sessions = active_sessions.clone();
         let effective_hidden_sessions = effective_hidden_sessions.clone();
@@ -131,34 +136,63 @@ pub(super) fn use_dashboard_focus(
                 active_sessions.clone(),
                 effective_hidden_sessions.clone(),
                 loading,
+                mobile_session_selector,
             ),
-            move |(sessions, hidden_sessions, is_loading)| {
+            move |(sessions, hidden_sessions, is_loading, mobile_selector)| {
                 if !*is_loading && !sessions.is_empty() {
-                    let visible = |session: &&SessionInfo| !hidden_sessions.contains(&session.id);
-                    let saved_focus = load_last_active_session().and_then(|saved_id| {
-                        sessions
-                            .iter()
-                            .find(|s| s.id == saved_id && !hidden_sessions.contains(&s.id))
-                            .map(|s| s.id)
-                    });
-                    // Prefer the last active session from this browser, then
-                    // fall back to the first non-hidden session by id (then
-                    // the first session if all are hidden).
-                    let focus_id = saved_focus.or_else(|| {
-                        sessions
-                            .iter()
-                            .find(visible)
-                            .or_else(|| sessions.first())
-                            .map(|s| s.id)
-                    });
+                    if *mobile_selector {
+                        session_state.dispatch(DashboardSessionAction::InitializeFocus {
+                            focus_id: None,
+                            activate_ids: Vec::new(),
+                        });
+                    } else {
+                        let visible =
+                            |session: &&SessionInfo| !hidden_sessions.contains(&session.id);
+                        let saved_focus = load_last_active_session().and_then(|saved_id| {
+                            sessions
+                                .iter()
+                                .find(|s| s.id == saved_id && !hidden_sessions.contains(&s.id))
+                                .map(|s| s.id)
+                        });
+                        // Prefer the last active session from this browser, then
+                        // fall back to the first non-hidden session by id (then
+                        // the first session if all are hidden).
+                        let focus_id = saved_focus.or_else(|| {
+                            sessions
+                                .iter()
+                                .find(visible)
+                                .or_else(|| sessions.first())
+                                .map(|s| s.id)
+                        });
 
-                    if let Some(id) = focus_id {
-                        save_last_active_session(id);
+                        if let Some(id) = focus_id {
+                            save_last_active_session(id);
+                        }
+
+                        session_state.dispatch(DashboardSessionAction::InitializeFocus {
+                            focus_id,
+                            activate_ids: focus_id.into_iter().collect(),
+                        });
                     }
+                }
+                || ()
+            },
+        );
+    }
 
-                    session_state.dispatch(DashboardSessionAction::InitializeFocus {
-                        focus_id,
-                        activate_ids: focus_id.into_iter().collect(),
+    // Entering the mobile layout must unmount any desktop background views
+    // immediately. Otherwise a resize (or restored browser viewport) would
+    // leave their history requests and sockets alive behind the selector.
+    {
+        let session_state = session_state.clone();
+        let focused_id = session_state.focused_id;
+        use_effect_with(
+            (mobile_session_selector, focused_id),
+            move |(mobile_selector, focused_id)| {
+                if *mobile_selector {
+                    session_state.dispatch(match focused_id {
+                        Some(id) => DashboardSessionAction::FocusExclusively(*id),
+                        None => DashboardSessionAction::ClearFocusAndActivation,
                     });
                 }
                 || ()
@@ -187,10 +221,11 @@ pub(super) fn use_dashboard_focus(
                 activated.clone(),
                 active_session_ids(&active_sessions),
                 hidden_sessions.clone(),
+                mobile_session_selector,
             ),
             move |_| {
                 let mut tick = None;
-                if initialized {
+                if initialized && !mobile_session_selector {
                     let mut pending: Vec<&SessionInfo> = active_sessions
                         .iter()
                         .filter(|s| !hidden_sessions.contains(&s.id) && !activated.contains(&s.id))
@@ -246,8 +281,19 @@ pub(super) fn use_dashboard_focus(
             crate::audio::play_sound(crate::audio::SoundEvent::SessionSwap);
             if let Some(session) = active_sessions.get(index) {
                 save_last_active_session(session.id);
-                session_state.dispatch(DashboardSessionAction::FocusAndActivate(session.id));
+                session_state.dispatch(if mobile_session_selector {
+                    DashboardSessionAction::FocusExclusively(session.id)
+                } else {
+                    DashboardSessionAction::FocusAndActivate(session.id)
+                });
             }
+        })
+    };
+
+    let on_clear_selection = {
+        let session_state = session_state.clone();
+        Callback::from(move |()| {
+            session_state.dispatch(DashboardSessionAction::ClearFocusAndActivation);
         })
     };
 
@@ -286,6 +332,7 @@ pub(super) fn use_dashboard_focus(
     DashboardFocus {
         focused_index,
         on_select_session,
+        on_clear_selection,
         on_activate,
         on_interrupt,
         interrupt_signal: *interrupt_signal,

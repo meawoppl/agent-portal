@@ -53,6 +53,11 @@ pub(super) enum DashboardSessionAction {
         activate_ids: Vec<Uuid>,
     },
     FocusAndActivate(Uuid),
+    /// Focus one session and make it the only mounted session view. Mobile
+    /// uses this to ensure changing the selector tears down the old history
+    /// request and websocket subscription instead of accumulating them.
+    FocusExclusively(Uuid),
+    ClearFocusAndActivation,
     Activate(Uuid),
     SetAwaiting {
         session_id: Uuid,
@@ -96,6 +101,17 @@ impl Reducible for DashboardSessionState {
                 if state.awaiting_sessions.contains(&session_id) {
                     state.seen_awaiting.insert(session_id);
                 }
+            }
+            DashboardSessionAction::FocusExclusively(session_id) => {
+                state.focused_id = Some(session_id);
+                state.activated_sessions = HashSet::from([session_id]);
+                if state.awaiting_sessions.contains(&session_id) {
+                    state.seen_awaiting.insert(session_id);
+                }
+            }
+            DashboardSessionAction::ClearFocusAndActivation => {
+                state.focused_id = None;
+                state.activated_sessions.clear();
             }
             DashboardSessionAction::Activate(session_id) => {
                 state.activated_sessions.insert(session_id);
@@ -358,6 +374,22 @@ mod tests {
 
         assert_eq!(state.focused_id, Some(id(42)));
         assert!(state.activated_sessions.contains(&id(42)));
+    }
+
+    #[test]
+    fn exclusive_focus_replaces_the_mounted_session() {
+        let mut initial = DashboardSessionState::new(HashSet::new());
+        initial.focused_id = Some(id(1));
+        initial.activated_sessions = HashSet::from([id(1), id(2)]);
+
+        let state = reduce(initial, DashboardSessionAction::FocusExclusively(id(3)));
+
+        assert_eq!(state.focused_id, Some(id(3)));
+        assert_eq!(state.activated_sessions, HashSet::from([id(3)]));
+
+        let state = state.reduce(DashboardSessionAction::ClearFocusAndActivation);
+        assert_eq!(state.focused_id, None);
+        assert!(state.activated_sessions.is_empty());
     }
 
     #[test]
