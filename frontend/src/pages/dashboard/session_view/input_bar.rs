@@ -695,32 +695,38 @@ impl Component for InputBar {
                 >
                     <span class="input-prompt">{ ">" }</span>
                     { self.render_vim_indicator() }
-                    { self.render_interim_transcription() }
-                    <textarea
-                        ref={self.input_ref.clone()}
-                        class={classes!(
-                            "message-input",
-                            self.interim_transcription.is_some().then_some("has-interim"),
-                            // Block-cursor styling in NORMAL mode. Yew-managed so a
-                            // re-render can't wipe it; vim.rs only sets the selection.
-                            (self.vim_enabled
-                                && self.vim.borrow().mode == vim::VimMode::Normal)
-                                .then_some("vim-normal")
-                        )}
-                        placeholder={self.pending_suggestion.clone().unwrap_or_else(|| if ctx.props().ws_connected {
-                            "Type your message... (Shift+Enter for new line)".into()
-                        } else {
-                            // The composer stays usable through a server
-                            // restart: sends queue in the outbox and flush on
-                            // reconnect (#1236), so say so instead of locking
-                            // the box.
-                            "Reconnecting — messages will send when the server is back".into()
-                        })}
-                        oninput={handle_input}
-                        onkeydown={handle_keydown}
-                        onpaste={handle_paste}
-                        rows="1"
-                    />
+                    // Keep the streaming voice preview in the textarea's own
+                    // layout box. Positioning it against the whole form let a
+                    // long transcript paint across adjacent controls and past
+                    // the composer edge on narrow screens.
+                    <div class="message-input-stack">
+                        { self.render_interim_transcription() }
+                        <textarea
+                            ref={self.input_ref.clone()}
+                            class={classes!(
+                                "message-input",
+                                self.interim_transcription.is_some().then_some("has-interim"),
+                                // Block-cursor styling in NORMAL mode. Yew-managed so a
+                                // re-render can't wipe it; vim.rs only sets the selection.
+                                (self.vim_enabled
+                                    && self.vim.borrow().mode == vim::VimMode::Normal)
+                                    .then_some("vim-normal")
+                            )}
+                            placeholder={self.pending_suggestion.clone().unwrap_or_else(|| if ctx.props().ws_connected {
+                                "Type your message... (Shift+Enter for new line)".into()
+                            } else {
+                                // The composer stays usable through a server
+                                // restart: sends queue in the outbox and flush on
+                                // reconnect (#1236), so say so instead of locking
+                                // the box.
+                                "Reconnecting — messages will send when the server is back".into()
+                            })}
+                            oninput={handle_input}
+                            onkeydown={handle_keydown}
+                            onpaste={handle_paste}
+                            rows="1"
+                        />
+                    </div>
                     if self.pending_suggestion.is_some() && self.input_text.is_empty() {
                         <button
                             type="button"

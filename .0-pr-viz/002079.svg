@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2079 - Share echo-preview truncation via shared helper</text>
+<text x="55" y="108" font-family="sans-serif" font-size="34" fill="#e6e9f5">One fewer hand-rolled truncator: echo-mismatch logs reuse the shared helper.</text>
+<path d="M55 178 H1945 M1000 195 V1130" stroke="#565f89" fill="none"/>
+<text x="55" y="235" font-family="sans-serif" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1055" y="235" font-family="sans-serif" font-size="22" fill="#9ece6a">AFTER</text>
+<g><rect x="55" y="285" width="870" height="180" rx="12" fill="#1e202e" stroke="#7aa2f7"/>
+<text x="79" y="327" font-family="sans-serif" font-size="26" fill="#7aa2f7">io_task.rs: truncate_for_log</text>
+<text x="79" y="371" font-family="sans-serif" font-size="23" fill="#c0caf5">Local take(120) plus three-dot suffix</text>
+<text x="79" y="407" font-family="sans-serif" font-size="23" fill="#c0caf5">for echo-mismatch warn previews.</text>
+</g>
+<g><rect x="1055" y="285" width="870" height="180" rx="12" fill="#1e202e" stroke="#7aa2f7"/>
+<text x="1079" y="327" font-family="sans-serif" font-size="26" fill="#7aa2f7">shared::strings helper</text>
+<text x="1079" y="371" font-family="sans-serif" font-size="23" fill="#c0caf5">truncate_with_ellipsis(text, 120)</text>
+<text x="1079" y="407" font-family="sans-serif" font-size="23" fill="#c0caf5">at both warn call sites.</text>
+</g>
+<g><rect x="55" y="570" width="870" height="180" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="612" font-family="sans-serif" font-size="26" fill="#f7768e">Cap rule in two places</text>
+<text x="79" y="656" font-family="sans-serif" font-size="23" fill="#c0caf5">Preview length and marker decided locally,</text>
+<text x="79" y="692" font-family="sans-serif" font-size="23" fill="#c0caf5">apart from the shared snippet helper.</text>
+</g>
+<g><rect x="1055" y="570" width="870" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="612" font-family="sans-serif" font-size="26" fill="#9ece6a">One cap rule</text>
+<text x="1079" y="656" font-family="sans-serif" font-size="23" fill="#c0caf5">Local fn deleted; length and marker come</text>
+<text x="1079" y="692" font-family="sans-serif" font-size="23" fill="#c0caf5">from the tested shared helper.</text>
+</g>
+<g><rect x="55" y="855" width="870" height="180" rx="12" fill="#1e202e" stroke="#a9b1d6"/>
+<text x="79" y="897" font-family="sans-serif" font-size="26" fill="#a9b1d6">Untested local shape</text>
+<text x="79" y="941" font-family="sans-serif" font-size="23" fill="#c0caf5">No unit test pinned the 120-plus-suffix shape.</text>
+</g>
+<g><rect x="1055" y="855" width="870" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="897" font-family="sans-serif" font-size="26" fill="#9ece6a">Covered by shared tests</text>
+<text x="1079" y="941" font-family="sans-serif" font-size="23" fill="#c0caf5">Net minus 10 lines; clippy clean; 96 + 225 tests pass.</text>
+</g>
+<path d="M490 477 V547 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<path d="M490 762 V832 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<path d="M1490 477 V547 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<path d="M1490 762 V832 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<text x="55" y="1170" font-family="sans-serif" font-size="22" fill="#a9b1d6">Scope: log-only output; the warn preview cap stays 120. Frontend and mobile three-dot previews untouched.</text>
+</svg>
