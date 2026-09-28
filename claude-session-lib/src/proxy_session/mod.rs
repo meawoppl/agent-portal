@@ -1123,7 +1123,7 @@ async fn fail_upload(state: &mut ConnectionState, upload_id: String, reason: Str
         drop(recv_state.file_handle);
         let _ = tokio::fs::remove_file(&recv_state.temp_path).await;
     }
-    error!("[upload {}] Failed: {}", truncate(&upload_id, 8), reason);
+    error!("[upload {}] Failed: {}", upload_id_log(&upload_id), reason);
     send_upload_result(state, upload_id, false, Some(reason), None).await;
 }
 
@@ -1138,6 +1138,24 @@ fn upload_rate_kbps(received_bytes: u64, elapsed_s: f64) -> f64 {
     } else {
         0.0
     }
+}
+
+/// Short upload id for the `[upload ...]` log lines. Single home for the
+/// width so the failure, duplicate-start, milestone, and completion logs
+/// cannot drift.
+fn upload_id_log(upload_id: &str) -> &str {
+    truncate(upload_id, 8)
+}
+
+/// 10%-bucketed upload progress for the milestone log. An unknown total
+/// size (nothing to measure against) reports 100. Single home for the
+/// bucket math so it stays testable next to `upload_rate_kbps`.
+fn upload_milestone_percent(received_bytes: u64, total_size: u64) -> u32 {
+    if total_size == 0 {
+        return 100;
+    }
+    let percent = ((received_bytes as f64 / total_size as f64) * 100.0) as u32;
+    (percent / 10) * 10
 }
 
 /// Handle a file upload event (start or chunk)
@@ -1171,7 +1189,7 @@ async fn handle_file_upload(upload_event: FileUploadEvent, state: &mut Connectio
             if let Some(old) = state.active_uploads.remove(&upload_id) {
                 warn!(
                     "[upload {}] Duplicate start; discarding previous partial",
-                    truncate(&upload_id, 8)
+                    upload_id_log(&upload_id)
                 );
                 drop(old.file_handle);
                 let _ = tokio::fs::remove_file(&old.temp_path).await;
@@ -1235,7 +1253,7 @@ async fn handle_file_upload(upload_event: FileUploadEvent, state: &mut Connectio
             use base64::Engine;
             use tokio::io::AsyncWriteExt;
 
-            let upload_id_short = truncate(&upload_id, 8);
+            let upload_id_short = upload_id_log(&upload_id);
             let Some(recv_state) = state.active_uploads.get_mut(&upload_id) else {
                 // Post-abort stragglers land here; the failure was already
                 // reported when the upload state was dropped.
@@ -1264,12 +1282,8 @@ async fn handle_file_upload(upload_event: FileUploadEvent, state: &mut Connectio
             recv_state.received_bytes += decoded.len() as u64;
 
             // Log every 10% milestone
-            let percent = if recv_state.total_size > 0 {
-                ((recv_state.received_bytes as f64 / recv_state.total_size as f64) * 100.0) as u32
-            } else {
-                100
-            };
-            let log_threshold = (percent / 10) * 10;
+            let log_threshold =
+                upload_milestone_percent(recv_state.received_bytes, recv_state.total_size);
             if log_threshold > recv_state.last_log_percent {
                 let elapsed = recv_state.start_time.elapsed().as_secs_f64();
                 let rate_kb = upload_rate_kbps(recv_state.received_bytes, elapsed);
@@ -1642,5 +1656,22 @@ mod tests {
         assert_eq!(upload_rate_kbps(1024, 0.0), 0.0);
         assert_eq!(upload_rate_kbps(1024, 1.0), 1.0);
         assert_eq!(upload_rate_kbps(2048, 0.5), 4.0);
+    }
+
+    #[test]
+    fn upload_id_log_keeps_short_ids_and_truncates_long_ones() {
+        assert_eq!(upload_id_log("abc"), "abc");
+        assert_eq!(upload_id_log("12345678"), "12345678");
+        assert_eq!(upload_id_log("123456789"), "12345678");
+    }
+
+    #[test]
+    fn upload_milestone_percent_buckets_by_ten() {
+        assert_eq!(upload_milestone_percent(0, 0), 100);
+        assert_eq!(upload_milestone_percent(0, 1000), 0);
+        assert_eq!(upload_milestone_percent(50, 1000), 0);
+        assert_eq!(upload_milestone_percent(149, 1000), 10);
+        assert_eq!(upload_milestone_percent(999, 1000), 90);
+        assert_eq!(upload_milestone_percent(1000, 1000), 100);
     }
 }
