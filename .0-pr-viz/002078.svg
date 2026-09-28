@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2078 · Update codex-codes and surface terminal turn errors</text>
+<text x="55" y="108" font-family="sans-serif" font-size="34" fill="#e6e9f5">Terminal turn errors were discarded; now their explanations reach the transcript.</text>
+<text x="55" y="151" font-family="sans-serif" font-size="34" fill="#e6e9f5">Codex 0.158.0 Guardian interruptions retain their status and usage events.</text>
+<path d="M55 178 H1945 M1000 195 V1130" stroke="#565f89" fill="none"/>
+<text x="55" y="235" font-family="sans-serif" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1055" y="235" font-family="sans-serif" font-size="22" fill="#9ece6a">AFTER</text>
+<g><rect x="55" y="285" width="870" height="180" rx="12" fill="#1e202e" stroke="#7aa2f7"/>
+<text x="79" y="327" font-family="sans-serif" font-size="26" fill="#7aa2f7">codex-codes 0.157.1</text>
+<text x="79" y="371" font-family="sans-serif" font-size="23" fill="#c0caf5">TurnCompleted carries turn.error,</text>
+<text x="79" y="407" font-family="sans-serif" font-size="23" fill="#c0caf5">but the handler only shapes TurnCompletedEvent.</text>
+</g>
+<g><rect x="1055" y="285" width="870" height="180" rx="12" fill="#1e202e" stroke="#7aa2f7"/>
+<text x="1079" y="327" font-family="sans-serif" font-size="26" fill="#7aa2f7">codex-codes 0.158.0</text>
+<text x="1079" y="371" font-family="sans-serif" font-size="23" fill="#c0caf5">Adds CodexErrorInfo::TooManyDenials.</text>
+<text x="1079" y="407" font-family="sans-serif" font-size="23" fill="#c0caf5">Interrupted turns can carry a terminal error.</text>
+</g>
+<g><rect x="55" y="570" width="870" height="180" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="612" font-family="sans-serif" font-size="26" fill="#f7768e">Terminal explanation dropped</text>
+<text x="79" y="656" font-family="sans-serif" font-size="23" fill="#c0caf5">turn.error is not forwarded.</text>
+<text x="79" y="692" font-family="sans-serif" font-size="23" fill="#c0caf5">The transcript lacks the interruption reason.</text>
+</g>
+<g><rect x="1055" y="570" width="870" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="612" font-family="sans-serif" font-size="26" fill="#9ece6a">handle_codex_server_message</text>
+<text x="1079" y="656" font-family="sans-serif" font-size="23" fill="#c0caf5">For each attached error, emit ErrorEvent.</text>
+<text x="1079" y="692" font-family="sans-serif" font-size="23" fill="#c0caf5">The existing error renderer shows its message.</text>
+</g>
+<g><rect x="55" y="855" width="870" height="180" rx="12" fill="#1e202e" stroke="#a9b1d6"/>
+<text x="79" y="897" font-family="sans-serif" font-size="26" fill="#a9b1d6">TurnCompletedEvent</text>
+<text x="79" y="941" font-family="sans-serif" font-size="23" fill="#c0caf5">Completion status and usage are forwarded.</text>
+</g>
+<g><rect x="1055" y="855" width="870" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="897" font-family="sans-serif" font-size="26" fill="#9ece6a">TurnCompletedEvent preserved</text>
+<text x="1079" y="941" font-family="sans-serif" font-size="23" fill="#c0caf5">Status, usage and turn-ended signal remain.</text>
+<text x="1079" y="977" font-family="sans-serif" font-size="23" fill="#c0caf5">Tests cover interrupted and failed terminal errors.</text>
+</g>
+<path d="M490 477 V547 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<path d="M490 762 V832 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<path d="M1490 477 V547 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<path d="M1490 762 V832 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<text x="55" y="1170" font-family="sans-serif" font-size="22" fill="#a9b1d6">Scope: TooManyDenials is main-only upstream; the pinned CLI does not emit it yet. MCP status filtering is unused.</text>
+</svg>

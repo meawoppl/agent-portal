@@ -20,6 +20,7 @@ use session_lib::io::{IoCommand, IoEvent};
 use session_lib::{
     AgentOutputClassifier, ClaudeAdapter, PermissionDecision, TurnOutcome, TurnTracker,
 };
+use shared::strings::truncate_with_ellipsis;
 use shared::PortalMessage;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
@@ -228,14 +229,6 @@ fn plain_user_echo_text(output: &ClaudeOutput) -> Option<String> {
     }
 
     saw_text.then_some(text)
-}
-
-fn truncate_for_log(text: &str) -> String {
-    const LIMIT: usize = 120;
-    if text.chars().count() <= LIMIT {
-        return text.to_string();
-    }
-    format!("{}...", text.chars().take(LIMIT).collect::<String>())
 }
 
 // Detector for the upstream-429 turn shape. When Anthropic's API rate-limits a
@@ -465,8 +458,8 @@ impl ClaudeIoState {
             if marker.expected_text != echoed_text {
                 tracing::warn!(
                     "Dropping Claude user echo with mismatched text; expected={}, echoed={}",
-                    truncate_for_log(&marker.expected_text),
-                    truncate_for_log(&echoed_text)
+                    truncate_with_ellipsis(&marker.expected_text, 120),
+                    truncate_with_ellipsis(&echoed_text, 120)
                 );
             }
             return true;
