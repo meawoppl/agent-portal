@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" font-family="'Segoe UI','Noto Sans',sans-serif">
+  <rect width="1600" height="900" fill="#1a1b26"/>
+  <text x="70" y="70" font-size="24" fill="#565f89">PR #2082 - startup reminder handling</text>
+  <text x="70" y="132" font-size="40" fill="#c0caf5">Base instructions ride with the first real turn.</text>
+  <text x="70" y="182" font-size="24" fill="#a9b1d6">Fresh sessions stay idle until the user actually sends work.</text>
+
+  <rect x="95" y="285" width="360" height="250" rx="18" fill="#202334" stroke="#7aa2f7" stroke-width="3"/>
+  <text x="135" y="350" font-size="28" fill="#7aa2f7">Session starts</text>
+  <text x="135" y="415" font-size="23" fill="#c0caf5">Claude process ready</text>
+  <text x="135" y="465" font-size="23" fill="#c0caf5">no hidden user turn</text>
+
+  <path d="M475 410H625" stroke="#bb9af7" stroke-width="5"/>
+  <polygon points="625,410 602,397 602,423" fill="#bb9af7"/>
+
+  <rect x="650" y="285" width="360" height="250" rx="18" fill="#202334" stroke="#bb9af7" stroke-width="3"/>
+  <text x="690" y="350" font-size="28" fill="#bb9af7">First user input</text>
+  <text x="690" y="415" font-size="23" fill="#c0caf5">Portal reminder folded in</text>
+  <text x="690" y="465" font-size="23" fill="#c0caf5">visible disclosure shown</text>
+
+  <path d="M1030 410H1180" stroke="#9ece6a" stroke-width="5"/>
+  <polygon points="1180,410 1157,397 1157,423" fill="#9ece6a"/>
+
+  <rect x="1205" y="285" width="300" height="250" rx="18" fill="#202334" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1245" y="350" font-size="28" fill="#9ece6a">Agent acts</text>
+  <text x="1245" y="415" font-size="23" fill="#c0caf5">only after user intent</text>
+  <text x="1245" y="465" font-size="23" fill="#c0caf5">no stale queue surprise</text>
+
+  <rect x="95" y="650" width="1410" height="120" rx="16" fill="#202334" stroke="#565f89"/>
+  <text x="135" y="705" font-size="25" fill="#7dcfff">Invariant</text>
+  <text x="275" y="705" font-size="24" fill="#c0caf5">The base session context is never delivered as a standalone task.</text>
+  <text x="135" y="745" font-size="21" fill="#565f89">Users can expand the disclosure to see why the first turn carried extra context.</text>
+</svg>
