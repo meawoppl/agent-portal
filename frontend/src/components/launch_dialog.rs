@@ -55,7 +55,7 @@ fn load_last_launch_dirs() -> HashMap<String, String> {
 fn load_last_launch_dir_for(launcher_id: Uuid) -> Option<String> {
     load_last_launch_dirs()
         .remove(&launcher_id.to_string())
-        .filter(|v| !v.is_empty())
+        .filter(|v| shared::strings::is_non_empty(v))
 }
 
 /// Persist the last-used launch directory for a specific launcher (machine),

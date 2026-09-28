@@ -21,7 +21,7 @@ use session_lib::{AgentOutput, AgentOutputClassifier};
 use tokio::sync::mpsc;
 
 use crate::classifier::CodexClassifier;
-use crate::events::{to_raw_output, CodexUsageEvent, TurnCompletedEvent};
+use crate::events::{to_raw_output, CodexUsageEvent, ErrorEvent, TurnCompletedEvent};
 
 /// Classify a Codex app-server ServerMessage and emit neutral
 /// [`IoEvent::Classified`] decisions. Returns (event_sent_ok, turn_ended).
@@ -35,6 +35,16 @@ pub(crate) fn handle_codex_server_message(
     // `CodexClassifier` deliberately returns `Noop` for it, so shape the
     // user-visible `turn.completed` event here and emit it as `Visible`.
     if let ServerMessage::Notification(Notification::TurnCompleted(p)) = &msg {
+        // Interrupted turns can carry an error too (Guardian's denial limit).
+        // Surface the terminal explanation regardless of status, while keeping
+        // the completion event that drives usage and turn lifecycle handling.
+        let error_sent = p.turn.error.as_ref().is_none_or(|error| {
+            event_tx
+                .send(IoEvent::Classified(AgentOutput::Visible(to_raw_output(
+                    &ErrorEvent::new(error.message.clone()),
+                ))))
+                .is_ok()
+        });
         let event = TurnCompletedEvent::new(
             p.turn.id.clone(),
             turn_status_label(&p.turn.status).to_string(),
@@ -46,7 +56,7 @@ pub(crate) fn handle_codex_server_message(
                 &event,
             ))))
             .is_ok();
-        return (ok, true);
+        return (ok && error_sent, true);
     }
 
     // Everything else: the classifier is the single mapping source; forward its
@@ -142,6 +152,35 @@ mod tests {
                 assert_eq!(value["usage"]["model_context_window"], 200000);
             }
             other => panic!("expected Visible, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn terminal_errors_are_visible_for_interrupted_and_failed_turns() {
+        for status in ["interrupted", "failed"] {
+            let wire = format!(
+                r#"{{"threadId":"thread-1","turn":{{"id":"turn-1","status":"{status}","items":[],"error":{{"message":"Guardian denial limit reached","codexErrorInfo":"tooManyDenials"}}}}}}"#
+            );
+            let notification = serde_json::from_str(&wire).unwrap();
+            let msg = ServerMessage::Notification(Notification::TurnCompleted(notification));
+            let (outputs, sent, ended) = classified(msg, None);
+            assert!(sent && ended);
+            assert_eq!(outputs.len(), 2);
+            match &outputs[0] {
+                AgentOutput::Visible(value) => {
+                    assert_eq!(value["type"], "error");
+                    assert_eq!(value["message"], "Guardian denial limit reached");
+                }
+                other => panic!("expected visible terminal error, got {other:?}"),
+            }
+            match &outputs[1] {
+                AgentOutput::Visible(value) => {
+                    assert_eq!(value["type"], "turn.completed");
+                    assert_eq!(value["status"], status);
+                    assert_eq!(value["turn_id"], "turn-1");
+                }
+                other => panic!("expected turn completion, got {other:?}"),
+            }
         }
     }
 
