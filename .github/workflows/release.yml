@@ -76,13 +76,13 @@ jobs:
           mv ${{ matrix.target-dir }}/agent-portal${{ matrix.ext }} ${{ matrix.target-dir }}/agent-portal-${{ matrix.suffix }}${{ matrix.ext }}
 
       - name: Upload proxy artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: claude-portal-${{ matrix.suffix }}
           path: ${{ matrix.target-dir }}/claude-portal-${{ matrix.suffix }}${{ matrix.ext }}
 
       - name: Upload launcher artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: agent-portal-${{ matrix.suffix }}
           path: ${{ matrix.target-dir }}/agent-portal-${{ matrix.suffix }}${{ matrix.ext }}
