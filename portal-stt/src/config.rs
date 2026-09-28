@@ -36,7 +36,7 @@ impl SttEnv {
             std::env::var(name)
                 .ok()
                 .map(|v| v.trim().to_string())
-                .filter(|v| !v.is_empty())
+                .filter(|v| shared::strings::is_non_empty(v))
         };
         Self {
             api_key: read(API_KEY_VAR),

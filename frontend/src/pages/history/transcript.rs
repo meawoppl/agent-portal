@@ -148,13 +148,13 @@ fn field(label: &str, value: &str) -> Html {
 
 fn opt_field(label: &str, value: &Option<String>) -> Html {
     match value {
-        Some(v) if !v.is_empty() => field(label, v),
+        Some(v) if shared::strings::is_non_empty(v) => field(label, v),
         _ => Html::default(),
     }
 }
 
 fn provenance(label: &str, version: &Option<String>) -> Html {
-    let v = version.clone().filter(|s| !s.is_empty());
+    let v = version.clone().filter(|s| shared::strings::is_non_empty(s));
     html! {
         <span class="provenance-chip">
             { format!("{label}: {}", v.unwrap_or_else(|| "—".to_string())) }

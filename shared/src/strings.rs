@@ -30,6 +30,18 @@ pub fn owned_non_blank(s: &str) -> Option<String> {
     non_blank(s).map(str::to_string)
 }
 
+/// True when `s` holds at least one byte.
+///
+/// Single home for the repeated `.filter(|v| !v.is_empty())` shape on
+/// optional env/config/remembered strings so the call sites cannot drift
+/// (e.g. one arm trimming while another keeps whitespace). Unlike
+/// [`is_non_blank`], whitespace counts as content: only the truly empty
+/// string is absent.
+#[must_use]
+pub fn is_non_empty(s: &str) -> bool {
+    !s.is_empty()
+}
+
 /// True when `haystack` contains `needle`, comparing ASCII-case-insensitively.
 ///
 /// Single home for the repeated `haystack.to_ascii_lowercase().contains(...)`
@@ -85,6 +97,13 @@ mod tests {
         assert_eq!(owned_non_blank(""), None);
         assert_eq!(owned_non_blank("   "), None);
         assert_eq!(owned_non_blank("  hi  "), Some("hi".to_string()));
+    }
+
+    #[test]
+    fn is_non_empty_rejects_only_the_empty_string() {
+        assert!(!is_non_empty(""));
+        assert!(is_non_empty("   "));
+        assert!(is_non_empty("hi"));
     }
 
     #[test]

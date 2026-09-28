@@ -32,7 +32,11 @@ use shared::api::{
 pub(crate) fn sender_session_id(
     sessions: &[shared::api::AgentSessionInfo],
 ) -> Result<Option<String>> {
-    let env = |key: &str| std::env::var(key).ok().filter(|v| !v.is_empty());
+    let env = |key: &str| {
+        std::env::var(key)
+            .ok()
+            .filter(|v| shared::strings::is_non_empty(v))
+    };
 
     if let Some(id) = env("PORTAL_SESSION_ID") {
         return Ok(Some(id));
@@ -98,7 +102,7 @@ pub(crate) async fn current_session_id(
 ) -> Result<String> {
     if let Some(id) = std::env::var("PORTAL_SESSION_ID")
         .ok()
-        .filter(|v| !v.is_empty())
+        .filter(|v| shared::strings::is_non_empty(v))
     {
         return Ok(id);
     }
@@ -113,7 +117,7 @@ pub(crate) fn api_base() -> Result<(String, String)> {
     let config = crate::config::load_config();
     let token = config
         .auth_token
-        .filter(|t| !t.is_empty())
+        .filter(|t| shared::strings::is_non_empty(t))
         .ok_or_else(|| anyhow!("Not authenticated — run `agent-portal login` first"))?;
     let ws_url = config
         .backend_url
