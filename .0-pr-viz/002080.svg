@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2080 - Defer mobile session streams until selection</text>
+<text x="55" y="108" font-family="sans-serif" font-size="34" fill="#e6e9f5">Mobile opens one session on demand instead of hydrating every transcript.</text>
+<path d="M55 178 H1945 M1000 195 V1130" stroke="#565f89" fill="none"/>
+<text x="55" y="235" font-family="sans-serif" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1055" y="235" font-family="sans-serif" font-size="22" fill="#9ece6a">AFTER</text>
+
+<g>
+<rect x="55" y="285" width="870" height="190" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="329" font-family="sans-serif" font-size="26" fill="#f7768e">Dashboard reload</text>
+<text x="79" y="375" font-family="sans-serif" font-size="23" fill="#c0caf5">use_dashboard_focus restores one view, then</text>
+<text x="79" y="413" font-family="sans-serif" font-size="23" fill="#c0caf5">the hydration drip mounts every visible session.</text>
+</g>
+<g>
+<rect x="1055" y="285" width="870" height="190" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="329" font-family="sans-serif" font-size="26" fill="#9ece6a">Mobile dashboard reload</text>
+<text x="1079" y="375" font-family="sans-serif" font-size="23" fill="#c0caf5">mobile-session-selector starts unselected;</text>
+<text x="1079" y="413" font-family="sans-serif" font-size="23" fill="#c0caf5">no SessionView exists and the drip is disabled.</text>
+</g>
+
+<g>
+<rect x="55" y="555" width="870" height="190" rx="12" fill="#1e202e" stroke="#e0af68"/>
+<text x="79" y="599" font-family="sans-serif" font-size="26" fill="#e0af68">Many mounted SessionViews</text>
+<text x="79" y="645" font-family="sans-serif" font-size="23" fill="#c0caf5">Each view loads REST history, parses its transcript,</text>
+<text x="79" y="683" font-family="sans-serif" font-size="23" fill="#c0caf5">and holds a per-session websocket subscription.</text>
+</g>
+<g>
+<rect x="1055" y="555" width="870" height="190" rx="12" fill="#1e202e" stroke="#7aa2f7"/>
+<text x="1079" y="599" font-family="sans-serif" font-size="26" fill="#7aa2f7">FocusExclusively(session_id)</text>
+<text x="1079" y="645" font-family="sans-serif" font-size="23" fill="#c0caf5">Exactly one activated_sessions entry mounts;</text>
+<text x="1079" y="683" font-family="sans-serif" font-size="23" fill="#c0caf5">switching destroys the previous SessionView first.</text>
+</g>
+
+<g>
+<rect x="55" y="825" width="870" height="190" rx="12" fill="#1e202e" stroke="#a9b1d6"/>
+<text x="79" y="869" font-family="sans-serif" font-size="26" fill="#a9b1d6">One UI path for every viewport</text>
+<text x="79" y="915" font-family="sans-serif" font-size="23" fill="#c0caf5">The compact rail still drives desktop and mobile,</text>
+<text x="79" y="953" font-family="sans-serif" font-size="23" fill="#c0caf5">even though mobile cannot afford all background work.</text>
+</g>
+<g>
+<rect x="1055" y="825" width="870" height="190" rx="12" fill="#1e202e" stroke="#bb9af7"/>
+<text x="1079" y="869" font-family="sans-serif" font-size="26" fill="#bb9af7">Responsive lifecycle, desktop preserved</text>
+<text x="1079" y="915" font-family="sans-serif" font-size="23" fill="#c0caf5">Resize cleanup drops background mobile streams;</text>
+<text x="1079" y="953" font-family="sans-serif" font-size="23" fill="#c0caf5">desktop keeps focused-first background hydration.</text>
+</g>
+
+<path d="M490 487 V537 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<path d="M490 757 V807 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<path d="M1490 487 V537 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<path d="M1490 757 V807 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<text x="55" y="1170" font-family="sans-serif" font-size="22" fill="#a9b1d6">Deep links and newly launched sessions still auto-select; 661 frontend tests and the wasm32 check pass.</text>
+</svg>
