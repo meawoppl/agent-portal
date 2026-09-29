@@ -733,11 +733,17 @@ pub async fn post_agent_progress(
 
     let mut conn = app_state.conn()?;
     crate::handlers::session_access::verify_session_mutator(&mut conn, target_id, user_id)?;
+    // The store remembers who to tell about the rail pill; it has no DB of its
+    // own for the sweep to look members up with.
+    let members: Vec<Uuid> = crate::schema::session_members::table
+        .filter(crate::schema::session_members::session_id.eq(target_id))
+        .select(crate::schema::session_members::user_id)
+        .load(&mut conn)?;
     drop(conn);
 
     let manager = &app_state.session_manager;
     if req.clear {
-        manager.clear_agent_progress(target_id, &id);
+        manager.clear_agent_progress(target_id, members, &id);
     } else {
         let bar = ProgressBar {
             id,
@@ -745,7 +751,7 @@ pub async fn post_agent_progress(
             fraction: req.fraction.map(|f| f.clamp(0.0, 1.0)),
         };
         manager
-            .set_agent_progress(target_id, bar)
+            .set_agent_progress(target_id, members, bar)
             .map_err(|_| AppError::Conflict("too many progress bars; clear one first"))?;
     }
     Ok(StatusCode::NO_CONTENT)

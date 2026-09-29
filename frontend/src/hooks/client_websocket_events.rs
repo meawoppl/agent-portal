@@ -29,6 +29,9 @@ pub const RECENT_TURN_BUFFER_CAP: usize = 50;
 pub(crate) struct ClientWsState {
     pub recent_turn_metrics: Vec<TurnMetrics>,
     pub latest_session_metrics: HashMap<Uuid, TurnMetrics>,
+    /// Rail-pill fill per session (`ServerToClient::SessionProgress`): the
+    /// completion fraction of the agent's progress bars. Absent = no fill.
+    pub session_progress: HashMap<Uuid, f32>,
     pub launch_event_counter: u32,
     pub launcher_event_counter: u32,
 }
@@ -41,6 +44,15 @@ pub(crate) enum ClientWsAction {
         trend: Vec<TurnMetrics>,
         latest: Vec<TurnMetrics>,
     },
+    /// One live `ServerToClient::SessionProgress` frame; `None` clears.
+    SessionProgress {
+        session_id: Uuid,
+        fraction: Option<f32>,
+    },
+    /// Drop every pill fill (`ServerToClient::SessionProgressReset`), sent on
+    /// each (re)connect ahead of the live values so a fill learned before a
+    /// drop can't outlive its bar.
+    SessionProgressReset,
     LaunchEvent,
     LauncherEvent,
 }
@@ -52,6 +64,7 @@ impl Reducible for ClientWsState {
         let mut next = ClientWsState {
             recent_turn_metrics: self.recent_turn_metrics.clone(),
             latest_session_metrics: self.latest_session_metrics.clone(),
+            session_progress: self.session_progress.clone(),
             launch_event_counter: self.launch_event_counter,
             launcher_event_counter: self.launcher_event_counter,
         };
@@ -80,6 +93,18 @@ impl Reducible for ClientWsState {
                     insert_latest_session_metric(&mut next.latest_session_metrics, metric);
                 }
             }
+            ClientWsAction::SessionProgress {
+                session_id,
+                fraction,
+            } => match fraction {
+                Some(fraction) => {
+                    next.session_progress.insert(session_id, fraction);
+                }
+                None => {
+                    next.session_progress.remove(&session_id);
+                }
+            },
+            ClientWsAction::SessionProgressReset => next.session_progress.clear(),
             ClientWsAction::LaunchEvent => {
                 next.launch_event_counter = next.launch_event_counter.wrapping_add(1);
             }
@@ -115,6 +140,18 @@ pub(crate) fn handle_server_message(
         }
         ServerToClient::TurnMetrics(metrics) => {
             live.dispatch(ClientWsAction::TurnMetrics(metrics));
+        }
+        ServerToClient::SessionProgress {
+            session_id,
+            fraction,
+        } => {
+            live.dispatch(ClientWsAction::SessionProgress {
+                session_id,
+                fraction,
+            });
+        }
+        ServerToClient::SessionProgressReset => {
+            live.dispatch(ClientWsAction::SessionProgressReset);
         }
         ServerToClient::LaunchSessionResult { success, error, .. } => {
             // Push signal from the backend that the launcher finished registering
@@ -246,6 +283,54 @@ mod tests {
         assert!(state.latest_session_metrics.contains_key(&b));
         assert_eq!(state.latest_session_metrics.len(), 2);
         assert_eq!(state.recent_turn_metrics.len(), 3, "trend ring accumulates");
+    }
+
+    /// Pill fills are per session: one session's progress frame must not
+    /// erase another's, and `None` clears only its own.
+    #[test]
+    fn session_progress_is_kept_per_session_and_none_clears() {
+        let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
+        let state = Rc::new(ClientWsState::default());
+        let state = state.reduce(ClientWsAction::SessionProgress {
+            session_id: a,
+            fraction: Some(0.25),
+        });
+        let state = state.reduce(ClientWsAction::SessionProgress {
+            session_id: b,
+            fraction: Some(0.5),
+        });
+        let state = state.reduce(ClientWsAction::SessionProgress {
+            session_id: b,
+            fraction: None,
+        });
+
+        assert_eq!(state.session_progress.get(&a), Some(&0.25));
+        assert!(!state.session_progress.contains_key(&b));
+    }
+
+    /// A reconnect must not keep a fill whose bar expired while the socket was
+    /// down: the reset wipes it, and only sessions still running are re-sent.
+    #[test]
+    fn reset_drops_fills_the_backend_no_longer_reports() {
+        let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
+        let state = Rc::new(ClientWsState::default());
+        let state = state.reduce(ClientWsAction::SessionProgress {
+            session_id: a,
+            fraction: Some(0.25),
+        });
+        let state = state.reduce(ClientWsAction::SessionProgress {
+            session_id: b,
+            fraction: Some(0.5),
+        });
+
+        let state = state.reduce(ClientWsAction::SessionProgressReset);
+        let state = state.reduce(ClientWsAction::SessionProgress {
+            session_id: b,
+            fraction: Some(0.5),
+        });
+
+        assert!(!state.session_progress.contains_key(&a));
+        assert_eq!(state.session_progress.get(&b), Some(&0.5));
     }
 
     /// The same stale-snapshot bug made the launch/launcher counters tick

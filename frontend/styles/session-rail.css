@@ -230,6 +230,7 @@
     --pill-visual-height: 2.5rem;
 
     position: relative;
+    isolation: isolate;
     display: flex;
     align-items: center;
     gap: 0.35rem;
@@ -1102,6 +1103,23 @@
 .session-pill.hidden .sparkline-tick,
 .session-pill.hidden .sparkline-range {
     opacity: 0.2;
+}
+
+/* Agent progress fill (`agent-portal progress`) — a gentle green wash behind
+   the pill content, growing left→right. z-index -1 inside the pill's own stacking
+   context (`isolation: isolate` on `.session-pill`) keeps it beneath every
+   foreground child — text, badges, status dot, activity ticks — without
+   each one needing a z-index; the pill's overflow:hidden clips it to the
+   rounded shape. */
+.pill-progress-fill {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    background: rgba(158, 206, 106, 0.16);
+    pointer-events: none;
+    z-index: -1;
+    transition: width 0.4s ease;
 }
 
 /* Top context-usage bar: the counterpart to the bottom activity ticks, but a

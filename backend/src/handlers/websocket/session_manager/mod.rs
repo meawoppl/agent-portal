@@ -255,7 +255,7 @@ pub struct SessionManager {
     input_dedup: Arc<DashMap<Uuid, input_dedup::InputDedupQueue>>,
     /// Live agent-driven progress bars per session (`agent-portal progress`),
     /// in memory only (see `agent_progress.rs`).
-    agent_progress: Arc<DashMap<Uuid, agent_progress::ProgressBars>>,
+    agent_progress: Arc<DashMap<Uuid, agent_progress::SessionProgress>>,
     /// Monotonic counter for connection generations (prevents stale cleanup).
     /// Shared by proxy and launcher registrations — uniqueness is all that
     /// matters, not contiguity per registry.

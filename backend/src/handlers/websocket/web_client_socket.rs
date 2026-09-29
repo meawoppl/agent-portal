@@ -28,7 +28,7 @@ pub async fn handle_web_client_socket(socket: WebSocket, app_state: Arc<AppState
     let mut verified_session_id: Option<Uuid> = None;
     let mut pending_uploads: HashMap<String, PendingUpload> = HashMap::new();
 
-    session_manager.add_user_client(user_id, tx.clone());
+    session_manager.add_user_client_with_progress(user_id, tx.clone());
 
     let ctx = WebClientCtx {
         app_state: &app_state,

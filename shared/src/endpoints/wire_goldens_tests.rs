@@ -842,3 +842,40 @@ fn server_to_client_agent_progress_golden() {
         _ => panic!("wrong variant"),
     }
 }
+
+#[test]
+fn server_to_client_session_progress_golden() {
+    let session_id = Uuid::nil();
+    let msg = ServerToClient::SessionProgress {
+        session_id,
+        fraction: Some(0.5),
+    };
+    let v = serde_json::to_value(&msg).unwrap();
+    assert_eq!(v["type"], "SessionProgress");
+    assert_eq!(v["fraction"], 0.5);
+    let back: ServerToClient = serde_json::from_value(v).unwrap();
+    assert!(matches!(
+        back,
+        ServerToClient::SessionProgress {
+            fraction: Some(_),
+            ..
+        }
+    ));
+
+    let cleared = serde_json::to_value(ServerToClient::SessionProgress {
+        session_id,
+        fraction: None,
+    })
+    .unwrap();
+    assert!(cleared.get("fraction").is_none());
+}
+
+#[test]
+fn server_to_client_session_progress_reset_golden() {
+    let v = serde_json::to_value(ServerToClient::SessionProgressReset).unwrap();
+    assert_eq!(v["type"], "SessionProgressReset");
+    assert!(matches!(
+        serde_json::from_value::<ServerToClient>(v).unwrap(),
+        ServerToClient::SessionProgressReset
+    ));
+}
