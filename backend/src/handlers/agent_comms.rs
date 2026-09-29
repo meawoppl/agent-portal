@@ -147,7 +147,7 @@ fn live_session_activity_state(
     })
 }
 
-fn turn_signal_activity_state(agent_type: &str, content: &str) -> SessionActivityState {
+pub(crate) fn turn_signal_activity_state(agent_type: &str, content: &str) -> SessionActivityState {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(content) else {
         return SessionActivityState::Busy;
     };

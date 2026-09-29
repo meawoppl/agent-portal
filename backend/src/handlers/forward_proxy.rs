@@ -26,11 +26,10 @@ use diesel::prelude::*;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use tower_cookies::Cookies;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 use uuid::Uuid;
 
 use crate::errors::AppError;
-use crate::handlers::websocket::EnqueueInput;
 use crate::AppState;
 use shared::api::{CreateEditStackRequest, ForwardError};
 
@@ -420,50 +419,20 @@ fn create_and_send_forward_edit_stack(
     user_id: Uuid,
     request: CreateEditStackRequest,
 ) -> Result<shared::api::EditStackResponse, AppError> {
-    let outcome = crate::handlers::edit_stack::create_edit_stack_items_for_user_with_inserted(
+    crate::handlers::edit_stack::create_edit_stack_items_for_user(
         app_state, user_id, session_id, request,
     )?;
 
-    for item in &outcome.inserted {
-        let client_msg_id = Uuid::new_v4();
-        let content =
-            serde_json::Value::String(crate::handlers::edit_stack::edit_stack_prompt_content(item));
-        if let Ok(mut conn) = app_state.conn() {
-            let display_name = crate::handlers::helpers::user_display_name(&mut conn, user_id)
-                .unwrap_or_else(|| "Unknown".to_string());
-            app_state
-                .session_manager
-                .set_last_input_sender(session_id, user_id, display_name);
-        }
-        let enqueue = app_state.session_manager.enqueue_input(
-            &app_state.db_pool,
-            session_key,
-            session_id,
-            EnqueueInput {
-                content,
-                send_mode: None,
-                reasoning_effort: None,
-                client_msg_id: Some(client_msg_id),
-            },
+    if let Err(err) = crate::handlers::edit_stack::try_send_next_pending_edit_stack_item(
+        &app_state.db_pool,
+        &app_state.session_manager,
+        session_key,
+        session_id,
+    ) {
+        warn!(
+            "Forward edit-stack queue for user {} -> session {} could not be drained: {:?}",
+            user_id, session_id, err
         );
-        info!(
-            "Forward edit-stack item: user {} -> session {} item {} (seq {}, delivered={}, persisted={})",
-            user_id, session_id, item.id, enqueue.seq, enqueue.delivered, enqueue.persisted
-        );
-        if enqueue.delivered || enqueue.persisted {
-            if let Err(err) = crate::handlers::edit_stack::mark_edit_stack_item_sent_for_user(
-                app_state,
-                user_id,
-                session_id,
-                item.id,
-                client_msg_id,
-            ) {
-                warn!(
-                    "Forward edit-stack item {} enqueued but could not be marked sent: {:?}",
-                    item.id, err
-                );
-            }
-        }
     }
 
     let response =

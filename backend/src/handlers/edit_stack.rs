@@ -18,6 +18,7 @@ use shared::api::{
 use std::collections::HashMap;
 use std::sync::Arc;
 use tower_cookies::Cookies;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 const MAX_EDIT_STACK_ITEMS_PER_REQUEST: usize = 50;
@@ -25,11 +26,6 @@ const MAX_EDIT_STACK_TITLE_CHARS: usize = 200;
 const MAX_EDIT_STACK_TEXT_CHARS: usize = 16_000;
 const MAX_EDIT_STACK_JSON_CHARS: usize = 64_000;
 const MAX_EDIT_STACK_IMAGE_CHARS: usize = 1_500_000;
-
-pub(crate) struct CreateEditStackOutcome {
-    pub(crate) response: EditStackResponse,
-    pub(crate) inserted: Vec<EditStackItem>,
-}
 
 pub async fn list_edit_stack(
     State(app_state): State<Arc<AppState>>,
@@ -107,23 +103,6 @@ pub(crate) fn create_edit_stack_items_for_user(
     session_id: Uuid,
     req: CreateEditStackRequest,
 ) -> Result<EditStackResponse, AppError> {
-    Ok(
-        create_edit_stack_items_for_user_with_inserted(
-            app_state,
-            current_user_id,
-            session_id,
-            req,
-        )?
-        .response,
-    )
-}
-
-pub(crate) fn create_edit_stack_items_for_user_with_inserted(
-    app_state: &AppState,
-    current_user_id: Uuid,
-    session_id: Uuid,
-    req: CreateEditStackRequest,
-) -> Result<CreateEditStackOutcome, AppError> {
     let mut conn = app_state.conn()?;
     let _session = verify_session_mutator(&mut conn, session_id, current_user_id)?;
     if req.items.is_empty() {
@@ -146,33 +125,50 @@ pub(crate) fn create_edit_stack_items_for_user_with_inserted(
         ));
     }
 
-    let inserted_rows = diesel::insert_into(session_edit_stack_items::table)
+    diesel::insert_into(session_edit_stack_items::table)
         .values(&inserts)
-        .returning(SessionEditStackItem::as_returning())
-        .get_results::<SessionEditStackItem>(&mut conn)?;
-    let inserted = enrich_items(&mut conn, inserted_rows)?;
+        .execute(&mut conn)?;
 
-    Ok(CreateEditStackOutcome {
-        response: EditStackResponse {
-            items: load_edit_stack_items(&mut conn, session_id)?,
-        },
-        inserted,
+    Ok(EditStackResponse {
+        items: load_edit_stack_items(&mut conn, session_id)?,
     })
 }
 
-pub(crate) fn mark_edit_stack_item_sent_for_user(
-    app_state: &AppState,
-    current_user_id: Uuid,
+pub(crate) fn try_send_next_pending_edit_stack_item(
+    db_pool: &crate::db::DbPool,
+    session_manager: &crate::handlers::websocket::SessionManager,
+    session_key: &str,
     session_id: Uuid,
-    item_id: Uuid,
-    client_msg_id: Uuid,
-) -> Result<(), AppError> {
-    let mut conn = app_state.conn()?;
-    let _session = verify_session_mutator(&mut conn, session_id, current_user_id)?;
-    let updated = diesel::update(
+) -> Result<bool, AppError> {
+    let mut conn = db_pool.get()?;
+    if !session_ready_for_edit_stack_send(&mut conn, session_manager, session_id)? {
+        return Ok(false);
+    }
+
+    let Some(row) = session_edit_stack_items::table
+        .filter(session_edit_stack_items::session_id.eq(session_id))
+        .filter(session_edit_stack_items::status.eq("pending"))
+        .order(session_edit_stack_items::created_at.asc())
+        .select(SessionEditStackItem::as_select())
+        .first::<SessionEditStackItem>(&mut conn)
+        .optional()?
+    else {
+        return Ok(false);
+    };
+
+    let Some(item) = enrich_items(&mut conn, vec![row.clone()])?
+        .into_iter()
+        .next()
+    else {
+        return Ok(false);
+    };
+
+    let client_msg_id = Uuid::new_v4();
+    let claimed = diesel::update(
         session_edit_stack_items::table
             .filter(session_edit_stack_items::session_id.eq(session_id))
-            .filter(session_edit_stack_items::id.eq(item_id)),
+            .filter(session_edit_stack_items::id.eq(row.id))
+            .filter(session_edit_stack_items::status.eq("pending")),
     )
     .set((
         session_edit_stack_items::status.eq("sent"),
@@ -181,10 +177,122 @@ pub(crate) fn mark_edit_stack_item_sent_for_user(
         session_edit_stack_items::updated_at.eq(diesel::dsl::now),
     ))
     .execute(&mut conn)?;
-    if updated == 0 {
-        return Err(AppError::NotFound("edit stack item not found"));
+    if claimed == 0 {
+        return Ok(false);
     }
-    Ok(())
+
+    let display_name = crate::handlers::helpers::user_display_name(&mut conn, row.created_by)
+        .unwrap_or_else(|| "Unknown".to_string());
+    session_manager.set_last_input_sender(session_id, row.created_by, display_name);
+    drop(conn);
+
+    let content = serde_json::Value::String(edit_stack_prompt_content(&item));
+    let enqueue = session_manager.enqueue_input(
+        db_pool,
+        session_key,
+        session_id,
+        crate::handlers::websocket::EnqueueInput {
+            content,
+            send_mode: None,
+            reasoning_effort: None,
+            client_msg_id: Some(client_msg_id),
+        },
+    );
+
+    if enqueue.delivered || enqueue.persisted {
+        info!(
+            "Edit-stack item: session {} item {} (seq {}, delivered={}, persisted={})",
+            session_id, row.id, enqueue.seq, enqueue.delivered, enqueue.persisted
+        );
+        broadcast_edit_stack_items(db_pool, session_manager, session_key, session_id)?;
+        return Ok(true);
+    }
+
+    warn!(
+        "Edit-stack item {} could not be enqueued for session {}; returning it to pending",
+        row.id, session_id
+    );
+    let mut conn = db_pool.get()?;
+    diesel::update(
+        session_edit_stack_items::table
+            .filter(session_edit_stack_items::session_id.eq(session_id))
+            .filter(session_edit_stack_items::id.eq(row.id))
+            .filter(session_edit_stack_items::sent_client_msg_id.eq(client_msg_id)),
+    )
+    .set((
+        session_edit_stack_items::status.eq("pending"),
+        session_edit_stack_items::sent_client_msg_id.eq(None::<Uuid>),
+        session_edit_stack_items::sent_at.eq(None::<chrono::NaiveDateTime>),
+        session_edit_stack_items::updated_at.eq(diesel::dsl::now),
+    ))
+    .execute(&mut conn)?;
+    broadcast_edit_stack_items(db_pool, session_manager, session_key, session_id)?;
+    Ok(false)
+}
+
+pub(crate) fn broadcast_edit_stack_items(
+    db_pool: &crate::db::DbPool,
+    session_manager: &crate::handlers::websocket::SessionManager,
+    session_key: &str,
+    session_id: Uuid,
+) -> Result<EditStackResponse, AppError> {
+    let mut conn = db_pool.get()?;
+    let response = EditStackResponse {
+        items: load_edit_stack_items(&mut conn, session_id)?,
+    };
+    session_manager.broadcast_to_web_clients(
+        session_key,
+        shared::ServerToClient::EditStackUpdated {
+            session_id,
+            items: response.items.clone(),
+        },
+    );
+    Ok(response)
+}
+
+fn session_ready_for_edit_stack_send(
+    conn: &mut crate::db::DbConnection,
+    session_manager: &crate::handlers::websocket::SessionManager,
+    session_id: Uuid,
+) -> Result<bool, AppError> {
+    use crate::schema::{messages, pending_inputs, pending_permission_requests};
+    use shared::api::SessionActivityState;
+
+    if session_manager.is_turn_active(session_id) {
+        return Ok(false);
+    }
+
+    let pending_input_count: i64 = pending_inputs::table
+        .filter(pending_inputs::session_id.eq(session_id))
+        .count()
+        .get_result(conn)?;
+    if pending_input_count > 0 {
+        return Ok(false);
+    }
+
+    let pending_permission_count: i64 = pending_permission_requests::table
+        .filter(pending_permission_requests::session_id.eq(session_id))
+        .count()
+        .get_result(conn)?;
+    if pending_permission_count > 0 {
+        return Ok(false);
+    }
+
+    let latest_signal: Option<(String, String)> = messages::table
+        .filter(messages::session_id.eq(session_id))
+        .filter(messages::role.eq_any(["user", "assistant", "result", "unknown", "error"]))
+        .order(messages::created_at.desc())
+        .select((messages::agent_type, messages::content))
+        .first(conn)
+        .optional()?;
+
+    let state =
+        latest_signal
+            .as_ref()
+            .map_or(SessionActivityState::Idle, |(agent_type, content)| {
+                crate::handlers::agent_comms::turn_signal_activity_state(agent_type, content)
+            });
+    Ok(matches!(state, SessionActivityState::Idle))
 }
 
 pub async fn update_edit_stack_item(

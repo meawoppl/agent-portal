@@ -318,7 +318,7 @@ fn handle_proxy_message(
 
             if result.success {
                 if let Some(session_id) = *db_session_id {
-                    replay_pending_inputs_from_db(db_pool, session_id, tx);
+                    replay_pending_inputs_from_db(db_pool, session_manager, session_id, tx);
                     replay_forward_opens_from_db(db_pool, session_id, tx);
                 }
             } else {
