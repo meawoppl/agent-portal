@@ -302,8 +302,11 @@ from `HistoryBatch`, the archive and retention.
   carries `pill_fraction` (mean of the determinate bars) to every member's
   *user* channel — the same route as `TurnMetrics`, so the rail needs no
   per-session socket. It is sent only when the whole percent changes, members
-  are remembered from the last post (the sweep has no DB), and a user client is
-  replayed its sessions' values on connect (`add_user_client_with_progress`).
+  are remembered from the last post (the sweep has no DB) and diffed on each
+  post — joiners get the current value, leavers a clear, even at an unchanged
+  percent. A user client connecting gets `SessionProgressReset` and then its
+  sessions' values (`add_user_client_with_progress`); the reset is the boundary
+  that stops a fill learned before a reconnect outliving its bar.
   The frontend keeps it in `ClientWsState::session_progress`.
 - **Connect always sends a snapshot, empty included**, so a still-mounted view
   drops bars that expired while it was disconnected.

@@ -88,8 +88,8 @@ impl SessionManager {
             }
             None => state.bars.push((bar, now)),
         }
-        state.members = members;
-        self.broadcast_progress(session_id, &mut state);
+        let prev_members = std::mem::replace(&mut state.members, members);
+        self.broadcast_progress(session_id, &mut state, &prev_members);
         Ok(())
     }
 
@@ -104,8 +104,8 @@ impl SessionManager {
         if entry.get().bars.len() == before {
             return;
         }
-        entry.get_mut().members = members;
-        self.broadcast_progress(session_id, entry.get_mut());
+        let prev_members = std::mem::replace(&mut entry.get_mut().members, members);
+        self.broadcast_progress(session_id, entry.get_mut(), &prev_members);
         if entry.get().bars.is_empty() {
             entry.remove();
         }
@@ -136,6 +136,7 @@ impl SessionManager {
     /// sees it) or after it, so the client never ends on older state.
     pub fn add_user_client_with_progress(&self, user_id: Uuid, sender: WebClientSender) {
         self.add_user_client(user_id, sender.clone());
+        let _ = sender.send(ServerToClient::SessionProgressReset);
         let sessions: Vec<Uuid> = self
             .agent_progress
             .iter()
@@ -173,7 +174,8 @@ impl SessionManager {
             }
             expired += dropped;
             let session_id = *entry.key();
-            self.broadcast_progress(session_id, entry.value_mut());
+            let members = entry.value().members.clone();
+            self.broadcast_progress(session_id, entry.value_mut(), &members);
             if entry.value().bars.is_empty() {
                 emptied.push(session_id);
             }
@@ -188,9 +190,17 @@ impl SessionManager {
     }
 
     /// Fan the session's state out: the full bar set to its web clients, and
-    /// the pill value to its members when the whole percent changed. Callers
-    /// hold the session's `agent_progress` entry (see the module docs).
-    fn broadcast_progress(&self, session_id: Uuid, state: &mut SessionProgress) {
+    /// the pill value to its members. A member who was already told the current
+    /// value only hears about a change; one who just joined (`prev_members`
+    /// lacks them) is sent the value even if it didn't change, and one who just
+    /// left is sent a clear. Callers hold the session's `agent_progress` entry
+    /// (see the module docs).
+    fn broadcast_progress(
+        &self,
+        session_id: Uuid,
+        state: &mut SessionProgress,
+        prev_members: &[Uuid],
+    ) {
         self.broadcast_to_web_clients(
             &session_id.to_string(),
             ServerToClient::AgentProgress {
@@ -198,18 +208,20 @@ impl SessionManager {
             },
         );
         let pct = state.current_pill_pct();
-        if pct == state.pill_pct {
-            return;
-        }
+        let changed = pct != state.pill_pct;
         state.pill_pct = pct;
+        let frame = |pct: Option<u8>| ServerToClient::SessionProgress {
+            session_id,
+            fraction: pct.map(|p| f32::from(p) / 100.0),
+        };
         for user_id in &state.members {
-            self.broadcast_to_user(
-                user_id,
-                ServerToClient::SessionProgress {
-                    session_id,
-                    fraction: pct.map(|p| f32::from(p) / 100.0),
-                },
-            );
+            let joined = !prev_members.contains(user_id);
+            if changed || (joined && pct.is_some()) {
+                self.broadcast_to_user(user_id, frame(pct));
+            }
+        }
+        for user_id in prev_members.iter().filter(|u| !state.members.contains(u)) {
+            self.broadcast_to_user(user_id, frame(None));
         }
     }
 
@@ -451,6 +463,38 @@ mod tests {
     }
 
     #[test]
+    fn membership_changes_reach_added_and_removed_users_at_an_unchanged_percent() {
+        let mgr = SessionManager::new();
+        let (sid, old, new) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+        let (tx_old, mut rx_old) = conn_channel(64);
+        let (tx_new, mut rx_new) = conn_channel(64);
+        mgr.add_user_client(old, tx_old);
+        mgr.add_user_client(new, tx_new);
+
+        mgr.set_agent_progress(sid, vec![old], bar("a", Some(0.5)))
+            .unwrap();
+        assert_eq!(drain_pill(&mut rx_old), vec![(sid, Some(0.5))]);
+
+        // Same percent, but the member set swapped.
+        mgr.set_agent_progress(sid, vec![new], bar("a", Some(0.5)))
+            .unwrap();
+        assert_eq!(drain_pill(&mut rx_new), vec![(sid, Some(0.5))]);
+        assert_eq!(drain_pill(&mut rx_old), vec![(sid, None)]);
+    }
+
+    #[test]
+    fn user_connect_starts_with_a_reset_even_when_nothing_is_running() {
+        let mgr = SessionManager::new();
+        let (tx, mut rx) = conn_channel(64);
+        mgr.add_user_client_with_progress(Uuid::new_v4(), tx);
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(ServerToClient::SessionProgressReset)
+        ));
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
     fn indeterminate_only_bars_send_no_pill_frame() {
         let mgr = SessionManager::new();
         let (sid, user) = (Uuid::new_v4(), Uuid::new_v4());
@@ -491,6 +535,10 @@ mod tests {
 
         let (tx, mut rx) = conn_channel(64);
         mgr.add_user_client_with_progress(user, tx);
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(ServerToClient::SessionProgressReset)
+        ));
         assert_eq!(drain_pill(&mut rx), vec![(mine, Some(0.25))]);
     }
 

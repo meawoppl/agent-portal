@@ -869,3 +869,13 @@ fn server_to_client_session_progress_golden() {
     .unwrap();
     assert!(cleared.get("fraction").is_none());
 }
+
+#[test]
+fn server_to_client_session_progress_reset_golden() {
+    let v = serde_json::to_value(ServerToClient::SessionProgressReset).unwrap();
+    assert_eq!(v["type"], "SessionProgressReset");
+    assert!(matches!(
+        serde_json::from_value::<ServerToClient>(v).unwrap(),
+        ServerToClient::SessionProgressReset
+    ));
+}

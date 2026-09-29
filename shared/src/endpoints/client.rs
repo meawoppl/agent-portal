@@ -393,4 +393,12 @@ pub enum ServerToClient {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         fraction: Option<f32>,
     },
+
+    /// Drop every rail-pill fill the client holds. Sent first when a user
+    /// client connects, followed by a [`ServerToClient::SessionProgress`] for
+    /// each session that still has one: the client's state survives its
+    /// reconnect loop, so without this boundary a fill learned before a drop
+    /// would outlive a bar that expired (or a backend that restarted) while it
+    /// was away.
+    SessionProgressReset,
 }

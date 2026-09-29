@@ -49,6 +49,10 @@ pub(crate) enum ClientWsAction {
         session_id: Uuid,
         fraction: Option<f32>,
     },
+    /// Drop every pill fill (`ServerToClient::SessionProgressReset`), sent on
+    /// each (re)connect ahead of the live values so a fill learned before a
+    /// drop can't outlive its bar.
+    SessionProgressReset,
     LaunchEvent,
     LauncherEvent,
 }
@@ -100,6 +104,7 @@ impl Reducible for ClientWsState {
                     next.session_progress.remove(&session_id);
                 }
             },
+            ClientWsAction::SessionProgressReset => next.session_progress.clear(),
             ClientWsAction::LaunchEvent => {
                 next.launch_event_counter = next.launch_event_counter.wrapping_add(1);
             }
@@ -144,6 +149,9 @@ pub(crate) fn handle_server_message(
                 session_id,
                 fraction,
             });
+        }
+        ServerToClient::SessionProgressReset => {
+            live.dispatch(ClientWsAction::SessionProgressReset);
         }
         ServerToClient::LaunchSessionResult { success, error, .. } => {
             // Push signal from the backend that the launcher finished registering
@@ -298,6 +306,31 @@ mod tests {
 
         assert_eq!(state.session_progress.get(&a), Some(&0.25));
         assert!(!state.session_progress.contains_key(&b));
+    }
+
+    /// A reconnect must not keep a fill whose bar expired while the socket was
+    /// down: the reset wipes it, and only sessions still running are re-sent.
+    #[test]
+    fn reset_drops_fills_the_backend_no_longer_reports() {
+        let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
+        let state = Rc::new(ClientWsState::default());
+        let state = state.reduce(ClientWsAction::SessionProgress {
+            session_id: a,
+            fraction: Some(0.25),
+        });
+        let state = state.reduce(ClientWsAction::SessionProgress {
+            session_id: b,
+            fraction: Some(0.5),
+        });
+
+        let state = state.reduce(ClientWsAction::SessionProgressReset);
+        let state = state.reduce(ClientWsAction::SessionProgress {
+            session_id: b,
+            fraction: Some(0.5),
+        });
+
+        assert!(!state.session_progress.contains_key(&a));
+        assert_eq!(state.session_progress.get(&b), Some(&0.5));
     }
 
     /// The same stale-snapshot bug made the launch/launcher counters tick

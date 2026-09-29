@@ -287,7 +287,7 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
         // every session socket too, but has no per-session UI consumer.
         ServerToClient::UserSpendUpdate { .. } => {}
         // The rail pill fill is consumed by the dashboard's user-wide socket.
-        ServerToClient::SessionProgress { .. } => {}
+        ServerToClient::SessionProgress { .. } | ServerToClient::SessionProgressReset => {}
         unhandled => {
             // Variants we haven't wired a UI route for yet (e.g. new
             // server-pushed frames added since this branch was written).
