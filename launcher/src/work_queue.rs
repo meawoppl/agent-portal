@@ -117,7 +117,6 @@ pub async fn add(
     let resolved = crate::message::resolve_session_id(agent_id, &sessions.sessions)?;
     let default_source = default_source(&sessions.sessions);
     let request = CreateEditStackRequest {
-        message_type: None,
         source: parse_loose_json(source).or(default_source),
         items: vec![EditStackItemInput {
             title: Some(

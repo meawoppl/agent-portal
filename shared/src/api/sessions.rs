@@ -94,9 +94,6 @@ pub struct MessagesListResponse<T> {
 
 // ---- Session edit stack -----------------------------------------------------
 
-/// Message type surfaces post to Portal when adding visual/text annotations.
-pub const EDIT_STACK_MESSAGE_TYPE: &str = "agent-portal:queue-prompts";
-
 /// Captured image payload for an edit-stack item.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -124,14 +121,12 @@ pub struct EditStackItemInput {
     pub image_data_url: Option<String>,
 }
 
-/// Body for `POST /api/sessions/{id}/edit-stack`. The same shape is also used
-/// by forwarded surfaces via `postMessage`; the `type` field is optional on
-/// REST so trusted Portal UI can reuse it without pretending to be a surface.
+/// Body for edit-stack submissions. Forwarded surfaces post this shape to
+/// `POST /__portal/edit-stack`; Portal UI and agent tooling use the
+/// session-scoped REST endpoints directly.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateEditStackRequest {
-    #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
-    pub message_type: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<serde_json::Value>,
     #[serde(default)]

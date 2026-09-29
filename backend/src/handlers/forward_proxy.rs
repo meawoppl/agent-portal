@@ -14,23 +14,25 @@
 use std::sync::Arc;
 
 use axum::{
-    body::Body,
+    body::{self, Body},
     extract::{Path, Query, Request, State},
     http::{header, HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri},
     middleware::Next,
     response::{IntoResponse, Redirect, Response},
+    Json,
 };
 use chrono::Utc;
 use diesel::prelude::*;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use tower_cookies::Cookies;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::errors::AppError;
+use crate::handlers::websocket::EnqueueInput;
 use crate::AppState;
-use shared::api::ForwardError;
+use shared::api::{CreateEditStackRequest, ForwardError};
 
 /// Handoff token TTL (portal origin → forward origin redirect).
 const HANDOFF_TTL_SECS: i64 = 60;
@@ -42,6 +44,8 @@ const MAX_NEXT_LEN: usize = 2048;
 const FWD_COOKIE: &str = "portal_fwd";
 const AUD_HANDOFF: &str = "portal-forward-auth";
 const AUD_COOKIE: &str = "portal-forward-session";
+const FORWARD_EDIT_STACK_PATH: &str = "/__portal/edit-stack";
+const MAX_FORWARD_EDIT_STACK_BODY_BYTES: usize = 8 * 1024 * 1024;
 
 /// Hop-by-hop headers (RFC 9110 §7.6.1) — never forwarded in either
 /// direction. `upgrade` stays stripped until WS passthrough lands.
@@ -61,15 +65,23 @@ const HOP_BY_HOP: &[&str] = &[
 struct ForwardClaims {
     aud: String,
     session_id: Uuid,
+    user_id: Uuid,
     exp: i64,
     iat: i64,
 }
 
-fn mint_token(app_state: &AppState, aud: &str, session_id: Uuid, ttl: i64) -> String {
+fn mint_token(
+    app_state: &AppState,
+    aud: &str,
+    session_id: Uuid,
+    user_id: Uuid,
+    ttl: i64,
+) -> String {
     let now = Utc::now().timestamp();
     let claims = ForwardClaims {
         aud: aud.to_string(),
         session_id,
+        user_id,
         exp: now + ttl,
         iat: now,
     };
@@ -84,7 +96,12 @@ fn mint_token(app_state: &AppState, aud: &str, session_id: Uuid, ttl: i64) -> St
 /// Verify a forward JWT and require it to match this origin's session. (The
 /// forward port isn't in the token — a session has at most one, looked up per
 /// request so revocation and re-pointing take effect immediately.)
-fn verify_token(app_state: &AppState, token: &str, aud: &str, session_id: Uuid) -> bool {
+fn decode_token(
+    app_state: &AppState,
+    token: &str,
+    aud: &str,
+    session_id: Uuid,
+) -> Option<ForwardClaims> {
     let mut validation = Validation::default();
     validation.set_audience(&[aud]);
     // `set_audience` alone only checks `aud` *if present*. Require it (and
@@ -96,8 +113,8 @@ fn verify_token(app_state: &AppState, token: &str, aud: &str, session_id: Uuid) 
         &DecodingKey::from_secret(app_state.jwt_secret.as_bytes()),
         &validation,
     ) {
-        Ok(data) => data.claims.session_id == session_id,
-        Err(_) => false,
+        Ok(data) if data.claims.session_id == session_id => Some(data.claims),
+        _ => None,
     }
 }
 
@@ -206,7 +223,13 @@ pub async fn open_forward(
     let origin = forward_origin(&app_state, &label)
         .ok_or(AppError::ServiceUnavailable("Forwarding is not configured"))?;
 
-    let token = mint_token(&app_state, AUD_HANDOFF, session_id, HANDOFF_TTL_SECS);
+    let token = mint_token(
+        &app_state,
+        AUD_HANDOFF,
+        session_id,
+        user_id,
+        HANDOFF_TTL_SECS,
+    );
     let next = validate_next(query.next.as_deref().unwrap_or("/"));
     let target = format!(
         "{origin}/__portal/auth?token={token}&next={}",
@@ -243,9 +266,10 @@ pub async fn forward_host_gate(
 /// Everything served on a forward origin. Resolves the label to a session and
 /// its live port (both may 404) before auth + reverse proxy.
 async fn dispatch(app_state: Arc<AppState>, label: String, req: Request) -> Response {
+    let is_edit_stack_request = req.uri().path() == FORWARD_EDIT_STACK_PATH;
     // Resolve label → session up front. An unknown label is a 404 (no leak of
     // whether the label ever existed).
-    let (session_id, port, session_key) = {
+    let (session_id, port, session_key, cookie_claims) = {
         let mut conn = match app_state.conn() {
             Ok(conn) => conn,
             Err(_) => return forward_error(ForwardError::Unavailable),
@@ -271,13 +295,12 @@ async fn dispatch(app_state: Arc<AppState>, label: String, req: Request) -> Resp
         // private-from-absent, so an unauthenticated caller can't probe
         // whether a private forward is active (they always get the same auth
         // bounce; only authenticated callers see the revocation 404).
+        let cookie_claims = cookie_value(req.headers(), FWD_COOKIE)
+            .and_then(|token| decode_token(&app_state, &token, AUD_COOKIE, session_id));
         let port = if let Some((port, true)) = forward {
             port
         } else {
-            let authed = cookie_value(req.headers(), FWD_COOKIE)
-                .map(|token| verify_token(&app_state, &token, AUD_COOKIE, session_id))
-                .unwrap_or(false);
-            if !authed {
+            if cookie_claims.is_none() {
                 return unauthenticated_response(&app_state, session_id, &req);
             }
             match forward {
@@ -295,8 +318,13 @@ async fn dispatch(app_state: Arc<AppState>, label: String, req: Request) -> Resp
             Ok(key) => key,
             Err(_) => return forward_error(ForwardError::UnknownForward),
         };
-        (session_id, port, session_key)
+        (session_id, port, session_key, cookie_claims)
     };
+
+    if is_edit_stack_request {
+        return handle_forward_edit_stack(&app_state, &session_key, session_id, cookie_claims, req)
+            .await;
+    }
 
     proxy_request(&app_state, &session_key, session_id, port, &label, req).await
 }
@@ -318,16 +346,21 @@ fn handle_auth(app_state: &AppState, session_id: Uuid, req: &Request) -> Respons
             next: None,
         });
 
-    let valid = query
+    let claims = query
         .token
         .as_deref()
-        .map(|t| verify_token(app_state, t, AUD_HANDOFF, session_id))
-        .unwrap_or(false);
-    if !valid {
+        .and_then(|t| decode_token(app_state, t, AUD_HANDOFF, session_id));
+    let Some(claims) = claims else {
         return forward_error(ForwardError::AuthRequired);
-    }
+    };
 
-    let cookie_jwt = mint_token(app_state, AUD_COOKIE, session_id, COOKIE_TTL_SECS);
+    let cookie_jwt = mint_token(
+        app_state,
+        AUD_COOKIE,
+        session_id,
+        claims.user_id,
+        COOKIE_TTL_SECS,
+    );
     let same_site = forward_cookie_same_site(app_state);
     let cookie = format!(
         "{FWD_COOKIE}={cookie_jwt}; Path=/; Max-Age={COOKIE_TTL_SECS}; HttpOnly; {same_site}"
@@ -339,6 +372,110 @@ fn handle_auth(app_state: &AppState, session_id: Uuid, req: &Request) -> Respons
         response.headers_mut().insert(header::SET_COOKIE, value);
     }
     response
+}
+
+async fn handle_forward_edit_stack(
+    app_state: &AppState,
+    session_key: &str,
+    session_id: Uuid,
+    claims: Option<ForwardClaims>,
+    req: Request,
+) -> Response {
+    if req.method() != Method::POST {
+        return (StatusCode::METHOD_NOT_ALLOWED, "Method not allowed").into_response();
+    }
+    let Some(user_id) = claims.map(|claims| claims.user_id) else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            "Forward session expired; reopen this forward from Portal",
+        )
+            .into_response();
+    };
+    let bytes = match body::to_bytes(req.into_body(), MAX_FORWARD_EDIT_STACK_BODY_BYTES).await {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return AppError::PayloadTooLarge(format!(
+                "edit stack request exceeded {} bytes",
+                MAX_FORWARD_EDIT_STACK_BODY_BYTES
+            ))
+            .into_response();
+        }
+    };
+    let request = match serde_json::from_slice::<CreateEditStackRequest>(&bytes) {
+        Ok(request) => request,
+        Err(_) => {
+            return AppError::BadRequest("edit stack request was not valid JSON").into_response()
+        }
+    };
+    match create_and_send_forward_edit_stack(app_state, session_key, session_id, user_id, request) {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+fn create_and_send_forward_edit_stack(
+    app_state: &AppState,
+    session_key: &str,
+    session_id: Uuid,
+    user_id: Uuid,
+    request: CreateEditStackRequest,
+) -> Result<shared::api::EditStackResponse, AppError> {
+    let outcome = crate::handlers::edit_stack::create_edit_stack_items_for_user_with_inserted(
+        app_state, user_id, session_id, request,
+    )?;
+
+    for item in &outcome.inserted {
+        let client_msg_id = Uuid::new_v4();
+        let content =
+            serde_json::Value::String(crate::handlers::edit_stack::edit_stack_prompt_content(item));
+        if let Ok(mut conn) = app_state.conn() {
+            let display_name = crate::handlers::helpers::user_display_name(&mut conn, user_id)
+                .unwrap_or_else(|| "Unknown".to_string());
+            app_state
+                .session_manager
+                .set_last_input_sender(session_id, user_id, display_name);
+        }
+        let enqueue = app_state.session_manager.enqueue_input(
+            &app_state.db_pool,
+            session_key,
+            session_id,
+            EnqueueInput {
+                content,
+                send_mode: None,
+                reasoning_effort: None,
+                client_msg_id: Some(client_msg_id),
+            },
+        );
+        info!(
+            "Forward edit-stack item: user {} -> session {} item {} (seq {}, delivered={}, persisted={})",
+            user_id, session_id, item.id, enqueue.seq, enqueue.delivered, enqueue.persisted
+        );
+        if enqueue.delivered || enqueue.persisted {
+            if let Err(err) = crate::handlers::edit_stack::mark_edit_stack_item_sent_for_user(
+                app_state,
+                user_id,
+                session_id,
+                item.id,
+                client_msg_id,
+            ) {
+                warn!(
+                    "Forward edit-stack item {} enqueued but could not be marked sent: {:?}",
+                    item.id, err
+                );
+            }
+        }
+    }
+
+    let response =
+        crate::handlers::edit_stack::list_edit_stack_for_user(app_state, user_id, session_id)?;
+    app_state.session_manager.broadcast_to_web_clients(
+        session_key,
+        shared::ServerToClient::EditStackUpdated {
+            session_id,
+            items: response.items.clone(),
+        },
+    );
+    Ok(response)
 }
 
 /// Missing/expired cookie: bounce navigations through the portal origin (the
@@ -1018,6 +1155,35 @@ mod tests {
         let decoded =
             decode::<ForwardClaims>(&no_aud, &DecodingKey::from_secret(secret), &validation);
         assert!(decoded.is_err(), "token without aud must be rejected");
+    }
+
+    #[test]
+    fn forward_claims_user_id_round_trips() {
+        let secret = b"test-secret-value-at-least-32-bytes-long";
+        let sid = Uuid::new_v4();
+        let uid = Uuid::new_v4();
+        let now = chrono::Utc::now().timestamp();
+        let mut validation = Validation::default();
+        validation.set_audience(&[AUD_COOKIE]);
+        validation.set_required_spec_claims(&["exp", "aud"]);
+
+        let new_token = encode(
+            &Header::default(),
+            &ForwardClaims {
+                aud: AUD_COOKIE.to_string(),
+                session_id: sid,
+                user_id: uid,
+                exp: now + 60,
+                iat: now,
+            },
+            &EncodingKey::from_secret(secret),
+        )
+        .unwrap();
+        let new =
+            decode::<ForwardClaims>(&new_token, &DecodingKey::from_secret(secret), &validation)
+                .unwrap();
+        assert_eq!(new.claims.session_id, sid);
+        assert_eq!(new.claims.user_id, uid);
     }
 
     #[test]

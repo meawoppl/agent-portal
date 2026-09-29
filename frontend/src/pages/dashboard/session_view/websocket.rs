@@ -2,6 +2,7 @@
 
 use crate::utils;
 use futures_util::StreamExt;
+use shared::api::EditStackItem;
 use shared::{
     ClientEndpoint, ClientToServer, InputDeliveryStage, ServerToClient, TurnMetrics, WsEndpoint,
 };
@@ -52,6 +53,10 @@ pub enum WsEvent {
     /// `GET /api/sessions/{id}/forwards` (docs/PORT_FORWARDING.md).
     ForwardsChanged {
         open_preview: bool,
+    },
+    /// Durable work queue snapshot after a plugin surface submission.
+    EditStackUpdated {
+        items: Vec<EditStackItem>,
     },
     /// Terminal outcome of a file upload (#939 phase 4). The view gates the
     /// prompt referencing the file on this.
@@ -259,6 +264,12 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
             open_preview,
         } => {
             on_event.emit(WsEvent::ForwardsChanged { open_preview });
+        }
+        ServerToClient::EditStackUpdated {
+            session_id: _,
+            items,
+        } => {
+            on_event.emit(WsEvent::EditStackUpdated { items });
         }
         ServerToClient::ToolProgress {
             tool_use_id,
@@ -672,6 +683,7 @@ mod tests {
             WsEvent::TurnMetrics(_) => "TurnMetrics",
             WsEvent::InputProgress { .. } => "InputProgress",
             WsEvent::ForwardsChanged { .. } => "ForwardsChanged",
+            WsEvent::EditStackUpdated { .. } => "EditStackUpdated",
             WsEvent::UploadResult(_) => "UploadResult",
             WsEvent::ToolProgress { .. } => "ToolProgress",
             WsEvent::Ephemeral(_) => "Ephemeral",
