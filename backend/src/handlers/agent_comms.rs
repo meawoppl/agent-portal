@@ -451,7 +451,12 @@ pub async fn send_agent_message(
     // agent-facing text, and the frontend renders the typed event directly.
     // The human web page sends no `from`, so fall back to a plain text portal
     // message with the sender display name in the prompt text.
-    let content = match req.from.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    let content = match req
+        .from
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| shared::strings::is_non_empty(s))
+    {
         Some(from) => {
             let sender_agent = from
                 .parse::<Uuid>()

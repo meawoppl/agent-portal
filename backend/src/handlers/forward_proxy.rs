@@ -425,7 +425,7 @@ fn filtered_cookie_header(headers: &HeaderMap) -> Option<String> {
             pair.split_once('=')
                 .is_none_or(|(name, _)| name != FWD_COOKIE)
         })
-        .filter(|pair| !pair.is_empty())
+        .filter(|pair| shared::strings::is_non_empty(pair))
         .collect();
     (!kept.is_empty()).then(|| kept.join("; "))
 }
@@ -798,7 +798,7 @@ pub fn strip_frame_ancestors(csp: &str) -> Option<String> {
     let kept: Vec<&str> = csp
         .split(';')
         .map(str::trim)
-        .filter(|d| !d.is_empty())
+        .filter(|d| shared::strings::is_non_empty(d))
         .filter(|d| {
             let name = d.split_ascii_whitespace().next().unwrap_or("");
             !name.eq_ignore_ascii_case("frame-ancestors")

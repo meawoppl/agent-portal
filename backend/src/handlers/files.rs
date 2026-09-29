@@ -86,7 +86,7 @@ pub async fn pull_session_file(
         .filename
         .as_deref()
         .map(sanitize_download_filename)
-        .filter(|s| !s.is_empty())
+        .filter(|s| shared::strings::is_non_empty(s))
         .unwrap_or_else(|| "download".to_string());
     let content_type = response
         .media_type

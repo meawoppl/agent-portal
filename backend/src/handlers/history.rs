@@ -268,7 +268,7 @@ fn owner_rollups<'a>(rows: impl Iterator<Item = &'a scan::FlatRow>) -> Vec<Histo
 fn owner_label(m: &archive_format::SessionArchiveManifest) -> String {
     m.owner_name
         .clone()
-        .filter(|n| !n.is_empty())
+        .filter(|n| shared::strings::is_non_empty(n))
         .unwrap_or_else(|| {
             if m.owner_email.is_empty() {
                 m.user_id.to_string()

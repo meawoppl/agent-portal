@@ -381,7 +381,7 @@ impl ServerConfig {
         let allowed_emails = env::var("ALLOWED_EMAILS").ok().map(|s| {
             s.split(',')
                 .map(|e| e.trim().to_lowercase())
-                .filter(|e| !e.is_empty())
+                .filter(|e| shared::strings::is_non_empty(e))
                 .collect::<Vec<_>>()
         });
 
@@ -623,7 +623,7 @@ fn mobile_app_links_config_from_env() -> MobileAppLinksConfig {
                 let fingerprints = value
                     .split(',')
                     .map(str::trim)
-                    .filter(|fingerprint| !fingerprint.is_empty())
+                    .filter(|fingerprint| shared::strings::is_non_empty(fingerprint))
                     .map(str::to_string)
                     .collect::<Vec<_>>();
                 if fingerprints.is_empty() {

@@ -205,7 +205,7 @@ pub struct HistoryMessageLine {
 pub fn parse_history_ndjson(body: &str) -> Vec<HistoryMessageLine> {
     body.lines()
         .map(str::trim)
-        .filter(|line| !line.is_empty())
+        .filter(|line| crate::strings::is_non_empty(line))
         .filter_map(|line| serde_json::from_str::<HistoryMessageLine>(line).ok())
         .collect()
 }
