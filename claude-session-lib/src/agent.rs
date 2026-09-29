@@ -35,7 +35,7 @@ impl Agent for ClaudeAgent {
             // Surface the OS pid so `Session::stop` can group-kill the agent
             // tree instead of relying on `kill_on_drop` (#927).
             let _ = event_tx.send(IoEvent::AgentStarted { pid });
-            claude_io_task(session_id, client, command_rx, event_tx).await;
+            claude_io_task(session_id, config.resume, client, command_rx, event_tx).await;
         });
         Ok(handle)
     }

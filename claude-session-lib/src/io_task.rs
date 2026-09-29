@@ -307,6 +307,57 @@ fn can_anchor_context(msg: &claude_codes::io::AssistantMessage) -> bool {
     true
 }
 
+fn should_drop_fresh_start_output(output: &ClaudeOutput) -> bool {
+    match output {
+        ClaudeOutput::Assistant(asst) => {
+            assistant_has_pre_input_visible_or_actionable_content(asst)
+        }
+        ClaudeOutput::ControlRequest(_) | ClaudeOutput::ToolProgress(_) | ClaudeOutput::User(_) => {
+            true
+        }
+        ClaudeOutput::System(_)
+        | ClaudeOutput::RateLimitEvent(_)
+        | ClaudeOutput::PromptSuggestion(_)
+        | ClaudeOutput::ConversationReset(_)
+        | ClaudeOutput::ControlResponse(_)
+        | ClaudeOutput::Error(_)
+        | ClaudeOutput::Result(_) => false,
+        // New typed status/stream variants should not trip the fresh-start
+        // guard by default. Known visible/actionable startup leaks are handled
+        // explicitly above.
+        _ => false,
+    }
+}
+
+fn should_interrupt_fresh_start_output(output: &ClaudeOutput) -> bool {
+    match output {
+        ClaudeOutput::Assistant(asst) => assistant_has_pre_input_tool_use(asst),
+        ClaudeOutput::ControlRequest(_) => true,
+        _ => false,
+    }
+}
+
+fn assistant_has_pre_input_visible_or_actionable_content(
+    msg: &claude_codes::io::AssistantMessage,
+) -> bool {
+    msg.message.content.iter().any(|block| match block {
+        ContentBlock::Text(text) => is_non_blank(&text.text),
+        ContentBlock::ToolUse(_) | ContentBlock::ServerToolUse(_) | ContentBlock::McpToolUse(_) => {
+            true
+        }
+        _ => false,
+    })
+}
+
+fn assistant_has_pre_input_tool_use(msg: &claude_codes::io::AssistantMessage) -> bool {
+    msg.message.content.iter().any(|block| {
+        matches!(
+            block,
+            ContentBlock::ToolUse(_) | ContentBlock::ServerToolUse(_) | ContentBlock::McpToolUse(_)
+        )
+    })
+}
+
 fn is_reportable_model(model: &str) -> bool {
     !model.is_empty() && model != SYNTHETIC_MODEL
 }
@@ -494,6 +545,7 @@ impl ClaudeIoState {
 /// if we tried to share it between tasks with a mutex.
 pub(crate) async fn claude_io_task(
     session_id: Uuid,
+    resume: bool,
     mut client: ClaudeAsyncClient,
     mut command_rx: mpsc::UnboundedReceiver<IoCommand>,
     event_tx: mpsc::UnboundedSender<IoEvent>,
@@ -534,6 +586,7 @@ pub(crate) async fn claude_io_task(
     // first turn starts land outside every turn window.
     let mut subagent_rollup = claude_codes::SubagentUsageRollup::default();
     let mut subagent_tokens_at_turn_start: i64 = 0;
+    let mut saw_user_input = resume;
 
     loop {
         tokio::select! {
@@ -546,6 +599,7 @@ pub(crate) async fn claude_io_task(
                         delivered,
                         display_event,
                     } => {
+                        saw_user_input = true;
                         // Each fresh user input gets its own retry budget.
                         state.reset_turn_retry_state();
                         subagent_tokens_at_turn_start = subagent_rollup.subagent_tokens as i64;
@@ -592,6 +646,24 @@ pub(crate) async fn claude_io_task(
             result = client.receive() => {
                 match result {
                     Ok(output) => {
+                        if !saw_user_input && should_drop_fresh_start_output(&output) {
+                            tracing::warn!(
+                                "Dropping Claude output before first user input for fresh session {}: {}",
+                                session_id,
+                                output.message_type()
+                            );
+                            if should_interrupt_fresh_start_output(&output) {
+                                if let Err(error) = client.send(&interrupt_input()).await {
+                                    tracing::warn!(
+                                        "Failed to interrupt Claude after pre-input output for fresh session {}: {}",
+                                        session_id,
+                                        error
+                                    );
+                                }
+                            }
+                            continue;
+                        }
+
                         if state.should_drop_user_echo(&output) {
                             continue;
                         }
@@ -1311,6 +1383,40 @@ mod tests {
             ClaudeOutput::Assistant(a) => a,
             other => panic!("expected assistant, got {other:?}"),
         }
+    }
+
+    fn parse_output(v: serde_json::Value) -> ClaudeOutput {
+        serde_json::from_value(v).expect("valid Claude output")
+    }
+
+    #[test]
+    fn fresh_start_guard_drops_user_voiced_assistant_suggestions_without_interrupting() {
+        let output = parse_output(assistant_frame(
+            "claude-opus-5-5",
+            Some("Can you explain the cone-search in src/extraction.rs?"),
+            true,
+        ));
+        assert!(should_drop_fresh_start_output(&output));
+        assert!(!should_interrupt_fresh_start_output(&output));
+    }
+
+    #[test]
+    fn fresh_start_guard_interrupts_pre_input_tool_use() {
+        let output = parse_output(assistant_frame("claude-opus-5-5", None, true));
+        assert!(should_drop_fresh_start_output(&output));
+        assert!(should_interrupt_fresh_start_output(&output));
+    }
+
+    #[test]
+    fn fresh_start_guard_allows_typed_prompt_suggestions() {
+        let output = parse_output(serde_json::json!({
+            "type": "prompt_suggestion",
+            "suggestion": "Can you explain the cone-search in src/extraction.rs?",
+            "uuid": "u5",
+            "session_id": "01890000-0000-7000-8000-000000000001"
+        }));
+        assert!(!should_drop_fresh_start_output(&output));
+        assert!(!should_interrupt_fresh_start_output(&output));
     }
 
     /// The context anchor is the CLI's `pro` form: input + cache_creation +

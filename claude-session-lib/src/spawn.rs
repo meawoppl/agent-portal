@@ -2,7 +2,7 @@
 //!
 //! Spawns `claude --print --verbose --output-format stream-json
 //! --input-format stream-json --permission-prompt-tool stdio
-//! --replay-user-messages [--prompt-suggestions true]
+//! --replay-user-messages [--prompt-suggestions true, only when explicitly enabled]
 //! [--session-id <id> | --resume <id> |
 //! --resume <source> --fork-session --session-id <new>] [extra...]`
 //! and wraps its handles in a [`ClaudeAsyncClient`].
@@ -164,7 +164,19 @@ fn build_claude_command(claude_path: &Path, args: &[String], config: &SessionCon
 /// Probe the installed CLI once per resolved path before using the additive
 /// prompt-suggestion flag. Older fleet hosts reject unknown flags at startup,
 /// so capability detection must happen before argv construction.
+///
+/// Prompt suggestions are disabled by default even when Claude advertises the
+/// flag. Claude 2.1.280+ can emit a suggested next prompt as a normal
+/// `assistant` message during session startup; because those suggestions are
+/// phrased as user requests, the portal can display and execute them as if a
+/// user had typed them before the first real input. Keep the typed
+/// `prompt_suggestion` plumbing in place, but require an explicit opt-in while
+/// the CLI wire shape is unsafe.
 pub async fn claude_supports_prompt_suggestions(claude_path: &Path) -> bool {
+    if !prompt_suggestions_explicitly_enabled() {
+        return false;
+    }
+
     static CACHE: OnceLock<tokio::sync::Mutex<HashMap<PathBuf, bool>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| tokio::sync::Mutex::new(HashMap::new()));
     let mut cache = cache.lock().await;
@@ -195,6 +207,21 @@ pub async fn claude_supports_prompt_suggestions(claude_path: &Path) -> bool {
         || String::from_utf8_lossy(&output.stderr).contains("--prompt-suggestions");
     cache.insert(claude_path.to_path_buf(), supported);
     supported
+}
+
+fn prompt_suggestions_explicitly_enabled() -> bool {
+    prompt_suggestions_enabled_value(
+        std::env::var("PORTAL_ENABLE_CLAUDE_PROMPT_SUGGESTIONS")
+            .ok()
+            .as_deref(),
+    )
+}
+
+fn prompt_suggestions_enabled_value(value: Option<&str>) -> bool {
+    matches!(
+        value.map(str::trim).map(str::to_ascii_lowercase).as_deref(),
+        Some("1" | "true" | "yes" | "on")
+    )
 }
 
 /// Log the resolved path and version of the claude binary for diagnostics.
@@ -346,6 +373,17 @@ mod tests {
     fn omits_prompt_suggestion_flag_for_older_claude() {
         let args = claude_cli_args(uuid::Uuid::nil(), false, None, None, false, &[]);
         assert!(!args.iter().any(|arg| arg == "--prompt-suggestions"));
+    }
+
+    #[test]
+    fn prompt_suggestions_require_explicit_env_opt_in() {
+        assert!(!prompt_suggestions_enabled_value(None));
+        assert!(!prompt_suggestions_enabled_value(Some("")));
+        assert!(!prompt_suggestions_enabled_value(Some("false")));
+        assert!(prompt_suggestions_enabled_value(Some("1")));
+        assert!(prompt_suggestions_enabled_value(Some(" true ")));
+        assert!(prompt_suggestions_enabled_value(Some("YES")));
+        assert!(prompt_suggestions_enabled_value(Some("on")));
     }
 
     /// The property the launcher's transcript gates depend on: the id

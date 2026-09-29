@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2091 - Guard Claude startup prompt suggestions</text>
+<text x="55" y="108" font-family="sans-serif" font-size="34" fill="#e6e9f5">Fresh Claude sessions no longer leak user-voiced startup suggestions into</text>
+<text x="55" y="148" font-family="sans-serif" font-size="34" fill="#e6e9f5">the transcript or run tools before Portal delivers real input.</text>
+<path d="M55 190 H1945 M1000 207 V1130" stroke="#565f89" fill="none"/>
+<text x="55" y="235" font-family="sans-serif" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1055" y="235" font-family="sans-serif" font-size="22" fill="#9ece6a">AFTER</text>
+
+<g>
+<rect x="55" y="285" width="870" height="180" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="327" font-family="sans-serif" font-size="26" fill="#f7768e">--prompt-suggestions auto-enabled</text>
+<text x="79" y="371" font-family="sans-serif" font-size="23" fill="#c0caf5">claude_supports_prompt_suggestions added the flag</text>
+<text x="79" y="407" font-family="sans-serif" font-size="23" fill="#c0caf5">whenever the installed CLI accepted it.</text>
+</g>
+
+<g>
+<rect x="1055" y="285" width="870" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="327" font-family="sans-serif" font-size="26" fill="#9ece6a">Opt-in prompt suggestions</text>
+<text x="1079" y="371" font-family="sans-serif" font-size="23" fill="#c0caf5">PORTAL_ENABLE_CLAUDE_PROMPT_SUGGESTIONS gates</text>
+<text x="1079" y="407" font-family="sans-serif" font-size="23" fill="#c0caf5">the flag while typed PromptSuggestion plumbing remains.</text>
+</g>
+
+<g>
+<rect x="55" y="570" width="870" height="180" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="612" font-family="sans-serif" font-size="26" fill="#f7768e">Pre-input Assistant could look user-authored</text>
+<text x="79" y="656" font-family="sans-serif" font-size="23" fill="#c0caf5">A startup text frame landed before the first</text>
+<text x="79" y="692" font-family="sans-serif" font-size="23" fill="#c0caf5">IoCommand::UserInput and appeared as a prompt.</text>
+</g>
+
+<g>
+<rect x="1055" y="570" width="870" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="612" font-family="sans-serif" font-size="26" fill="#9ece6a">Fresh-start guard in claude_io_task</text>
+<text x="1079" y="656" font-family="sans-serif" font-size="23" fill="#c0caf5">should_drop_fresh_start_output suppresses visible</text>
+<text x="1079" y="692" font-family="sans-serif" font-size="23" fill="#c0caf5">or actionable output until Portal input arrives.</text>
+</g>
+
+<g>
+<rect x="55" y="855" width="870" height="180" rx="12" fill="#1e202e" stroke="#e0af68"/>
+<text x="79" y="897" font-family="sans-serif" font-size="26" fill="#e0af68">Cron emits startup status first</text>
+<text x="79" y="941" font-family="sans-serif" font-size="23" fill="#c0caf5">Scheduled prompts can arrive after assistant</text>
+<text x="79" y="977" font-family="sans-serif" font-size="23" fill="#c0caf5">thinking and signature frames.</text>
+</g>
+
+<g>
+<rect x="1055" y="855" width="870" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="897" font-family="sans-serif" font-size="26" fill="#9ece6a">Content-aware, cron-safe handling</text>
+<text x="1079" y="941" font-family="sans-serif" font-size="23" fill="#c0caf5">Status and typed PromptSuggestion frames pass;</text>
+<text x="1079" y="977" font-family="sans-serif" font-size="23" fill="#c0caf5">tool or control attempts trigger interrupt_input.</text>
+</g>
+
+<path d="M490 477 V547 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<path d="M490 762 V832 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<path d="M1490 477 V547 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<path d="M1490 762 V832 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<text x="55" y="1170" font-family="sans-serif" font-size="22" fill="#a9b1d6">Scope: Claude startup path only; cron timing still deserves overnight production observation.</text>
+</svg>
