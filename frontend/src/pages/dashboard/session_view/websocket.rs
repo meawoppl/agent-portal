@@ -73,6 +73,9 @@ pub enum WsEvent {
     /// Drives a transient per-session live-status line (muse's streamed
     /// deltas / task status); never persisted, not part of `Output`.
     Ephemeral(serde_json::Value),
+    /// The session's full set of agent-driven progress bars
+    /// (`ServerToClient::AgentProgress`); replaces whatever the view held.
+    AgentProgress(Vec<shared::api::ProgressBar>),
 }
 
 /// Log a WebSocket failure and surface it to the UI as a [`WsEvent::Error`].
@@ -276,6 +279,9 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
         }
         ServerToClient::Ephemeral { payload } => {
             on_event.emit(WsEvent::Ephemeral(payload));
+        }
+        ServerToClient::AgentProgress { bars } => {
+            on_event.emit(WsEvent::AgentProgress(bars));
         }
         // Spend screens hydrate through REST. This user-wide broadcast reaches
         // every session socket too, but has no per-session UI consumer.
@@ -667,6 +673,7 @@ mod tests {
             WsEvent::UploadResult(_) => "UploadResult",
             WsEvent::ToolProgress { .. } => "ToolProgress",
             WsEvent::Ephemeral(_) => "Ephemeral",
+            WsEvent::AgentProgress(_) => "AgentProgress",
         }
     }
 }

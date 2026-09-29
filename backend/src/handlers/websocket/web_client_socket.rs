@@ -373,7 +373,7 @@ fn handle_web_register(
             *session_key = Some(key.clone());
             *verified_session_id = Some(session_id);
 
-            session_manager.add_web_client(key, tx.clone());
+            session_manager.add_web_client_with_progress(session_id, tx.clone());
             info!(
                 "Web client connected to session: {} ({}) for user {}",
                 session_name, session_id, user_id

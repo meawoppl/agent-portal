@@ -283,6 +283,29 @@ A recurring `PENDING_INPUT_PERSIST_FAILED` right after a deploy almost always
 means schema drift (a migration recorded-but-not-applied) — see above. A one-off
 of any marker is usually a transient DB/network blip.
 
+### Agent progress bars (`agent-portal progress`)
+
+Live-only status an agent drives from the shell: `launcher/src/progress.rs` →
+`POST /api/agent/sessions/{id}/progress` → `SessionManager` in-memory store
+(`session_manager/agent_progress.rs`) → `ServerToClient::AgentProgress` →
+`render_agent_progress` above the input bar. Never persisted, so it is absent
+from `HistoryBatch`, the archive and retention.
+
+- **Full snapshots, no revision.** Every frame is the session's complete bar
+  set, so delivery order *is* state order. Mutations broadcast **while holding
+  the session's `agent_progress` entry**, and a connecting client is registered
+  and sent its snapshot under that same entry (`add_web_client_with_progress`).
+  Lock order is always `agent_progress` entry → `web_clients` shard. Don't
+  release the entry before fanning out — two writers could then deliver
+  snapshots out of order and the browser can't tell.
+- **Connect always sends a snapshot, empty included**, so a still-mounted view
+  drops bars that expired while it was disconnected.
+- **Posting needs `verify_session_mutator`** (owner/editor); a viewer must not
+  be able to forge or clear the session UI.
+- Bars expire after `PROGRESS_BAR_TTL` (10 min) via `run_liveness_sweep`; the
+  cap is `MAX_PROGRESS_BARS`. The agent-facing description lives in
+  `session-lib/portal_reminder.md` — keep it in step with the CLI.
+
 ### Adding a New API Endpoint
 
 1. **Add handler** in `backend/src/handlers/`:

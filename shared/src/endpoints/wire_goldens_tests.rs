@@ -813,3 +813,32 @@ fn continuation_reason_wire_strings_stable() {
     );
     assert_eq!(ContinuationReason::from_wire("bogus"), None);
 }
+
+#[test]
+fn server_to_client_agent_progress_golden() {
+    let msg = ServerToClient::AgentProgress {
+        bars: vec![
+            crate::api::ProgressBar {
+                id: "build".into(),
+                label: Some("Building".into()),
+                fraction: Some(0.25),
+            },
+            crate::api::ProgressBar {
+                id: "wait".into(),
+                label: None,
+                fraction: None,
+            },
+        ],
+    };
+    let v = serde_json::to_value(&msg).unwrap();
+    assert_eq!(v["type"], "AgentProgress");
+    assert_eq!(v["bars"][0]["id"], "build");
+    assert_eq!(v["bars"][0]["fraction"], 0.25);
+    assert!(v["bars"][1].get("fraction").is_none());
+    assert!(v["bars"][1].get("label").is_none());
+    let back: ServerToClient = serde_json::from_value(v).unwrap();
+    match back {
+        ServerToClient::AgentProgress { bars } => assert_eq!(bars.len(), 2),
+        _ => panic!("wrong variant"),
+    }
+}

@@ -770,6 +770,9 @@ pub async fn run_liveness_sweep(app_state: Arc<AppState>) {
             launchers
         );
     }
+    app_state
+        .session_manager
+        .sweep_stale_agent_progress(crate::handlers::websocket::PROGRESS_BAR_TTL);
 }
 
 /// Query user spend from DB and broadcast to all connected web clients

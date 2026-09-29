@@ -7,6 +7,7 @@
 //! - [`client_fanout`] — web/user client registries and broadcast fanout
 //! - [`correlation`] — request/response correlation for launcher RPCs
 //! - [`launcher_registry`] — launcher registration and `(user, host)` dedup
+//! - [`agent_progress`] — live agent-driven progress bars (in memory)
 //!
 //! The `SessionManager` struct itself (and its small, cross-cutting helpers)
 //! lives here; each submodule contributes a focused `impl SessionManager`
@@ -24,6 +25,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
+mod agent_progress;
 mod client_fanout;
 mod correlation;
 mod data_plane;
@@ -36,6 +38,7 @@ mod proxy_lifecycle;
 mod session_tracking;
 mod tunnel_client;
 
+pub use agent_progress::PROGRESS_BAR_TTL;
 use data_plane::DataPlaneMap;
 pub use data_plane::{DataPlaneConnection, DataPlaneSender, DATA_PLANE_CHANNEL_CAPACITY};
 pub(crate) use input_dedup::{DedupVerdict, InputDeliveryState};
@@ -250,6 +253,9 @@ pub struct SessionManager {
     /// Recent web-client input ids per session and their delivery state —
     /// the server half of input idempotency (#1236, see `input_dedup.rs`).
     input_dedup: Arc<DashMap<Uuid, input_dedup::InputDedupQueue>>,
+    /// Live agent-driven progress bars per session (`agent-portal progress`),
+    /// in memory only (see `agent_progress.rs`).
+    agent_progress: Arc<DashMap<Uuid, agent_progress::ProgressBars>>,
     /// Monotonic counter for connection generations (prevents stale cleanup).
     /// Shared by proxy and launcher registrations — uniqueness is all that
     /// matters, not contiguity per registry.
@@ -279,6 +285,7 @@ impl Default for SessionManager {
             last_input_sender: Arc::new(DashMap::new()),
             subagent_tokens: Arc::new(DashMap::new()),
             input_dedup: Arc::new(DashMap::new()),
+            agent_progress: Arc::new(DashMap::new()),
             gen_counter: Arc::new(AtomicU64::new(1)),
         }
     }

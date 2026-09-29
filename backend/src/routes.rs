@@ -297,6 +297,11 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
                 app_state.max_video_mb as usize * 1024 * 1024,
             )),
         )
+        // `agent-portal progress`: create/update/clear a live progress bar.
+        .route(
+            "/api/agent/sessions/{id}/progress",
+            post(handlers::agent_comms::post_agent_progress),
+        )
         // Serve videos shown via `agent-portal show`, with HTTP Range support.
         .route("/api/media/{id}", get(handlers::media_store::serve_media))
         // Voice recordings post the whole utterance as the body; the handler

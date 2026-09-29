@@ -526,6 +526,62 @@
     transition: width 1.5s ease;
 }
 
+/* Agent progress bars (`agent-portal progress`) — pinned above the input.
+   Track/fill styling is shared with the upload bar. */
+.agent-progress {
+    padding: 6px 12px;
+    background: var(--bg-dark);
+    border-top: 1px solid var(--border);
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+}
+
+.agent-progress-bar + .agent-progress-bar {
+    margin-top: 6px;
+}
+
+.agent-progress-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    font-weight: 600;
+    color: var(--accent);
+}
+
+.agent-progress-label {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.agent-progress-pct {
+    flex-shrink: 0;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
+.agent-progress .upload-bar-fill {
+    transition: width 0.3s ease;
+}
+
+.agent-progress .upload-bar-fill.indeterminate {
+    width: 30%;
+    transition: none;
+    animation: agent-progress-slide 1.2s ease-in-out infinite alternate;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .agent-progress .upload-bar-fill.indeterminate {
+        animation: none;
+        width: 100%;
+        opacity: 0.5;
+    }
+}
+
+@keyframes agent-progress-slide {
+    from { margin-left: 0; }
+    to { margin-left: 70%; }
+}
+
 /* Drop hint — shown as subtle static label, prominent on drag-hover */
 .session-view-input .drop-hint {
     position: absolute;
