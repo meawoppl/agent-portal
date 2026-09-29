@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+  <rect width="2000" height="1200" fill="#1a1b26"/>
+  <desc id="desc">Before, forwarded edit-stack submissions were enqueued immediately, so annotations could become user input during an active agent turn. After, Portal claims one pending item only when the session is idle or a terminal output frame releases the next queued item.</desc>
+  <text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2100 - Gate edit-stack sends on turn completion</text>
+  <text x="55" y="108" font-family="sans-serif" font-size="34" fill="#e6e9f5">Forwarded annotations used to inject during active turns; now</text>
+  <text x="55" y="148" font-family="sans-serif" font-size="34" fill="#e6e9f5">server-side queue promotion waits for a real terminal frame.</text>
+  <path d="M55 190 H1945 M1000 207 V1130" stroke="#565f89" fill="none"/>
+  <text x="55" y="235" font-family="sans-serif" font-size="22" fill="#f7768e">BEFORE</text>
+  <text x="1055" y="235" font-family="sans-serif" font-size="22" fill="#9ece6a">AFTER</text>
+
+  <g>
+    <rect x="55" y="285" width="870" height="210" rx="12" fill="#1e202e" stroke="#f7768e"/>
+    <text x="90" y="332" font-family="sans-serif" font-size="26" fill="#f7768e">create_and_send_forward_edit_stack</text>
+    <text x="90" y="382" font-family="sans-serif" font-size="23" fill="#c0caf5">Forward POST created stack rows and looped through</text>
+    <text x="90" y="418" font-family="sans-serif" font-size="23" fill="#c0caf5">outcome.inserted, calling enqueue_input immediately.</text>
+    <text x="90" y="454" font-family="sans-serif" font-size="23" fill="#c0caf5">That bypassed the old dashboard drain timing.</text>
+  </g>
+
+  <g>
+    <rect x="1055" y="285" width="870" height="210" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+    <text x="1090" y="332" font-family="sans-serif" font-size="26" fill="#9ece6a">try_send_next_pending_edit_stack_item</text>
+    <text x="1090" y="382" font-family="sans-serif" font-size="23" fill="#c0caf5">Forward POST persists items, then asks one shared</text>
+    <text x="1090" y="418" font-family="sans-serif" font-size="23" fill="#c0caf5">server-side gate whether exactly one item may send.</text>
+    <text x="1090" y="454" font-family="sans-serif" font-size="23" fill="#c0caf5">If busy, the item stays status=pending.</text>
+  </g>
+
+  <g>
+    <rect x="55" y="565" width="870" height="210" rx="12" fill="#1e202e" stroke="#f7768e"/>
+    <text x="90" y="612" font-family="sans-serif" font-size="26" fill="#f7768e">Input ack made the session look idle</text>
+    <text x="90" y="662" font-family="sans-serif" font-size="23" fill="#c0caf5">pending_inputs could be deleted before the durable</text>
+    <text x="90" y="698" font-family="sans-serif" font-size="23" fill="#c0caf5">assistant transcript showed the active turn state.</text>
+    <text x="90" y="734" font-family="sans-serif" font-size="23" fill="#c0caf5">A second annotation could slip into the same turn.</text>
+  </g>
+
+  <g>
+    <rect x="1055" y="565" width="870" height="210" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+    <text x="1090" y="612" font-family="sans-serif" font-size="26" fill="#9ece6a">SessionManager.active_turns</text>
+    <text x="1090" y="662" font-family="sans-serif" font-size="23" fill="#c0caf5">mark_turn_input_delivered records a live turn when</text>
+    <text x="1090" y="698" font-family="sans-serif" font-size="23" fill="#c0caf5">enqueue_input or pending replay reaches the proxy.</text>
+    <text x="1090" y="734" font-family="sans-serif" font-size="23" fill="#c0caf5">The edit-stack gate refuses sends while it is set.</text>
+  </g>
+
+  <g>
+    <rect x="55" y="845" width="870" height="210" rx="12" fill="#1e202e" stroke="#e0af68"/>
+    <text x="90" y="892" font-family="sans-serif" font-size="26" fill="#e0af68">No terminal-frame handoff</text>
+    <text x="90" y="942" font-family="sans-serif" font-size="23" fill="#c0caf5">Queue release was tied to browser behavior, not to</text>
+    <text x="90" y="978" font-family="sans-serif" font-size="23" fill="#c0caf5">the agent protocols' result or turn.completed frames.</text>
+  </g>
+
+  <g>
+    <rect x="1055" y="845" width="870" height="210" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+    <text x="1090" y="892" font-family="sans-serif" font-size="26" fill="#9ece6a">edit_stack_output_releases_next</text>
+    <text x="1090" y="942" font-family="sans-serif" font-size="23" fill="#c0caf5">Claude result/error, Codex turn.completed/failed,</text>
+    <text x="1090" y="978" font-family="sans-serif" font-size="23" fill="#c0caf5">and Muse run.terminal.* clear active_turns and</text>
+    <text x="1090" y="1014" font-family="sans-serif" font-size="23" fill="#c0caf5">promote the oldest pending stack item.</text>
+  </g>
+
+  <text x="55" y="1170" font-family="sans-serif" font-size="22" fill="#a9b1d6">Scope: ordering guarantee only; this does not alter annotation capture payloads or agent protocol frame parsing.</text>
+</svg>
