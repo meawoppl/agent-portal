@@ -88,7 +88,11 @@ fn dashboard_in_nav_mode() -> bool {
         .is_some()
 }
 
-const REASONING_EFFORT_KEY: &str = "agent-portal-reasoning-effort";
+const REASONING_EFFORT_KEY_PREFIX: &str = "agent-portal-reasoning-effort";
+
+fn reasoning_effort_key(session_id: Uuid) -> String {
+    format!("{REASONING_EFFORT_KEY_PREFIX}-{session_id}")
+}
 
 fn reasoning_effort_from_str(value: &str) -> Option<ReasoningEffort> {
     match value {
@@ -101,22 +105,27 @@ fn reasoning_effort_from_str(value: &str) -> Option<ReasoningEffort> {
     }
 }
 
-fn load_reasoning_effort() -> Option<ReasoningEffort> {
+fn load_reasoning_effort(session_id: Uuid) -> Option<ReasoningEffort> {
     gloo::utils::window()
         .local_storage()
         .ok()
         .flatten()
-        .and_then(|storage| storage.get_item(REASONING_EFFORT_KEY).ok().flatten())
+        .and_then(|storage| {
+            storage
+                .get_item(&reasoning_effort_key(session_id))
+                .ok()
+                .flatten()
+        })
         .and_then(|value| reasoning_effort_from_str(&value))
 }
 
-fn save_reasoning_effort(effort: Option<ReasoningEffort>) {
+fn save_reasoning_effort(session_id: Uuid, effort: Option<ReasoningEffort>) {
     if let Ok(Some(storage)) = gloo::utils::window().local_storage() {
-        if let Some(effort) = effort {
-            let _ = storage.set_item(REASONING_EFFORT_KEY, effort.as_str());
-        } else {
-            let _ = storage.remove_item(REASONING_EFFORT_KEY);
-        }
+        // Keep this preference scoped to the session. A browser-global value
+        // made every newly launched session inherit whichever concrete effort
+        // was selected elsewhere (often XHigh), instead of starting on Auto.
+        let value = effort.map_or("auto", |effort| effort.as_str());
+        let _ = storage.set_item(&reasoning_effort_key(session_id), value);
     }
 }
 
@@ -272,7 +281,7 @@ impl Component for InputBar {
             is_recording: false,
             interim_transcription: None,
             pending_suggestion: None,
-            reasoning_effort: load_reasoning_effort(),
+            reasoning_effort: load_reasoning_effort(ctx.props().session_id),
             voice_button_ref: NodeRef::default(),
             was_focused: ctx.props().focused,
             was_ws_connected: ctx.props().ws_connected,
@@ -383,7 +392,7 @@ impl Component for InputBar {
             }
             InputBarMsg::SetReasoningEffort(effort) => {
                 self.reasoning_effort = effort;
-                save_reasoning_effort(effort);
+                save_reasoning_effort(ctx.props().session_id, effort);
                 true
             }
             InputBarMsg::HistoryUp => {
@@ -1224,6 +1233,23 @@ fn voice_transcription_prompt(visible_input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reasoning_effort_preferences_are_scoped_to_the_session() {
+        let first = Uuid::from_u128(1);
+        let second = Uuid::from_u128(2);
+
+        assert_eq!(
+            reasoning_effort_key(first),
+            "agent-portal-reasoning-effort-00000000-0000-0000-0000-000000000001"
+        );
+        assert_ne!(reasoning_effort_key(first), reasoning_effort_key(second));
+    }
+
+    #[test]
+    fn auto_is_the_absence_of_a_reasoning_effort_override() {
+        assert_eq!(reasoning_effort_from_str("auto"), None);
+    }
 
     #[test]
     fn voice_transcription_adds_a_small_agent_reminder() {
