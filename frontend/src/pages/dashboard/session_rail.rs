@@ -169,6 +169,7 @@ fn render_pill_section(
                 server_version={props.server_version.clone()}
                 activity_timestamps={props.activity_timestamps.clone()}
                 context_fraction={props.context_fractions.get(&session.id).copied()}
+                progress_fraction={props.progress_fractions.get(&session.id).copied()}
                 is_broadcast_sender={broadcast_senders.contains(&session.id)}
                 is_broadcast_receiver={broadcast_receivers.contains(&session.id)}
                 render_time={render_time}
@@ -249,6 +250,10 @@ pub struct SessionRailProps {
     /// no context bar.
     #[prop_or_default]
     pub context_fractions: std::collections::HashMap<Uuid, f64>,
+    /// Per-session completion fraction of the agent's progress bars (session
+    /// id → 0.0..=1.0). Sessions absent from the map render no pill fill.
+    #[prop_or_default]
+    pub progress_fractions: std::collections::HashMap<Uuid, f32>,
     #[prop_or_default]
     pub broadcasts: BroadcastRef,
     pub rail_position: crate::pages::dashboard::RailPosition,

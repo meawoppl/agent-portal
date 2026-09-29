@@ -381,4 +381,16 @@ pub enum ServerToClient {
     /// Live-only like [`ServerToClient::ToolProgress`]: never persisted, never
     /// part of `HistoryBatch`.
     AgentProgress { bars: Vec<ProgressBar> },
+
+    /// The completion fraction a session's rail pill shows for its agent
+    /// progress bars (see [`crate::api::pill_fraction`]), fanned out on every
+    /// member's user channel so the dashboard rail needs no per-session
+    /// socket. `None` clears the pill fill. Live-only like
+    /// [`ServerToClient::AgentProgress`]; sent when the whole-percent value
+    /// changes, and replayed when a user client connects.
+    SessionProgress {
+        session_id: Uuid,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fraction: Option<f32>,
+    },
 }

@@ -38,6 +38,25 @@ fn render_context_bar(fraction: Option<f64>, compacting: bool) -> Html {
     }
 }
 
+/// Gentle green fill behind the pill's content, growing left→right with the
+/// agent's progress bars (`agent-portal progress`). It sits under the text and
+/// the activity ticks, and the pill's `overflow: hidden` clips it to the
+/// rounded shape.
+fn render_progress_fill(fraction: Option<f32>) -> Html {
+    let Some(fraction) = fraction else {
+        return html! {};
+    };
+    let pct = fraction.clamp(0.0, 1.0) * 100.0;
+    html! {
+        <span
+            class="pill-progress-fill"
+            style={format!("width: {pct:.0}%")}
+            title={format!("Agent progress {pct:.0}%")}
+            aria-hidden="true"
+        />
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum VcsView {
     PullRequests(Vec<(i64, String)>),
@@ -81,6 +100,10 @@ pub(super) struct SessionPillProps {
     /// unknown window). Drives the top context-usage bar.
     #[prop_or_default]
     pub context_fraction: Option<f64>,
+    /// Completion fraction (0.0..=1.0) of the agent's progress bars, or `None`
+    /// when it has none running. Drives the green background fill.
+    #[prop_or_default]
+    pub progress_fraction: Option<f32>,
     pub is_broadcast_sender: bool,
     pub is_broadcast_receiver: bool,
     pub render_time: f64,
@@ -127,6 +150,7 @@ pub(super) fn session_pill(props: &SessionPillProps) -> Html {
             data-index={props.index.to_string()}
             data-session-id={session.id.to_string()}
         >
+            { render_progress_fill(props.progress_fraction) }
             <span class={view.watermark_class} aria-hidden="true" />
             <span class="pill-broadcast-effect" aria-hidden="true">
                 <span class="pill-broadcast-strand strand-left-top" />

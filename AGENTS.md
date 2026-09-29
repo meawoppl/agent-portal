@@ -298,6 +298,13 @@ from `HistoryBatch`, the archive and retention.
   Lock order is always `agent_progress` entry → `web_clients` shard. Don't
   release the entry before fanning out — two writers could then deliver
   snapshots out of order and the browser can't tell.
+- **The rail pill fill is a second frame.** `ServerToClient::SessionProgress`
+  carries `pill_fraction` (mean of the determinate bars) to every member's
+  *user* channel — the same route as `TurnMetrics`, so the rail needs no
+  per-session socket. It is sent only when the whole percent changes, members
+  are remembered from the last post (the sweep has no DB), and a user client is
+  replayed its sessions' values on connect (`add_user_client_with_progress`).
+  The frontend keeps it in `ClientWsState::session_progress`.
 - **Connect always sends a snapshot, empty included**, so a still-mounted view
   drops bars that expired while it was disconnected.
 - **Posting needs `verify_session_mutator`** (owner/editor); a viewer must not

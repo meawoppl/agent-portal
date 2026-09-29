@@ -1108,6 +1108,21 @@
    single fill sized to how full the model's context window is. Clipped to the
    pill's rounded top by the pill's own `overflow: hidden`, like the sparkline
    at the bottom. */
+/* Agent progress fill (`agent-portal progress`) — a gentle green wash behind
+   the pill content, growing left→right. z-index 0 keeps it under the text
+   (z-index 1) while the later-in-DOM activity ticks paint over it; the pill's
+   overflow:hidden clips it to the rounded shape. */
+.pill-progress-fill {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    background: rgba(158, 206, 106, 0.16);
+    pointer-events: none;
+    z-index: 0;
+    transition: width 0.4s ease;
+}
+
 .pill-context-bar {
     position: absolute;
     top: 0;

@@ -34,6 +34,9 @@ pub struct UseClientWebSocket {
     /// trend ring. Context status must not disappear when another session is
     /// busy or emits a newer row without context metadata.
     pub latest_session_metrics: HashMap<Uuid, TurnMetrics>,
+    /// Per-session completion fraction of the agent's progress bars, pushed
+    /// live by `ServerToClient::SessionProgress`; drives the rail pill fill.
+    pub session_progress: HashMap<Uuid, f32>,
     /// Monotonic counter that ticks every time the backend broadcasts a
     /// `ServerToClient::LaunchSessionResult` frame (proxy registered, or
     /// the launch failed). Consumers can hang a `use_effect_with` on this
@@ -183,6 +186,7 @@ pub fn use_client_websocket() -> UseClientWebSocket {
         update_available: (*update_available).clone(),
         recent_turn_metrics: live.recent_turn_metrics.clone(),
         latest_session_metrics: live.latest_session_metrics.clone(),
+        session_progress: live.session_progress.clone(),
         launch_event_counter: live.launch_event_counter,
         launcher_event_counter: live.launcher_event_counter,
     }

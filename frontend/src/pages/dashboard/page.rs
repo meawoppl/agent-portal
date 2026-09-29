@@ -913,6 +913,7 @@ pub fn dashboard_page() -> Html {
                         nav_mode={keyboard_nav.nav_mode}
                         activity_timestamps={(*activity_timestamps).clone()}
                         context_fractions={context_fractions.clone()}
+                        progress_fractions={ws_hook.session_progress.clone()}
                         broadcasts={(*agent_message_broadcasts).clone()}
                         rail_position={ui_state.rail_position}
                         server_version={server_version.clone()}

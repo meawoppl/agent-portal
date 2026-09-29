@@ -42,6 +42,14 @@ pub struct AgentProgressRequest {
     pub clear: bool,
 }
 
+/// The single completion fraction a session's rail pill shows for its bars:
+/// the mean of the determinate ones. `None` when there are none (no bars, or
+/// only indeterminate ones), which clears the pill fill.
+pub fn pill_fraction(bars: &[ProgressBar]) -> Option<f32> {
+    let fractions: Vec<f32> = bars.iter().filter_map(|bar| bar.fraction).collect();
+    (!fractions.is_empty()).then(|| fractions.iter().sum::<f32>() / fractions.len() as f32)
+}
+
 /// Parse a CLI progress value into a completion fraction.
 ///
 /// Accepts `37` (out of `max`), `37%`, `0.5%`, and `3/12`. The result is
@@ -76,6 +84,25 @@ pub fn parse_progress_fraction(value: &str, max: f64) -> Result<f32, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn bar(fraction: Option<f32>) -> ProgressBar {
+        ProgressBar {
+            id: "b".into(),
+            label: None,
+            fraction,
+        }
+    }
+
+    #[test]
+    fn pill_fraction_averages_determinate_bars_only() {
+        assert_eq!(pill_fraction(&[]), None);
+        assert_eq!(pill_fraction(&[bar(None)]), None);
+        assert_eq!(pill_fraction(&[bar(Some(0.5))]), Some(0.5));
+        assert_eq!(
+            pill_fraction(&[bar(Some(0.25)), bar(None), bar(Some(0.75))]),
+            Some(0.5)
+        );
+    }
 
     #[test]
     fn parses_bare_number_against_max() {
