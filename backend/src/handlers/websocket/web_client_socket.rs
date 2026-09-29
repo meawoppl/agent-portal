@@ -381,6 +381,10 @@ fn handle_web_register(
 
             replay_history(db_pool, tx, session_id, replay_after, initial_replay_limit);
             replay_pending_permission(db_pool, session_id, tx);
+            let bars = session_manager.agent_progress_snapshot(session_id);
+            if !bars.is_empty() {
+                let _ = tx.send(ServerToClient::AgentProgress { bars });
+            }
             false
         }
         Err(e) => {

@@ -6,6 +6,7 @@ use super::types::{
     FileUploadChunkFields, FileUploadResultFields, FileUploadStartFields, PermissionResponseFields,
     RegisterFields, SubagentRetryStatus,
 };
+use crate::api::ProgressBar;
 use crate::{
     AgentType, PermissionSuggestion, ReasoningEffort, SendMode, SessionCost, SessionStatus,
     TurnMetrics,
@@ -373,4 +374,11 @@ pub enum ServerToClient {
     /// render as transient live status and drop at turn end. A client offline
     /// during the frame loses nothing.
     Ephemeral { payload: serde_json::Value },
+
+    /// The session's complete set of agent-driven progress bars
+    /// (`agent-portal progress`). A full snapshot rather than a delta, so it is
+    /// also what a client receives on connect; an empty list clears every bar.
+    /// Live-only like [`ServerToClient::ToolProgress`]: never persisted, never
+    /// part of `HistoryBatch`.
+    AgentProgress { bars: Vec<ProgressBar> },
 }

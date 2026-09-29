@@ -11,7 +11,7 @@ use std::sync::Arc;
 use axum::{
     body::Bytes,
     extract::{Path, Query, State},
-    http::{header, HeaderMap, HeaderValue},
+    http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
@@ -21,8 +21,9 @@ use tracing::{error, info};
 use uuid::Uuid;
 
 use shared::api::{
-    AgentSessionInfo, AgentSessionsResponse, SendAgentMessageRequest, SendAgentMessageResponse,
-    SessionActivityState, ShowMediaResponse,
+    AgentProgressRequest, AgentSessionInfo, AgentSessionsResponse, ProgressBar,
+    SendAgentMessageRequest, SendAgentMessageResponse, SessionActivityState, ShowMediaResponse,
+    MAX_PROGRESS_ID_LEN, MAX_PROGRESS_LABEL_LEN,
 };
 use shared::media::MediaKind;
 use shared::{AgentType, PortalContent, PortalMessage, ServerToClient, SessionStatus};
@@ -697,6 +698,60 @@ pub async fn show_media(
         content_type,
         persisted,
     }))
+}
+
+/// `POST /api/agent/sessions/{id}/progress` — `agent-portal progress`. Creates,
+/// updates, or clears one of the session's live progress bars and pushes the
+/// resulting set to its web clients. Nothing is persisted: bars are live
+/// status, held in memory by the session manager.
+pub async fn post_agent_progress(
+    State(app_state): State<Arc<AppState>>,
+    Path(target_id): Path<Uuid>,
+    headers: HeaderMap,
+    cookies: Cookies,
+    Json(req): Json<AgentProgressRequest>,
+) -> Result<StatusCode, AppError> {
+    let user_id = resolve_user(&app_state, &headers, &cookies)?;
+
+    let id = shared::strings::trimmed_non_blank(Some(&req.id))
+        .ok_or(AppError::BadRequest("progress id must not be blank"))?
+        .to_string();
+    if id.len() > MAX_PROGRESS_ID_LEN {
+        return Err(AppError::BadRequest("progress id is too long"));
+    }
+    let label = shared::strings::trimmed_non_blank(req.label.as_deref()).map(str::to_string);
+    if label
+        .as_ref()
+        .is_some_and(|l| l.len() > MAX_PROGRESS_LABEL_LEN)
+    {
+        return Err(AppError::BadRequest("progress label is too long"));
+    }
+    if req.fraction.is_some_and(|f| !f.is_finite()) {
+        return Err(AppError::BadRequest("progress fraction must be finite"));
+    }
+
+    let mut conn = app_state.conn()?;
+    crate::handlers::session_access::verify_session_reader(&mut conn, target_id, user_id)?;
+    drop(conn);
+
+    let manager = &app_state.session_manager;
+    let bars = if req.clear {
+        manager.clear_agent_progress(target_id, &id)
+    } else {
+        let bar = ProgressBar {
+            id,
+            label,
+            fraction: req.fraction.map(|f| f.clamp(0.0, 1.0)),
+        };
+        manager
+            .set_agent_progress(target_id, bar)
+            .map_err(|_| AppError::Conflict("too many progress bars; clear one first"))?
+    };
+    manager.broadcast_to_web_clients(
+        &target_id.to_string(),
+        ServerToClient::AgentProgress { bars },
+    );
+    Ok(StatusCode::NO_CONTENT)
 }
 
 fn pending_input_count(

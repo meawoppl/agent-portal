@@ -12,6 +12,7 @@ mod pastebin;
 mod path_policy;
 mod plugin;
 mod process_manager;
+mod progress;
 mod scheduler;
 mod seppuku;
 mod service;
@@ -111,6 +112,30 @@ enum Command {
     Show {
         /// Path to the media file (png, jpg, gif, webp, svg, mp4, webm).
         file: String,
+    },
+    /// Show or update a live progress bar in this session's web view.
+    ///
+    /// VALUE is a number out of --max (default 100), a percentage like `37%`,
+    /// or a fraction like `3/12`. Omit it for an indeterminate bar. Bars are
+    /// live status only (not part of the transcript), expire after 10 minutes
+    /// without an update, and a session may show up to 8 at once, told apart
+    /// by --id. Call it in a loop to animate a long-running job.
+    Progress {
+        /// Current progress: `42`, `42%`, or `3/12`.
+        #[arg(conflicts_with = "done")]
+        value: Option<String>,
+        /// Text shown beside the bar.
+        #[arg(short, long, conflicts_with = "done")]
+        label: Option<String>,
+        /// What a bare VALUE is measured against.
+        #[arg(long, default_value_t = 100.0)]
+        max: f64,
+        /// Bar name, for running several at once.
+        #[arg(long)]
+        id: Option<String>,
+        /// Remove the bar.
+        #[arg(long)]
+        done: bool,
     },
     /// Expose a local HTTP port through the portal for the user's browser.
     ///
@@ -456,6 +481,16 @@ async fn main() -> anyhow::Result<()> {
         }
         Some(Command::Show { file }) => {
             return media::show(&file).await;
+        }
+        Some(Command::Progress {
+            value,
+            label,
+            max,
+            id,
+            done,
+        }) => {
+            return progress::run(value.as_deref(), label.as_deref(), max, id.as_deref(), done)
+                .await;
         }
         Some(Command::Forward { target }) => {
             return match target.as_str() {

@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- **Agent progress bars.** `agent-portal progress <value>` shows a live bar
+  above the input box for long-running jobs (`42`, `42%`, or `3/12`; `--label`,
+  `--id` for several at once, `--done` to remove). Bars are live-only, replayed
+  to browsers that connect mid-run, and expire after 10 minutes without an
+  update.
+
 - **Interactive Rizzma parameters.** Schema-4 portable figures expose their
   bounded, author-declared parameters as host-rendered sliders. Applied values
   come back from the sandboxed renderer after clamp and step normalization;

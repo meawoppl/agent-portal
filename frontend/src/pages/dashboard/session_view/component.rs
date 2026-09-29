@@ -303,6 +303,9 @@ pub struct SessionView {
     /// ends. Kept out of the memoized message-render props on purpose (see the
     /// `helpers` tool-progress section).
     active_tools: Vec<ActiveToolProgress>,
+    /// Agent-driven progress bars (`agent-portal progress`), replaced wholesale
+    /// by each `WsEvent::AgentProgress` snapshot. Live-only, like `active_tools`.
+    agent_progress: Vec<shared::api::ProgressBar>,
     /// Latest non-Muse neutral ephemeral status line, shown as a transient
     /// transcript-tail strip and cleared by durable output. Muse owns the
     /// richer turn-local overlay below instead.
@@ -432,6 +435,7 @@ impl Component for SessionView {
             turn_metrics: Vec::new(),
             continuation_statuses: HashMap::new(),
             active_tools: Vec::new(),
+            agent_progress: Vec::new(),
             ephemeral_status: None,
             muse_live_turn: MuseLiveTurn::default(),
             forwards_refresh: 0,
@@ -1062,6 +1066,7 @@ impl Component for SessionView {
                         </div>
 
                         { self.render_permission_handler(ctx) }
+                        { self.render_agent_progress() }
                         { self.render_input_bar(ctx) }
                     </div>
                     if let Some(surface) = self.active_surface.clone() {
@@ -1248,6 +1253,13 @@ impl SessionView {
                         subagent_retry,
                     },
                 );
+                true
+            }
+            WsEvent::AgentProgress(bars) => {
+                if self.agent_progress == bars {
+                    return false;
+                }
+                self.agent_progress = bars;
                 true
             }
             WsEvent::Ephemeral(payload) => {
@@ -1629,6 +1641,41 @@ impl SessionView {
                                     ) }
                                 </span>
                             }
+                        </div>
+                    }
+                }) }
+            </div>
+        }
+    }
+
+    /// Agent-driven progress bars, pinned above the input bar so a long job's
+    /// progress stays visible while the transcript scrolls. Reuses the upload
+    /// bar's track/fill styling; a bar without a fraction is indeterminate.
+    fn render_agent_progress(&self) -> Html {
+        if self.agent_progress.is_empty() {
+            return html! {};
+        }
+        html! {
+            <div class="agent-progress">
+                { for self.agent_progress.iter().map(|bar| {
+                    let (fill_class, fill_style, pct_text) = match bar.fraction {
+                        Some(fraction) => {
+                            let pct = (fraction * 100.0).round() as u32;
+                            ("upload-bar-fill", format!("width: {pct}%"), format!("{pct}%"))
+                        }
+                        None => ("upload-bar-fill indeterminate", String::new(), String::new()),
+                    };
+                    html! {
+                        <div class="agent-progress-bar" key={bar.id.clone()}>
+                            <div class="agent-progress-header">
+                                <span class="agent-progress-label">
+                                    { bar.label.clone().unwrap_or_else(|| bar.id.clone()) }
+                                </span>
+                                <span class="agent-progress-pct">{ pct_text }</span>
+                            </div>
+                            <div class="upload-bar-track">
+                                <div class={fill_class} style={fill_style} />
+                            </div>
                         </div>
                     }
                 }) }
