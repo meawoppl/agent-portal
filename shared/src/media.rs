@@ -2,7 +2,7 @@
 //!
 //! The CLI detects a file's content type (by extension + magic bytes) and the
 //! backend validates the declared `Content-Type`. Both agree on the supported
-//! set and the image/video/figure split through this one module, so the allow-list
+//! set and the image/video split through this one module, so the allow-list
 //! never drifts between the two sides.
 
 /// Kind of supported transcript media. Drives storage and rendering without
@@ -11,7 +11,6 @@
 pub enum MediaKind {
     Image,
     Video,
-    Figure,
 }
 
 /// Supported image content types (stored in the in-memory image store).
@@ -26,30 +25,10 @@ pub const SUPPORTED_IMAGE_TYPES: &[&str] = &[
 /// Supported video content types (stored on disk, served with Range support).
 pub const SUPPORTED_VIDEO_TYPES: &[&str] = &["video/mp4", "video/webm"];
 
-/// Rizzma portable figures. The artifact is data; it is only interpreted by a
-/// host-vetted renderer inside a sandboxed realm.
+/// Legacy content type for archived/transcript rows produced before the portal
+/// stopped hosting local portable-figure runtimes. Kept for inert serving and
+/// deserializing old messages; new uploads no longer accept it.
 pub const PORTABLE_FIGURE_TYPE: &str = "application/vnd.rizzma.figure";
-
-/// Declared upload type for a reversible `.riz.html` carrier. The backend
-/// unwraps this form and stores only the canonical raw artifact.
-pub const PORTABLE_FIGURE_HTML_TYPE: &str = "application/vnd.rizzma.figure+html";
-
-/// Canonical portable-figure artifact cap.
-pub const PORTABLE_FIGURE_MAX_BYTES: usize = 10 * 1024 * 1024;
-/// Maximum number of host-DOM sliders persisted for one portable figure.
-pub const PORTABLE_FIGURE_MAX_CONTROLS: usize = 16;
-/// Maximum UTF-8 byte length of one persisted control label.
-pub const PORTABLE_FIGURE_MAX_CONTROL_LABEL_BYTES: usize = 128;
-
-/// Transport cap for `.riz.html`. Base64 expands the canonical artifact by
-/// one third and the live tier may also carry a renderer which is discarded
-/// at ingest; the unwrapped artifact remains subject to the canonical cap.
-pub const PORTABLE_FIGURE_HTML_MAX_BYTES: usize = 20 * 1024 * 1024;
-
-/// Exact carrier marker emitted and accepted by Rizzma. This is only a fast
-/// launcher-side preflight; the backend uses Rizzma's strict, budgeted unwrap.
-pub const RIZZMA_HTML_CARRIER_OPEN: &str =
-    r#"<script type="application/vnd.rizzma.figure+base64" id="riz">"#;
 
 /// Classify a supported content type, or return `None`.
 #[must_use]
@@ -59,8 +38,6 @@ pub fn media_kind(content_type: &str) -> Option<MediaKind> {
         Some(MediaKind::Image)
     } else if SUPPORTED_VIDEO_TYPES.contains(&ct) {
         Some(MediaKind::Video)
-    } else if ct == PORTABLE_FIGURE_TYPE || ct == PORTABLE_FIGURE_HTML_TYPE {
-        Some(MediaKind::Figure)
     } else {
         None
     }
@@ -68,7 +45,7 @@ pub fn media_kind(content_type: &str) -> Option<MediaKind> {
 
 /// Human-readable list of supported formats, for CLI/backend error messages.
 pub const SUPPORTED_FORMATS_HINT: &str =
-    "png, jpg, jpeg, gif, webp, svg (images); mp4, webm (video); riz, riz.html (portable figure)";
+    "png, jpg, jpeg, gif, webp, svg (images); mp4, webm (video)";
 
 // --- Format probes ---
 //
@@ -109,22 +86,6 @@ pub fn has_webm_magic(b: &[u8]) -> bool {
     b.starts_with(&[0x1A, 0x45, 0xDF, 0xA3])
 }
 
-#[must_use]
-pub fn has_rizzma_magic(b: &[u8]) -> bool {
-    b.starts_with(b"RZFG")
-}
-
-/// Fast declared-wrapper check used by the launcher before upload. Full HTML
-/// carrier validation and artifact validation remain backend responsibilities.
-#[must_use]
-pub fn has_rizzma_html_carrier(b: &[u8]) -> bool {
-    let Ok(text) = std::str::from_utf8(b) else {
-        return false;
-    };
-    let mut matches = text.match_indices(RIZZMA_HTML_CARRIER_OPEN);
-    matches.next().is_some() && matches.next().is_none()
-}
-
 /// SVG is XML text, so there's no single magic number. Skip a UTF-8 BOM and
 /// leading whitespace, then look for an `<svg` (or `<?xml` prolog) near the
 /// start.
@@ -163,8 +124,6 @@ pub fn sniff_content_type(bytes: &[u8]) -> Option<&'static str> {
         Some("video/mp4")
     } else if has_webm_magic(bytes) {
         Some("video/webm")
-    } else if has_rizzma_magic(bytes) {
-        Some(PORTABLE_FIGURE_TYPE)
     } else if looks_like_svg(bytes) {
         Some("image/svg+xml")
     } else {
@@ -182,22 +141,6 @@ mod tests {
         assert_eq!(media_kind("image/svg+xml"), Some(MediaKind::Image));
         assert_eq!(media_kind("video/mp4"), Some(MediaKind::Video));
         assert_eq!(media_kind("video/webm"), Some(MediaKind::Video));
-        assert_eq!(media_kind(PORTABLE_FIGURE_TYPE), Some(MediaKind::Figure));
-        assert_eq!(
-            media_kind(PORTABLE_FIGURE_HTML_TYPE),
-            Some(MediaKind::Figure)
-        );
-    }
-
-    #[test]
-    fn reversible_html_carrier_requires_one_exact_marker() {
-        let one = format!("<!doctype html>{RIZZMA_HTML_CARRIER_OPEN}AAAA</script>");
-        assert!(has_rizzma_html_carrier(one.as_bytes()));
-        assert!(!has_rizzma_html_carrier(
-            b"<!doctype html><p>not a figure</p>"
-        ));
-        let two = format!("{one}{RIZZMA_HTML_CARRIER_OPEN}AAAA</script>");
-        assert!(!has_rizzma_html_carrier(two.as_bytes()));
     }
 
     #[test]
@@ -218,10 +161,6 @@ mod tests {
         );
         assert_eq!(sniff_content_type(b"GIF89a...."), Some("image/gif"));
         assert_eq!(sniff_content_type(b"RIFF____WEBPVP8 "), Some("image/webp"));
-        assert_eq!(
-            sniff_content_type(b"RZFG\x01\0\0\0"),
-            Some(PORTABLE_FIGURE_TYPE)
-        );
         assert_eq!(sniff_content_type(b"\0\0\0\x18ftypisom"), Some("video/mp4"));
         assert_eq!(
             sniff_content_type(&[0x1A, 0x45, 0xDF, 0xA3, 0, 0, 0, 0]),

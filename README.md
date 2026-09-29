@@ -106,17 +106,14 @@ Open **http://localhost:3000/** — dev mode logs you in as
   purpose-built cards for bash, edits, searches, and sub-agent tasks.
 - **Decisions as forms.** Permission requests and multiple-choice questions
   render as click-to-answer cards instead of walls of text.
-- **Media inline.** `agent-portal show plot.png|clip.mp4|figure.riz` uploads and
-  renders images, video, and interactive Rizzma portable figures into the
-  transcript.
+- **Media inline.** `agent-portal show plot.png|clip.mp4` uploads and renders
+  images and video into the transcript. For interactive apps, animations, and
+  live plots, host a local site and expose it with port forwarding.
 - **Downloadable artifacts.** Agents emit `portal://file/...` links that become
   secure download actions.
 
 <img src="docs/media/feature-permission-card.webp" width="900"
      alt="A prompt is typed and sent; the agent reads the file and proposes a diff, then a 'Permission Required' card appears with Allow / Allow &amp; Remember / Deny. Clicking Allow lets the edit land.">
-
-<img src="docs/media/feature-show-media.webp" width="820"
-     alt="The agent runs 'agent-portal show signals.riz'; a portable figure appears in the transcript as a poster, and clicking play mounts the runtime and animates three travelling waveforms with a scrubber.">
 
 ### Port forwarding
 

@@ -7,10 +7,9 @@
 //   - Trunk's hashed assets (*.wasm / *.js / *.css whose filename ends in a
 //     content hash, e.g. base-545c8725d321f26d.css): cache-first (immutable,
 //     safe to serve from cache forever).
-//   - everything else — including stable-URL scripts like katex-helper.js and
-//     wasm-bindgen snippets (/snippets/<crate>-<hash>/rizzma-host.js, where the
-//     hash is the crate's, not the file's) — passes through to the network, so
-//     a changed file never fails the integrity check in a fresh index.html.
+//   - everything else — including stable-URL helper scripts like katex-helper.js
+//     — passes through to the network, so a changed file never fails the
+//     integrity check in a fresh index.html.
 //
 // NEVER intercepted: /api/*, /ws/*, and any non-GET request. Those must always
 // hit the network directly — caching them would break auth, WS upgrades, and

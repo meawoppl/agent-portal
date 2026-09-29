@@ -3,13 +3,12 @@
 use yew::prelude::*;
 
 use super::charts::render_charts;
-use super::model::{AxisScale, GroupBy, TimeWindow};
+use super::model::{AxisScale, GroupBy};
 use super::use_metrics::PerformanceMetrics;
 
 pub(super) fn render_performance_body(
     metrics: &PerformanceMetrics,
     group_by: &GroupBy,
-    window: TimeWindow,
     axis_scale: AxisScale,
     show_p95: bool,
 ) -> Html {
@@ -28,6 +27,6 @@ pub(super) fn render_performance_body(
             </div>
         }
     } else {
-        render_charts(group_by, window, axis_scale, show_p95)
+        render_charts(&metrics.buckets, group_by, axis_scale, show_p95)
     }
 }

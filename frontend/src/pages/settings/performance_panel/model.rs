@@ -7,7 +7,7 @@ use crate::components::turn_metrics_display::{
     format_agent_model_tier_label, is_displayable_model,
 };
 
-/// Y-axis projection requested from the server-side Rizzma builder.
+/// Y-axis projection used by the client-side SVG charts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum AxisScale {
     Linear,
@@ -23,13 +23,6 @@ impl AxisScale {
         match self {
             Self::Linear => "Linear",
             Self::Log => "Log",
-        }
-    }
-
-    pub(super) const fn wire_name(self) -> &'static str {
-        match self {
-            Self::Linear => "linear",
-            Self::Log => "log",
         }
     }
 }

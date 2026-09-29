@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2084 - Remove local Rizzma runtime support</text>
+<text x="55" y="108" font-family="sans-serif" font-size="34" fill="#e6e9f5">Local .riz playback used to ship runtimes into every Portal build;</text>
+<text x="55" y="148" font-family="sans-serif" font-size="34" fill="#e6e9f5">now show media is images/video only and live surfaces use port forwarding.</text>
+<path d="M55 190 H1945 M1000 207 V1130" stroke="#565f89" fill="none"/>
+<text x="55" y="235" font-family="sans-serif" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1055" y="235" font-family="sans-serif" font-size="22" fill="#9ece6a">AFTER</text>
+
+<g>
+<rect x="55" y="285" width="870" height="180" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="327" font-family="sans-serif" font-size="26" fill="#f7768e">agent-portal show .riz</text>
+<text x="79" y="371" font-family="sans-serif" font-size="23" fill="#c0caf5">MediaKind::Figure accepted application/vnd.rizzma.figure</text>
+<text x="79" y="407" font-family="sans-serif" font-size="23" fill="#c0caf5">and .riz.html carrier uploads in show_media.</text>
+</g>
+
+<g>
+<rect x="1055" y="285" width="870" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="327" font-family="sans-serif" font-size="26" fill="#9ece6a">show_media accepts Image or Video</text>
+<text x="1079" y="371" font-family="sans-serif" font-size="23" fill="#c0caf5">MediaKind now has only Image and Video; launcher</text>
+<text x="1079" y="407" font-family="sans-serif" font-size="23" fill="#c0caf5">detect_content_type rejects plot.riz.</text>
+</g>
+
+<g>
+<rect x="55" y="570" width="870" height="180" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="612" font-family="sans-serif" font-size="26" fill="#f7768e">frontend/rizzma-runtime/* payload</text>
+<text x="79" y="656" font-family="sans-serif" font-size="23" fill="#c0caf5">Four pinned WASM runtimes plus rizzma-host.js</text>
+<text x="79" y="692" font-family="sans-serif" font-size="23" fill="#c0caf5">were copied into every Trunk bundle.</text>
+</g>
+
+<g>
+<rect x="1055" y="570" width="870" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="612" font-family="sans-serif" font-size="26" fill="#9ece6a">LegacyFigureViewer is poster-only</text>
+<text x="1079" y="656" font-family="sans-serif" font-size="23" fill="#c0caf5">PortalContent::Figure survives old rows as an inert</text>
+<text x="1079" y="692" font-family="sans-serif" font-size="23" fill="#c0caf5">transcript fallback with no local runtime.</text>
+</g>
+
+<g>
+<rect x="55" y="855" width="870" height="180" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="897" font-family="sans-serif" font-size="26" fill="#f7768e">/api/metrics/turns/figure</text>
+<text x="79" y="941" font-family="sans-serif" font-size="23" fill="#c0caf5">performance_figures.rs rendered a portable</text>
+<text x="79" y="977" font-family="sans-serif" font-size="23" fill="#c0caf5">dashboard that RizzmaChart mounted.</text>
+</g>
+
+<g>
+<rect x="1055" y="855" width="870" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="897" font-family="sans-serif" font-size="26" fill="#9ece6a">Performance charts are static SVG</text>
+<text x="1079" y="941" font-family="sans-serif" font-size="23" fill="#c0caf5">render_charts draws MetricBucket data in Yew;</text>
+<text x="1079" y="977" font-family="sans-serif" font-size="23" fill="#c0caf5">no chart runtime endpoint remains.</text>
+</g>
+
+<path d="M490 477 V547 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<path d="M490 762 V832 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<path d="M1490 477 V547 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<path d="M1490 762 V832 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<text x="55" y="1170" font-family="sans-serif" font-size="22" fill="#a9b1d6">Scope: PortalContent::Figure remains for old transcripts; active apps and animations should be hosted through agent-portal forward.</text>
+</svg>

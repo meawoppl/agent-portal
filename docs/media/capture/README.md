@@ -11,9 +11,8 @@ recordings of the running app, not illustrations — and they run against a
 |--------|------|-------|
 | `cap-launch.js` | `feature-launch-session.webp` | Launch dialog → machine, directory, model, worktree → session appears and the agent boots |
 | `cap-permission.js` | `feature-permission-card.webp` | Prompt → Read/diff cards → **Permission Required** form → Allow → edit lands |
-| `cap-forward.js` | `feature-port-forward.webp` | The agent starts an `http.server` on the rizzma rustdoc and runs `agent-portal forward 8899` — both visible as tool cards — then the chip appears and the docs render live in the preview panel, navigable inside the frame |
+| `cap-forward.js` | `feature-port-forward.webp` | The agent starts an `http.server` on generated rustdoc and runs `agent-portal forward 8899` — both visible as tool cards — then the chip appears and the docs render live in the preview panel, navigable inside the frame |
 | `cap-message.js` | `feature-agent-message.webp` | One session messages another; the message lands as a turn and that agent starts working |
-| `cap-media.js` | `feature-show-media.webp` | `agent-portal show signals.riz` → poster in the transcript → play → the figure animates |
 | `cap-metrics.js` | `feature-turn-metrics.webp` | The header sparkline building over turns, then switching which metric it plots |
 | `cap-nav.js` | `feature-nav-mode.webp` | `Ctrl+K` → numbered pills, key legend, arrows and a number key jumping between sessions |
 | `cap-agents.js` | `feature-multi-agent.webp` | The same dashboard switching between a Claude session and a Codex session, each in its own protocol's shape |
@@ -67,15 +66,15 @@ looking at on the other end.
 
 ```bash
 # Something dynamic to serve — rustdoc, with its JS search and navigation
-cargo doc -p rizzma --no-deps
-mkdir -p "$DEMO_ROOT/home/rizzma-figs/target"
-cp -r target/doc "$DEMO_ROOT/home/rizzma-figs/target/doc"
+cargo doc -p backend --no-deps
+mkdir -p "$DEMO_ROOT/home/portal-docs/target"
+cp -r target/doc "$DEMO_ROOT/home/portal-docs/target/doc"
 
 ./reset-demo.sh                              # wipe sessions, THEN mint the CLI token
 SID=$(curl -s -X POST "$DEMO_URL/api/launch" -H 'Content-Type: application/json' \
-        -d '{"working_directory":"'"$DEMO_ROOT"'/home/rizzma-figs","launcher_id":"'"$LID"'",
+        -d '{"working_directory":"'"$DEMO_ROOT"'/home/portal-docs","launcher_id":"'"$LID"'",
              "claude_args":["--model","claude-haiku-4-5","--dangerously-skip-permissions"],
-             "agent_type":"claude","name":"rizzma-figs","create_worktree":false}' \
+             "agent_type":"claude","name":"portal-docs","create_worktree":false}' \
       | python3 -c "import sys,json;print(json.load(sys.stdin)['session_id'])")
 DEMO_SID=$SID node cap-forward.js
 ```
@@ -151,9 +150,6 @@ quality at roughly a tenth the bytes (283 KB vs 3.0 MB for the permission clip).
   the dev-mode banner changed style without changing layout, so the region never
   repainted and the banner stayed in the frames. `stage()` **removes** the node
   instead.
-- **Some clicks need to be dispatched in-page.** Headless hit-testing misses the
-  rizzma figure's overlay mount button; `cap-media.js` glides the cursor there
-  and then calls `.click()` in-page. A real click on it does the same thing.
 - **The launcher has a session cap** (20). Re-shoots accumulate in-process
   sessions even after the database rows are gone; when launches start failing
   with `At session limit (20/20)`, restart the launcher.

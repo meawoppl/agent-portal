@@ -4,36 +4,7 @@
 
 use crate::components::DismissibleBackdrop;
 use crate::hooks::use_escape_capture;
-use gloo::events::EventListener;
-use wasm_bindgen::prelude::*;
-use wasm_bindgen_futures::JsFuture;
-use web_sys::{HtmlIFrameElement, HtmlInputElement};
 use yew::prelude::*;
-
-#[wasm_bindgen(module = "/rizzma-host.js")]
-extern "C" {
-    #[wasm_bindgen(js_name = mountRizzma)]
-    fn mount_rizzma(
-        frame: HtmlIFrameElement,
-        artifact_url: &str,
-        renderer_version: &str,
-    ) -> js_sys::Promise;
-
-    #[wasm_bindgen(js_name = playRizzma)]
-    fn play_rizzma(frame: HtmlIFrameElement);
-
-    #[wasm_bindgen(js_name = pauseRizzma)]
-    fn pause_rizzma(frame: HtmlIFrameElement);
-
-    #[wasm_bindgen(js_name = seekRizzma)]
-    fn seek_rizzma(frame: HtmlIFrameElement, time: f64);
-
-    #[wasm_bindgen(js_name = setRizzmaControl)]
-    fn set_rizzma_control(frame: HtmlIFrameElement, index: usize, value: f64);
-
-    #[wasm_bindgen(js_name = disposeRizzma)]
-    fn dispose_rizzma(frame: HtmlIFrameElement);
-}
 
 const ALLOWED_IMAGE_MEDIA_TYPES: &[&str] = &[
     "image/png",
@@ -186,8 +157,7 @@ pub(super) fn render_video_source(media_type: &str, url: &str, filename: Option<
 }
 
 #[derive(Properties, PartialEq)]
-pub(super) struct FigureViewerProps {
-    pub artifact_url: String,
+pub(super) struct LegacyFigureViewerProps {
     pub width_px: u32,
     pub height_px: u32,
     #[prop_or_default]
@@ -196,170 +166,13 @@ pub(super) struct FigureViewerProps {
     pub alt: Option<String>,
     #[prop_or_default]
     pub poster_base64: Option<String>,
-    pub animated: bool,
-    pub duration: f64,
-    #[prop_or_default]
-    pub controls: Vec<shared::PortableFigureControl>,
-    pub renderer_version: String,
-    pub live_supported: bool,
 }
 
-/// Only exact, host-vetted runtime versions may execute. Rizzma 1.9 supports
-/// static interaction; 1.10 and 1.11 add bound-session seeking; 1.12 adds
-/// schema-4 parameter controls.
-pub(super) fn figure_live_supported(schema: u32, renderer_version: &str, animated: bool) -> bool {
-    match renderer_version {
-        "1.9.0" => schema <= 3 && !animated,
-        "1.10.0" | "1.11.0" => schema <= 3,
-        "1.12.0" => schema <= 4,
-        _ => false,
-    }
-}
-
-/// Sandboxed Rizzma viewer. Runtime assets are pinned and verified by the
-/// portal-owned host module before any realm is created. The iframe has only
-/// `allow-scripts`; it receives bytes through a MessageChannel and has no
-/// network, storage, cookie, or portal-origin access.
-#[function_component(FigureViewer)]
-pub(super) fn figure_viewer(props: &FigureViewerProps) -> Html {
-    let frame_ref = use_node_ref();
-    let loading = use_state(|| false);
-    let mounted = use_state(|| false);
-    let playing = use_state(|| false);
-    let position = use_state(|| 0.0_f64);
-    let control_values = {
-        let controls = props.controls.clone();
-        use_state(move || {
-            controls
-                .iter()
-                .map(|control| control.default)
-                .collect::<Vec<_>>()
-        })
-    };
-    let error = use_state(|| None::<String>);
-
-    {
-        let frame_ref = frame_ref.clone();
-        use_effect_with((), move |_| {
-            move || {
-                if let Some(frame) = frame_ref.cast::<HtmlIFrameElement>() {
-                    dispose_rizzma(frame);
-                }
-            }
-        });
-    }
-
-    {
-        let frame_ref = frame_ref.clone();
-        let playing = playing.clone();
-        let position = position.clone();
-        let control_values = control_values.clone();
-        use_effect_with(*mounted, move |is_mounted| {
-            let listeners = if *is_mounted {
-                frame_ref.cast::<HtmlIFrameElement>().map(|frame| {
-                    let state_frame = frame.clone();
-                    let state_listener = EventListener::new(&frame, "rizzma-state", move |_| {
-                        playing.set(
-                            state_frame.get_attribute("data-rizzma-playing").as_deref()
-                                == Some("true"),
-                        );
-                        if let Some(value) = state_frame
-                            .get_attribute("data-rizzma-time")
-                            .and_then(|value| value.parse::<f64>().ok())
-                            .filter(|value| value.is_finite())
-                        {
-                            position.set(value);
-                        }
-                    });
-                    let control_frame = frame.clone();
-                    let control_listener =
-                        EventListener::new(&frame, "rizzma-control", move |_| {
-                            let index = control_frame
-                                .get_attribute("data-rizzma-control-index")
-                                .and_then(|value| value.parse::<usize>().ok());
-                            let value = control_frame
-                                .get_attribute("data-rizzma-control-value")
-                                .and_then(|value| value.parse::<f64>().ok())
-                                .filter(|value| value.is_finite());
-                            if let (Some(index), Some(value)) = (index, value) {
-                                let mut next = (*control_values).clone();
-                                if let Some(slot) = next.get_mut(index) {
-                                    *slot = value;
-                                    control_values.set(next);
-                                }
-                            }
-                        });
-                    (state_listener, control_listener)
-                })
-            } else {
-                None
-            };
-            move || drop(listeners)
-        });
-    }
-
-    let onclick = {
-        let frame_ref = frame_ref.clone();
-        let artifact_url = props.artifact_url.clone();
-        let renderer_version = props.renderer_version.clone();
-        let loading = loading.clone();
-        let mounted = mounted.clone();
-        let error = error.clone();
-        Callback::from(move |_: MouseEvent| {
-            let Some(frame) = frame_ref.cast::<HtmlIFrameElement>() else {
-                error.set(Some("portable-figure frame is unavailable".to_string()));
-                return;
-            };
-            loading.set(true);
-            error.set(None);
-            let loading = loading.clone();
-            let mounted = mounted.clone();
-            let error = error.clone();
-            let promise = mount_rizzma(frame, &artifact_url, &renderer_version);
-            wasm_bindgen_futures::spawn_local(async move {
-                match JsFuture::from(promise).await {
-                    Ok(_) => mounted.set(true),
-                    Err(value) => error.set(Some(
-                        value
-                            .as_string()
-                            .unwrap_or_else(|| "portable figure failed to mount".to_string()),
-                    )),
-                }
-                loading.set(false);
-            });
-        })
-    };
-
-    let on_play_pause = {
-        let frame_ref = frame_ref.clone();
-        let playing = playing.clone();
-        Callback::from(move |_: MouseEvent| {
-            let Some(frame) = frame_ref.cast::<HtmlIFrameElement>() else {
-                return;
-            };
-            if *playing {
-                pause_rizzma(frame);
-            } else {
-                play_rizzma(frame);
-            }
-        })
-    };
-
-    let on_seek = {
-        let frame_ref = frame_ref.clone();
-        Callback::from(move |event: InputEvent| {
-            let value = event
-                .target_unchecked_into::<HtmlInputElement>()
-                .value_as_number();
-            if !value.is_finite() {
-                return;
-            }
-            if let Some(frame) = frame_ref.cast::<HtmlIFrameElement>() {
-                seek_rizzma(frame, value);
-            }
-        })
-    };
-
+/// Legacy portable figures are poster-only. The portal no longer ships a local
+/// interactive runtime; active figures should be hosted as a web surface and
+/// exposed through the forwarding proxy.
+#[function_component(LegacyFigureViewer)]
+pub(super) fn legacy_figure_viewer(props: &LegacyFigureViewerProps) -> Html {
     let aspect_ratio = format!("{} / {}", props.width_px.max(1), props.height_px.max(1));
     let poster = props
         .poster_base64
@@ -372,107 +185,18 @@ pub(super) fn figure_viewer(props: &FigureViewerProps) -> Html {
         .unwrap_or_else(|| "Portable figure".to_string());
 
     html! {
-        <div class="rizzma-figure">
-            <div class="rizzma-viewport" style={format!("aspect-ratio: {aspect_ratio}")}>
-                if !*mounted {
-                    if let Some(src) = poster {
-                        <img class="rizzma-poster" {src} alt={label.clone()} />
-                    } else {
-                        <div class="rizzma-poster-missing">{ label.clone() }</div>
-                    }
-                }
-                <iframe
-                    ref={frame_ref.clone()}
-                    class={classes!("rizzma-frame", (!*mounted).then_some("hidden"))}
-                    sandbox="allow-scripts"
-                    title={label}
-                />
-                if !*mounted {
-                    <button class="rizzma-mount" {onclick} disabled={*loading || !props.live_supported}>
-                        if !props.live_supported {
-                            { "Poster (runtime unavailable)" }
-                        } else if *loading {
-                            { "Loading interactive figure…" }
-                        } else if props.animated {
-                            { "Play interactive figure" }
-                        } else {
-                            { "Open interactive figure" }
-                        }
-                    </button>
-                }
-                if let Some(message) = &*error {
-                    <div class="rizzma-error">{ message }</div>
+        <div class="portable-figure">
+            <div class="portable-figure-viewport" style={format!("aspect-ratio: {aspect_ratio}")}>
+                if let Some(src) = poster {
+                    <img class="portable-figure-poster" {src} alt={label.clone()} />
+                } else {
+                    <div class="portable-figure-poster-missing">{ label.clone() }</div>
                 }
             </div>
-            if *mounted && props.animated {
-                <div class="rizzma-controls">
-                    <button type="button" onclick={on_play_pause}>
-                        { if *playing { "Pause" } else { "Play" } }
-                    </button>
-                    <input
-                        type="range"
-                        min="0"
-                        max={props.duration.max(0.0).to_string()}
-                        step="0.01"
-                        value={(*position).to_string()}
-                        oninput={on_seek}
-                        aria-label="Animation position"
-                    />
-                    <span>{ format!("{:.1}s / {:.1}s", *position, props.duration.max(0.0)) }</span>
-                </div>
-            }
-            if *mounted && !props.controls.is_empty() {
-                <div class="rizzma-parameter-controls">
-                    { for props.controls.iter().enumerate().map(|(index, control)| {
-                        let frame_ref = frame_ref.clone();
-                        let oninput = Callback::from(move |event: InputEvent| {
-                            let value = event
-                                .target_unchecked_into::<HtmlInputElement>()
-                                .value_as_number();
-                            if value.is_finite() {
-                                if let Some(frame) = frame_ref.cast::<HtmlIFrameElement>() {
-                                    set_rizzma_control(frame, index, value);
-                                }
-                            }
-                        });
-                        let value = control_values.get(index).copied().unwrap_or(control.default);
-                        html! {
-                            <label class="rizzma-parameter" key={index}>
-                                <span>{ control.label.clone() }</span>
-                                <input
-                                    type="range"
-                                    min={control.min.to_string()}
-                                    max={control.max.to_string()}
-                                    step={control.step.map_or_else(|| "any".to_string(), |step| step.to_string())}
-                                    value={value.to_string()}
-                                    {oninput}
-                                />
-                                <output>{ format!("{value:.3}") }</output>
-                            </label>
-                        }
-                    }) }
-                </div>
-            }
+            <div class="portable-figure-note">
+                { "Interactive portable figures are no longer rendered inside Portal. Host the animation as a site and open it through the forwarding proxy." }
+            </div>
         </div>
-    }
-}
-
-#[cfg(test)]
-mod figure_tests {
-    use super::figure_live_supported;
-
-    #[test]
-    fn runtime_capability_distinguishes_static_and_animated_figures() {
-        assert!(figure_live_supported(3, "1.9.0", false));
-        assert!(!figure_live_supported(3, "1.9.0", true));
-        assert!(figure_live_supported(3, "1.10.0", false));
-        assert!(figure_live_supported(3, "1.10.0", true));
-        assert!(figure_live_supported(3, "1.11.0", false));
-        assert!(figure_live_supported(3, "1.11.0", true));
-        assert!(!figure_live_supported(4, "1.10.0", false));
-        assert!(figure_live_supported(4, "1.12.0", false));
-        assert!(figure_live_supported(4, "1.12.0", true));
-        assert!(!figure_live_supported(5, "1.12.0", false));
     }
 }
 

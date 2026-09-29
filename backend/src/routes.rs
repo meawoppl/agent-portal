@@ -38,8 +38,8 @@ pub const AUTH_DEVICE_LOGIN: &str = "/api/auth/device-login";
 /// Whether a script/style/wasm path carries Trunk's content hash in its
 /// filename (`base-545c8725d321f26d.css`, `frontend-664e49a7ece9c11e_bg.wasm`).
 /// Trunk trims leading zeros, so the hash can be shorter than 16 hex digits.
-/// Snippet files (`/snippets/frontend-<crate hash>/rizzma-host.js`) only hash
-/// the directory by crate, not the file contents, so they are not hashed.
+/// Snippet files only hash the directory by crate, not each file's contents, so
+/// they are not hashed.
 pub(crate) fn is_content_hashed_asset(path: &str) -> bool {
     let file = path.rsplit('/').next().unwrap_or(path);
     let Some(stem) = [".js", ".css", ".wasm"]
@@ -278,15 +278,13 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
             get(handlers::agent_comms::download_agent_history),
         )
         // `agent-portal show <file>`: display media in a session transcript.
-        // Raise the request-body limit to the larger of the configured video
-        // cap and the reversible-figure carrier cap; the handler enforces the
-        // exact per-kind cap. Without
-        // this override axum's 2 MB default would reject most media uploads.
+        // Raise the request-body limit to the configured video cap; the
+        // handler enforces the exact per-kind cap. Without this override
+        // axum's 2 MB default would reject most media uploads.
         .route(
             "/api/agent/sessions/{id}/media",
             post(handlers::agent_comms::show_media).layer(axum::extract::DefaultBodyLimit::max(
-                (app_state.max_video_mb as usize * 1024 * 1024)
-                    .max(shared::media::PORTABLE_FIGURE_HTML_MAX_BYTES),
+                app_state.max_video_mb as usize * 1024 * 1024,
             )),
         )
         // Serve videos shown via `agent-portal show`, with HTTP Range support.
@@ -325,10 +323,6 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
         .route(
             "/api/metrics/turns",
             get(handlers::turn_metrics::list_aggregated_turn_metrics),
-        )
-        .route(
-            "/api/metrics/turns/figure",
-            get(handlers::performance_figures::get_performance_figure),
         )
         // Proxy token management endpoints
         .route(
@@ -551,9 +545,6 @@ mod tests {
     fn stable_url_assets_are_not_hashed() {
         assert!(!is_content_hashed_asset("/sw.js"));
         assert!(!is_content_hashed_asset("/katex-helper.js"));
-        assert!(!is_content_hashed_asset(
-            "/snippets/frontend-f623259064c03830/rizzma-host.js"
-        ));
         assert!(!is_content_hashed_asset("/index.html"));
     }
 }

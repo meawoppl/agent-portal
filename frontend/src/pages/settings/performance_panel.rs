@@ -1,8 +1,7 @@
 //! Settings → Performance page.
 //!
-//! The backend turns the selected metrics window into one portable Rizzma
-//! dashboard. The frontend keeps only the query controls and mounts the `.riz`
-//! through Portal's verified, sandboxed runtime.
+//! The backend returns metric buckets; the frontend renders them as static SVG
+//! charts so the settings page does not need a local executable chart runtime.
 
 use yew::prelude::*;
 
@@ -72,7 +71,6 @@ pub fn performance_panel() -> Html {
             { render_performance_body(
                 &metrics,
                 &group_by,
-                *window,
                 *axis_scale,
                 *show_p95,
             ) }
@@ -82,19 +80,17 @@ pub fn performance_panel() -> Html {
 
 #[cfg(test)]
 mod tests {
-    use super::model::{bucket_param, AxisScale, GroupBy, TimeWindow};
+    use super::model::{bucket_param, GroupBy, TimeWindow};
     use shared::AgentType;
 
     #[test]
-    fn chart_query_controls_have_stable_wire_names() {
-        assert_eq!(AxisScale::Linear.wire_name(), "linear");
-        assert_eq!(AxisScale::Log.wire_name(), "log");
+    fn metric_query_uses_stable_bucket_granularity() {
         assert_eq!(bucket_param(TimeWindow::Hours1), "5m");
         assert_eq!(bucket_param(TimeWindow::Days30), "day");
     }
 
     #[test]
-    fn selected_group_round_trips_for_the_figure_endpoint() {
+    fn selected_group_round_trips_for_client_side_chart_filtering() {
         let pairs = vec![(
             AgentType::Claude,
             Some("claude-opus-4-7".to_string()),

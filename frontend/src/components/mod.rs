@@ -19,7 +19,6 @@ mod model_select;
 pub mod muse_renderer;
 mod onboarding_tutorial;
 mod proxy_token_setup;
-mod rizzma_chart;
 mod schedule_dialog;
 mod share_dialog;
 pub mod skip_permissions;
@@ -45,7 +44,6 @@ pub use message_renderer::{
 pub use model_select::ModelSelect;
 pub use onboarding_tutorial::OnboardingTutorial;
 pub use proxy_token_setup::ProxyTokenSetup;
-pub use rizzma_chart::RizzmaChart;
 pub use schedule_dialog::ScheduleDialog;
 pub use share_dialog::ShareDialog;
 pub use turn_metrics_pill::TurnMetricsHeaderPill;

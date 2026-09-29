@@ -2,8 +2,7 @@
 //!
 //! #1450 stores shown media in ephemeral, bounded stores: images in the
 //! in-memory [`ImageStore`](crate::handlers::images::ImageStore) (TTL + LRU),
-//! videos and portable figures in the on-disk
-//! [`MediaStore`](crate::handlers::media_store::MediaStore)
+//! videos in the on-disk [`MediaStore`](crate::handlers::media_store::MediaStore)
 //! (TTL + byte-cap). The persisted transcript row outlives the blob, so once
 //! the blob is evicted an archived/backed-up session shows only a "media
 //! expired" placeholder — the bytes are gone.
@@ -43,7 +42,6 @@ fn url_prefix(kind: MediaKind) -> &'static str {
     match kind {
         MediaKind::Image => "images",
         MediaKind::Video => "media",
-        MediaKind::Figure => "media",
     }
 }
 
@@ -51,7 +49,6 @@ fn kind_str(kind: MediaKind) -> &'static str {
     match kind {
         MediaKind::Image => "image",
         MediaKind::Video => "video",
-        MediaKind::Figure => "figure",
     }
 }
 

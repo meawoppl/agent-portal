@@ -14,10 +14,8 @@ use anyhow::{anyhow, Context, Result};
 
 use shared::api::ShowMediaResponse;
 use shared::media::{
-    has_gif_magic, has_jpeg_magic, has_mp4_magic, has_png_magic, has_rizzma_html_carrier,
-    has_rizzma_magic, has_webm_magic, has_webp_magic, looks_like_svg, media_kind, MediaKind,
-    PORTABLE_FIGURE_HTML_MAX_BYTES, PORTABLE_FIGURE_HTML_TYPE, PORTABLE_FIGURE_MAX_BYTES,
-    PORTABLE_FIGURE_TYPE, SUPPORTED_FORMATS_HINT,
+    has_gif_magic, has_jpeg_magic, has_mp4_magic, has_png_magic, has_webm_magic, has_webp_magic,
+    looks_like_svg, media_kind, MediaKind, SUPPORTED_FORMATS_HINT,
 };
 
 /// Detect a supported media content type from `path`'s extension, verified
@@ -26,24 +24,6 @@ use shared::media::{
 ///
 /// Pure function (no I/O) so it can be unit-tested with byte fixtures.
 pub(crate) fn detect_content_type(path: &Path, bytes: &[u8]) -> Result<&'static str, String> {
-    let filename = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .map(str::to_ascii_lowercase);
-    if filename
-        .as_deref()
-        .is_some_and(|name| name.ends_with(".riz.html"))
-    {
-        return if has_rizzma_html_carrier(bytes) {
-            Ok(PORTABLE_FIGURE_HTML_TYPE)
-        } else {
-            Err(format!(
-                "file contents don't match its extension (expected {PORTABLE_FIGURE_HTML_TYPE}); \
-                 refusing to display a possibly-corrupt or misnamed file"
-            ))
-        };
-    }
-
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
@@ -57,7 +37,6 @@ pub(crate) fn detect_content_type(path: &Path, bytes: &[u8]) -> Result<&'static 
         Some("svg") => ("image/svg+xml", looks_like_svg(bytes)),
         Some("mp4") => ("video/mp4", has_mp4_magic(bytes)),
         Some("webm") => ("video/webm", has_webm_magic(bytes)),
-        Some("riz") => (PORTABLE_FIGURE_TYPE, has_rizzma_magic(bytes)),
         _ => {
             return Err(format!(
                 "unsupported file type; supported formats: {SUPPORTED_FORMATS_HINT}"
@@ -75,18 +54,11 @@ pub(crate) fn detect_content_type(path: &Path, bytes: &[u8]) -> Result<&'static 
 }
 
 /// Per-format byte cap. The backend is authoritative; this is a fast local
-/// pre-flight. HTML carriers get transport headroom for base64 and an embedded
-/// runtime, while their decoded artifact remains capped at 10 MiB server-side.
-fn cap_bytes(content_type: &str, kind: MediaKind) -> u64 {
-    if content_type == PORTABLE_FIGURE_HTML_TYPE {
-        return PORTABLE_FIGURE_HTML_MAX_BYTES as u64;
-    }
+/// pre-flight.
+fn cap_bytes(kind: MediaKind) -> u64 {
     let (var, default) = match kind {
         MediaKind::Image => ("PORTAL_MAX_IMAGE_MB", 10),
         MediaKind::Video => ("PORTAL_MAX_VIDEO_MB", 100),
-        // Fixed cap, not env-tunable: returning here keeps the match
-        // exhaustive without an unreachable fallback.
-        MediaKind::Figure => return PORTABLE_FIGURE_MAX_BYTES as u64,
     };
     std::env::var(var)
         .ok()
@@ -112,7 +84,6 @@ pub async fn show(path_str: &str) -> Result<()> {
     let kind_word = match kind {
         MediaKind::Image => "image",
         MediaKind::Video => "video",
-        MediaKind::Figure => "portable figure",
     };
     println!(
         "Displayed {kind_word} {filename} ({}) in session {}.",
@@ -150,7 +121,7 @@ pub(crate) async fn upload_media(
         .to_string();
 
     let size = bytes.len() as u64;
-    let limit = cap_bytes(content_type, kind);
+    let limit = cap_bytes(kind);
     if size > limit {
         return Err(anyhow!(
             "{filename} is {} — exceeds the {} MB transport limit for {}",
@@ -159,7 +130,6 @@ pub(crate) async fn upload_media(
             match kind {
                 MediaKind::Image => "images",
                 MediaKind::Video => "videos",
-                MediaKind::Figure => "portable figures",
             },
         ));
     }
@@ -204,30 +174,6 @@ mod tests {
             detect_content_type(Path::new("plot.png"), &png_bytes()),
             Ok("image/png")
         );
-    }
-
-    #[test]
-    fn detects_portable_figure_by_extension_and_magic() {
-        assert_eq!(
-            detect_content_type(Path::new("plot.riz"), b"RZFG\x01\0\0\0"),
-            Ok(PORTABLE_FIGURE_TYPE)
-        );
-        assert!(detect_content_type(Path::new("plot.riz"), b"not a figure").is_err());
-
-        let wrapper = format!(
-            "<!doctype html>{}AAAA</script>",
-            shared::media::RIZZMA_HTML_CARRIER_OPEN
-        );
-        assert_eq!(
-            detect_content_type(Path::new("plot.riz.html"), wrapper.as_bytes()),
-            Ok(PORTABLE_FIGURE_HTML_TYPE)
-        );
-        assert_eq!(
-            detect_content_type(Path::new("PLOT.RIZ.HTML"), wrapper.as_bytes()),
-            Ok(PORTABLE_FIGURE_HTML_TYPE)
-        );
-        assert!(detect_content_type(Path::new("plot.html"), wrapper.as_bytes()).is_err());
-        assert!(detect_content_type(Path::new("plot.riz.html"), b"not a wrapper").is_err());
     }
 
     #[test]
@@ -283,6 +229,8 @@ mod tests {
     fn rejects_unsupported_extension() {
         let err = detect_content_type(Path::new("doc.pdf"), b"%PDF-1.7").unwrap_err();
         assert!(err.contains("unsupported file type"), "{err}");
+        let err = detect_content_type(Path::new("plot.riz"), b"RZFG\x01\0\0\0").unwrap_err();
+        assert!(err.contains("unsupported file type"), "{err}");
     }
 
     #[test]
@@ -303,19 +251,5 @@ mod tests {
         assert_eq!(human_size(512), "512 B");
         assert_eq!(human_size(1536), "1.5 KB");
         assert_eq!(human_size(1024 * 1024 + 512 * 1024), "1.5 MB");
-    }
-
-    #[test]
-    fn figure_caps_are_fixed_regardless_of_env() {
-        // The env-tunable image/video arms read PORTAL_MAX_*_MB, so only
-        // the fixed figure arms are pinned here.
-        assert_eq!(
-            cap_bytes(PORTABLE_FIGURE_TYPE, MediaKind::Figure),
-            PORTABLE_FIGURE_MAX_BYTES as u64
-        );
-        assert_eq!(
-            cap_bytes(PORTABLE_FIGURE_HTML_TYPE, MediaKind::Figure),
-            PORTABLE_FIGURE_HTML_MAX_BYTES as u64
-        );
     }
 }
