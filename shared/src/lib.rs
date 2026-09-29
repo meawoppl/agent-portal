@@ -1026,9 +1026,8 @@ pub enum PortalContent {
         #[serde(default)]
         source_type: Option<String>,
     },
-    /// A Rizzma portable figure. `data` is the served artifact URL. The poster
-    /// is embedded in the durable transcript row so replay still has a useful
-    /// fallback after the TTL-bounded live artifact has expired.
+    /// A legacy portable figure. Local active figure playback has been removed;
+    /// the frontend renders the embedded poster as an inert transcript fallback.
     Figure {
         media_type: String,
         data: String,

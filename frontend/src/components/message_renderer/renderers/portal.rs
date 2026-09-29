@@ -115,7 +115,6 @@ fn render_portal_content(
             }
         }
         shared::PortalContent::Figure {
-            data,
             file_path,
             file_size,
             width_px,
@@ -123,34 +122,17 @@ fn render_portal_content(
             title,
             alt,
             poster_base64,
-            animated,
-            duration,
-            controls,
-            controls_unsupported,
-            schema,
-            renderer_version,
             ..
         } => {
             html! {
                 <>
                     { render_portal_image_header(file_path.as_deref(), *file_size) }
-                    <super::media::FigureViewer
-                        artifact_url={data.clone()}
+                    <super::media::LegacyFigureViewer
                         width_px={*width_px}
                         height_px={*height_px}
                         title={title.clone()}
                         alt={alt.clone()}
                         poster_base64={poster_base64.clone()}
-                        animated={*animated}
-                        duration={*duration}
-                        controls={controls.clone()}
-                        renderer_version={renderer_version.clone()}
-                        live_supported={!*controls_unsupported
-                            && super::media::figure_live_supported(
-                                *schema,
-                                renderer_version,
-                                *animated,
-                            )}
                     />
                 </>
             }

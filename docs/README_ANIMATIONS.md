@@ -12,8 +12,8 @@ the UI moves.
 
 ## House rules
 
-- **Every animation is bytes on the landing page.** The current set is 2.6 MB
-  across ten clips; keep new ones under ~400 KB and re-encode an old one rather
+- **Every animation is bytes on the landing page.** The current set is about
+  2.3 MB across nine clips; keep new ones under ~400 KB and re-encode an old one rather
   than letting the total creep. `encode.sh` at `-q:v 50`–`60` is the usual knob,
   and shortening the clip beats lowering quality on text.
 - **Format: animated WebP** for UI capture, **animated SVG** for terminal casts
@@ -63,8 +63,9 @@ the chip appears in the session header. Clicking it genies open the floating
 preview with the site live inside the portal — and a link click *inside* the
 panel navigates it, which is what proves it is a tunnel and not a screenshot.
 
-The site is the **rizzma crate's rustdoc**: a JS-driven app with search and
-navigation, so it exercises the tunnel rather than serving a static page.
+The site is generated **rustdoc** from this workspace: a JS-driven app with
+search and navigation, so it exercises the tunnel rather than serving a static
+page.
 
 This is the single highest-value clip — it demonstrates the tunnel, the CLI, the
 chip, and the in-portal preview in one unbroken shot, and it is the feature
@@ -150,19 +151,7 @@ The strongest emotional pitch in the product, and the hardest to stage — two
 synchronized captures composited side by side. Consider a schematic animated SVG
 version (watermark → replay) if the real capture proves fiddly.
 
-### 7. `agent-portal show` puts a figure in the transcript ✅ shipped
-
-
-`docs/media/feature-show-media.webp` — 340 KB, 10.3 s. Shot by `cap-media.js`.
-The figure arrives as a poster; pressing play mounts the runtime and the
-waveforms travel.
-**Slot:** Features ▸ Rich rendering (or the media docs). **~6 s.**
-
-Terminal `agent-portal show figure.riz` on the left; the interactive portable
-figure appearing inline in the transcript on the right, with a cursor rotating
-or scrubbing it to show it is live, not a screenshot.
-
-### 8. Live turn metrics ✅ shipped
+### 7. Live turn metrics ✅ shipped
 
 
 `docs/media/feature-turn-metrics.webp` — 91 KB, 6.5 s, tight crop. Shot by
@@ -175,7 +164,7 @@ rate.
 The per-session cost badge shaking as it increments, and the rail sparkline
 growing a new bar per turn. Tiny crop, tiny file, high charm.
 
-### 9. Nav mode ✅ shipped
+### 8. Nav mode ✅ shipped
 
 
 `docs/media/feature-nav-mode.webp` — 204 KB, 7.5 s. Shot by `cap-nav.js`, with a
@@ -188,7 +177,7 @@ key-cap overlay.**
 input → `Enter` accepts. Keystrokes drawn as key caps in the corner, since the
 motion is meaningless without them.
 
-### 10. Two agents, two renderers ✅ shipped (Muse pending)
+### 9. Two agents, two renderers ✅ shipped (Muse pending)
 
 
 `docs/media/feature-multi-agent.webp` — 161 KB, 9.5 s. Shot by `cap-agents.js`.
@@ -203,7 +192,7 @@ The same dashboard cross-fading between a Claude session, a Codex session, and a
 Muse session, pausing on the tool card each protocol produces. Shows breadth
 without three separate clips.
 
-### 11. Voice to prompt ⛔ not shippable headlessly
+### 10. Voice to prompt ⛔ not shippable headlessly
 
 
 No honest path on a capture box: the Web Speech API needs a real microphone and

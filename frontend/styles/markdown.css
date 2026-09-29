@@ -602,9 +602,9 @@
     display: block;
 }
 
-/* Portable figures are poster-first. A live renderer replaces the poster only
-   after the artifact and every executable runtime asset have been verified. */
-.rizzma-figure {
+/* Legacy portable figures are poster-only. Interactive figures should be
+   hosted as web surfaces and opened through the forwarding proxy. */
+.portable-figure {
     width: min(100%, 960px);
     overflow: hidden;
     border: 1px solid var(--border-color);
@@ -613,36 +613,21 @@
     margin-inline: auto;
 }
 
-.rizzma-viewport {
+.portable-figure-viewport {
     position: relative;
     width: 100%;
     max-height: 72vh;
     overflow: hidden;
 }
 
-.rizzma-poster,
-.rizzma-frame {
-    position: absolute;
-    inset: 0;
+.portable-figure-poster {
+    display: block;
     width: 100%;
     height: 100%;
-    border: 0;
     object-fit: contain;
 }
 
-.rizzma-poster {
-    z-index: 0;
-}
-
-.rizzma-frame {
-    z-index: 1;
-}
-
-.rizzma-frame.hidden {
-    visibility: hidden;
-}
-
-.rizzma-poster-missing {
+.portable-figure-poster-missing {
     position: absolute;
     inset: 0;
     display: grid;
@@ -650,86 +635,10 @@
     color: var(--text-muted);
 }
 
-.rizzma-mount {
-    position: absolute;
-    left: 50%;
-    bottom: 0.75rem;
-    transform: translateX(-50%);
-    border: 1px solid rgba(122, 162, 247, 0.55);
-    border-radius: 3px;
-    padding: 0.4rem 0.7rem;
-    background: rgba(26, 27, 38, 0.92);
-    color: #c0caf5;
-    cursor: pointer;
-    z-index: 2;
-}
-
-.rizzma-mount:disabled {
-    cursor: default;
-    color: var(--text-muted);
-}
-
-.rizzma-error {
-    position: absolute;
-    inset: auto 0 0;
-    padding: 0.4rem 0.6rem;
-    background: rgba(247, 118, 142, 0.16);
-    color: #f7768e;
-    font-size: 0.78rem;
-    z-index: 3;
-}
-
-.rizzma-controls {
-    display: flex;
-    align-items: center;
-    gap: 0.55rem;
-    padding: 0.45rem 0.6rem;
-    background: rgba(26, 27, 38, 0.94);
-    color: #c0caf5;
-    font-size: 0.78rem;
-}
-
-.rizzma-controls button {
-    border: 1px solid rgba(122, 162, 247, 0.55);
-    border-radius: 3px;
-    padding: 0.25rem 0.55rem;
-    background: transparent;
-    color: inherit;
-    cursor: pointer;
-}
-
-.rizzma-controls input[type="range"] {
-    flex: 1;
-    min-width: 5rem;
-}
-
-.rizzma-parameter-controls {
-    display: grid;
-    gap: 0.45rem;
+.portable-figure-note {
     padding: 0.55rem 0.65rem;
     border-top: 1px solid var(--border-color);
     background: rgba(26, 27, 38, 0.94);
-}
-
-.rizzma-parameter {
-    display: grid;
-    grid-template-columns: minmax(6rem, auto) minmax(8rem, 1fr) 4.5rem;
-    align-items: center;
-    gap: 0.6rem;
     color: #c0caf5;
     font-size: 0.78rem;
-}
-
-.rizzma-parameter input[type="range"] {
-    min-width: 0;
-}
-
-.rizzma-parameter > span {
-    overflow-wrap: anywhere;
-}
-
-.rizzma-parameter output {
-    color: var(--text-muted);
-    font-variant-numeric: tabular-nums;
-    text-align: right;
 }
