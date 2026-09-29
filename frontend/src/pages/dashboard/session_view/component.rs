@@ -1658,22 +1658,38 @@ impl SessionView {
         html! {
             <div class="agent-progress">
                 { for self.agent_progress.iter().map(|bar| {
-                    let (fill_class, fill_style, pct_text) = match bar.fraction {
+                    let name = bar.label.clone().unwrap_or_else(|| bar.id.clone());
+                    let (fill_class, fill_style, pct_text, now) = match bar.fraction {
                         Some(fraction) => {
                             let pct = (fraction * 100.0).round() as u32;
-                            ("upload-bar-fill", format!("width: {pct}%"), format!("{pct}%"))
+                            (
+                                "upload-bar-fill",
+                                format!("width: {pct}%"),
+                                format!("{pct}%"),
+                                Some(pct.to_string()),
+                            )
                         }
-                        None => ("upload-bar-fill indeterminate", String::new(), String::new()),
+                        None => (
+                            "upload-bar-fill indeterminate",
+                            String::new(),
+                            String::new(),
+                            None,
+                        ),
                     };
                     html! {
                         <div class="agent-progress-bar" key={bar.id.clone()}>
                             <div class="agent-progress-header">
-                                <span class="agent-progress-label">
-                                    { bar.label.clone().unwrap_or_else(|| bar.id.clone()) }
-                                </span>
+                                <span class="agent-progress-label">{ name.clone() }</span>
                                 <span class="agent-progress-pct">{ pct_text }</span>
                             </div>
-                            <div class="upload-bar-track">
+                            <div
+                                class="upload-bar-track"
+                                role="progressbar"
+                                aria-label={name}
+                                aria-valuemin="0"
+                                aria-valuemax="100"
+                                aria-valuenow={now}
+                            >
                                 <div class={fill_class} style={fill_style} />
                             </div>
                         </div>

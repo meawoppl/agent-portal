@@ -548,7 +548,13 @@
     color: var(--accent);
 }
 
+.agent-progress-label {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
 .agent-progress-pct {
+    flex-shrink: 0;
     color: var(--text-secondary);
     font-variant-numeric: tabular-nums;
 }
@@ -561,6 +567,14 @@
     width: 30%;
     transition: none;
     animation: agent-progress-slide 1.2s ease-in-out infinite alternate;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .agent-progress .upload-bar-fill.indeterminate {
+        animation: none;
+        width: 100%;
+        opacity: 0.5;
+    }
 }
 
 @keyframes agent-progress-slide {

@@ -373,7 +373,7 @@ fn handle_web_register(
             *session_key = Some(key.clone());
             *verified_session_id = Some(session_id);
 
-            session_manager.add_web_client(key, tx.clone());
+            session_manager.add_web_client_with_progress(session_id, tx.clone());
             info!(
                 "Web client connected to session: {} ({}) for user {}",
                 session_name, session_id, user_id
@@ -381,10 +381,6 @@ fn handle_web_register(
 
             replay_history(db_pool, tx, session_id, replay_after, initial_replay_limit);
             replay_pending_permission(db_pool, session_id, tx);
-            let bars = session_manager.agent_progress_snapshot(session_id);
-            if !bars.is_empty() {
-                let _ = tx.send(ServerToClient::AgentProgress { bars });
-            }
             false
         }
         Err(e) => {

@@ -702,7 +702,8 @@ pub async fn show_media(
 
 /// `POST /api/agent/sessions/{id}/progress` — `agent-portal progress`. Creates,
 /// updates, or clears one of the session's live progress bars and pushes the
-/// resulting set to its web clients. Nothing is persisted: bars are live
+/// resulting set to its web clients. Restricted to owners/editors: a viewer
+/// must not be able to forge or clear another user's session UI. Nothing is persisted: bars are live
 /// status, held in memory by the session manager.
 pub async fn post_agent_progress(
     State(app_state): State<Arc<AppState>>,
@@ -731,12 +732,12 @@ pub async fn post_agent_progress(
     }
 
     let mut conn = app_state.conn()?;
-    crate::handlers::session_access::verify_session_reader(&mut conn, target_id, user_id)?;
+    crate::handlers::session_access::verify_session_mutator(&mut conn, target_id, user_id)?;
     drop(conn);
 
     let manager = &app_state.session_manager;
-    let bars = if req.clear {
-        manager.clear_agent_progress(target_id, &id)
+    if req.clear {
+        manager.clear_agent_progress(target_id, &id);
     } else {
         let bar = ProgressBar {
             id,
@@ -745,12 +746,8 @@ pub async fn post_agent_progress(
         };
         manager
             .set_agent_progress(target_id, bar)
-            .map_err(|_| AppError::Conflict("too many progress bars; clear one first"))?
-    };
-    manager.broadcast_to_web_clients(
-        &target_id.to_string(),
-        ServerToClient::AgentProgress { bars },
-    );
+            .map_err(|_| AppError::Conflict("too many progress bars; clear one first"))?;
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
