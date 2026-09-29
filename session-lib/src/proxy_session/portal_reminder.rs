@@ -2,13 +2,13 @@
 //! each compaction boundary.
 //!
 //! At session start the reminder is folded into the first real user input,
-//! rather than sent as a standalone turn. After a compaction boundary it is
-//! injected directly to re-prime the shortened agent context. In both cases
-//! the agent-facing copy is wrapped in `<system-reminder>…</system-reminder>`
-//! tags so Claude treats it as out-of-band context. The user-facing copy was
-//! removed in #692: it ate too much vertical scrollback for content the user
-//! already knows (they built the portal), and the reminder's value is the
-//! agent recovering its affordance knowledge after a fresh start / compaction.
+//! rather than sent as a standalone turn. The transcript keeps that first
+//! injection in a collapsed notice so the user can inspect exactly what the
+//! agent received without spending scrollback on it. After a compaction
+//! boundary it is injected directly to re-prime the shortened agent context.
+//! In both cases the agent-facing copy is wrapped in
+//! `<system-reminder>…</system-reminder>` tags so the agent treats it as
+//! out-of-band context.
 //!
 //! The reminder body lives in `session-lib/portal_reminder.md` as a
 //! readable markdown file and is baked into the binary via `include_str!`.
@@ -56,11 +56,18 @@ pub fn load_reminder_body() -> String {
     }
 }
 
-fn agent_facing(body: &str) -> String {
+fn reminder_contents(body: &str) -> String {
     format!(
-        "<system-reminder>\nAgent Portal version {}.\n\n{}\n</system-reminder>",
+        "Agent Portal version {}.\n\n{}",
         PORTAL_VERSION,
         body.trim()
+    )
+}
+
+fn agent_facing(body: &str) -> String {
+    format!(
+        "<system-reminder>\n{}\n</system-reminder>",
+        reminder_contents(body)
     )
 }
 
@@ -111,36 +118,27 @@ pub fn is_clear_command(text: &str) -> bool {
 /// agent-specific "echo the user's own text" synthesizer. Taken as a closure
 /// (rather than calling one agent's synthesizer here) because this module is
 /// agent-agnostic (#1657); it runs only when `display_event` is `None`, with
-/// the original text plus a short collapsed notice, before the reminder prefix
-/// is applied.
+/// the original text plus a collapsed copy of the exact injected instructions,
+/// before the reminder prefix is applied.
 pub fn fold_session_start_reminder(
     text: String,
     display_event: Option<serde_json::Value>,
     plugin_skill_reminder: Option<&str>,
     default_display: impl FnOnce(&str) -> serde_json::Value,
 ) -> (String, Option<serde_json::Value>) {
+    let body = body_with_plugin_skills(plugin_skill_reminder);
+    let contents = reminder_contents(&body);
     let display_event = display_event.or_else(|| {
         Some(default_display(&visible_text_with_base_session_notice(
-            &text,
+            &text, &contents,
         )))
     });
-    let prefixed = format!(
-        "{}\n\n{}",
-        agent_facing(&body_with_plugin_skills(plugin_skill_reminder)),
-        text
-    );
+    let prefixed = format!("<system-reminder>\n{contents}\n</system-reminder>\n\n{text}");
     (prefixed, display_event)
 }
 
-fn visible_text_with_base_session_notice(text: &str) -> String {
-    format!(
-        "{text}\n\n<system-reminder>\n\
-Agent Portal attached its base session instructions to this first message. \
-The agent sees those instructions together with your message; this does not \
-create a separate task or come from an old session queue. They include Portal \
-UI affordances, available local tools, and enabled plugin skills.\n\
-</system-reminder>"
-    )
+fn visible_text_with_base_session_notice(text: &str, contents: &str) -> String {
+    format!("{text}\n\n<system-reminder>\n{contents}\n</system-reminder>")
 }
 
 /// Inject the reminder into the agent's stdin only. The user-bound copy was
@@ -202,7 +200,8 @@ mod tests {
     /// Regression guard for the transcript: the folded text starts with
     /// `<system-reminder>`, which both the claude and codex echo paths use as
     /// their "suppress the synthesized echo" signal. Without a display event
-    /// carrying the user's own words, their message would silently vanish.
+    /// carrying the user's own words and the inspectable injection, their
+    /// message would silently vanish and the attached context would be opaque.
     #[test]
     fn fold_supplies_a_display_event_so_the_user_message_still_renders() {
         let (_, display) = fold_session_start_reminder(
@@ -219,12 +218,12 @@ mod tests {
             "display event must echo the user's text, got {display}"
         );
         assert!(
-            display.to_string().contains("base session instructions"),
-            "display event should disclose that base instructions were attached: {display}"
+            display.to_string().contains("Agent Portal version"),
+            "display event should contain the injected instructions: {display}"
         );
         assert!(
-            !display.to_string().contains("Agent Portal version"),
-            "the full reminder body must not leak into the transcript: {display}"
+            display.to_string().contains("agent-portal show"),
+            "display event should contain the full reminder body: {display}"
         );
     }
 

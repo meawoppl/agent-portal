@@ -24,6 +24,9 @@
 
 use yew::prelude::*;
 
+const BASE_PORTAL_INSTRUCTIONS_PREFIX: &str = "Agent Portal version ";
+const BASE_PORTAL_INSTRUCTIONS_TITLE: &str = "Base Portal Instructions Injection";
+
 #[derive(Properties, PartialEq)]
 pub(super) struct SystemReminderBarProps {
     /// Reminder contents, tags already stripped.
@@ -32,8 +35,23 @@ pub(super) struct SystemReminderBarProps {
 
 #[function_component(SystemReminderBar)]
 pub(super) fn system_reminder_bar(props: &SystemReminderBarProps) -> Html {
+    let title = system_reminder_title(&props.body);
     html! {
-        <CollapsibleNoticeBar title="System reminder" body={props.body.clone()} />
+        <CollapsibleNoticeBar {title} body={props.body.clone()} />
+    }
+}
+
+/// The session-start injection is the one reminder whose identity matters in
+/// the collapsed state: it contains the exact base instructions attached to
+/// the first prompt. Other machine-authored reminders keep the generic title.
+fn system_reminder_title(body: &str) -> &'static str {
+    if body
+        .trim_start()
+        .starts_with(BASE_PORTAL_INSTRUCTIONS_PREFIX)
+    {
+        BASE_PORTAL_INSTRUCTIONS_TITLE
+    } else {
+        "System reminder"
     }
 }
 
@@ -102,7 +120,19 @@ fn collapsible_notice_bar(props: &CollapsibleNoticeBarProps) -> Html {
 
 #[cfg(test)]
 mod tests {
-    use super::xml_field;
+    use super::{system_reminder_title, xml_field, BASE_PORTAL_INSTRUCTIONS_TITLE};
+
+    #[test]
+    fn base_portal_instructions_get_a_specific_title() {
+        assert_eq!(
+            system_reminder_title("\nAgent Portal version 2.14.1234.\n\nTools…"),
+            BASE_PORTAL_INSTRUCTIONS_TITLE
+        );
+        assert_eq!(
+            system_reminder_title("Voice input was transcribed automatically."),
+            "System reminder"
+        );
+    }
 
     #[test]
     fn extracts_task_notification_summary_and_status() {
