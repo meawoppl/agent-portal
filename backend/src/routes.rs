@@ -230,6 +230,16 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
             get(handlers::messages::list_messages).post(handlers::messages::create_message),
         )
         .route(
+            "/api/sessions/{id}/edit-stack",
+            get(handlers::edit_stack::list_edit_stack)
+                .post(handlers::edit_stack::create_edit_stack_items),
+        )
+        .route(
+            "/api/sessions/{id}/edit-stack/{item_id}",
+            axum::routing::patch(handlers::edit_stack::update_edit_stack_item)
+                .delete(handlers::edit_stack::delete_edit_stack_item),
+        )
+        .route(
             "/api/sessions/{id}/turn-metrics",
             get(handlers::turn_metrics::list_turn_metrics),
         )

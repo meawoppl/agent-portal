@@ -16,16 +16,19 @@ use crate::components::{
 use crate::utils::{self, On401};
 use gloo::events::EventListener;
 use gloo::timers::callback::Timeout;
-use shared::api::{ForwardInfo, TurnMetricsResponse};
+use gloo_net::http::Request;
+use shared::api::{
+    CreateEditStackRequest, EditStackItem, EditStackResponse, ForwardInfo, TurnMetricsResponse,
+    UpdateEditStackItemRequest, EDIT_STACK_MESSAGE_TYPE,
+};
 use shared::{
     ClientToServer, DeliveryMeta, PortalMeta, ReasoningEffort, SendMode, SessionInfo, TurnMetrics,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
-use wasm_bindgen::closure::Closure;
-use wasm_bindgen::JsCast;
+use wasm_bindgen::{closure::Closure, JsCast, JsValue};
 use wasm_bindgen_futures::spawn_local;
-use web_sys::{Element, KeyboardEvent, MouseEvent, PointerEvent};
+use web_sys::{Element, KeyboardEvent, MessageEvent, MouseEvent, PointerEvent};
 use yew::prelude::*;
 
 use super::forward_chips::ForwardChips;
@@ -56,6 +59,9 @@ use super::websocket::{connect_websocket, send_message, WsEvent};
 use crate::pages::dashboard::types::{MessageData, MessagesResponse};
 use crate::pages::settings::agent_login::AgentLoginModal;
 use crate::utils::calculate_backoff;
+
+const EDIT_STACK_BODY_PREVIEW_CHARS: usize = 260;
+const EDIT_STACK_CONTEXT_PREVIEW_CHARS: usize = 700;
 
 /// Props for the SessionView component
 #[derive(Properties, PartialEq)]
@@ -115,6 +121,73 @@ fn is_mobile_surface_viewport() -> bool {
         .and_then(|window| window.inner_width().ok())
         .and_then(|value| value.as_f64())
         .is_some_and(|width| width < 700.0)
+}
+
+fn truncate_chars(value: &str, max_chars: usize) -> String {
+    let mut output = value.chars().take(max_chars).collect::<String>();
+    if value.chars().count() > max_chars {
+        output.push('…');
+    }
+    output
+}
+
+fn pretty_json(value: &serde_json::Value) -> Option<String> {
+    serde_json::to_string_pretty(value).ok()
+}
+
+fn edit_stack_api_path(session_id: Uuid) -> String {
+    format!("/api/sessions/{session_id}/edit-stack")
+}
+
+fn edit_stack_item_api_path(session_id: Uuid, item_id: Uuid) -> String {
+    format!("/api/sessions/{session_id}/edit-stack/{item_id}")
+}
+
+fn edit_stack_prompt_content(item: &EditStackItem) -> String {
+    let mut content = String::new();
+    content.push_str("Portal edit-stack annotation.\n\n");
+    content.push_str(&format!("Title: {}\n\n", item.title));
+    if let Some(source) = item.source.as_ref().and_then(pretty_json) {
+        content.push_str("Source:\n```json\n");
+        content.push_str(&source);
+        content.push_str("\n```\n\n");
+    }
+    if let Some(context) = item.context.as_ref().and_then(pretty_json) {
+        content.push_str("Selected region / view context:\n```json\n");
+        content.push_str(&context);
+        content.push_str("\n```\n\n");
+    }
+    if item.body.trim().is_empty() {
+        content.push_str("User note: (no text note provided)\n\n");
+    } else {
+        content.push_str("User note:\n");
+        content.push_str(&item.body);
+        content.push_str("\n\n");
+    }
+    if let Some(image) = item.image_data_url.as_deref() {
+        content.push_str("Captured region:\n");
+        content.push_str(&format!("![edit-stack capture]({image})\n\n"));
+    }
+    content.push_str(
+        "Please handle this single edit-stack item as one focused change. Verify it, then stop so Portal can send the next pending item if requested.",
+    );
+    content
+}
+
+fn edit_stack_fetch(link: yew::html::Scope<SessionView>, session_id: Uuid) {
+    spawn_local(async move {
+        match utils::fetch_json::<EditStackResponse>(
+            &edit_stack_api_path(session_id),
+            On401::Ignore,
+        )
+        .await
+        {
+            Ok(data) => link.send_message(SessionViewMsg::EditStackLoaded(data.items)),
+            Err(err) => link.send_message(SessionViewMsg::EditStackRequestFailed(format!(
+                "Could not load edit stack: {err}"
+            ))),
+        }
+    });
 }
 
 /// Messages for the SessionView component
@@ -179,6 +252,17 @@ pub enum SessionViewMsg {
     OpenForwardSurface(ForwardInfo),
     /// The forward chip strip fetched the current forward set.
     ForwardsLoaded(Vec<ForwardInfo>),
+    /// A trusted forwarded surface posted captured annotation items into the host.
+    EditStackBridgeMessage {
+        origin: String,
+        data: JsValue,
+    },
+    EditStackLoaded(Vec<EditStackItem>),
+    EditStackRequestFailed(String),
+    SendNextEditStackItem,
+    SendEditStackItem(Uuid),
+    SendAllEditStack,
+    DismissEditStackItem(Uuid),
     /// Close the active session surface.
     CloseSurface,
     ToggleSurfaceCollapsed,
@@ -320,11 +404,17 @@ pub struct SessionView {
     /// its port and provide a fresh URL.
     pending_surface_restore: Option<ForwardSurfaceMemory>,
     active_surface: Option<SessionSurface>,
+    edit_stack_items: Vec<EditStackItem>,
+    edit_stack_active: Option<(Uuid, Uuid)>,
+    edit_stack_send_all: bool,
+    edit_stack_error: Option<String>,
     surface_split_percent: f64,
     body_ref: NodeRef,
     resize_listeners: Vec<EventListener>,
     #[allow(dead_code)]
     surface_escape_listener: Option<EventListener>,
+    #[allow(dead_code)]
+    edit_stack_listener: Option<EventListener>,
     show_fork_dialog: bool,
     show_claude_login: bool,
 }
@@ -339,6 +429,7 @@ impl Component for SessionView {
         let agent_type = ctx.props().session.agent_type;
         let on_awaiting_change = ctx.props().on_awaiting_change.clone();
         let escape_link = ctx.link().clone();
+        let edit_stack_link = ctx.link().clone();
         let surface_escape_listener = web_sys::window().and_then(|window| {
             window.document().map(|document| {
                 EventListener::new(&document, "keydown", move |event| {
@@ -351,6 +442,19 @@ impl Component for SessionView {
                 })
             })
         });
+        let edit_stack_listener = web_sys::window().map(|window| {
+            EventListener::new(&window, "message", move |event| {
+                let Some(event) = event.dyn_ref::<MessageEvent>() else {
+                    return;
+                };
+                edit_stack_link.send_message(SessionViewMsg::EditStackBridgeMessage {
+                    origin: event.origin(),
+                    data: event.data(),
+                });
+            })
+        });
+
+        edit_stack_fetch(ctx.link().clone(), session_id);
 
         // Hydrate the per-turn metrics buffer in its own task, off the
         // history→WebSocket critical path (#1915): metrics only feed the
@@ -438,10 +542,15 @@ impl Component for SessionView {
             open_forward_on_load: false,
             pending_surface_restore: load_open_surface(session_id),
             active_surface: None,
+            edit_stack_items: Vec::new(),
+            edit_stack_active: None,
+            edit_stack_send_all: false,
+            edit_stack_error: None,
             surface_split_percent: load_split_percent(session_id),
             body_ref: NodeRef::default(),
             resize_listeners: Vec::new(),
             surface_escape_listener,
+            edit_stack_listener,
             show_fork_dialog: false,
             show_claude_login: false,
         }
@@ -450,9 +559,14 @@ impl Component for SessionView {
     fn changed(&mut self, ctx: &Context<Self>, old_props: &Self::Properties) -> bool {
         if ctx.props().session.id != old_props.session.id {
             self.active_surface = None;
+            self.edit_stack_items.clear();
+            self.edit_stack_active = None;
+            self.edit_stack_send_all = false;
+            self.edit_stack_error = None;
             self.open_forward_on_load = false;
             self.pending_surface_restore = load_open_surface(ctx.props().session.id);
             self.surface_split_percent = load_split_percent(ctx.props().session.id);
+            edit_stack_fetch(ctx.link().clone(), ctx.props().session.id);
         }
 
         // Detect interrupt signal change on the focused session. Textarea
@@ -579,6 +693,7 @@ impl Component for SessionView {
                 // never handed to the transport are resent, so this can't
                 // duplicate anything the backend already received.
                 self.flush_outbox();
+                self.drain_edit_stack_queue_if_idle(ctx);
                 let session_id = ctx.props().session.id;
                 ctx.props().on_connected_change.emit((session_id, true));
                 true
@@ -658,6 +773,42 @@ impl Component for SessionView {
                 let surface = SessionSurface::from_forward(ctx.props().session.id, forward, mode);
                 save_open_surface(&surface);
                 self.active_surface = Some(surface);
+                true
+            }
+            SessionViewMsg::EditStackBridgeMessage { origin, data } => {
+                self.handle_edit_stack_bridge_message(ctx, &origin, &data)
+            }
+            SessionViewMsg::EditStackLoaded(items) => {
+                self.edit_stack_items = items;
+                self.edit_stack_error = None;
+                self.drain_edit_stack_queue_if_idle(ctx);
+                true
+            }
+            SessionViewMsg::EditStackRequestFailed(err) => {
+                self.edit_stack_error = Some(err);
+                true
+            }
+            SessionViewMsg::SendNextEditStackItem => {
+                if let Some(item_id) = self
+                    .edit_stack_items
+                    .iter()
+                    .find(|item| item.status == "pending")
+                    .map(|item| item.id)
+                {
+                    self.edit_stack_send_all = false;
+                    self.send_edit_stack_item(ctx, item_id)
+                } else {
+                    false
+                }
+            }
+            SessionViewMsg::SendEditStackItem(item_id) => self.send_edit_stack_item(ctx, item_id),
+            SessionViewMsg::SendAllEditStack => {
+                self.edit_stack_send_all = true;
+                self.drain_edit_stack_queue_if_idle(ctx);
+                true
+            }
+            SessionViewMsg::DismissEditStackItem(item_id) => {
+                self.dismiss_edit_stack_item(ctx, item_id);
                 true
             }
             SessionViewMsg::ForwardsLoaded(forwards) => {
@@ -1061,6 +1212,7 @@ impl Component for SessionView {
                             { self.render_tasks_panel(ctx) }
                         </div>
 
+                        { self.render_edit_stack_panel(ctx) }
                         { self.render_permission_handler(ctx) }
                         { self.render_input_bar(ctx) }
                     </div>
@@ -1204,12 +1356,31 @@ impl SessionView {
                 ) {
                     self.outbox.resolve(client_msg_id);
                 }
-                update_pending_send_delivery(
+                let updated = update_pending_send_delivery(
                     &mut self.pending_sends,
                     client_msg_id,
                     stage,
                     message.as_deref(),
-                )
+                );
+                if let Some((item_id, active_client_msg_id)) = self.edit_stack_active {
+                    if active_client_msg_id == client_msg_id {
+                        match stage {
+                            shared::InputDeliveryStage::AgentAccepted => {
+                                self.mark_edit_stack_item_sent(ctx, item_id, client_msg_id);
+                            }
+                            shared::InputDeliveryStage::Failed => {
+                                self.edit_stack_active = None;
+                                self.edit_stack_send_all = false;
+                                self.edit_stack_error = Some(message.unwrap_or_else(|| {
+                                    "Edit-stack item failed before the agent accepted it"
+                                        .to_string()
+                                }));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                updated
             }
             WsEvent::ContinuationStatus {
                 continuation_id,
@@ -1460,6 +1631,210 @@ impl SessionView {
         ctx.link().send_message(SessionViewMsg::CheckAwaiting);
     }
 
+    fn handle_edit_stack_bridge_message(
+        &mut self,
+        ctx: &Context<Self>,
+        origin: &str,
+        data: &JsValue,
+    ) -> bool {
+        if !self.surface_message_origin_is_active(origin) {
+            return false;
+        }
+        let Some(raw) = js_sys::JSON::stringify(data)
+            .ok()
+            .and_then(|value| value.as_string())
+        else {
+            return false;
+        };
+        let request = match serde_json::from_str::<CreateEditStackRequest>(&raw) {
+            Ok(request)
+                if request.message_type.as_deref() == Some(EDIT_STACK_MESSAGE_TYPE)
+                    && !request.items.is_empty() =>
+            {
+                request
+            }
+            Ok(request) if request.message_type.as_deref() != Some(EDIT_STACK_MESSAGE_TYPE) => {
+                return false;
+            }
+            Ok(_) => {
+                self.edit_stack_error =
+                    Some("Forwarded annotation stack did not include any items.".to_string());
+                return true;
+            }
+            Err(err) => {
+                self.edit_stack_error = Some(format!(
+                    "Forwarded annotation stack was not valid JSON: {err}"
+                ));
+                return true;
+            }
+        };
+        let session_id = ctx.props().session.id;
+        let link = ctx.link().clone();
+        spawn_local(async move {
+            let result = utils::send_json(
+                Request::post(&utils::api_url(&edit_stack_api_path(session_id))),
+                &request,
+            )
+            .await;
+            match result {
+                Ok(response) if response.ok() => match response.json::<EditStackResponse>().await {
+                    Ok(data) => link.send_message(SessionViewMsg::EditStackLoaded(data.items)),
+                    Err(err) => link.send_message(SessionViewMsg::EditStackRequestFailed(format!(
+                        "Edit-stack response was malformed: {err}"
+                    ))),
+                },
+                Ok(response) => {
+                    let message = utils::error_body(response).await;
+                    link.send_message(SessionViewMsg::EditStackRequestFailed(format!(
+                        "Could not save edit stack: {message}"
+                    )));
+                }
+                Err(err) => link.send_message(SessionViewMsg::EditStackRequestFailed(format!(
+                    "Could not save edit stack: {err}"
+                ))),
+            }
+        });
+        self.ephemeral_status = Some("Saving surface annotation stack…".to_string());
+        true
+    }
+
+    fn surface_message_origin_is_active(&self, origin: &str) -> bool {
+        self.active_surface
+            .as_ref()
+            .and_then(SessionSurface::forward)
+            .and_then(|forward| web_sys::Url::new(&forward.url).ok())
+            .is_some_and(|url| url.origin() == origin)
+    }
+
+    fn send_edit_stack_item(&mut self, ctx: &Context<Self>, item_id: Uuid) -> bool {
+        let Some(item) = self
+            .edit_stack_items
+            .iter()
+            .find(|item| item.id == item_id && item.status == "pending")
+            .cloned()
+        else {
+            return false;
+        };
+        if self.edit_stack_active.is_some() {
+            self.edit_stack_send_all = true;
+            return true;
+        }
+        let content = edit_stack_prompt_content(&item);
+        let client_msg_id =
+            self.dispatch_agent_input(serde_json::Value::String(content), None, None);
+        self.edit_stack_active = Some((item.id, client_msg_id));
+        self.edit_stack_error = None;
+        self.ephemeral_status = Some(format!("Sent edit-stack item: {}", item.title));
+        ctx.props().on_message_sent.emit(ctx.props().session.id);
+        true
+    }
+
+    fn drain_edit_stack_queue_if_idle(&mut self, ctx: &Context<Self>) {
+        if !self.edit_stack_send_all {
+            return;
+        }
+        if self.edit_stack_active.is_some()
+            || self.has_pending_permission
+            || !self.pending_sends.is_empty()
+            || is_awaiting(
+                self.messages.iter().map(|message| &message.content),
+                ctx.props().session.agent_type,
+            )
+        {
+            return;
+        }
+        let Some(next_id) = self
+            .edit_stack_items
+            .iter()
+            .find(|item| item.status == "pending")
+            .map(|item| item.id)
+        else {
+            self.edit_stack_send_all = false;
+            return;
+        };
+        self.send_edit_stack_item(ctx, next_id);
+    }
+
+    fn mark_edit_stack_item_sent(
+        &mut self,
+        ctx: &Context<Self>,
+        item_id: Uuid,
+        client_msg_id: Uuid,
+    ) {
+        if let Some(item) = self
+            .edit_stack_items
+            .iter_mut()
+            .find(|item| item.id == item_id)
+        {
+            item.status = "sent".to_string();
+            item.sent_client_msg_id = Some(client_msg_id);
+        }
+        let session_id = ctx.props().session.id;
+        let link = ctx.link().clone();
+        let body = UpdateEditStackItemRequest {
+            status: Some("sent".to_string()),
+            sent_client_msg_id: Some(client_msg_id),
+        };
+        spawn_local(async move {
+            let result = utils::send_json(
+                Request::patch(&utils::api_url(&edit_stack_item_api_path(
+                    session_id, item_id,
+                ))),
+                &body,
+            )
+            .await;
+            match result {
+                Ok(response) if response.ok() => match response.json::<EditStackResponse>().await {
+                    Ok(data) => link.send_message(SessionViewMsg::EditStackLoaded(data.items)),
+                    Err(err) => link.send_message(SessionViewMsg::EditStackRequestFailed(format!(
+                        "Edit-stack response was malformed: {err}"
+                    ))),
+                },
+                Ok(response) => {
+                    let message = utils::error_body(response).await;
+                    link.send_message(SessionViewMsg::EditStackRequestFailed(format!(
+                        "Could not update edit-stack item: {message}"
+                    )));
+                }
+                Err(err) => link.send_message(SessionViewMsg::EditStackRequestFailed(format!(
+                    "Could not update edit-stack item: {err}"
+                ))),
+            }
+        });
+    }
+
+    fn dismiss_edit_stack_item(&mut self, ctx: &Context<Self>, item_id: Uuid) {
+        self.edit_stack_items.retain(|item| item.id != item_id);
+        if self
+            .edit_stack_active
+            .is_some_and(|(active_id, _)| active_id == item_id)
+        {
+            self.edit_stack_active = None;
+        }
+        let session_id = ctx.props().session.id;
+        let link = ctx.link().clone();
+        spawn_local(async move {
+            let url = utils::api_url(&edit_stack_item_api_path(session_id, item_id));
+            match Request::delete(&url).send().await {
+                Ok(response) if response.ok() => match response.json::<EditStackResponse>().await {
+                    Ok(data) => link.send_message(SessionViewMsg::EditStackLoaded(data.items)),
+                    Err(err) => link.send_message(SessionViewMsg::EditStackRequestFailed(format!(
+                        "Edit-stack response was malformed: {err}"
+                    ))),
+                },
+                Ok(response) => {
+                    let message = utils::error_body(response).await;
+                    link.send_message(SessionViewMsg::EditStackRequestFailed(format!(
+                        "Could not dismiss edit-stack item: {message}"
+                    )));
+                }
+                Err(err) => link.send_message(SessionViewMsg::EditStackRequestFailed(format!(
+                    "Could not dismiss edit-stack item: {err}"
+                ))),
+            }
+        });
+    }
+
     /// Translate a plain-text submission from `InputBar` into an outbox-tracked
     /// `AgentInput`. The bar has already trimmed and cleared its textarea and
     /// emitted `MessageSent` separately; we just dispatch the input.
@@ -1489,7 +1864,7 @@ impl SessionView {
         content: serde_json::Value,
         send_mode: Option<SendMode>,
         reasoning_effort: Option<ReasoningEffort>,
-    ) {
+    ) -> Uuid {
         let client_msg_id = Uuid::new_v4();
         if let Some(text) = content.as_str() {
             let now_iso = js_sys::Date::new_0()
@@ -1516,6 +1891,7 @@ impl SessionView {
             );
         }
         self.transmit_input(client_msg_id, frame);
+        client_msg_id
     }
 
     /// Hand a recorded frame to the transport, marking it transmitted on
@@ -1574,6 +1950,11 @@ impl SessionView {
                 .emit((ctx.props().session.id, tag, activity_ts));
         }
         reconcile_pending_sends(&mut self.pending_sends, tag, &output.content);
+        if self.edit_stack_active.is_some()
+            && matches!(tag, ActivityTag::Result | ActivityTag::Error)
+        {
+            self.edit_stack_active = None;
+        }
 
         // Retire any active-tool strip entries this message completes: a
         // tool_result for the running tool, or a turn `result` that ends the
@@ -1591,6 +1972,7 @@ impl SessionView {
             MAX_MESSAGES_PER_SESSION,
             |message| counts_toward_render_limit(&message.content),
         );
+        self.drain_edit_stack_queue_if_idle(ctx);
         true
     }
 
@@ -1691,6 +2073,130 @@ impl SessionView {
             link.send_message(SessionViewMsg::WsEvent(event));
         });
         connect_websocket(session_id, replay_after, true, on_event);
+    }
+
+    fn render_edit_stack_panel(&self, ctx: &Context<Self>) -> Html {
+        let pending = self
+            .edit_stack_items
+            .iter()
+            .filter(|item| item.status == "pending")
+            .collect::<Vec<_>>();
+        if pending.is_empty() && self.edit_stack_error.is_none() {
+            return html! {};
+        }
+        let creator_count = pending
+            .iter()
+            .map(|item| item.created_by)
+            .collect::<HashSet<_>>()
+            .len();
+        let show_creator = creator_count > 1;
+        let busy = self.edit_stack_active.is_some()
+            || self.has_pending_permission
+            || !self.pending_sends.is_empty()
+            || is_awaiting(
+                self.messages.iter().map(|message| &message.content),
+                ctx.props().session.agent_type,
+            );
+        let active_item = self.edit_stack_active.map(|(item_id, _)| item_id);
+        let send_next = ctx
+            .link()
+            .callback(|_| SessionViewMsg::SendNextEditStackItem);
+        let send_all = ctx.link().callback(|_| SessionViewMsg::SendAllEditStack);
+        html! {
+            <section class="edit-stack-panel" aria-label="Edit stack">
+                <div class="edit-stack-header">
+                    <div class="edit-stack-title">
+                        <span class="edit-stack-kicker">{ "Edit stack" }</span>
+                        <span class="edit-stack-count">
+                            { format!("{} pending", pending.len()) }
+                        </span>
+                    </div>
+                    <div class="edit-stack-actions">
+                        <button
+                            type="button"
+                            class="edit-stack-action"
+                            disabled={pending.is_empty() || busy}
+                            onclick={send_next}
+                        >
+                            { "Send next" }
+                        </button>
+                        <button
+                            type="button"
+                            class="edit-stack-action primary"
+                            disabled={pending.is_empty() || busy}
+                            onclick={send_all}
+                        >
+                            { if self.edit_stack_send_all { "Sending…" } else { "Send all" } }
+                        </button>
+                    </div>
+                </div>
+                if let Some(error) = self.edit_stack_error.as_deref() {
+                    <div class="edit-stack-error">{ error }</div>
+                }
+                <div class="edit-stack-list">
+                    { pending.into_iter().map(|item| {
+                        let item_id = item.id;
+                        let is_active = active_item == Some(item_id);
+                        let image = item.image_data_url.clone();
+                        let body = if item.body.trim().is_empty() {
+                            "(no text note)".to_string()
+                        } else {
+                            truncate_chars(&item.body, EDIT_STACK_BODY_PREVIEW_CHARS)
+                        };
+                        let context = item
+                            .context
+                            .as_ref()
+                            .and_then(pretty_json)
+                            .map(|value| truncate_chars(&value, EDIT_STACK_CONTEXT_PREVIEW_CHARS));
+                        let creator = item.created_by_name.clone();
+                        let send_one = ctx.link().callback(move |_| SessionViewMsg::SendEditStackItem(item_id));
+                        let dismiss = ctx.link().callback(move |_| SessionViewMsg::DismissEditStackItem(item_id));
+                        html! {
+                            <article class={classes!("edit-stack-item", is_active.then_some("active"))} key={item.id.to_string()}>
+                                if let Some(src) = image {
+                                    <img class="edit-stack-thumb" src={src} alt="Captured annotation region" />
+                                } else {
+                                    <div class="edit-stack-thumb empty">{ "TXT" }</div>
+                                }
+                                <div class="edit-stack-item-main">
+                                    <div class="edit-stack-item-topline">
+                                        <span class="edit-stack-item-title">{ &item.title }</span>
+                                        if show_creator {
+                                            if let Some(name) = creator {
+                                                <span class="edit-stack-creator">{ name }</span>
+                                            }
+                                        }
+                                    </div>
+                                    <div class="edit-stack-note">{ body }</div>
+                                    if let Some(context) = context {
+                                        <pre class="edit-stack-context">{ context }</pre>
+                                    }
+                                </div>
+                                <div class="edit-stack-item-actions">
+                                    <button
+                                        type="button"
+                                        class="edit-stack-icon-action"
+                                        disabled={busy || is_active}
+                                        onclick={send_one}
+                                        title="Send this item"
+                                    >
+                                        { "Send" }
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="edit-stack-icon-action"
+                                        onclick={dismiss}
+                                        title="Dismiss this item"
+                                    >
+                                        { "Dismiss" }
+                                    </button>
+                                </div>
+                            </article>
+                        }
+                    }).collect::<Html>() }
+                </div>
+            </section>
+        }
     }
 
     fn render_permission_handler(&self, ctx: &Context<Self>) -> Html {

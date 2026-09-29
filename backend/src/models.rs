@@ -239,6 +239,37 @@ pub struct NewMessage {
     pub provenance_agent_type: Option<String>,
 }
 
+#[derive(Debug, Queryable, Selectable, Serialize, Deserialize, Clone)]
+#[diesel(table_name = crate::schema::session_edit_stack_items)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct SessionEditStackItem {
+    pub id: Uuid,
+    pub session_id: Uuid,
+    pub created_by: Uuid,
+    pub title: String,
+    pub body: String,
+    pub source: Option<serde_json::Value>,
+    pub context: Option<serde_json::Value>,
+    pub image_data_url: Option<String>,
+    pub status: String,
+    pub sent_client_msg_id: Option<Uuid>,
+    pub sent_at: Option<NaiveDateTime>,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+}
+
+#[derive(Debug, Insertable)]
+#[diesel(table_name = crate::schema::session_edit_stack_items)]
+pub struct NewSessionEditStackItem {
+    pub session_id: Uuid,
+    pub created_by: Uuid,
+    pub title: String,
+    pub body: String,
+    pub source: Option<serde_json::Value>,
+    pub context: Option<serde_json::Value>,
+    pub image_data_url: Option<String>,
+}
+
 // ============================================================================
 // Proxy Auth Token Models
 // ============================================================================

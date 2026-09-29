@@ -266,6 +266,65 @@ Surface requirements:
 - keep app state inside the plugin service or browser, not in Portal backend;
 - avoid service workers unless their scope is carefully constrained.
 
+### Surface Edit Stacks
+
+Forwarded surfaces may hand a stack of visual/text annotations back to the active
+session with `window.parent.postMessage`. Portal accepts these messages only
+from the origin of the currently open session surface, stores each annotation in
+the durable session edit stack, and renders the pending stack in the chat view.
+The user can inspect, dismiss, send the next item, or send all items. `Send all`
+still prompts the agent one item at a time and waits for the current agent turn
+to finish before sending the next item.
+
+This is intentionally domain-neutral. Plugins should put their own coordinates,
+view names, slide numbers, waveform cursors, or other loose context in
+`source`/`context`; Portal stores and displays that JSON and injects it into the
+agent prompt when the user sends an item.
+
+Use this message shape:
+
+```js
+window.parent.postMessage({
+  type: "agent-portal:queue-prompts",
+  version: 1,
+  source: {
+    plugin: "my-plugin",
+    page: location.href,
+  },
+  items: [
+    {
+      title: "Short human-readable title",
+      body: "User note or speech transcript",
+      context: {
+        tab: "PCB",
+        rect: { x: 0.2, y: 0.1, w: 0.3, h: 0.4 },
+      },
+      image: {
+        dataUrl: "data:image/png;base64,...",
+      },
+    },
+  ],
+}, new URL(document.referrer).origin);
+```
+
+Keep payloads small and self-contained. Prefer a normalized region, current
+view/project identifiers, and an optional cropped image over full application
+state. Portal bounds the number of items, text size, JSON context size, and
+image data URL size before saving the stack.
+
+Portal exposes the same state through session-scoped REST endpoints:
+
+| Method | Path | Meaning |
+| --- | --- | --- |
+| `GET` | `/api/sessions/{id}/edit-stack` | List non-deleted stack items visible to the current user |
+| `POST` | `/api/sessions/{id}/edit-stack` | Add one or more items using the message shape above |
+| `PATCH` | `/api/sessions/{id}/edit-stack/{item_id}` | Mark an item `pending`, `sent`, or `dismissed` |
+| `DELETE` | `/api/sessions/{id}/edit-stack/{item_id}` | Dismiss an item from the visible stack |
+
+The backend enforces normal session reader/mutator permissions. Items keep the
+creator id and display name; Portal only shows contributor names in the compact
+chat panel when there is more than one contributor in the pending stack.
+
 The launcher owns the lifecycle:
 
 1. choose a free port;
