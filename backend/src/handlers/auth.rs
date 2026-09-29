@@ -225,11 +225,7 @@ async fn provider_callback(
     cookies: Cookies,
     query: AuthCallbackQuery,
 ) -> Result<axum::response::Response, AppError> {
-    let callback_kind = if query
-        .state
-        .as_deref()
-        .is_some_and(|state| state.starts_with("device:"))
-    {
+    let callback_kind = if oauth::is_device_oauth_state(query.state.as_deref()) {
         "device"
     } else {
         "web"
