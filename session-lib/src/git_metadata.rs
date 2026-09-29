@@ -140,7 +140,7 @@ fn checkout_branch(cwd: &str) -> Option<String> {
     let branch = String::from_utf8(output.stdout)
         .ok()
         .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())?;
+        .filter(|s| shared::strings::is_non_empty(s))?;
 
     if branch == "HEAD" {
         std::process::Command::new("git")
@@ -235,7 +235,7 @@ pub fn get_repo_url(cwd: &str) -> Option<String> {
     String::from_utf8(output.stdout)
         .ok()
         .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
+        .filter(|s| shared::strings::is_non_empty(s))
 }
 
 /// Look up the GitHub PR URL for a branch using the `gh` CLI.
@@ -254,7 +254,7 @@ pub fn get_pr_url(cwd: &str, branch: &str) -> Option<String> {
     String::from_utf8(output.stdout)
         .ok()
         .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
+        .filter(|s| shared::strings::is_non_empty(s))
 }
 
 /// List all open PRs in the repo via the `gh` CLI, sorted by number ascending.

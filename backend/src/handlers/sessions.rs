@@ -106,7 +106,11 @@ pub async fn resolve_proxy_session(
         .select(Session::as_select())
         .into_boxed();
 
-    if let Some(hostname) = req.hostname.as_deref().filter(|h| !h.is_empty()) {
+    if let Some(hostname) = req
+        .hostname
+        .as_deref()
+        .filter(|h| shared::strings::is_non_empty(h))
+    {
         query = query.filter(sessions::hostname.eq(hostname));
     }
 

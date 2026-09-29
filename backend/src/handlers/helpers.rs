@@ -72,7 +72,7 @@ pub fn request_content_type(headers: &HeaderMap) -> Result<&str, AppError> {
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .map(|s| s.split(';').next().unwrap_or(s).trim())
-        .filter(|s| !s.is_empty())
+        .filter(|s| shared::strings::is_non_empty(s))
         .ok_or(AppError::BadRequest("missing Content-Type header"))
 }
 

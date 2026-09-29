@@ -178,7 +178,7 @@ fn default_session_name(working_directory: &str) -> String {
     std::path::Path::new(working_directory)
         .file_name()
         .and_then(|name| name.to_str())
-        .filter(|name| !name.is_empty())
+        .filter(|name| shared::strings::is_non_empty(name))
         .unwrap_or(working_directory)
         .to_string()
 }

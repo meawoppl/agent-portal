@@ -66,7 +66,7 @@ fn body_with_plugin_skills(plugin_skill_reminder: Option<&str>) -> String {
     let mut body = load_reminder_body();
     if let Some(extra) = plugin_skill_reminder
         .map(str::trim)
-        .filter(|extra| !extra.is_empty())
+        .filter(|extra| shared::strings::is_non_empty(extra))
     {
         body.push_str("\n\n");
         body.push_str(extra);
