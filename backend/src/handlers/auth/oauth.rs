@@ -99,7 +99,7 @@ pub(super) fn validate_callback_state(
     state: Option<&str>,
 ) -> Result<Option<DeviceOAuthState>, AppError> {
     let device_state = state.and_then(parse_device_oauth_state);
-    if state.is_some_and(|state| state.starts_with("device:")) && device_state.is_none() {
+    if is_device_oauth_state(state) && device_state.is_none() {
         error!("Device OAuth callback: malformed state");
         return Err(AppError::Forbidden);
     }
@@ -181,8 +181,15 @@ fn remove_oauth_csrf_cookie(name: &'static str, path: &'static str) -> Cookie<'s
     cookie
 }
 
+/// Prefix marking an OAuth `state` as belonging to the CLI device flow.
+pub(super) const DEVICE_OAUTH_STATE_PREFIX: &str = "device:";
+
+pub(super) fn is_device_oauth_state(state: Option<&str>) -> bool {
+    state.is_some_and(|state| state.starts_with(DEVICE_OAUTH_STATE_PREFIX))
+}
+
 fn build_device_oauth_state(user_code: &str, csrf_nonce: &str) -> String {
-    format!("device:{user_code}:{csrf_nonce}")
+    format!("{DEVICE_OAUTH_STATE_PREFIX}{user_code}:{csrf_nonce}")
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -192,7 +199,7 @@ pub(super) struct DeviceOAuthState {
 }
 
 fn parse_device_oauth_state(state: &str) -> Option<DeviceOAuthState> {
-    let state = state.strip_prefix("device:")?;
+    let state = state.strip_prefix(DEVICE_OAUTH_STATE_PREFIX)?;
     let (user_code, csrf_nonce) = state.rsplit_once(':')?;
     if user_code.is_empty() || csrf_nonce.is_empty() {
         return None;
@@ -219,6 +226,13 @@ mod tests {
                 csrf_nonce: "nonce-value".to_string(),
             })
         );
+    }
+
+    #[test]
+    fn is_device_oauth_state_matches_prefix_only() {
+        assert!(is_device_oauth_state(Some("device:ABC-123:nonce")));
+        assert!(!is_device_oauth_state(Some("regular-state")));
+        assert!(!is_device_oauth_state(None));
     }
 
     #[test]
