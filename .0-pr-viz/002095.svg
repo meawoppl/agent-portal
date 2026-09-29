@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1050" viewBox="0 0 1800 1050">
+  <rect width="1800" height="1050" fill="#1a1b26"/>
+  <text x="60" y="58" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2095 · Default new sessions to automatic reasoning effort</text>
+  <text x="60" y="120" font-family="sans-serif" font-size="38" fill="#c0caf5">Reasoning effort now belongs to the session that chose it</text>
+  <text x="60" y="165" font-family="sans-serif" font-size="25" fill="#a9b1d6">New sessions start on Auto; returning sessions restore their own last selection.</text>
+
+  <text x="60" y="245" font-family="sans-serif" font-size="23" fill="#f7768e">BEFORE · ONE BROWSER-GLOBAL VALUE</text>
+  <rect x="60" y="280" width="760" height="265" rx="18" fill="#202231" stroke="#f7768e" stroke-width="3"/>
+  <rect x="105" y="325" width="230" height="92" rx="12" fill="#292c3c" stroke="#7aa2f7"/>
+  <text x="220" y="360" text-anchor="middle" font-family="sans-serif" font-size="22" fill="#c0caf5">Session A</text>
+  <text x="220" y="395" text-anchor="middle" font-family="sans-serif" font-size="24" fill="#f7768e">XHigh</text>
+  <rect x="545" y="325" width="230" height="92" rx="12" fill="#292c3c" stroke="#7aa2f7"/>
+  <text x="660" y="360" text-anchor="middle" font-family="sans-serif" font-size="22" fill="#c0caf5">New session B</text>
+  <text x="660" y="395" text-anchor="middle" font-family="sans-serif" font-size="24" fill="#f7768e">XHigh</text>
+  <path d="M345 371 H530" stroke="#f7768e" stroke-width="4" fill="none"/>
+  <path d="M515 359 L530 371 L515 383" stroke="#f7768e" stroke-width="4" fill="none"/>
+  <text x="440" y="480" text-anchor="middle" font-family="monospace" font-size="21" fill="#e0af68">agent-portal-reasoning-effort = xhigh</text>
+  <text x="440" y="515" text-anchor="middle" font-family="sans-serif" font-size="20" fill="#a9b1d6">A stale choice leaked into every composer.</text>
+
+  <text x="980" y="245" font-family="sans-serif" font-size="23" fill="#9ece6a">AFTER · SESSION-SCOPED VALUES</text>
+  <rect x="980" y="280" width="760" height="265" rx="18" fill="#202231" stroke="#9ece6a" stroke-width="3"/>
+  <rect x="1025" y="325" width="290" height="92" rx="12" fill="#292c3c" stroke="#bb9af7"/>
+  <text x="1170" y="360" text-anchor="middle" font-family="sans-serif" font-size="22" fill="#c0caf5">Returning session A</text>
+  <text x="1170" y="395" text-anchor="middle" font-family="sans-serif" font-size="24" fill="#bb9af7">XHigh</text>
+  <rect x="1405" y="325" width="290" height="92" rx="12" fill="#292c3c" stroke="#9ece6a"/>
+  <text x="1550" y="360" text-anchor="middle" font-family="sans-serif" font-size="22" fill="#c0caf5">New session B</text>
+  <text x="1550" y="395" text-anchor="middle" font-family="sans-serif" font-size="24" fill="#9ece6a">Auto</text>
+  <text x="1360" y="478" text-anchor="middle" font-family="monospace" font-size="19" fill="#7dcfff">agent-portal-reasoning-effort-&lt;session-id&gt;</text>
+  <text x="1360" y="515" text-anchor="middle" font-family="sans-serif" font-size="20" fill="#a9b1d6">No saved key means no override: the model decides.</text>
+
+  <path d="M60 620 H1740" stroke="#565f89" stroke-width="2"/>
+  <text x="60" y="690" font-family="sans-serif" font-size="28" fill="#7dcfff">Behavior</text>
+  <rect x="60" y="730" width="510" height="205" rx="16" fill="#202231" stroke="#7aa2f7"/>
+  <text x="95" y="780" font-family="sans-serif" font-size="25" fill="#7aa2f7">1 · Launch</text>
+  <text x="95" y="825" font-family="sans-serif" font-size="22" fill="#c0caf5">Fresh session has no preference.</text>
+  <text x="95" y="865" font-family="sans-serif" font-size="22" fill="#9ece6a">Selector displays Auto.</text>
+
+  <rect x="645" y="730" width="510" height="205" rx="16" fill="#202231" stroke="#bb9af7"/>
+  <text x="680" y="780" font-family="sans-serif" font-size="25" fill="#bb9af7">2 · Choose</text>
+  <text x="680" y="825" font-family="sans-serif" font-size="22" fill="#c0caf5">Selection is saved under that</text>
+  <text x="680" y="865" font-family="sans-serif" font-size="22" fill="#c0caf5">session's UUID only.</text>
+
+  <rect x="1230" y="730" width="510" height="205" rx="16" fill="#202231" stroke="#9ece6a"/>
+  <text x="1265" y="780" font-family="sans-serif" font-size="25" fill="#9ece6a">3 · Return</text>
+  <text x="1265" y="825" font-family="sans-serif" font-size="22" fill="#c0caf5">That session restores its choice;</text>
+  <text x="1265" y="865" font-family="sans-serif" font-size="22" fill="#c0caf5">other sessions remain independent.</text>
+  <path d="M575 832 H630" stroke="#565f89" stroke-width="4" fill="none"/>
+  <path d="M615 820 L630 832 L615 844" stroke="#565f89" stroke-width="4" fill="none"/>
+  <path d="M1160 832 H1215" stroke="#565f89" stroke-width="4" fill="none"/>
+  <path d="M1200 820 L1215 832 L1200 844" stroke="#565f89" stroke-width="4" fill="none"/>
+  <text x="60" y="1010" font-family="sans-serif" font-size="20" fill="#a9b1d6">Wire behavior is unchanged: Auto sends no per-turn reasoning-effort override.</text>
+</svg>
