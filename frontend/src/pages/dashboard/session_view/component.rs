@@ -18,17 +18,16 @@ use gloo::events::EventListener;
 use gloo::timers::callback::Timeout;
 use gloo_net::http::Request;
 use shared::api::{
-    CreateEditStackRequest, EditStackItem, EditStackResponse, ForwardInfo, TurnMetricsResponse,
-    UpdateEditStackItemRequest, EDIT_STACK_MESSAGE_TYPE,
+    EditStackItem, EditStackResponse, ForwardInfo, TurnMetricsResponse, UpdateEditStackItemRequest,
 };
 use shared::{
     ClientToServer, DeliveryMeta, PortalMeta, ReasoningEffort, SendMode, SessionInfo, TurnMetrics,
 };
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
-use wasm_bindgen::{closure::Closure, JsCast, JsValue};
+use wasm_bindgen::{closure::Closure, JsCast};
 use wasm_bindgen_futures::spawn_local;
-use web_sys::{Element, KeyboardEvent, MessageEvent, MouseEvent, PointerEvent};
+use web_sys::{Element, KeyboardEvent, MouseEvent, PointerEvent};
 use yew::prelude::*;
 
 use super::forward_chips::ForwardChips;
@@ -252,11 +251,6 @@ pub enum SessionViewMsg {
     OpenForwardSurface(ForwardInfo),
     /// The forward chip strip fetched the current forward set.
     ForwardsLoaded(Vec<ForwardInfo>),
-    /// A trusted forwarded surface posted captured annotation items into the host.
-    EditStackBridgeMessage {
-        origin: String,
-        data: JsValue,
-    },
     EditStackLoaded(Vec<EditStackItem>),
     EditStackRequestFailed(String),
     ToggleEditStackPanel,
@@ -419,8 +413,6 @@ pub struct SessionView {
     resize_listeners: Vec<EventListener>,
     #[allow(dead_code)]
     surface_escape_listener: Option<EventListener>,
-    #[allow(dead_code)]
-    edit_stack_listener: Option<EventListener>,
     show_fork_dialog: bool,
     show_claude_login: bool,
 }
@@ -435,7 +427,6 @@ impl Component for SessionView {
         let agent_type = ctx.props().session.agent_type;
         let on_awaiting_change = ctx.props().on_awaiting_change.clone();
         let escape_link = ctx.link().clone();
-        let edit_stack_link = ctx.link().clone();
         let surface_escape_listener = web_sys::window().and_then(|window| {
             window.document().map(|document| {
                 EventListener::new(&document, "keydown", move |event| {
@@ -446,17 +437,6 @@ impl Component for SessionView {
                         escape_link.send_message(SessionViewMsg::EscapeSurface);
                     }
                 })
-            })
-        });
-        let edit_stack_listener = web_sys::window().map(|window| {
-            EventListener::new(&window, "message", move |event| {
-                let Some(event) = event.dyn_ref::<MessageEvent>() else {
-                    return;
-                };
-                edit_stack_link.send_message(SessionViewMsg::EditStackBridgeMessage {
-                    origin: event.origin(),
-                    data: event.data(),
-                });
             })
         });
 
@@ -558,7 +538,6 @@ impl Component for SessionView {
             body_ref: NodeRef::default(),
             resize_listeners: Vec::new(),
             surface_escape_listener,
-            edit_stack_listener,
             show_fork_dialog: false,
             show_claude_login: false,
         }
@@ -783,9 +762,6 @@ impl Component for SessionView {
                 save_open_surface(&surface);
                 self.active_surface = Some(surface);
                 true
-            }
-            SessionViewMsg::EditStackBridgeMessage { origin, data } => {
-                self.handle_edit_stack_bridge_message(ctx, &origin, &data)
             }
             SessionViewMsg::EditStackLoaded(items) => {
                 self.edit_stack_items = items;
@@ -1445,6 +1421,11 @@ impl SessionView {
                 self.forwards_refresh = self.forwards_refresh.wrapping_add(1);
                 true
             }
+            WsEvent::EditStackUpdated { items } => {
+                self.edit_stack_items = items;
+                self.edit_stack_error = None;
+                true
+            }
             WsEvent::UploadResult(fields) => self.handle_upload_result(fields),
             WsEvent::ToolProgress {
                 tool_use_id,
@@ -1684,85 +1665,6 @@ impl SessionView {
             .collect();
         self.last_message_timestamp = last_timestamp;
         ctx.link().send_message(SessionViewMsg::CheckAwaiting);
-    }
-
-    fn handle_edit_stack_bridge_message(
-        &mut self,
-        ctx: &Context<Self>,
-        origin: &str,
-        data: &JsValue,
-    ) -> bool {
-        let Some(raw) = js_sys::JSON::stringify(data)
-            .ok()
-            .and_then(|value| value.as_string())
-        else {
-            return false;
-        };
-        let request = match serde_json::from_str::<CreateEditStackRequest>(&raw) {
-            Ok(request)
-                if request.message_type.as_deref() == Some(EDIT_STACK_MESSAGE_TYPE)
-                    && !request.items.is_empty() =>
-            {
-                request
-            }
-            Ok(request) if request.message_type.as_deref() != Some(EDIT_STACK_MESSAGE_TYPE) => {
-                return false;
-            }
-            Ok(_) => {
-                self.edit_stack_error =
-                    Some("Forwarded annotation stack did not include any items.".to_string());
-                return true;
-            }
-            Err(err) => {
-                self.edit_stack_error = Some(format!(
-                    "Forwarded annotation stack was not valid JSON: {err}"
-                ));
-                return true;
-            }
-        };
-        if !self.surface_message_origin_is_active(origin) {
-            self.edit_stack_error = Some(format!(
-                "Annotation stack came from {origin}, but that is not the active in-frame surface. Open the forwarded view inside this session before sending annotations."
-            ));
-            return true;
-        }
-        let session_id = ctx.props().session.id;
-        let link = ctx.link().clone();
-        spawn_local(async move {
-            let result = utils::send_json(
-                Request::post(&utils::api_url(&edit_stack_api_path(session_id))),
-                &request,
-            )
-            .await;
-            match result {
-                Ok(response) if response.ok() => match response.json::<EditStackResponse>().await {
-                    Ok(data) => link.send_message(SessionViewMsg::EditStackLoaded(data.items)),
-                    Err(err) => link.send_message(SessionViewMsg::EditStackRequestFailed(format!(
-                        "Edit-stack response was malformed: {err}"
-                    ))),
-                },
-                Ok(response) => {
-                    let message = utils::error_body(response).await;
-                    link.send_message(SessionViewMsg::EditStackRequestFailed(format!(
-                        "Could not save edit stack: {message}"
-                    )));
-                }
-                Err(err) => link.send_message(SessionViewMsg::EditStackRequestFailed(format!(
-                    "Could not save edit stack: {err}"
-                ))),
-            }
-        });
-        self.edit_stack_send_all = true;
-        self.ephemeral_status = Some("Saving surface annotation stack…".to_string());
-        true
-    }
-
-    fn surface_message_origin_is_active(&self, origin: &str) -> bool {
-        self.active_surface
-            .as_ref()
-            .and_then(SessionSurface::forward)
-            .and_then(|forward| web_sys::Url::new(&forward.url).ok())
-            .is_some_and(|url| url.origin() == origin)
     }
 
     fn send_edit_stack_item(&mut self, ctx: &Context<Self>, item_id: Uuid) -> bool {

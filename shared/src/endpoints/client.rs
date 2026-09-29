@@ -343,6 +343,14 @@ pub enum ServerToClient {
         open_preview: bool,
     },
 
+    /// The durable work queue changed outside this web client, usually because
+    /// a forwarded plugin surface submitted an annotation through
+    /// `POST /__portal/edit-stack`.
+    EditStackUpdated {
+        session_id: Uuid,
+        items: Vec<crate::api::EditStackItem>,
+    },
+
     /// Ephemeral live tool-progress heartbeat, fanned out from
     /// `ProxyToServer::ToolProgress`. Purely a live-status signal: never
     /// persisted, never part of `HistoryBatch`, so it carries no `created_at`

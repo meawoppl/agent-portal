@@ -13,7 +13,7 @@ use diesel::prelude::*;
 use diesel::result::OptionalExtension;
 use shared::api::{
     CreateEditStackRequest, EditStackItem, EditStackItemInput, EditStackResponse,
-    UpdateEditStackItemRequest, EDIT_STACK_MESSAGE_TYPE,
+    UpdateEditStackItemRequest,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,6 +25,11 @@ const MAX_EDIT_STACK_TITLE_CHARS: usize = 200;
 const MAX_EDIT_STACK_TEXT_CHARS: usize = 16_000;
 const MAX_EDIT_STACK_JSON_CHARS: usize = 64_000;
 const MAX_EDIT_STACK_IMAGE_CHARS: usize = 1_500_000;
+
+pub(crate) struct CreateEditStackOutcome {
+    pub(crate) response: EditStackResponse,
+    pub(crate) inserted: Vec<EditStackItem>,
+}
 
 pub async fn list_edit_stack(
     State(app_state): State<Arc<AppState>>,
@@ -53,7 +58,7 @@ pub async fn list_agent_edit_stack(
     )?))
 }
 
-fn list_edit_stack_for_user(
+pub(crate) fn list_edit_stack_for_user(
     app_state: &AppState,
     current_user_id: Uuid,
     session_id: Uuid,
@@ -96,21 +101,31 @@ pub async fn create_agent_edit_stack_items(
     )?))
 }
 
-fn create_edit_stack_items_for_user(
+pub(crate) fn create_edit_stack_items_for_user(
     app_state: &AppState,
     current_user_id: Uuid,
     session_id: Uuid,
     req: CreateEditStackRequest,
 ) -> Result<EditStackResponse, AppError> {
+    Ok(
+        create_edit_stack_items_for_user_with_inserted(
+            app_state,
+            current_user_id,
+            session_id,
+            req,
+        )?
+        .response,
+    )
+}
+
+pub(crate) fn create_edit_stack_items_for_user_with_inserted(
+    app_state: &AppState,
+    current_user_id: Uuid,
+    session_id: Uuid,
+    req: CreateEditStackRequest,
+) -> Result<CreateEditStackOutcome, AppError> {
     let mut conn = app_state.conn()?;
     let _session = verify_session_mutator(&mut conn, session_id, current_user_id)?;
-    if req
-        .message_type
-        .as_deref()
-        .is_some_and(|kind| kind != EDIT_STACK_MESSAGE_TYPE)
-    {
-        return Err(AppError::BadRequest("unsupported edit-stack message type"));
-    }
     if req.items.is_empty() {
         return Err(AppError::BadRequest("edit stack request had no items"));
     }
@@ -131,14 +146,45 @@ fn create_edit_stack_items_for_user(
         ));
     }
 
-    diesel::insert_into(session_edit_stack_items::table)
+    let inserted_rows = diesel::insert_into(session_edit_stack_items::table)
         .values(&inserts)
         .returning(SessionEditStackItem::as_returning())
         .get_results::<SessionEditStackItem>(&mut conn)?;
+    let inserted = enrich_items(&mut conn, inserted_rows)?;
 
-    Ok(EditStackResponse {
-        items: load_edit_stack_items(&mut conn, session_id)?,
+    Ok(CreateEditStackOutcome {
+        response: EditStackResponse {
+            items: load_edit_stack_items(&mut conn, session_id)?,
+        },
+        inserted,
     })
+}
+
+pub(crate) fn mark_edit_stack_item_sent_for_user(
+    app_state: &AppState,
+    current_user_id: Uuid,
+    session_id: Uuid,
+    item_id: Uuid,
+    client_msg_id: Uuid,
+) -> Result<(), AppError> {
+    let mut conn = app_state.conn()?;
+    let _session = verify_session_mutator(&mut conn, session_id, current_user_id)?;
+    let updated = diesel::update(
+        session_edit_stack_items::table
+            .filter(session_edit_stack_items::session_id.eq(session_id))
+            .filter(session_edit_stack_items::id.eq(item_id)),
+    )
+    .set((
+        session_edit_stack_items::status.eq("sent"),
+        session_edit_stack_items::sent_client_msg_id.eq(client_msg_id),
+        session_edit_stack_items::sent_at.eq(diesel::dsl::now),
+        session_edit_stack_items::updated_at.eq(diesel::dsl::now),
+    ))
+    .execute(&mut conn)?;
+    if updated == 0 {
+        return Err(AppError::NotFound("edit stack item not found"));
+    }
+    Ok(())
 }
 
 pub async fn update_edit_stack_item(
@@ -289,6 +335,41 @@ fn image_data_url(item: &EditStackItemInput) -> Option<&str> {
         .as_ref()
         .and_then(|image| image.data_url.as_deref())
         .or(item.image_data_url.as_deref())
+}
+
+fn pretty_json(value: &serde_json::Value) -> Option<String> {
+    serde_json::to_string_pretty(value).ok()
+}
+
+pub(crate) fn edit_stack_prompt_content(item: &EditStackItem) -> String {
+    let mut content = String::new();
+    content.push_str("Portal edit-stack annotation.\n\n");
+    content.push_str(&format!("Title: {}\n\n", item.title));
+    if let Some(source) = item.source.as_ref().and_then(pretty_json) {
+        content.push_str("Source:\n```json\n");
+        content.push_str(&source);
+        content.push_str("\n```\n\n");
+    }
+    if let Some(context) = item.context.as_ref().and_then(pretty_json) {
+        content.push_str("Selected region / view context:\n```json\n");
+        content.push_str(&context);
+        content.push_str("\n```\n\n");
+    }
+    if item.body.trim().is_empty() {
+        content.push_str("User note: (no text note provided)\n\n");
+    } else {
+        content.push_str("User note:\n");
+        content.push_str(&item.body);
+        content.push_str("\n\n");
+    }
+    if let Some(image) = item.image_data_url.as_deref() {
+        content.push_str("Captured region:\n");
+        content.push_str(&format!("![edit-stack capture]({image})\n\n"));
+    }
+    content.push_str(
+        "Please handle this single edit-stack item as one focused change. Verify it, then stop so Portal can send the next pending item if requested.",
+    );
+    content
 }
 
 fn validate_image_data_url(value: Option<&str>) -> Result<Option<String>, AppError> {
