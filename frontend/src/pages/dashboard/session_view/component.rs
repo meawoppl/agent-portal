@@ -1637,9 +1637,6 @@ impl SessionView {
         origin: &str,
         data: &JsValue,
     ) -> bool {
-        if !self.surface_message_origin_is_active(origin) {
-            return false;
-        }
         let Some(raw) = js_sys::JSON::stringify(data)
             .ok()
             .and_then(|value| value.as_string())
@@ -1668,6 +1665,12 @@ impl SessionView {
                 return true;
             }
         };
+        if !self.surface_message_origin_is_active(origin) {
+            self.edit_stack_error = Some(format!(
+                "Annotation stack came from {origin}, but that is not the active in-frame surface. Open the forwarded view inside this session before sending annotations."
+            ));
+            return true;
+        }
         let session_id = ctx.props().session.id;
         let link = ctx.link().clone();
         spawn_local(async move {
@@ -1694,6 +1697,7 @@ impl SessionView {
                 ))),
             }
         });
+        self.edit_stack_send_all = true;
         self.ephemeral_status = Some("Saving surface annotation stack…".to_string());
         true
     }
