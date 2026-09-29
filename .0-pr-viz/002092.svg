@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2092 - Show exact base Portal instruction injection</text>
+<text x="55" y="108" font-family="sans-serif" font-size="34" fill="#e6e9f5">The first-message notice now identifies the Portal injection and lets the</text>
+<text x="55" y="148" font-family="sans-serif" font-size="34" fill="#e6e9f5">user inspect the same versioned instructions that were sent to the agent.</text>
+<path d="M55 190 H1945 M1000 207 V1130" stroke="#565f89" fill="none"/>
+<text x="55" y="235" font-family="sans-serif" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1055" y="235" font-family="sans-serif" font-size="22" fill="#9ece6a">AFTER</text>
+
+<g>
+<rect x="55" y="285" width="870" height="180" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="327" font-family="sans-serif" font-size="26" fill="#f7768e">Generic collapsed header</text>
+<text x="79" y="371" font-family="sans-serif" font-size="23" fill="#c0caf5">SystemReminderBar always displayed</text>
+<text x="79" y="407" font-family="sans-serif" font-size="23" fill="#c0caf5">&quot;System reminder&quot; for every reminder body.</text>
+</g>
+
+<g>
+<rect x="1055" y="285" width="870" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="327" font-family="sans-serif" font-size="26" fill="#9ece6a">Specific injection header</text>
+<text x="1079" y="371" font-family="sans-serif" font-size="23" fill="#c0caf5">system_reminder_title recognizes the versioned body:</text>
+<text x="1079" y="407" font-family="sans-serif" font-size="23" fill="#7dcfff">Base Portal Instructions Injection</text>
+</g>
+
+<g>
+<rect x="55" y="570" width="870" height="180" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="612" font-family="sans-serif" font-size="26" fill="#f7768e">Substituted explanation</text>
+<text x="79" y="656" font-family="sans-serif" font-size="23" fill="#c0caf5">visible_text_with_base_session_notice hid the</text>
+<text x="79" y="692" font-family="sans-serif" font-size="23" fill="#c0caf5">actual instructions behind a short description.</text>
+</g>
+
+<g>
+<rect x="1055" y="570" width="870" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="612" font-family="sans-serif" font-size="26" fill="#9ece6a">Exact inspectable payload</text>
+<text x="1079" y="656" font-family="sans-serif" font-size="23" fill="#c0caf5">reminder_contents feeds both the agent envelope</text>
+<text x="1079" y="692" font-family="sans-serif" font-size="23" fill="#c0caf5">and the transcript dropdown from one value.</text>
+</g>
+
+<g>
+<rect x="55" y="855" width="870" height="180" rx="12" fill="#1e202e" stroke="#e0af68"/>
+<text x="79" y="897" font-family="sans-serif" font-size="26" fill="#e0af68">User upload remains visible</text>
+<text x="79" y="941" font-family="sans-serif" font-size="23" fill="#c0caf5">The real first prompt still renders normally beside</text>
+<text x="79" y="977" font-family="sans-serif" font-size="23" fill="#c0caf5">the separate collapsed machine-authored notice.</text>
+</g>
+
+<g>
+<rect x="1055" y="855" width="870" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="897" font-family="sans-serif" font-size="26" fill="#9ece6a">Other reminders stay generic</text>
+<text x="1079" y="941" font-family="sans-serif" font-size="23" fill="#c0caf5">Voice, inter-agent, and other system reminders keep</text>
+<text x="1079" y="977" font-family="sans-serif" font-size="23" fill="#c0caf5">their established &quot;System reminder&quot; presentation.</text>
+</g>
+
+<path d="M490 477 V547 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<path d="M490 762 V832 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<path d="M1490 477 V547 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<path d="M1490 762 V832 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<text x="55" y="1170" font-family="sans-serif" font-size="22" fill="#a9b1d6">Scope: first-turn base instruction disclosure; compaction injections remain agent-only.</text>
+</svg>
