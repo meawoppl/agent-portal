@@ -522,7 +522,11 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                             if !working_directory.is_empty() { <code class="sched-dir">{ &working_directory }</code> }
                         </div>
                     </div>
-                    <button class="sched-close" onclick={props.on_close.reform(|_| ())}>
+                    <button
+                        class="sched-close"
+                        onclick={props.on_close.reform(|_| ())}
+                        aria-label="Close"
+                    >
                         { "X" }
                     </button>
                 </div>

@@ -249,7 +249,11 @@ impl Component for ShareDialog {
                 <div class="share-dialog">
                     <div class="share-dialog-header">
                         <h2>{ "Share Session" }</h2>
-                        <button class="share-dialog-close" onclick={move |_| on_close.emit(())}>
+                        <button
+                            class="share-dialog-close"
+                            onclick={move |_| on_close.emit(())}
+                            aria-label="Close"
+                        >
                             { "×" }
                         </button>
                     </div>
