@@ -16,6 +16,7 @@ mod progress;
 mod scheduler;
 mod seppuku;
 mod service;
+mod work_queue;
 mod worktree;
 
 use clap::{Parser, Subcommand};
@@ -106,6 +107,12 @@ enum Command {
     Message {
         #[command(subcommand)]
         action: MessageAction,
+    },
+    /// View or add durable work queue items for your sessions.
+    #[command(name = "work-queue", alias = "queue")]
+    WorkQueue {
+        #[command(subcommand)]
+        action: WorkQueueAction,
     },
     /// Display an image, video, or portable figure in this session's transcript.
     #[command(alias = "display")]
@@ -284,6 +291,37 @@ enum MessageAction {
         /// Replace an existing destination file
         #[arg(long, conflicts_with = "stdout")]
         force: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum WorkQueueAction {
+    /// List queued work. With no target, shows a summary across sessions.
+    List {
+        /// Target session id (a unique prefix works)
+        agent_id: Option<String>,
+        /// Include sent and dismissed items, not just pending work
+        #[arg(long)]
+        all: bool,
+        /// Print raw JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Add a text work item to another session's queue
+    Add {
+        /// Target session id (a unique prefix works)
+        agent_id: String,
+        /// Work item body
+        message: String,
+        /// Human-readable item title
+        #[arg(short, long)]
+        title: Option<String>,
+        /// Plugin/view context. JSON is preserved; non-JSON is stored as text.
+        #[arg(long)]
+        context: Option<String>,
+        /// Source metadata. JSON is preserved; non-JSON is stored as text.
+        #[arg(long)]
+        source: Option<String>,
     },
 }
 
@@ -477,6 +515,31 @@ async fn main() -> anyhow::Result<()> {
                     stdout,
                     force,
                 } => message::history(&agent_id, output.as_deref(), stdout, force).await,
+            };
+        }
+        Some(Command::WorkQueue { action }) => {
+            return match action {
+                WorkQueueAction::List {
+                    agent_id,
+                    all,
+                    json,
+                } => work_queue::list(agent_id.as_deref(), all, json).await,
+                WorkQueueAction::Add {
+                    agent_id,
+                    message,
+                    title,
+                    context,
+                    source,
+                } => {
+                    work_queue::add(
+                        &agent_id,
+                        &message,
+                        title.as_deref(),
+                        context.as_deref(),
+                        source.as_deref(),
+                    )
+                    .await
+                }
             };
         }
         Some(Command::Show { file }) => {

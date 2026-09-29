@@ -278,6 +278,11 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
             "/api/agent/sessions/{id}/message",
             post(handlers::agent_comms::send_agent_message),
         )
+        .route(
+            "/api/agent/sessions/{id}/edit-stack",
+            get(handlers::edit_stack::list_agent_edit_stack)
+                .post(handlers::edit_stack::create_agent_edit_stack_items),
+        )
         // `agent-portal message peek`: summarized recent activity, read-only.
         .route(
             "/api/agent/sessions/{id}/messages",

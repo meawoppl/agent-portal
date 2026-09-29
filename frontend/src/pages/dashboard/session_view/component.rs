@@ -259,6 +259,8 @@ pub enum SessionViewMsg {
     },
     EditStackLoaded(Vec<EditStackItem>),
     EditStackRequestFailed(String),
+    ToggleEditStackPanel,
+    HideEditStackPanel,
     SendNextEditStackItem,
     SendEditStackItem(Uuid),
     SendAllEditStack,
@@ -411,6 +413,7 @@ pub struct SessionView {
     edit_stack_active: Option<(Uuid, Uuid)>,
     edit_stack_send_all: bool,
     edit_stack_error: Option<String>,
+    edit_stack_panel_open: bool,
     surface_split_percent: f64,
     body_ref: NodeRef,
     resize_listeners: Vec<EventListener>,
@@ -550,6 +553,7 @@ impl Component for SessionView {
             edit_stack_active: None,
             edit_stack_send_all: false,
             edit_stack_error: None,
+            edit_stack_panel_open: false,
             surface_split_percent: load_split_percent(session_id),
             body_ref: NodeRef::default(),
             resize_listeners: Vec::new(),
@@ -567,6 +571,7 @@ impl Component for SessionView {
             self.edit_stack_active = None;
             self.edit_stack_send_all = false;
             self.edit_stack_error = None;
+            self.edit_stack_panel_open = false;
             self.open_forward_on_load = false;
             self.pending_surface_restore = load_open_surface(ctx.props().session.id);
             self.surface_split_percent = load_split_percent(ctx.props().session.id);
@@ -790,6 +795,17 @@ impl Component for SessionView {
             }
             SessionViewMsg::EditStackRequestFailed(err) => {
                 self.edit_stack_error = Some(err);
+                true
+            }
+            SessionViewMsg::ToggleEditStackPanel => {
+                self.edit_stack_panel_open = !self.edit_stack_panel_open;
+                if self.edit_stack_panel_open {
+                    edit_stack_fetch(ctx.link().clone(), ctx.props().session.id);
+                }
+                true
+            }
+            SessionViewMsg::HideEditStackPanel => {
+                self.edit_stack_panel_open = false;
                 true
             }
             SessionViewMsg::SendNextEditStackItem => {
@@ -1105,6 +1121,13 @@ impl Component for SessionView {
             .current_user_id
             .as_deref()
             .is_some_and(|uid| uid == ctx.props().session.user_id.to_string());
+        let pending_work_count = self
+            .edit_stack_items
+            .iter()
+            .filter(|item| item.status == "pending")
+            .count();
+        let work_queue_expanded =
+            self.edit_stack_panel_open || pending_work_count > 0 || self.edit_stack_error.is_some();
 
         html! {
             <div class={classes!("session-view", ctx.props().focused.then_some("focused"))}>
@@ -1138,6 +1161,26 @@ impl Component for SessionView {
                         on_open={ctx.link().callback(SessionViewMsg::OpenForwardSurface)}
                         on_loaded={ctx.link().callback(SessionViewMsg::ForwardsLoaded)}
                     />
+                    <button
+                        type="button"
+                        class={classes!(
+                            "session-header-action",
+                            "work-queue-action",
+                            work_queue_expanded.then_some("active"),
+                        )}
+                        title="View work queue"
+                        aria-controls="session-work-queue"
+                        aria-expanded={work_queue_expanded.to_string()}
+                        onclick={ctx.link().callback(|_| SessionViewMsg::ToggleEditStackPanel)}
+                    >
+                        {
+                            if pending_work_count > 0 {
+                                format!("Queue {pending_work_count}")
+                            } else {
+                                "Queue".to_string()
+                            }
+                        }
+                    </button>
                     <span class={status_class}>{ ctx.props().session.status.as_str() }</span>
                     if ctx.props().session.my_role == shared::SessionRole::Owner
                         && ctx.props().session.launcher_id.is_some()
@@ -2148,7 +2191,7 @@ impl SessionView {
             .iter()
             .filter(|item| item.status == "pending")
             .collect::<Vec<_>>();
-        if pending.is_empty() && self.edit_stack_error.is_none() {
+        if pending.is_empty() && self.edit_stack_error.is_none() && !self.edit_stack_panel_open {
             return html! {};
         }
         let creator_count = pending
@@ -2169,11 +2212,12 @@ impl SessionView {
             .link()
             .callback(|_| SessionViewMsg::SendNextEditStackItem);
         let send_all = ctx.link().callback(|_| SessionViewMsg::SendAllEditStack);
+        let close = ctx.link().callback(|_| SessionViewMsg::HideEditStackPanel);
         html! {
-            <section class="edit-stack-panel" aria-label="Edit stack">
+            <section id="session-work-queue" class="edit-stack-panel" aria-label="Work queue">
                 <div class="edit-stack-header">
                     <div class="edit-stack-title">
-                        <span class="edit-stack-kicker">{ "Edit stack" }</span>
+                        <span class="edit-stack-kicker">{ "Work queue" }</span>
                         <span class="edit-stack-count">
                             { format!("{} pending", pending.len()) }
                         </span>
@@ -2195,12 +2239,26 @@ impl SessionView {
                         >
                             { if self.edit_stack_send_all { "Sending…" } else { "Send all" } }
                         </button>
+                        if pending.is_empty() {
+                            <button
+                                type="button"
+                                class="edit-stack-icon-action compact"
+                                onclick={close}
+                                title="Hide work queue"
+                                aria-label="Hide work queue"
+                            >
+                                { "x" }
+                            </button>
+                        }
                     </div>
                 </div>
                 if let Some(error) = self.edit_stack_error.as_deref() {
                     <div class="edit-stack-error">{ error }</div>
                 }
                 <div class="edit-stack-list">
+                    if pending.is_empty() {
+                        <div class="edit-stack-empty">{ "No pending work items." }</div>
+                    }
                     { pending.into_iter().map(|item| {
                         let item_id = item.id;
                         let is_active = active_item == Some(item_id);

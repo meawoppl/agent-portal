@@ -139,11 +139,15 @@ See [Port Forwarding](docs/PORT_FORWARDING.md).
 ```bash
 agent-portal message list                     # your other sessions
 agent-portal message send <id> "PR is up — review the auth boundary"
+agent-portal work-queue list                  # pending queued work by session
+agent-portal work-queue add <id> "Fix the labelled capture"
 ```
 
 Messages arrive as a turn in the target session and reply by id, using the
 session's own identity — no credential handling in agent code. One agent
-writing code while another reviews it is a normal working pattern here.
+writing code while another reviews it is a normal working pattern here. Work
+queue items use the same durable stack as visual annotations, so a session can
+drain focused tasks one at a time without an immediate interrupt.
 
 <img src="docs/media/feature-agent-message.webp" width="900"
      alt="A message sent from one session lands in another as a 'Message from Claude' card; that session's agent picks it up and starts running commands.">
