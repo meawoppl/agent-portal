@@ -92,6 +92,95 @@ pub struct MessagesListResponse<T> {
     pub total: i64,
 }
 
+// ---- Session edit stack -----------------------------------------------------
+
+/// Message type surfaces post to Portal when adding visual/text annotations.
+pub const EDIT_STACK_MESSAGE_TYPE: &str = "agent-portal:queue-prompts";
+
+/// Captured image payload for an edit-stack item.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct EditStackImageInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_url: Option<String>,
+}
+
+/// One annotation supplied by a surface. It may be text-only, image-only, or
+/// both. `context` is deliberately loose JSON so plugins can attach domain
+/// coordinates, view names, slide numbers, waveform cursors, etc.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct EditStackItemInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<EditStackImageInput>,
+    /// Alias for simple producers that do not want an `image` object.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_data_url: Option<String>,
+}
+
+/// Body for `POST /api/sessions/{id}/edit-stack`. The same shape is also used
+/// by forwarded surfaces via `postMessage`; the `type` field is optional on
+/// REST so trusted Portal UI can reuse it without pretending to be a surface.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateEditStackRequest {
+    #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
+    pub message_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<serde_json::Value>,
+    #[serde(default)]
+    pub items: Vec<EditStackItemInput>,
+}
+
+/// Body for `PATCH /api/sessions/{id}/edit-stack/{item_id}`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateEditStackItemRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sent_client_msg_id: Option<Uuid>,
+}
+
+/// One durable edit-stack item.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditStackItem {
+    pub id: Uuid,
+    pub session_id: Uuid,
+    pub created_by: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_by_name: Option<String>,
+    pub title: String,
+    pub body: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_data_url: Option<String>,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sent_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sent_client_msg_id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct EditStackResponse {
+    #[serde(default)]
+    pub items: Vec<EditStackItem>,
+}
+
 // ---- Inter-agent messaging --------------------------------------------------
 
 /// Live agent activity, separate from the persisted session lifecycle

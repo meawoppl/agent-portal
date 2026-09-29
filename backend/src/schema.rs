@@ -179,6 +179,25 @@ diesel::table! {
 }
 
 diesel::table! {
+    session_edit_stack_items (id) {
+        id -> Uuid,
+        session_id -> Uuid,
+        created_by -> Uuid,
+        title -> Text,
+        body -> Text,
+        source -> Nullable<Jsonb>,
+        context -> Nullable<Jsonb>,
+        image_data_url -> Nullable<Text>,
+        #[max_length = 32]
+        status -> Varchar,
+        sent_client_msg_id -> Nullable<Uuid>,
+        sent_at -> Nullable<Timestamp>,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     session_members (id) {
         id -> Uuid,
         session_id -> Uuid,
@@ -323,6 +342,8 @@ diesel::joinable!(push_subscriptions -> users (user_id));
 diesel::joinable!(scheduled_tasks -> users (user_id));
 diesel::joinable!(session_continuations -> sessions (session_id));
 diesel::joinable!(session_continuations -> users (user_id));
+diesel::joinable!(session_edit_stack_items -> sessions (session_id));
+diesel::joinable!(session_edit_stack_items -> users (created_by));
 diesel::joinable!(session_forwards -> sessions (session_id));
 diesel::joinable!(session_members -> sessions (session_id));
 diesel::joinable!(session_members -> users (user_id));
@@ -343,6 +364,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     push_subscriptions,
     scheduled_tasks,
     session_continuations,
+    session_edit_stack_items,
     session_forwards,
     session_members,
     sessions,

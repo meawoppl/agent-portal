@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2090 - Add durable session edit stack</text>
+<text x="55" y="108" font-family="sans-serif" font-size="34" fill="#e6e9f5">Forwarded surface annotations now become durable Portal work items</text>
+<text x="55" y="148" font-family="sans-serif" font-size="34" fill="#e6e9f5">with images, loose context, and explicit send controls.</text>
+<path d="M55 190 H1945 M1000 207 V1130" stroke="#565f89" fill="none"/>
+<text x="55" y="235" font-family="sans-serif" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1055" y="235" font-family="sans-serif" font-size="22" fill="#9ece6a">AFTER</text>
+
+<g>
+<rect x="55" y="285" width="870" height="180" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="327" font-family="sans-serif" font-size="26" fill="#f7768e">agent-portal:queue-prompts</text>
+<text x="79" y="371" font-family="sans-serif" font-size="23" fill="#c0caf5">SessionView kept a local VecDeque of prompt jobs</text>
+<text x="79" y="407" font-family="sans-serif" font-size="23" fill="#c0caf5">and auto-drained them into the agent.</text>
+</g>
+
+<g>
+<rect x="1055" y="285" width="870" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="327" font-family="sans-serif" font-size="26" fill="#9ece6a">session_edit_stack_items</text>
+<text x="1079" y="371" font-family="sans-serif" font-size="23" fill="#c0caf5">POST /api/sessions/{id}/edit-stack persists</text>
+<text x="1079" y="407" font-family="sans-serif" font-size="23" fill="#c0caf5">title, note, image data URL, source, and context.</text>
+</g>
+
+<g>
+<rect x="55" y="570" width="870" height="180" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="612" font-family="sans-serif" font-size="26" fill="#f7768e">Hidden queue state</text>
+<text x="79" y="656" font-family="sans-serif" font-size="23" fill="#c0caf5">Users could not inspect, dismiss, or share the</text>
+<text x="79" y="692" font-family="sans-serif" font-size="23" fill="#c0caf5">pending annotation stack after capture.</text>
+</g>
+
+<g>
+<rect x="1055" y="570" width="870" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="612" font-family="sans-serif" font-size="26" fill="#9ece6a">Edit stack panel</text>
+<text x="1079" y="656" font-family="sans-serif" font-size="23" fill="#c0caf5">The chat view shows thumbnails, notes, JSON context,</text>
+<text x="1079" y="692" font-family="sans-serif" font-size="23" fill="#c0caf5">multi-user attribution, Send next, Send all, Dismiss.</text>
+</g>
+
+<g>
+<rect x="55" y="855" width="870" height="180" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="897" font-family="sans-serif" font-size="26" fill="#f7768e">Plugin-specific behavior</text>
+<text x="79" y="941" font-family="sans-serif" font-size="23" fill="#c0caf5">The KiCad annotation prototype carried surface state</text>
+<text x="79" y="977" font-family="sans-serif" font-size="23" fill="#c0caf5">through a narrow browser-only bridge.</text>
+</g>
+
+<g>
+<rect x="1055" y="855" width="870" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="897" font-family="sans-serif" font-size="26" fill="#9ece6a">Portal primitive for future surfaces</text>
+<text x="1079" y="941" font-family="sans-serif" font-size="23" fill="#c0caf5">PLUGIN_AUTHORING documents a domain-neutral contract</text>
+<text x="1079" y="977" font-family="sans-serif" font-size="23" fill="#c0caf5">for slides, waveforms, schematics, layouts, and more.</text>
+</g>
+
+<path d="M490 477 V547 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<path d="M490 762 V832 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<path d="M1490 477 V547 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<path d="M1490 762 V832 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<text x="55" y="1170" font-family="sans-serif" font-size="22" fill="#a9b1d6">Prompt delivery remains deliberate: Send all sequences one item at a time and waits for each agent turn.</text>
+</svg>
