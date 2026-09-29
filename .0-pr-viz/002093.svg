@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2093 - Fix edit-stack annotation delivery bridge</text>
+<text x="55" y="108" font-family="sans-serif" font-size="34" fill="#e6e9f5">Forwarded annotation stacks now surface bridge errors and automatically drain</text>
+<text x="55" y="148" font-family="sans-serif" font-size="34" fill="#e6e9f5">to the agent after Portal saves them.</text>
+<path d="M55 190 H1945 M1000 207 V1130" stroke="#565f89" fill="none"/>
+<text x="55" y="235" font-family="sans-serif" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1055" y="235" font-family="sans-serif" font-size="22" fill="#9ece6a">AFTER</text>
+
+<g>
+<rect x="55" y="285" width="870" height="180" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="327" font-family="sans-serif" font-size="26" fill="#f7768e">Wrong surface disappeared</text>
+<text x="79" y="371" font-family="sans-serif" font-size="23" fill="#c0caf5">SessionView origin-gated before parsing the</text>
+<text x="79" y="407" font-family="sans-serif" font-size="23" fill="#c0caf5">annotation payload, so rejected sends were silent.</text>
+</g>
+
+<g>
+<rect x="1055" y="285" width="870" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="327" font-family="sans-serif" font-size="26" fill="#9ece6a">Payload recognized first</text>
+<text x="1079" y="371" font-family="sans-serif" font-size="23" fill="#c0caf5">Portal parses edit-stack messages before the</text>
+<text x="1079" y="407" font-family="sans-serif" font-size="23" fill="#c0caf5">origin check and shows a clear surface error.</text>
+</g>
+
+<g>
+<rect x="55" y="570" width="870" height="180" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="612" font-family="sans-serif" font-size="26" fill="#f7768e">Saved stacks sat idle</text>
+<text x="79" y="656" font-family="sans-serif" font-size="23" fill="#c0caf5">A bridge save only populated the edit-stack panel.</text>
+<text x="79" y="692" font-family="sans-serif" font-size="23" fill="#c0caf5">The user still had to press Send all manually.</text>
+</g>
+
+<g>
+<rect x="1055" y="570" width="870" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="612" font-family="sans-serif" font-size="26" fill="#9ece6a">Accepted stacks auto-drain</text>
+<text x="1079" y="656" font-family="sans-serif" font-size="23" fill="#c0caf5">The bridge sets edit_stack_send_all before the</text>
+<text x="1079" y="692" font-family="sans-serif" font-size="23" fill="#c0caf5">reload, reusing the existing sequential drain.</text>
+</g>
+
+<g>
+<rect x="55" y="855" width="870" height="180" rx="12" fill="#1e202e" stroke="#e0af68"/>
+<text x="79" y="897" font-family="sans-serif" font-size="26" fill="#e0af68">No server-side rejection trail</text>
+<text x="79" y="941" font-family="sans-serif" font-size="23" fill="#c0caf5">A missing postMessage recipient looked like a</text>
+<text x="79" y="977" font-family="sans-serif" font-size="23" fill="#c0caf5">successful send but produced no POST or row.</text>
+</g>
+
+<g>
+<rect x="1055" y="855" width="870" height="180" rx="12" fill="#7aa2f7" fill-opacity=".10" stroke="#7aa2f7"/>
+<text x="1079" y="897" font-family="sans-serif" font-size="26" fill="#7aa2f7">Debuggability restored</text>
+<text x="1079" y="941" font-family="sans-serif" font-size="23" fill="#c0caf5">Wrong-origin annotations are visible in Portal;</text>
+<text x="1079" y="977" font-family="sans-serif" font-size="23" fill="#c0caf5">valid stacks enter the normal input pipeline.</text>
+</g>
+
+<path d="M490 477 V547 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<path d="M490 762 V832 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<path d="M1490 477 V547 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<path d="M1490 762 V832 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<text x="55" y="1170" font-family="sans-serif" font-size="22" fill="#a9b1d6">Scope: Portal bridge behavior; KiCad plugin runtime guard was patched separately on bp-test.</text>
+</svg>
