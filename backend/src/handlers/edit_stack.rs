@@ -6,6 +6,7 @@ use crate::schema::{session_edit_stack_items, users};
 use crate::AppState;
 use axum::{
     extract::{Path, State},
+    http::HeaderMap,
     Json,
 };
 use diesel::prelude::*;
@@ -16,6 +17,7 @@ use shared::api::{
 };
 use std::collections::HashMap;
 use std::sync::Arc;
+use tower_cookies::Cookies;
 use uuid::Uuid;
 
 const MAX_EDIT_STACK_ITEMS_PER_REQUEST: usize = 50;
@@ -29,11 +31,38 @@ pub async fn list_edit_stack(
     CurrentUserId(current_user_id): CurrentUserId,
     Path(session_id): Path<Uuid>,
 ) -> Result<Json<EditStackResponse>, AppError> {
+    Ok(Json(list_edit_stack_for_user(
+        &app_state,
+        current_user_id,
+        session_id,
+    )?))
+}
+
+pub async fn list_agent_edit_stack(
+    State(app_state): State<Arc<AppState>>,
+    Path(session_id): Path<Uuid>,
+    headers: HeaderMap,
+    cookies: Cookies,
+) -> Result<Json<EditStackResponse>, AppError> {
+    let current_user_id =
+        crate::handlers::agent_comms::resolve_user(&app_state, &headers, &cookies)?;
+    Ok(Json(list_edit_stack_for_user(
+        &app_state,
+        current_user_id,
+        session_id,
+    )?))
+}
+
+fn list_edit_stack_for_user(
+    app_state: &AppState,
+    current_user_id: Uuid,
+    session_id: Uuid,
+) -> Result<EditStackResponse, AppError> {
     let mut conn = app_state.conn()?;
     let _session = verify_session_reader(&mut conn, session_id, current_user_id)?;
-    Ok(Json(EditStackResponse {
+    Ok(EditStackResponse {
         items: load_edit_stack_items(&mut conn, session_id)?,
-    }))
+    })
 }
 
 pub async fn create_edit_stack_items(
@@ -42,6 +71,37 @@ pub async fn create_edit_stack_items(
     Path(session_id): Path<Uuid>,
     Json(req): Json<CreateEditStackRequest>,
 ) -> Result<Json<EditStackResponse>, AppError> {
+    Ok(Json(create_edit_stack_items_for_user(
+        &app_state,
+        current_user_id,
+        session_id,
+        req,
+    )?))
+}
+
+pub async fn create_agent_edit_stack_items(
+    State(app_state): State<Arc<AppState>>,
+    Path(session_id): Path<Uuid>,
+    headers: HeaderMap,
+    cookies: Cookies,
+    Json(req): Json<CreateEditStackRequest>,
+) -> Result<Json<EditStackResponse>, AppError> {
+    let current_user_id =
+        crate::handlers::agent_comms::resolve_user(&app_state, &headers, &cookies)?;
+    Ok(Json(create_edit_stack_items_for_user(
+        &app_state,
+        current_user_id,
+        session_id,
+        req,
+    )?))
+}
+
+fn create_edit_stack_items_for_user(
+    app_state: &AppState,
+    current_user_id: Uuid,
+    session_id: Uuid,
+    req: CreateEditStackRequest,
+) -> Result<EditStackResponse, AppError> {
     let mut conn = app_state.conn()?;
     let _session = verify_session_mutator(&mut conn, session_id, current_user_id)?;
     if req
@@ -76,9 +136,9 @@ pub async fn create_edit_stack_items(
         .returning(SessionEditStackItem::as_returning())
         .get_results::<SessionEditStackItem>(&mut conn)?;
 
-    Ok(Json(EditStackResponse {
+    Ok(EditStackResponse {
         items: load_edit_stack_items(&mut conn, session_id)?,
-    }))
+    })
 }
 
 pub async fn update_edit_stack_item(

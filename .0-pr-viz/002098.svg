@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+  <rect width="2000" height="1200" fill="#1a1b26"/>
+  <desc id="desc">Before, annotation work existed as a browser-only edit stack with no top-rail affordance and no agent CLI path. After, the same durable stack is visible as a work queue and scriptable through agent-portal work-queue commands.</desc>
+  <text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2098 - Session work queue controls</text>
+  <text x="55" y="108" font-family="sans-serif" font-size="34" fill="#e6e9f5">Annotation work is now a visible session queue with a CLI path for agents.</text>
+  <path d="M55 190 H1945 M1000 207 V1130" stroke="#565f89" fill="none"/>
+  <text x="55" y="235" font-family="sans-serif" font-size="22" fill="#f7768e">BEFORE</text>
+  <text x="1055" y="235" font-family="sans-serif" font-size="22" fill="#9ece6a">AFTER</text>
+
+  <g>
+    <rect x="55" y="290" width="870" height="230" rx="12" fill="#1e202e" stroke="#f7768e"/>
+    <text x="90" y="340" font-family="sans-serif" font-size="26" fill="#f7768e">Hidden footer stack</text>
+    <rect x="130" y="390" width="520" height="58" rx="8" fill="#16161e" stroke="#565f89"/>
+    <text x="165" y="428" font-family="monospace" font-size="24" fill="#a9b1d6">Edit stack appears only when pending</text>
+    <text x="90" y="486" font-family="sans-serif" font-size="23" fill="#c0caf5">Users had to notice a transient panel near the input bar.</text>
+  </g>
+
+  <g>
+    <rect x="1055" y="290" width="870" height="230" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+    <text x="1090" y="340" font-family="sans-serif" font-size="26" fill="#9ece6a">Top rail queue button</text>
+    <rect x="1140" y="390" width="160" height="58" rx="8" fill="#1a1b26" stroke="#9ece6a"/>
+    <text x="1175" y="428" font-family="monospace" font-size="24" fill="#9ece6a">Queue 3</text>
+    <rect x="1325" y="390" width="400" height="58" rx="8" fill="#16161e" stroke="#565f89"/>
+    <text x="1360" y="428" font-family="monospace" font-size="24" fill="#c0caf5">Work queue panel opens on demand</text>
+    <text x="1090" y="486" font-family="sans-serif" font-size="23" fill="#c0caf5">The session header shows count and opens an empty or pending queue.</text>
+  </g>
+
+  <g>
+    <rect x="55" y="600" width="870" height="210" rx="12" fill="#1e202e" stroke="#e0af68"/>
+    <text x="90" y="650" font-family="sans-serif" font-size="26" fill="#e0af68">Browser-only producer</text>
+    <text x="90" y="704" font-family="sans-serif" font-size="23" fill="#c0caf5">Forwarded surfaces posted annotations through the web route.</text>
+    <text x="90" y="742" font-family="sans-serif" font-size="23" fill="#c0caf5">Peer agents could message immediately, but could not add queued work.</text>
+  </g>
+
+  <g>
+    <rect x="1055" y="600" width="870" height="210" rx="12" fill="#1e202e" stroke="#7aa2f7"/>
+    <text x="1090" y="650" font-family="sans-serif" font-size="26" fill="#7aa2f7">Agent API plus CLI</text>
+    <text x="1090" y="704" font-family="monospace" font-size="23" fill="#c0caf5">agent-portal work-queue list [session]</text>
+    <text x="1090" y="742" font-family="monospace" font-size="23" fill="#c0caf5">agent-portal work-queue add &lt;id&gt; "task"</text>
+    <text x="1090" y="780" font-family="sans-serif" font-size="23" fill="#c0caf5">Bearer-token endpoints reuse the same validation and storage.</text>
+  </g>
+
+  <g>
+    <rect x="55" y="885" width="870" height="150" rx="12" fill="#1e202e" stroke="#565f89"/>
+    <text x="90" y="935" font-family="sans-serif" font-size="26" fill="#a9b1d6">Docs named edit-stack internals</text>
+    <text x="90" y="988" font-family="sans-serif" font-size="23" fill="#c0caf5">Plugin authors saw REST paths, but agents got no queue hint.</text>
+  </g>
+
+  <g>
+    <rect x="1055" y="885" width="870" height="150" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+    <text x="1090" y="935" font-family="sans-serif" font-size="26" fill="#9ece6a">Reminder and plugin docs teach the queue</text>
+    <text x="1090" y="988" font-family="sans-serif" font-size="23" fill="#c0caf5">Agents learn the CLI; plugins can link to the same stack endpoints.</text>
+  </g>
+
+  <text x="55" y="1170" font-family="sans-serif" font-size="22" fill="#a9b1d6">Scope: UI affordance, CLI client, and agent API only; existing browser annotation payload shape stays unchanged.</text>
+</svg>

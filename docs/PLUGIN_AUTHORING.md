@@ -321,6 +321,12 @@ Portal exposes the same state through session-scoped REST endpoints:
 | `PATCH` | `/api/sessions/{id}/edit-stack/{item_id}` | Mark an item `pending`, `sent`, or `dismissed` |
 | `DELETE` | `/api/sessions/{id}/edit-stack/{item_id}` | Dismiss an item from the visible stack |
 
+Agent-side tooling can use the bearer-token equivalents:
+`GET /api/agent/sessions/{id}/edit-stack` and
+`POST /api/agent/sessions/{id}/edit-stack`. The bundled CLI exposes those as
+`agent-portal work-queue list [session-id]` and
+`agent-portal work-queue add <session-id> "task"`.
+
 The backend enforces normal session reader/mutator permissions. Items keep the
 creator id and display name; Portal only shows contributor names in the compact
 chat panel when there is more than one contributor in the pending stack.
