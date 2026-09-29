@@ -3,7 +3,7 @@
 //! Fetches `GET /api/sessions/{id}/forwards` on mount and whenever `refresh`
 //! bumps (the parent bumps it on a `ForwardsChanged` WS frame). Each chip emits
 //! its [`ForwardInfo`] to the session view, which owns the split-surface iframe;
-//! the session owner also gets a revoke `×`.
+//! the session owner also gets a stop-forward control.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -106,6 +106,7 @@ pub fn forward_chips(props: &ForwardChipsProps) -> Html {
             { for forwards.iter().map(|f| {
                 let on_revoke = revoke.clone();
                 let on_open = props.on_open.clone();
+                let open_url = api_url(&format!("/api/sessions/{}/forwards/open", props.session_id));
                 let forward = f.clone();
                 // Health is conveyed by color alone: pulsing green = last
                 // probe saw a listener, flat red = connection refused,
@@ -127,21 +128,35 @@ pub fn forward_chips(props: &ForwardChipsProps) -> Html {
                         key={f.port}
                         title={health_title}
                     >
-                        // Click opens the session-owned split surface; "Visit
-                        // site" inside the surface goes to the full page.
+                        // The port opens the session-owned split surface. The
+                        // separate arrow opens the proxied app in a browser tab.
                         <button
                             type="button"
                             class="forward-chip-open"
+                            title="Open forward in Portal"
+                            aria-label={format!("Open port {} in Portal", f.port)}
                             onclick={Callback::from(move |_| on_open.emit(forward.clone()))}
                         >
-                            { format!(":{} ↗", f.port) }
+                            { format!(":{}", f.port) }
                         </button>
+                        <a
+                            class="forward-chip-external"
+                            href={open_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Open forward in new tab"
+                            aria-label={format!("Open port {} in a new tab", f.port)}
+                        >
+                            { "↗" }
+                        </a>
                         if props.is_owner {
                             <button
+                                type="button"
                                 class="forward-chip-revoke"
-                                title="Stop forwarding"
+                                title="Stop forwarding this port"
+                                aria-label={format!("Stop forwarding port {}", f.port)}
                                 onclick={Callback::from(move |_| on_revoke.emit(()))}
-                            >{ "×" }</button>
+                            >{ "■" }</button>
                         }
                     </span>
                 }

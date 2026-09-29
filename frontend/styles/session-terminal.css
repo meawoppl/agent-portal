@@ -197,41 +197,74 @@
 .session-view-header .forward-chip {
     display: inline-flex;
     align-items: center;
-    gap: 0.25rem;
+    gap: 0.18rem;
     font-size: 0.78rem;
     font-family: monospace;
-    padding: 0.15rem 0.4rem;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: rgba(125, 207, 255, 0.1);
+    padding: 0;
+    border: 0;
+    background: transparent;
     white-space: nowrap;
 }
 
-.session-view-header .forward-chip-open {
+.session-view-header .forward-chip-open,
+.session-view-header .forward-chip-external,
+.session-view-header .forward-chip-revoke {
     appearance: none;
-    background: none;
-    border: 0;
-    padding: 0;
+    min-height: 1.6rem;
+    box-sizing: border-box;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: rgba(125, 207, 255, 0.1);
     font: inherit;
     color: var(--text-teal, #7dcfff);
     text-decoration: none;
     cursor: pointer;
 }
 
-.session-view-header .forward-chip-open:hover {
-    text-decoration: underline;
+.session-view-header .forward-chip-open {
+    padding: 0.18rem 0.48rem;
+}
+
+.session-view-header .forward-chip-external,
+.session-view-header .forward-chip-revoke {
+    min-width: 1.6rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    line-height: 1;
+}
+
+.session-view-header .forward-chip-external {
+    background: rgba(122, 162, 247, 0.12);
+    border-color: rgba(122, 162, 247, 0.48);
+    color: var(--text-blue, #7aa2f7);
+}
+
+.session-view-header .forward-chip-open:hover,
+.session-view-header .forward-chip-external:hover {
+    background: rgba(125, 207, 255, 0.18);
+    color: var(--text-primary);
+}
+
+.session-view-header .forward-chip-open:focus-visible,
+.session-view-header .forward-chip-external:focus-visible,
+.session-view-header .forward-chip-revoke:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
 }
 
 /* Live port health from the proxy's background probe, conveyed by color
    alone: a subtle breathing green while the port is live, flat red when the
    last probe was refused. */
 .session-view-header .forward-chip.is-up {
-    border-color: rgba(158, 206, 106, 0.6);
-    background: rgba(158, 206, 106, 0.12);
     animation: forward-chip-breathe 2.8s ease-in-out infinite;
 }
 
-.session-view-header .forward-chip.is-up .forward-chip-open {
+.session-view-header .forward-chip.is-up .forward-chip-open,
+.session-view-header .forward-chip.is-up .forward-chip-external {
+    border-color: rgba(158, 206, 106, 0.6);
+    background: rgba(158, 206, 106, 0.12);
     color: var(--success, #9ece6a);
 }
 
@@ -254,27 +287,24 @@
     }
 }
 
-.session-view-header .forward-chip.is-down {
+.session-view-header .forward-chip.is-down .forward-chip-open,
+.session-view-header .forward-chip.is-down .forward-chip-external {
     border-color: rgba(247, 118, 142, 0.6);
     background: rgba(247, 118, 142, 0.12);
-}
-
-.session-view-header .forward-chip.is-down .forward-chip-open {
     color: var(--error, #f7768e);
 }
 
 .session-view-header .forward-chip-revoke {
-    background: none;
-    border: none;
+    background: rgba(192, 202, 245, 0.05);
+    border-color: rgba(192, 202, 245, 0.2);
     color: var(--text-secondary);
-    cursor: pointer;
-    padding: 0;
-    line-height: 1;
-    font-size: 0.95rem;
+    font-size: 0.68rem;
 }
 
 .session-view-header .forward-chip-revoke:hover {
     color: var(--error);
+    background: rgba(247, 118, 142, 0.1);
+    border-color: rgba(247, 118, 142, 0.45);
 }
 
 .session-forward-surface {
