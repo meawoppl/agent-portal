@@ -217,11 +217,10 @@ pub fn storage_set(key: &str, value: &str) {
 
 /// Keep a string only when it is present and non-blank.
 ///
-/// Trims leading/trailing whitespace so whitespace-only values are treated as
-/// absent instead of rendering blank lines or being sent as empty constraints.
-pub fn non_empty(opt: Option<&str>) -> Option<&str> {
-    opt.map(str::trim).filter(|s| !s.is_empty())
-}
+/// Re-export of the shared helper under the established frontend name so
+/// filter call sites keep calling `utils::non_empty` without a second copy
+/// of the trim-then-reject-blank shape to drift.
+pub use shared::strings::trimmed_non_blank as non_empty;
 
 /// True when `s` holds non-whitespace text.
 ///

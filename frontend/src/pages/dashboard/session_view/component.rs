@@ -156,7 +156,7 @@ fn edit_stack_prompt_content(item: &EditStackItem) -> String {
         content.push_str(&context);
         content.push_str("\n```\n\n");
     }
-    if item.body.trim().is_empty() {
+    if !utils::is_non_blank(&item.body) {
         content.push_str("User note: (no text note provided)\n\n");
     } else {
         content.push_str("User note:\n");
@@ -2165,7 +2165,7 @@ impl SessionView {
                         let item_id = item.id;
                         let is_active = active_item == Some(item_id);
                         let image = item.image_data_url.clone();
-                        let body = if item.body.trim().is_empty() {
+                        let body = if !utils::is_non_blank(&item.body) {
                             "(no text note)".to_string()
                         } else {
                             truncate_chars(&item.body, EDIT_STACK_BODY_PREVIEW_CHARS)
