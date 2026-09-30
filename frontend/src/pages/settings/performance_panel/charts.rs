@@ -202,12 +202,23 @@ fn value_bounds(values: &[f64]) -> (f64, f64) {
     let max = values
         .iter()
         .fold(f64::NEG_INFINITY, |acc, value| acc.max(*value));
+    if min >= 0.0 {
+        return (0.0, nonnegative_axis_upper(max));
+    }
     if (max - min).abs() < f64::EPSILON {
         let pad = (max.abs() * 0.1).max(1.0);
         (min - pad, max + pad)
     } else {
         let pad = (max - min) * 0.08;
         (min - pad, max + pad)
+    }
+}
+
+fn nonnegative_axis_upper(max: f64) -> f64 {
+    if max.is_finite() && max > 0.0 {
+        max * 1.08
+    } else {
+        1.0
     }
 }
 
@@ -272,5 +283,31 @@ fn format_value(value: f64, unit: &str) -> String {
         format!("{value:.1}")
     } else {
         format!("{value:.2}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nonnegative_values_use_zero_baseline() {
+        let (min, max) = value_bounds(&[4.0, 7.0, 10.0]);
+
+        assert_eq!(min, 0.0);
+        assert!(max > 10.0);
+    }
+
+    #[test]
+    fn zero_values_keep_visible_headroom() {
+        assert_eq!(value_bounds(&[0.0, 0.0]), (0.0, 1.0));
+    }
+
+    #[test]
+    fn negative_values_keep_padded_bounds() {
+        let (min, max) = value_bounds(&[-2.0, 6.0]);
+
+        assert!(min < -2.0);
+        assert!(max > 6.0);
     }
 }
