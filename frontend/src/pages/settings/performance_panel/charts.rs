@@ -24,11 +24,11 @@ struct Point {
 #[derive(Clone)]
 struct Series {
     label: String,
-    color: &'static str,
+    color: String,
     points: Vec<Point>,
 }
 
-const SERIES_COLORS: &[&str] = &[
+const BASE_SERIES_COLORS: &[&str] = &[
     shared::palette::ACCENT_BLUE,
     shared::palette::ACCENT_PURPLE,
     shared::palette::ACCENT_GREEN,
@@ -37,6 +37,8 @@ const SERIES_COLORS: &[&str] = &[
     shared::palette::ACCENT_TEAL,
     "#ff9e64",
 ];
+
+const GOLDEN_ANGLE_FRACTION: f64 = 0.618_033_988_749_895;
 
 /// Render a static dashboard. The controls are local projections over the
 /// already-fetched metrics response, so no chart endpoint or executable figure
@@ -168,11 +170,67 @@ where
                 .any(|point| point.value.is_some() || point.p95.is_some())
                 .then(|| Series {
                     label: pair_label(&group),
-                    color: SERIES_COLORS[index % SERIES_COLORS.len()],
+                    color: series_color(index),
                     points,
                 })
         })
         .collect()
+}
+
+fn series_color(index: usize) -> String {
+    BASE_SERIES_COLORS.get(index).map_or_else(
+        || generated_series_color(index - BASE_SERIES_COLORS.len()),
+        |hex| (*hex).to_string(),
+    )
+}
+
+// Keep the hand-picked Portal colors for the common case, then generate
+// additional hues instead of wrapping and making two model groups look identical.
+fn generated_series_color(index: usize) -> String {
+    let hue = (0.07 + (index as f64 * GOLDEN_ANGLE_FRACTION)).fract();
+    let lightness = match index % 3 {
+        0 => 0.66,
+        1 => 0.58,
+        _ => 0.72,
+    };
+    hsl_to_hex(hue, 0.72, lightness)
+}
+
+fn hsl_to_hex(h: f64, s: f64, l: f64) -> String {
+    let q = if l < 0.5 {
+        l * (1.0 + s)
+    } else {
+        l + s - l * s
+    };
+    let p = 2.0 * l - q;
+    format!(
+        "#{:02x}{:02x}{:02x}",
+        color_channel_to_u8(hue_to_rgb(p, q, h + 1.0 / 3.0)),
+        color_channel_to_u8(hue_to_rgb(p, q, h)),
+        color_channel_to_u8(hue_to_rgb(p, q, h - 1.0 / 3.0)),
+    )
+}
+
+fn hue_to_rgb(p: f64, q: f64, mut t: f64) -> f64 {
+    if t < 0.0 {
+        t += 1.0;
+    }
+    if t > 1.0 {
+        t -= 1.0;
+    }
+    if t < 1.0 / 6.0 {
+        p + (q - p) * 6.0 * t
+    } else if t < 1.0 / 2.0 {
+        q
+    } else if t < 2.0 / 3.0 {
+        p + (q - p) * (2.0 / 3.0 - t) * 6.0
+    } else {
+        p
+    }
+}
+
+fn color_channel_to_u8(value: f64) -> u8 {
+    (value.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
 fn weighted_average<F>(buckets: &[&MetricBucket], project: &F) -> Option<f64>
@@ -261,7 +319,7 @@ fn render_chart(
                 { for series.iter().map(|item| {
                     let primary = path_data(&item.points, |point| point.value, min, max, axis_scale);
                     html! {
-                        <path d={primary} fill="none" stroke={item.color} stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+                        <path d={primary} fill="none" stroke={item.color.clone()} stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
                     }
                 }) }
                 if p95_legend {
@@ -271,7 +329,7 @@ fn render_chart(
                         .map(|item| {
                             let p95 = path_data(&item.points, |point| point.p95, min, max, axis_scale);
                             html! {
-                                <path d={p95} fill="none" stroke={item.color} stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="6 5" />
+                                <path d={p95} fill="none" stroke={item.color.clone()} stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="6 5" />
                             }
                     }) }
                 }
@@ -453,5 +511,20 @@ mod tests {
         assert_eq!(series.len(), 1);
         assert!(series[0].label.contains("claude-sonnet-test"));
         assert_eq!(series[0].points[0].value, Some(30.0));
+    }
+
+    #[test]
+    fn series_color_keeps_portal_colors_first() {
+        for (index, hex) in BASE_SERIES_COLORS.iter().enumerate() {
+            assert_eq!(series_color(index), *hex);
+        }
+    }
+
+    #[test]
+    fn series_color_does_not_wrap_for_many_groups() {
+        let colors: Vec<String> = (0..48).map(series_color).collect();
+        let unique: BTreeSet<_> = colors.iter().cloned().collect();
+
+        assert_eq!(unique.len(), colors.len(), "{colors:?}");
     }
 }
