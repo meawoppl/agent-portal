@@ -463,7 +463,7 @@ pub(crate) fn edit_stack_prompt_content(item: &EditStackItem) -> String {
         content.push_str(&context);
         content.push_str("\n```\n\n");
     }
-    if item.body.trim().is_empty() {
+    if !shared::strings::is_non_blank(&item.body) {
         content.push_str("User note: (no text note provided)\n\n");
     } else {
         content.push_str("User note:\n");
@@ -481,7 +481,7 @@ pub(crate) fn edit_stack_prompt_content(item: &EditStackItem) -> String {
 }
 
 fn validate_image_data_url(value: Option<&str>) -> Result<Option<String>, AppError> {
-    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+    let Some(value) = shared::strings::trimmed_non_blank(value) else {
         return Ok(None);
     };
     if !value.starts_with("data:image/") {

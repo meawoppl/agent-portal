@@ -73,10 +73,7 @@ fn agent_facing(body: &str) -> String {
 
 fn body_with_plugin_skills(plugin_skill_reminder: Option<&str>) -> String {
     let mut body = load_reminder_body();
-    if let Some(extra) = plugin_skill_reminder
-        .map(str::trim)
-        .filter(|extra| shared::strings::is_non_empty(extra))
-    {
+    if let Some(extra) = shared::strings::trimmed_non_blank(plugin_skill_reminder) {
         body.push_str("\n\n");
         body.push_str(extra);
     }
