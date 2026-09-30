@@ -176,11 +176,10 @@ fn render_portal_content(
 }
 
 fn agent_label(agent_type: &str) -> &'static str {
-    match agent_type.to_ascii_lowercase().as_str() {
-        "claude" => "Claude",
-        "codex" => "Codex",
-        _ => "agent",
-    }
+    agent_type
+        .parse::<shared::AgentType>()
+        .map(|agent| agent.display_name())
+        .unwrap_or("agent")
 }
 
 pub(crate) fn render_agent_message_from_source(
