@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+  <rect width="2000" height="1200" fill="#1a1b26"/>
+  <desc id="desc">Before, pending edit-stack items forced the full work queue panel to stay open. After, pending work only marks the Queue button active; the full panel opens on demand and can collapse while items remain.</desc>
+  <text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2102 - Make session work queue collapsible</text>
+  <text x="55" y="108" font-family="sans-serif" font-size="34" fill="#e6e9f5">Pending annotation work no longer forces the full queue panel open.</text>
+  <text x="55" y="148" font-family="sans-serif" font-size="34" fill="#e6e9f5">The top rail keeps the count; the user controls expansion.</text>
+  <path d="M55 190 H1945 M1000 207 V1130" stroke="#565f89" fill="none"/>
+  <text x="55" y="235" font-family="sans-serif" font-size="22" fill="#f7768e">BEFORE</text>
+  <text x="1055" y="235" font-family="sans-serif" font-size="22" fill="#9ece6a">AFTER</text>
+
+  <g>
+    <rect x="55" y="285" width="870" height="220" rx="12" fill="#1e202e" stroke="#f7768e"/>
+    <text x="90" y="334" font-family="sans-serif" font-size="26" fill="#f7768e">work_queue_expanded</text>
+    <text x="90" y="384" font-family="monospace" font-size="23" fill="#c0caf5">panel_open || pending_work_count &gt; 0 || error</text>
+    <text x="90" y="432" font-family="sans-serif" font-size="23" fill="#c0caf5">Any pending item made aria-expanded true and</text>
+    <text x="90" y="468" font-family="sans-serif" font-size="23" fill="#c0caf5">kept the full queue list visible above input.</text>
+  </g>
+
+  <g>
+    <rect x="1055" y="285" width="870" height="220" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+    <text x="1090" y="334" font-family="sans-serif" font-size="26" fill="#9ece6a">work_queue_active</text>
+    <text x="1090" y="384" font-family="monospace" font-size="23" fill="#c0caf5">panel_open || pending_or_error_attention</text>
+    <text x="1090" y="432" font-family="sans-serif" font-size="23" fill="#c0caf5">Pending work still colors Queue N in the top rail,</text>
+    <text x="1090" y="468" font-family="sans-serif" font-size="23" fill="#c0caf5">but aria-expanded now follows panel_open only.</text>
+  </g>
+
+  <g>
+    <rect x="55" y="585" width="870" height="210" rx="12" fill="#1e202e" stroke="#f7768e"/>
+    <text x="90" y="632" font-family="sans-serif" font-size="26" fill="#f7768e">render_edit_stack_panel</text>
+    <text x="90" y="682" font-family="sans-serif" font-size="23" fill="#c0caf5">The renderer returned a full section whenever</text>
+    <text x="90" y="718" font-family="sans-serif" font-size="23" fill="#c0caf5">pending was non-empty, even after Hide.</text>
+    <text x="90" y="754" font-family="sans-serif" font-size="23" fill="#c0caf5">The panel could not stay collapsed with work queued.</text>
+  </g>
+
+  <g>
+    <rect x="1055" y="585" width="870" height="210" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+    <text x="1090" y="632" font-family="sans-serif" font-size="26" fill="#9ece6a">panel renders only when open</text>
+    <text x="1090" y="682" font-family="sans-serif" font-size="23" fill="#c0caf5">If panel_open is false and there is no error,</text>
+    <text x="1090" y="718" font-family="sans-serif" font-size="23" fill="#c0caf5">pending items stay hidden behind the top-rail button.</text>
+    <text x="1090" y="754" font-family="sans-serif" font-size="23" fill="#c0caf5">Errors still surface instead of disappearing silently.</text>
+  </g>
+
+  <g>
+    <rect x="55" y="875" width="870" height="170" rx="12" fill="#1e202e" stroke="#e0af68"/>
+    <text x="90" y="922" font-family="sans-serif" font-size="26" fill="#e0af68">Close control only on empty queues</text>
+    <text x="90" y="972" font-family="sans-serif" font-size="23" fill="#c0caf5">The x button appeared only after pending work drained,</text>
+    <text x="90" y="1008" font-family="sans-serif" font-size="23" fill="#c0caf5">so a long queue had no direct collapse affordance.</text>
+  </g>
+
+  <g>
+    <rect x="1055" y="875" width="870" height="170" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+    <text x="1090" y="922" font-family="sans-serif" font-size="26" fill="#9ece6a">Always-available Collapse</text>
+    <text x="1090" y="972" font-family="sans-serif" font-size="23" fill="#c0caf5">The expanded panel now includes a Collapse action</text>
+    <text x="1090" y="1008" font-family="sans-serif" font-size="23" fill="#c0caf5">whether the queue is empty, pending, or busy.</text>
+  </g>
+
+  <text x="55" y="1170" font-family="sans-serif" font-size="22" fill="#a9b1d6">Scope: frontend visibility and controls only; queue storage, dispatch, and annotation payloads are unchanged.</text>
+</svg>
