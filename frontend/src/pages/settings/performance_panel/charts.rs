@@ -1,11 +1,11 @@
 //! Static SVG chart composition for the Performance settings panel.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use shared::api::MetricBucket;
 use yew::prelude::*;
 
-use super::model::{bucket_group_key, pair_label, AxisScale, GroupBy};
+use super::model::{bucket_group_key, pair_label, AxisScale, GroupBy, GroupKey};
 
 const WIDTH: f64 = 960.0;
 const HEIGHT: f64 = 260.0;
@@ -21,6 +21,23 @@ struct Point {
     p95: Option<f64>,
 }
 
+#[derive(Clone)]
+struct Series {
+    label: String,
+    color: &'static str,
+    points: Vec<Point>,
+}
+
+const SERIES_COLORS: &[&str] = &[
+    shared::palette::ACCENT_BLUE,
+    shared::palette::ACCENT_PURPLE,
+    shared::palette::ACCENT_GREEN,
+    shared::palette::ACCENT_ORANGE,
+    shared::palette::ACCENT_RED,
+    shared::palette::ACCENT_TEAL,
+    "#ff9e64",
+];
+
 /// Render a static dashboard. The controls are local projections over the
 /// already-fetched metrics response, so no chart endpoint or executable figure
 /// runtime is needed.
@@ -31,18 +48,21 @@ pub(super) fn render_charts(
     show_p95: bool,
 ) -> Html {
     let scoped = scoped_buckets(buckets, group_by);
-    let throughput = metric_points(
+    let throughput = metric_series(
         &scoped,
+        group_by,
         |bucket| bucket.throughput_p50_tps,
         |bucket| bucket.throughput_p95_tps,
     );
-    let ttft = metric_points(
+    let ttft = metric_series(
         &scoped,
+        group_by,
         |bucket| bucket.ttft_p50_ms.map(|v| v as f64 / 1000.0),
         |bucket| bucket.ttft_p95_ms.map(|v| v as f64 / 1000.0),
     );
-    let cache = metric_points(
+    let cache = metric_series(
         &scoped,
+        group_by,
         |bucket| {
             let total = bucket.cache_read_tokens_sum
                 + bucket.cache_creation_tokens_sum
@@ -51,8 +71,9 @@ pub(super) fn render_charts(
         },
         |_| None,
     );
-    let cost = metric_points(
+    let cost = metric_series(
         &scoped,
+        group_by,
         |bucket| {
             bucket
                 .total_cost_usd_sum
@@ -66,7 +87,7 @@ pub(super) fn render_charts(
     );
 
     let subtitle = match group_by {
-        GroupBy::All => "All groups".to_string(),
+        GroupBy::All => "Per model".to_string(),
         GroupBy::Pair(pair) => pair_label(pair),
     };
 
@@ -90,24 +111,66 @@ fn scoped_buckets<'a>(buckets: &'a [MetricBucket], group_by: &GroupBy) -> Vec<&'
         .collect()
 }
 
-fn metric_points<F, G>(buckets: &[&MetricBucket], value: F, p95: G) -> Vec<Point>
+fn metric_series<F, G>(
+    buckets: &[&MetricBucket],
+    group_by: &GroupBy,
+    value: F,
+    p95: G,
+) -> Vec<Series>
 where
     F: Fn(&MetricBucket) -> Option<f64>,
     G: Fn(&MetricBucket) -> Option<f64>,
 {
-    let mut grouped: BTreeMap<_, Vec<&MetricBucket>> = BTreeMap::new();
+    let axis = buckets
+        .iter()
+        .map(|bucket| bucket.bucket_start)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let groups = match group_by {
+        GroupBy::All => buckets
+            .iter()
+            .map(|bucket| bucket_group_key(bucket))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>(),
+        GroupBy::Pair(pair) => vec![pair.clone()],
+    };
+
+    let mut grouped: BTreeMap<(GroupKey, _), Vec<&MetricBucket>> = BTreeMap::new();
     for bucket in buckets {
         grouped
-            .entry(bucket.bucket_start)
+            .entry((bucket_group_key(bucket), bucket.bucket_start))
             .or_default()
             .push(*bucket);
     }
-    grouped
+
+    groups
         .into_iter()
-        .map(|(start, buckets)| Point {
-            label: start.format("%m/%d").to_string(),
-            value: weighted_average(&buckets, &value),
-            p95: weighted_average(&buckets, &p95),
+        .enumerate()
+        .filter_map(|(index, group)| {
+            let points = axis
+                .iter()
+                .map(|start| {
+                    let buckets = grouped
+                        .get(&(group.clone(), *start))
+                        .map(Vec::as_slice)
+                        .unwrap_or(&[]);
+                    Point {
+                        label: start.format("%m/%d").to_string(),
+                        value: weighted_average(buckets, &value),
+                        p95: weighted_average(buckets, &p95),
+                    }
+                })
+                .collect::<Vec<_>>();
+            points
+                .iter()
+                .any(|point| point.value.is_some() || point.p95.is_some())
+                .then(|| Series {
+                    label: pair_label(&group),
+                    color: SERIES_COLORS[index % SERIES_COLORS.len()],
+                    points,
+                })
         })
         .collect()
 }
@@ -133,12 +196,13 @@ fn render_chart(
     title: &'static str,
     unit: &'static str,
     subtitle: &str,
-    points: &[Point],
+    series: &[Series],
     axis_scale: AxisScale,
     show_p95: bool,
 ) -> Html {
-    let values = points
+    let values = series
         .iter()
+        .flat_map(|item| &item.points)
         .flat_map(|point| [point.value, show_p95.then_some(point.p95).flatten()])
         .flatten()
         .filter(|value| value.is_finite())
@@ -156,11 +220,17 @@ fn render_chart(
     }
 
     let (min, max) = value_bounds(&values);
-    let primary = path_data(points, |point| point.value, min, max, axis_scale);
-    let p95 = path_data(points, |point| point.p95, min, max, axis_scale);
+    let points = series
+        .first()
+        .map(|item| item.points.as_slice())
+        .unwrap_or(&[]);
     let x_first = points.first().map(|p| p.label.as_str()).unwrap_or_default();
     let x_last = points.last().map(|p| p.label.as_str()).unwrap_or_default();
-    let p95_legend = show_p95 && points.iter().any(|point| point.p95.is_some());
+    let p95_legend = show_p95
+        && series
+            .iter()
+            .flat_map(|item| &item.points)
+            .any(|point| point.p95.is_some());
 
     html! {
         <div class="performance-chart">
@@ -169,14 +239,16 @@ fn render_chart(
                 <span class="chart-scale-badge">{ format!("{} · {}", subtitle, axis_scale.label()) }</span>
             </div>
             <div class="chart-legend">
-                <span class="chart-legend-item">
-                    <span class="chart-legend-swatch" style={format!("background: {}", shared::palette::ACCENT_BLUE)} />
-                    { "p50 / value" }
-                </span>
+                { for series.iter().map(|item| html! {
+                    <span class="chart-legend-item">
+                        <span class="chart-legend-swatch" style={format!("background: {}", item.color)} />
+                        { item.label.as_str() }
+                    </span>
+                }) }
                 if p95_legend {
                     <span class="chart-legend-item">
-                        <span class="chart-legend-swatch dashed" style={format!("background: {}", shared::palette::ACCENT_ORANGE)} />
-                        { "p95" }
+                        <span class="chart-legend-swatch dashed" />
+                        { "p95 dashed" }
                     </span>
                 }
             </div>
@@ -186,9 +258,21 @@ fn render_chart(
                 <text class="chart-x-label" x={LEFT.to_string()} y={(HEIGHT - 10.0).to_string()}>{ x_first }</text>
                 <text class="chart-x-label" text-anchor="end" x={(WIDTH - RIGHT).to_string()} y={(HEIGHT - 10.0).to_string()}>{ x_last }</text>
                 <text class="chart-y-axis-title" transform={format!("translate(16 {}) rotate(-90)", HEIGHT / 2.0)}>{ unit }</text>
-                <path d={primary} fill="none" stroke={shared::palette::ACCENT_BLUE} stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+                { for series.iter().map(|item| {
+                    let primary = path_data(&item.points, |point| point.value, min, max, axis_scale);
+                    html! {
+                        <path d={primary} fill="none" stroke={item.color} stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+                    }
+                }) }
                 if p95_legend {
-                    <path d={p95} fill="none" stroke={shared::palette::ACCENT_ORANGE} stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="6 5" />
+                    { for series.iter().filter_map(|item| {
+                        item.points.iter().any(|point| point.p95.is_some()).then(|| {
+                            let p95 = path_data(&item.points, |point| point.p95, min, max, axis_scale);
+                            html! {
+                                <path d={p95} fill="none" stroke={item.color} stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="6 5" />
+                            }
+                        })
+                    }) }
                 }
             </svg>
         </div>
@@ -289,6 +373,22 @@ fn format_value(value: f64, unit: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_fixtures::MetricBucketBuilder;
+    use chrono::TimeZone;
+    use shared::AgentType;
+
+    fn bucket(model: &str, throughput: f64, turns: i64) -> MetricBucket {
+        let mut bucket =
+            MetricBucketBuilder::new(chrono::Utc.with_ymd_and_hms(2026, 9, 1, 0, 0, 0).unwrap())
+                .agent_type(AgentType::Claude)
+                .model(Some(model))
+                .service_tier(Some("standard"))
+                .throughput_p50(Some(throughput))
+                .build();
+        bucket.turn_count = turns;
+        bucket.throughput_p95_tps = Some(throughput * 2.0);
+        bucket
+    }
 
     #[test]
     fn nonnegative_values_use_zero_baseline() {
@@ -309,5 +409,48 @@ mod tests {
 
         assert!(min < -2.0);
         assert!(max > 6.0);
+    }
+
+    #[test]
+    fn all_groups_render_one_series_per_model() {
+        let opus = bucket("claude-opus-test", 10.0, 1);
+        let sonnet = bucket("claude-sonnet-test", 30.0, 5);
+        let buckets = vec![&opus, &sonnet];
+
+        let series = metric_series(
+            &buckets,
+            &GroupBy::All,
+            |bucket| bucket.throughput_p50_tps,
+            |bucket| bucket.throughput_p95_tps,
+        );
+
+        assert_eq!(series.len(), 2);
+        assert!(series
+            .iter()
+            .any(|series| series.label.contains("claude-opus-test")));
+        assert!(series
+            .iter()
+            .any(|series| series.label.contains("claude-sonnet-test")));
+        assert_eq!(series[0].points[0].value, Some(10.0));
+        assert_eq!(series[1].points[0].value, Some(30.0));
+    }
+
+    #[test]
+    fn selected_group_renders_only_that_model() {
+        let opus = bucket("claude-opus-test", 10.0, 1);
+        let sonnet = bucket("claude-sonnet-test", 30.0, 5);
+        let buckets = vec![&opus, &sonnet];
+        let selected = GroupBy::Pair(bucket_group_key(&sonnet));
+
+        let series = metric_series(
+            &buckets,
+            &selected,
+            |bucket| bucket.throughput_p50_tps,
+            |bucket| bucket.throughput_p95_tps,
+        );
+
+        assert_eq!(series.len(), 1);
+        assert!(series[0].label.contains("claude-sonnet-test"));
+        assert_eq!(series[0].points[0].value, Some(30.0));
     }
 }
