@@ -128,13 +128,14 @@ pub fn forward_chips(props: &ForwardChipsProps) -> Html {
                         key={f.port}
                         title={health_title}
                     >
-                        // The port opens the session-owned split surface. The
-                        // separate arrow opens the proxied app in a browser tab.
+                        // The port toggles the session-owned split surface.
+                        // The separate arrow opens the proxied app in a
+                        // browser tab.
                         <button
                             type="button"
                             class="forward-chip-open"
-                            title="Open forward in Portal"
-                            aria-label={format!("Open port {} in Portal", f.port)}
+                            title="Open or collapse forward in Portal"
+                            aria-label={format!("Open or collapse port {} in Portal", f.port)}
                             onclick={Callback::from(move |_| on_open.emit(forward.clone()))}
                         >
                             { format!(":{}", f.port) }

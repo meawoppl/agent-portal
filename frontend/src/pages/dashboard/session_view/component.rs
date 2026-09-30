@@ -753,6 +753,17 @@ impl Component for SessionView {
                 reasoning_effort,
             } => self.handle_secret_drop(ctx, upload_id, file_size, reasoning_effort),
             SessionViewMsg::OpenForwardSurface(forward) => {
+                if let Some(surface) = self.active_surface.as_mut() {
+                    let same_forward = surface
+                        .forward()
+                        .is_some_and(|current| current.port == forward.port);
+                    if same_forward {
+                        surface.update_forward(forward);
+                        surface.collapsed = !surface.collapsed;
+                        save_open_surface(surface);
+                        return true;
+                    }
+                }
                 let mode = if is_mobile_surface_viewport() {
                     SessionSurfaceMode::Fullscreen
                 } else {
