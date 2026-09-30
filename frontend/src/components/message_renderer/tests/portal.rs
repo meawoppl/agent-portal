@@ -95,7 +95,7 @@ fn connection_cycle_round_trips_as_its_own_variant() {
 /// near-identical one-liners. The run must collapse to a single summary.
 #[test]
 fn a_run_of_reconnects_collapses_to_one_line() {
-    use super::super::group_renderer::{connection_cycle_run, render_connection_cycle_run};
+    use super::super::group_renderer::{reconnect_notice_run, render_reconnect_notice_run};
 
     let cycles: Vec<_> = ["38s", "38s", "38s", "36s"]
         .iter()
@@ -110,10 +110,10 @@ fn a_run_of_reconnects_collapses_to_one_line() {
         })
         .collect();
 
-    let durations = connection_cycle_run(&cycles).expect("all members are connection cycles");
-    assert_eq!(durations.len(), 4);
+    let notices = reconnect_notice_run(&cycles).expect("all members are connection cycles");
+    assert_eq!(notices.len(), 4);
     // Renders at all, and as one node rather than four.
-    let _ = render_connection_cycle_run(&durations);
+    let _ = render_reconnect_notice_run(&notices);
 
     // A group carrying anything else must not collapse.
     let mut mixed = cycles.clone();
@@ -122,5 +122,55 @@ fn a_run_of_reconnects_collapses_to_one_line() {
             .to_json()
             .to_string(),
     ));
-    assert!(connection_cycle_run(&mixed).is_none());
+    assert!(reconnect_notice_run(&mixed).is_none());
+}
+
+/// Historical reconnect notices were persisted as full markdown text cards.
+/// They should also collapse so old inactive sessions get quieter as soon as
+/// the frontend updates.
+#[test]
+fn historical_reconnect_text_cards_collapse_to_one_line() {
+    use super::super::group_renderer::{reconnect_notice_run, render_reconnect_notice_run};
+
+    let cards: Vec<_> = ["4s", "37s", "41s"]
+        .iter()
+        .map(|d| {
+            rendered(
+                shared::PortalMessage::text(format!(
+                    "**Proxy reconnected** after {d} (unexpected disconnect)\n  disconnected at 2026-09-30T09:11:23Z (UTC)\n  reconnected  at 2026-09-30T09:11:28Z (UTC) — `ttb-fsm-test`"
+                ))
+                .to_json()
+                .to_string(),
+            )
+        })
+        .collect();
+
+    let notices = reconnect_notice_run(&cards).expect("all members are reconnect text cards");
+    assert_eq!(notices.len(), 3);
+    let _ = render_reconnect_notice_run(&notices);
+}
+
+#[test]
+fn typed_and_historical_reconnect_cards_collapse_together() {
+    use super::super::group_renderer::reconnect_notice_run;
+
+    let messages = vec![
+        rendered(
+            shared::PortalMessage::with_content(vec![shared::PortalContent::ConnectionCycle {
+                duration: Some("35s".to_string()),
+            }])
+            .to_json()
+            .to_string(),
+        ),
+        rendered(
+            shared::PortalMessage::text(
+                "**Proxy reconnected** after 4s (unexpected disconnect)".into(),
+            )
+            .to_json()
+            .to_string(),
+        ),
+    ];
+
+    let notices = reconnect_notice_run(&messages).expect("all members are reconnect notices");
+    assert_eq!(notices.len(), 2);
 }

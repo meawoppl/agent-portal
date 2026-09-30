@@ -40,50 +40,162 @@ pub struct MessageGroupRendererProps {
     pub muse_live_events: Vec<serde_json::Value>,
 }
 
-/// The reconnect durations in a group whose members are *all* connection
-/// cycles, or `None` if any member is something else.
-///
-/// An idle session reconnects on a slow loop, so these arrive as a long run of
-/// otherwise-identical one-liners. Collapsing the run to a single line is the
-/// whole point of the frame being typed.
-pub(super) fn connection_cycle_run(
-    messages: &[super::types::RenderedMessage],
-) -> Option<Vec<String>> {
-    let mut durations = Vec::with_capacity(messages.len());
-    for message in messages {
-        let portal: shared::PortalMessage = serde_json::from_str(&message.content).ok()?;
-        match portal.content.as_slice() {
-            [shared::PortalContent::ConnectionCycle { duration }] => {
-                durations.push(duration.clone().unwrap_or_default())
-            }
-            _ => return None,
-        }
-    }
-    (!durations.is_empty()).then_some(durations)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ReconnectReason {
+    ServerRestart,
+    UnexpectedDisconnect,
+    Unknown,
 }
 
-/// One line for a whole run: `reconnected 4x (36-38s)`.
-pub(super) fn render_connection_cycle_run(durations: &[String]) -> Html {
-    let label = match durations {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ReconnectNotice {
+    pub duration: Option<String>,
+    pub reason: ReconnectReason,
+}
+
+/// The reconnect notices in a group whose members are *all* reconnect notices,
+/// or `None` if any member is something else.
+///
+/// An idle session reconnects on a slow loop, so these arrive as a long run of
+/// otherwise-identical one-liners. Collapsing the run to a single line keeps
+/// inactive sessions from turning routine portal restarts into a transcript
+/// wall. Older transcripts used full markdown text cards, so this recognizes
+/// both the typed `ConnectionCycle` variant and historical `Proxy reconnected`
+/// prose.
+pub(super) fn reconnect_notice_run(
+    messages: &[super::types::RenderedMessage],
+) -> Option<Vec<ReconnectNotice>> {
+    let mut notices = Vec::with_capacity(messages.len());
+    for message in messages {
+        let portal: shared::PortalMessage = serde_json::from_str(&message.content).ok()?;
+        notices.push(reconnect_notice_from_portal(&portal)?);
+    }
+    (!notices.is_empty()).then_some(notices)
+}
+
+fn reconnect_notice_from_portal(portal: &shared::PortalMessage) -> Option<ReconnectNotice> {
+    match portal.content.as_slice() {
+        [shared::PortalContent::ConnectionCycle { duration }] => Some(ReconnectNotice {
+            duration: duration.clone(),
+            reason: ReconnectReason::ServerRestart,
+        }),
+        [shared::PortalContent::Text { text }] => reconnect_notice_from_text(text),
+        _ => None,
+    }
+}
+
+fn reconnect_notice_from_text(text: &str) -> Option<ReconnectNotice> {
+    let first_line = text.lines().next()?.trim();
+    let rest = first_line
+        .strip_prefix("**Proxy reconnected**")
+        .or_else(|| first_line.strip_prefix("Proxy reconnected"))?;
+    let duration = rest
+        .trim_start()
+        .strip_prefix("after ")
+        .map(|after| {
+            after
+                .split_once(" (")
+                .map_or(after, |(before_reason, _)| before_reason)
+                .split_once(" —")
+                .map_or_else(
+                    || after.trim().to_string(),
+                    |(before_context, _)| before_context.trim().to_string(),
+                )
+        })
+        .filter(|duration| !duration.is_empty());
+    let reason = if first_line.contains("(server restart)") {
+        ReconnectReason::ServerRestart
+    } else if first_line.contains("(unexpected disconnect)") {
+        ReconnectReason::UnexpectedDisconnect
+    } else {
+        ReconnectReason::Unknown
+    };
+    Some(ReconnectNotice { duration, reason })
+}
+
+fn duration_sort_key(duration: &str) -> Option<u64> {
+    let mut total_ms = 0_u64;
+    let mut parsed_any = false;
+    for part in duration.split_whitespace() {
+        if let Some(raw) = part.strip_suffix("ms") {
+            total_ms = total_ms.checked_add(raw.parse::<u64>().ok()?)?;
+            parsed_any = true;
+        } else if let Some(raw) = part.strip_suffix('s') {
+            total_ms = total_ms.checked_add(raw.parse::<u64>().ok()?.checked_mul(1_000)?)?;
+            parsed_any = true;
+        } else if let Some(raw) = part.strip_suffix('m') {
+            total_ms = total_ms.checked_add(raw.parse::<u64>().ok()?.checked_mul(60_000)?)?;
+            parsed_any = true;
+        }
+    }
+    parsed_any.then_some(total_ms)
+}
+
+fn duration_range(durations: &[&str]) -> Option<String> {
+    let mut seen = durations
+        .iter()
+        .copied()
+        .filter(|d| !d.is_empty())
+        .collect::<Vec<_>>();
+    if seen.is_empty() {
+        return None;
+    }
+    seen.sort_unstable_by(|a, b| {
+        duration_sort_key(a)
+            .cmp(&duration_sort_key(b))
+            .then_with(|| a.cmp(b))
+    });
+    seen.dedup();
+    match (seen.first(), seen.last()) {
+        (Some(lo), Some(hi)) if lo == hi => Some((*lo).to_string()),
+        (Some(lo), Some(hi)) => Some(format!("{lo}-{hi}")),
+        _ => None,
+    }
+}
+
+fn reason_suffix(notices: &[ReconnectNotice]) -> &'static str {
+    if notices
+        .iter()
+        .all(|notice| notice.reason == ReconnectReason::UnexpectedDisconnect)
+    {
+        " (unexpected disconnects)"
+    } else if notices
+        .iter()
+        .any(|notice| notice.reason == ReconnectReason::UnexpectedDisconnect)
+    {
+        " (some unexpected disconnects)"
+    } else {
+        ""
+    }
+}
+
+/// One line for a whole run: `reconnected 4x after 36s-38s`.
+pub(super) fn render_reconnect_notice_run(notices: &[ReconnectNotice]) -> Html {
+    let durations = notices
+        .iter()
+        .filter_map(|notice| notice.duration.as_deref())
+        .collect::<Vec<_>>();
+    let label = match notices {
         [] => return html! {},
-        [only] if only.is_empty() => "reconnected".to_string(),
-        [only] => format!("reconnected after {only}"),
+        [only] => match only.duration.as_deref() {
+            Some(duration) if !duration.is_empty() => {
+                format!("reconnected after {}{}", duration, reason_suffix(notices))
+            }
+            _ => format!("reconnected{}", reason_suffix(notices)),
+        },
         many => {
             // Durations arrive newest-last and are near-identical; show the
             // span rather than repeating one value N times.
-            let mut seen: Vec<&str> = many
-                .iter()
-                .map(String::as_str)
-                .filter(|d| !d.is_empty())
-                .collect();
-            seen.sort_unstable();
-            seen.dedup();
-            match (seen.first(), seen.last()) {
-                (Some(lo), Some(hi)) if lo == hi => {
-                    format!("reconnected {}x after {lo}", many.len())
+            match duration_range(&durations) {
+                Some(range) => {
+                    format!(
+                        "reconnected {}x after {}{}",
+                        many.len(),
+                        range,
+                        reason_suffix(notices)
+                    )
                 }
-                (Some(lo), Some(hi)) => format!("reconnected {}x ({lo}-{hi})", many.len()),
-                _ => format!("reconnected {}x", many.len()),
+                None => format!("reconnected {}x{}", many.len(), reason_suffix(notices)),
             }
         }
     };
@@ -177,11 +289,11 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
 
             // A run of reconnect notices collapses to one line.
             if *category == GroupCategory::Portal {
-                if let Some(durations) = connection_cycle_run(messages) {
+                if let Some(notices) = reconnect_notice_run(messages) {
                     return html! {
                         <div class="claude-message portal-message" title={ts.unwrap_or_default()}>
                             <div class="message-body">
-                                { render_connection_cycle_run(&durations) }
+                                { render_reconnect_notice_run(&notices) }
                             </div>
                         </div>
                     };

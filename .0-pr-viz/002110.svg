@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2110 - Collapse reconnect portal notice runs</text>
+<text x="55" y="108" font-family="sans-serif" font-size="34" fill="#e6e9f5">Inactive sessions no longer expand routine reconnect churn into a wall of portal cards.</text>
+<path d="M55 178 H1945 M1000 195 V1130" stroke="#565f89" fill="none"/>
+<text x="55" y="235" font-family="sans-serif" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1055" y="235" font-family="sans-serif" font-size="22" fill="#9ece6a">AFTER</text>
+
+<g>
+<rect x="55" y="285" width="870" height="620" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="90" y="334" font-family="sans-serif" font-size="28" fill="#f7768e">Repeated portal reconnect cards</text>
+<text x="90" y="380" font-family="sans-serif" font-size="24" fill="#c0caf5">Historical transcript rows used markdown text cards.</text>
+<g font-family="sans-serif" font-size="24">
+<rect x="90" y="430" width="760" height="66" rx="8" fill="#16161e" stroke="#565f89"/>
+<text x="118" y="472" fill="#c0caf5">Proxy reconnected after 4s (unexpected disconnect)</text>
+<rect x="90" y="520" width="760" height="66" rx="8" fill="#16161e" stroke="#565f89"/>
+<text x="118" y="562" fill="#c0caf5">Proxy reconnected after 37s (unexpected disconnect)</text>
+<rect x="90" y="610" width="760" height="66" rx="8" fill="#16161e" stroke="#565f89"/>
+<text x="118" y="652" fill="#c0caf5">Proxy reconnected after 38s (unexpected disconnect)</text>
+<rect x="90" y="700" width="760" height="66" rx="8" fill="#16161e" stroke="#565f89"/>
+<text x="118" y="742" fill="#c0caf5">Proxy reconnected after 41s (unexpected disconnect)</text>
+</g>
+<text x="90" y="840" font-family="sans-serif" font-size="24" fill="#a9b1d6">A grouped portal run still rendered every reconnect entry.</text>
+</g>
+
+<g>
+<rect x="1055" y="285" width="870" height="620" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1090" y="334" font-family="sans-serif" font-size="28" fill="#9ece6a">One compact reconnect summary</text>
+<text x="1090" y="380" font-family="sans-serif" font-size="24" fill="#c0caf5">The renderer recognizes typed and historical reconnect notices.</text>
+<rect x="1090" y="500" width="760" height="110" rx="10" fill="#16161e" stroke="#7aa2f7"/>
+<circle cx="1130" cy="555" r="7" fill="#7aa2f7"/>
+<text x="1155" y="565" font-family="sans-serif" font-size="28" fill="#c0caf5">reconnected 4x after 4s-41s (unexpected disconnects)</text>
+<path d="M1155 650 H1810" stroke="#565f89" fill="none" stroke-width="3"/>
+<circle cx="1190" cy="650" r="7" fill="#7aa2f7"/>
+<circle cx="1440" cy="650" r="7" fill="#7aa2f7"/>
+<circle cx="1510" cy="650" r="7" fill="#7aa2f7"/>
+<circle cx="1800" cy="650" r="7" fill="#7aa2f7"/>
+<text x="1090" y="755" font-family="sans-serif" font-size="24" fill="#a9b1d6">Other portal messages still render normally and break the run.</text>
+</g>
+
+<g>
+<rect x="55" y="985" width="1870" height="90" rx="12" fill="#1e202e" stroke="#a9b1d6"/>
+<text x="90" y="1042" font-family="monospace" font-size="24" fill="#c0caf5">reconnect_notice_run(): ConnectionCycle OR "**Proxy reconnected** ..." -> one summarized portal group</text>
+</g>
+
+<text x="55" y="1172" font-family="sans-serif" font-size="22" fill="#a9b1d6">Scope: frontend transcript rendering only; persisted history and proxy reconnect behavior are unchanged.</text>
+</svg>
