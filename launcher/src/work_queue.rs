@@ -120,9 +120,7 @@ pub async fn add(
         source: parse_loose_json(source).or(default_source),
         items: vec![EditStackItemInput {
             title: Some(
-                title
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
+                shared::strings::trimmed_non_blank(title)
                     .map(str::to_string)
                     .unwrap_or_else(|| default_title(body)),
             ),
@@ -224,7 +222,7 @@ fn print_items(items: &[EditStackItem], all: bool) {
             creator,
             age_label(&item.created_at),
         );
-        if !item.body.trim().is_empty() {
+        if shared::strings::is_non_blank(&item.body) {
             println!("      {}", one_line_preview(&item.body, 140));
         }
         if item.image_data_url.is_some() {
@@ -259,17 +257,14 @@ fn default_source(sessions: &[AgentSessionInfo]) -> Option<serde_json::Value> {
 }
 
 fn parse_loose_json(value: Option<&str>) -> Option<serde_json::Value> {
-    let raw = value?.trim();
-    if raw.is_empty() {
-        return None;
-    }
+    let raw = shared::strings::trimmed_non_blank(value)?;
     Some(serde_json::from_str(raw).unwrap_or_else(|_| serde_json::Value::String(raw.to_string())))
 }
 
 fn default_title(body: &str) -> String {
     let first_line = body
         .lines()
-        .find(|line| !line.trim().is_empty())
+        .find(|line| shared::strings::is_non_blank(line))
         .unwrap_or(body);
     let title = one_line_preview(first_line, 80);
     if title.is_empty() {
