@@ -53,6 +53,7 @@ pub fn replay_forward_opens_from_db(db_pool: &DbPool, session_id: Uuid, sender: 
 /// Returns the number of inputs replayed.
 pub fn replay_pending_inputs_from_db(
     db_pool: &DbPool,
+    session_manager: &SessionManager,
     session_id: Uuid,
     sender: &ProxySender,
 ) -> usize {
@@ -111,6 +112,7 @@ pub fn replay_pending_inputs_from_db(
         };
 
         if sender.send(msg).is_ok() {
+            session_manager.mark_turn_input_delivered(session_id);
             replayed += 1;
         } else {
             warn!("Failed to send pending input to proxy, channel closed");
@@ -291,6 +293,7 @@ pub fn handle_claude_output(ctx: ClaudeOutputContext<'_>, frame: ClaudeOutputFra
     };
     let normalized = normalize_output_content(content);
     let content = normalized.content;
+    let releases_edit_stack = edit_stack_output_releases_next(agent_type.as_str(), &content);
 
     // Insert the message FIRST so the live broadcast's `meta` carries the
     // server-assigned `created_at` the historical-read path would surface
@@ -407,6 +410,45 @@ pub fn handle_claude_output(ctx: ClaudeOutputContext<'_>, frame: ClaudeOutputFra
                 meta: broadcast_meta,
             },
         );
+    }
+
+    if releases_edit_stack {
+        if let Some(session_id) = db_session_id {
+            session_manager.mark_turn_finished(session_id);
+            if inserted_created_at.is_some() {
+                if let Some(key) = session_key.as_ref() {
+                    if let Err(err) =
+                        crate::handlers::edit_stack::try_send_next_pending_edit_stack_item(
+                            db_pool,
+                            session_manager,
+                            key.as_str(),
+                            session_id,
+                        )
+                    {
+                        warn!(
+                        "Could not promote next edit-stack item after turn completion for session {}: {:?}",
+                        session_id, err
+                    );
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn edit_stack_output_releases_next(agent_type: &str, content: &serde_json::Value) -> bool {
+    let kind = content.get("type").and_then(|value| value.as_str());
+    match agent_type {
+        "claude" => matches!(kind, Some("result" | "error")),
+        "codex" => matches!(kind, Some("turn.completed" | "turn.failed" | "error")),
+        "muse" => content
+            .get("payload_type")
+            .and_then(|value| value.as_str())
+            .is_some_and(|kind| kind.starts_with("run.terminal.")),
+        _ => matches!(
+            kind,
+            Some("result" | "turn.completed" | "turn.failed" | "error")
+        ),
     }
 }
 
@@ -746,5 +788,34 @@ mod tests {
             )
             .to_json(),
         );
+    }
+
+    #[test]
+    fn edit_stack_release_predicate_only_accepts_terminal_turn_frames() {
+        assert!(edit_stack_output_releases_next(
+            "claude",
+            &serde_json::json!({"type": "result"})
+        ));
+        assert!(edit_stack_output_releases_next(
+            "codex",
+            &serde_json::json!({"type": "turn.completed"})
+        ));
+        assert!(edit_stack_output_releases_next(
+            "muse",
+            &serde_json::json!({"type": "muse_record", "payload_type": "run.terminal.completed"})
+        ));
+
+        assert!(!edit_stack_output_releases_next(
+            "claude",
+            &serde_json::json!({"type": "assistant"})
+        ));
+        assert!(!edit_stack_output_releases_next(
+            "codex",
+            &serde_json::json!({"type": "thread.started"})
+        ));
+        assert!(!edit_stack_output_releases_next(
+            "muse",
+            &serde_json::json!({"type": "muse_record", "payload_type": "tool.result"})
+        ));
     }
 }

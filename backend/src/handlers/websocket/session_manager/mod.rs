@@ -256,6 +256,10 @@ pub struct SessionManager {
     /// Live agent-driven progress bars per session (`agent-portal progress`),
     /// in memory only (see `agent_progress.rs`).
     agent_progress: Arc<DashMap<Uuid, agent_progress::SessionProgress>>,
+    /// Sessions with a delivered input whose terminal output has not arrived
+    /// yet. This closes the small input-ack-before-transcript window where the
+    /// durable latest-message classifier can still look idle.
+    active_turns: Arc<DashSet<Uuid>>,
     /// Monotonic counter for connection generations (prevents stale cleanup).
     /// Shared by proxy and launcher registrations — uniqueness is all that
     /// matters, not contiguity per registry.
@@ -286,6 +290,7 @@ impl Default for SessionManager {
             subagent_tokens: Arc::new(DashMap::new()),
             input_dedup: Arc::new(DashMap::new()),
             agent_progress: Arc::new(DashMap::new()),
+            active_turns: Arc::new(DashSet::new()),
             gen_counter: Arc::new(AtomicU64::new(1)),
         }
     }
@@ -306,6 +311,18 @@ impl SessionManager {
             self.pending_truncations.remove(id);
         }
         ids
+    }
+
+    pub(crate) fn mark_turn_input_delivered(&self, session_id: Uuid) {
+        self.active_turns.insert(session_id);
+    }
+
+    pub(crate) fn mark_turn_finished(&self, session_id: Uuid) {
+        self.active_turns.remove(&session_id);
+    }
+
+    pub(crate) fn is_turn_active(&self, session_id: Uuid) -> bool {
+        self.active_turns.contains(&session_id)
     }
 }
 
