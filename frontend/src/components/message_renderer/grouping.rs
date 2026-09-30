@@ -152,10 +152,9 @@ fn source_identity(
                 .next()
                 .unwrap_or_default()
                 .to_string();
-            let label = match agent_type.to_ascii_lowercase().as_str() {
-                "claude" => format!("Message from Claude ({short})"),
-                "codex" => format!("Message from Codex ({short})"),
-                _ => format!("Message from agent ({short})"),
+            let label = match agent_type.parse::<shared::AgentType>() {
+                Ok(agent) => format!("Message from {} ({short})", agent.display_name()),
+                Err(_) => format!("Message from agent ({short})"),
             };
             MessageIdentity {
                 category: GroupCategory::User,
