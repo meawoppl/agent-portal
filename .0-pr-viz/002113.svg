@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-labelledby="title desc">
+  <title id="title">Codex model blank check routes through shared</title>
+  <desc id="desc">non_empty_string stops hand-rolling trim and empty checks and composes shared owned_non_blank instead, keeping only the codex unknown placeholder rejection local.</desc>
+  <rect width="2000" height="1200" fill="#1a1b26"/>
+
+  <text x="80" y="105" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="50" font-weight="700">Codex Model Check Routes Through Shared</text>
+  <text x="80" y="158" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="28">non_empty_string composes shared owned_non_blank; only the unknown rejection stays local.</text>
+
+  <line x1="1000" y1="210" x2="1000" y2="1050" stroke="#3d4666" stroke-width="3" stroke-dasharray="10 12"/>
+
+  <text x="90" y="250" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700" letter-spacing="4">BEFORE</text>
+  <text x="90" y="298" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="27">io_task.rs owned all three steps inline</text>
+  <text x="90" y="335" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">A private copy of the trim-then-reject-blank shape shared already owns.</text>
+
+  <rect x="90" y="385" width="830" height="430" rx="16" fill="#16161e" stroke="#3d4666" stroke-width="2"/>
+  <text x="130" y="440" fill="#7aa2f7" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">codex io_task.rs</text>
+  <text x="130" y="478" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">fn non_empty_string</text>
+  <rect x="130" y="510" width="750" height="64" rx="10" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="155" y="551" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25">1. value.trim()</text>
+  <rect x="130" y="590" width="750" height="64" rx="10" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="155" y="631" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25">2. trimmed.is_empty() reject</text>
+  <rect x="130" y="670" width="750" height="64" rx="10" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="155" y="711" fill="#e0af68" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25">3. unknown placeholder reject</text>
+  <text x="130" y="790" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25">Steps 1-2 duplicate shared::strings.</text>
+
+  <text x="1080" y="250" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700" letter-spacing="4">AFTER</text>
+  <text x="1080" y="298" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="27">shared owns trim and blank; io_task keeps unknown</text>
+  <text x="1080" y="335" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">Same behavior; the codex-only placeholder rule stays visible.</text>
+
+  <rect x="1080" y="385" width="830" height="430" rx="16" fill="#16161e" stroke="#3d4666" stroke-width="2"/>
+  <text x="1120" y="440" fill="#7aa2f7" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">shared::strings</text>
+  <text x="1120" y="478" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">owned_non_blank</text>
+  <rect x="1120" y="510" width="750" height="64" rx="10" fill="#1e202e" stroke="#7aa2f7" stroke-width="2"/>
+  <text x="1145" y="551" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25">trim + reject blank (one home)</text>
+  <line x1="1495" y1="574" x2="1495" y2="640" stroke="#9ece6a" stroke-width="4"/>
+  <path d="M1480 625 L1495 648 L1510 625" fill="none" stroke="#9ece6a" stroke-width="4"/>
+  <rect x="1120" y="648" width="750" height="64" rx="10" fill="#1e202e" stroke="#e0af68" stroke-width="2"/>
+  <text x="1145" y="689" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25">.filter unknown - codex io_task.rs</text>
+  <text x="1120" y="770" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25">41 codex tests pass; clippy and fmt clean.</text>
+  <text x="1120" y="806" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">Stays narrower than has_known_model on purpose.</text>
+
+  <rect x="190" y="1080" width="1620" height="70" rx="14" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+  <text x="230" y="1125" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">Scope: DRY refactor only; model resolution results and telemetry guards are unchanged.</text>
+</svg>
