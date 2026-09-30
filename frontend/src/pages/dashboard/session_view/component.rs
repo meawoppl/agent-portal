@@ -1102,8 +1102,8 @@ impl Component for SessionView {
             .iter()
             .filter(|item| item.status == "pending")
             .count();
-        let work_queue_expanded =
-            self.edit_stack_panel_open || pending_work_count > 0 || self.edit_stack_error.is_some();
+        let work_queue_needs_attention = pending_work_count > 0 || self.edit_stack_error.is_some();
+        let work_queue_active = self.edit_stack_panel_open || work_queue_needs_attention;
 
         html! {
             <div class={classes!("session-view", ctx.props().focused.then_some("focused"))}>
@@ -1142,11 +1142,11 @@ impl Component for SessionView {
                         class={classes!(
                             "session-header-action",
                             "work-queue-action",
-                            work_queue_expanded.then_some("active"),
+                            work_queue_active.then_some("active"),
                         )}
-                        title="View work queue"
+                        title={if self.edit_stack_panel_open { "Hide work queue" } else { "View work queue" }}
                         aria-controls="session-work-queue"
-                        aria-expanded={work_queue_expanded.to_string()}
+                        aria-expanded={self.edit_stack_panel_open.to_string()}
                         onclick={ctx.link().callback(|_| SessionViewMsg::ToggleEditStackPanel)}
                     >
                         {
@@ -2093,7 +2093,7 @@ impl SessionView {
             .iter()
             .filter(|item| item.status == "pending")
             .collect::<Vec<_>>();
-        if pending.is_empty() && self.edit_stack_error.is_none() && !self.edit_stack_panel_open {
+        if !self.edit_stack_panel_open && self.edit_stack_error.is_none() {
             return html! {};
         }
         let creator_count = pending
@@ -2141,17 +2141,14 @@ impl SessionView {
                         >
                             { if self.edit_stack_send_all { "Sending…" } else { "Send all" } }
                         </button>
-                        if pending.is_empty() {
-                            <button
-                                type="button"
-                                class="edit-stack-icon-action compact"
-                                onclick={close}
-                                title="Hide work queue"
-                                aria-label="Hide work queue"
-                            >
-                                { "x" }
-                            </button>
-                        }
+                        <button
+                            type="button"
+                            class="edit-stack-action"
+                            onclick={close}
+                            title="Collapse work queue"
+                        >
+                            { "Collapse" }
+                        </button>
                     </div>
                 </div>
                 if let Some(error) = self.edit_stack_error.as_deref() {
