@@ -1235,13 +1235,17 @@ fn approval_response_kind(msg: &ServerMessage) -> Option<(String, CodexApprovalR
     Some((format_request_id(id), kind))
 }
 
+/// Keep a model name only when it is usable: non-blank and not the `"unknown"`
+/// placeholder the server sends when it has nothing to report.
+///
+/// Blank handling lives in `shared::strings` (single home for the trim-check
+/// shape); only the codex-specific `"unknown"` rejection stays here. This
+/// rejects a narrower set than `TurnMetrics::has_known_model`, which also
+/// rejects `"<synthetic>"` — the two guard different things (model resolution
+/// vs telemetry validity), so keep them separate.
 fn non_empty_string(value: String) -> Option<String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("unknown") {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
+    shared::strings::owned_non_blank(&value)
+        .filter(|trimmed| !trimmed.eq_ignore_ascii_case("unknown"))
 }
 
 /// Resolve the model a freshly resumed/started thread reports, falling back to
