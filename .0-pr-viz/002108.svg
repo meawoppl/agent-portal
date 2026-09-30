@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2108 - Default performance p95 overlay off</text>
+<text x="55" y="108" font-family="sans-serif" font-size="34" fill="#e6e9f5">Performance charts now open with p50/value traces only; p95 remains one toggle away.</text>
+<path d="M55 178 H1945 M1000 195 V1130" stroke="#565f89" fill="none"/>
+<text x="55" y="235" font-family="sans-serif" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1055" y="235" font-family="sans-serif" font-size="22" fill="#9ece6a">AFTER</text>
+
+<g>
+<rect x="55" y="285" width="870" height="555" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="90" y="335" font-family="sans-serif" font-size="28" fill="#f7768e">p95 was enabled on first load</text>
+<text x="90" y="382" font-family="sans-serif" font-size="24" fill="#c0caf5">Each model line also drew a dashed p95 line by default.</text>
+<path d="M130 725 H860 M130 610 H860 M130 495 H860" stroke="#3d4666" fill="none"/>
+<path d="M130 725 V455" stroke="#565f89" fill="none"/>
+<path d="M130 725 H860" stroke="#565f89" fill="none"/>
+<path d="M170 675 C310 575 455 650 610 535 S805 470 845 505" stroke="#7aa2f7" fill="none" stroke-width="7" stroke-linecap="round"/>
+<path d="M170 615 C310 500 455 585 610 455 S805 405 845 430" stroke="#7aa2f7" fill="none" stroke-width="5" stroke-dasharray="18 14" stroke-linecap="round"/>
+<path d="M170 715 C310 690 455 595 610 650 S805 580 845 610" stroke="#9ece6a" fill="none" stroke-width="7" stroke-linecap="round"/>
+<path d="M170 655 C310 635 455 525 610 575 S805 515 845 540" stroke="#9ece6a" fill="none" stroke-width="5" stroke-dasharray="18 14" stroke-linecap="round"/>
+<rect x="90" y="780" width="250" height="44" rx="8" fill="#16161e" stroke="#f7768e"/>
+<text x="115" y="810" font-family="sans-serif" font-size="22" fill="#f7768e">p95 active</text>
+</g>
+
+<g>
+<rect x="1055" y="285" width="870" height="555" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1090" y="335" font-family="sans-serif" font-size="28" fill="#9ece6a">p95 now starts off</text>
+<text x="1090" y="382" font-family="sans-serif" font-size="24" fill="#c0caf5">The default view emphasizes the primary per-model series.</text>
+<path d="M1130 725 H1860 M1130 610 H1860 M1130 495 H1860" stroke="#3d4666" fill="none"/>
+<path d="M1130 725 V455" stroke="#565f89" fill="none"/>
+<path d="M1130 725 H1860" stroke="#565f89" fill="none"/>
+<path d="M1170 675 C1310 575 1455 650 1610 535 S1805 470 1845 505" stroke="#7aa2f7" fill="none" stroke-width="7" stroke-linecap="round"/>
+<path d="M1170 715 C1310 690 1455 595 1610 650 S1805 580 1845 610" stroke="#9ece6a" fill="none" stroke-width="7" stroke-linecap="round"/>
+<rect x="1090" y="780" width="250" height="44" rx="8" fill="#16161e" stroke="#565f89"/>
+<text x="1115" y="810" font-family="sans-serif" font-size="22" fill="#c0caf5">p95 inactive</text>
+</g>
+
+<g>
+<rect x="55" y="930" width="870" height="110" rx="12" fill="#1e202e" stroke="#a9b1d6"/>
+<text x="90" y="974" font-family="sans-serif" font-size="26" fill="#a9b1d6">Old state</text>
+<text x="90" y="1018" font-family="monospace" font-size="24" fill="#c0caf5">let show_p95 = use_state(|| true);</text>
+</g>
+
+<g>
+<rect x="1055" y="930" width="870" height="110" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1090" y="974" font-family="sans-serif" font-size="26" fill="#9ece6a">New state</text>
+<text x="1090" y="1018" font-family="monospace" font-size="24" fill="#c0caf5">const DEFAULT_SHOW_P95: bool = false;</text>
+</g>
+
+<text x="55" y="1172" font-family="sans-serif" font-size="22" fill="#a9b1d6">Scope: default control state only; the p95 toggle and chart rendering path remain available.</text>
+</svg>

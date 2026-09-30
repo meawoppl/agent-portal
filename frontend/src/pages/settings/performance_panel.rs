@@ -15,12 +15,18 @@ use controls::{render_performance_controls, PerformanceControlsProps};
 use model::{distinct_pairs, AxisScale, GroupBy, TimeWindow};
 use use_metrics::use_performance_metrics;
 
+const DEFAULT_SHOW_P95: bool = false;
+
+fn default_show_p95() -> bool {
+    DEFAULT_SHOW_P95
+}
+
 #[function_component(PerformancePanel)]
 pub fn performance_panel() -> Html {
     let window = use_state(|| TimeWindow::Days30);
     let group_by = use_state(|| GroupBy::All);
     let axis_scale = use_state(|| AxisScale::Linear);
-    let show_p95 = use_state(|| true);
+    let show_p95 = use_state(default_show_p95);
     let metrics = use_performance_metrics(*window);
 
     let pairs = distinct_pairs(&metrics.buckets);
@@ -80,8 +86,16 @@ pub fn performance_panel() -> Html {
 
 #[cfg(test)]
 mod tests {
-    use super::model::{bucket_param, GroupBy, TimeWindow};
+    use super::{
+        default_show_p95,
+        model::{bucket_param, GroupBy, TimeWindow},
+    };
     use shared::AgentType;
+
+    #[test]
+    fn p95_overlay_defaults_off() {
+        assert!(!default_show_p95());
+    }
 
     #[test]
     fn metric_query_uses_stable_bucket_granularity() {
