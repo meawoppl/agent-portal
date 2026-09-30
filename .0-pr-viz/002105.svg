@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2105 - Route remaining blank-string checks via shared</text>
+<text x="55" y="108" font-family="sans-serif" font-size="34" fill="#e6e9f5">Leftover trim/is-empty shapes move onto shared::strings.</text>
+<path d="M55 178 H1945 M1000 195 V1130" stroke="#565f89" fill="none"/>
+<text x="55" y="235" font-family="sans-serif" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1055" y="235" font-family="sans-serif" font-size="22" fill="#9ece6a">AFTER</text>
+<g><rect x="55" y="285" width="870" height="180" rx="12" fill="#1e202e" stroke="#7aa2f7"/>
+<text x="79" y="327" font-family="sans-serif" font-size="26" fill="#7aa2f7">Scattered Option trim+filter</text>
+<text x="79" y="371" font-family="monospace" font-size="23" fill="#c0caf5">.map(str::trim).filter(|s| ...)</text>
+<text x="79" y="407" font-family="sans-serif" font-size="23" fill="#c0caf5">Four sites in backend, session-lib, launcher.</text>
+</g>
+<g><rect x="1055" y="285" width="870" height="180" rx="12" fill="#1e202e" stroke="#7aa2f7"/>
+<text x="1079" y="327" font-family="sans-serif" font-size="26" fill="#7aa2f7">One shared helper</text>
+<text x="1079" y="371" font-family="monospace" font-size="23" fill="#c0caf5">shared::strings::trimmed_non_blank(x)</text>
+<text x="1079" y="407" font-family="sans-serif" font-size="23" fill="#c0caf5">Same trim semantics at every site.</text>
+</g>
+<g><rect x="55" y="570" width="870" height="180" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="612" font-family="sans-serif" font-size="26" fill="#f7768e">Inline guards, redundant branch</text>
+<text x="79" y="656" font-family="monospace" font-size="23" fill="#c0caf5">if item.body.trim().is_empty()</text>
+<text x="79" y="692" font-family="sans-serif" font-size="23" fill="#c0caf5">parse_loose_json re-checks emptiness.</text>
+</g>
+<g><rect x="1055" y="570" width="870" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="612" font-family="sans-serif" font-size="26" fill="#9ece6a">Shared guards, dead branch gone</text>
+<text x="1079" y="656" font-family="monospace" font-size="23" fill="#c0caf5">is_non_blank(&amp;item.body)</text>
+<text x="1079" y="692" font-family="sans-serif" font-size="23" fill="#c0caf5">parse_loose_json folds check into helper.</text>
+</g>
+<g><rect x="55" y="855" width="870" height="180" rx="12" fill="#1e202e" stroke="#a9b1d6"/>
+<text x="79" y="897" font-family="sans-serif" font-size="26" fill="#a9b1d6">Behavior unchanged</text>
+<text x="79" y="941" font-family="sans-serif" font-size="23" fill="#c0caf5">Same predicates, same trim semantics;</text>
+<text x="79" y="977" font-family="sans-serif" font-size="23" fill="#c0caf5">no request or render logic touched.</text>
+</g>
+<g><rect x="1055" y="855" width="870" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="897" font-family="sans-serif" font-size="26" fill="#9ece6a">Verified locally</text>
+<text x="1079" y="941" font-family="sans-serif" font-size="23" fill="#c0caf5">Workspace tests pass; clippy</text>
+<text x="1079" y="977" font-family="sans-serif" font-size="23" fill="#c0caf5">and fmt clean.</text>
+</g>
+<path d="M490 477 V547 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<path d="M490 762 V832 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<path d="M1490 477 V547 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<path d="M1490 762 V832 l-8 -12 m8 12 l8 -12" stroke="#565f89" fill="none" stroke-width="3"/>
+<path d="M490 1047 V1052 M1490 1047 V1052" stroke="#565f89" fill="none" stroke-width="3"/>
+</svg>
