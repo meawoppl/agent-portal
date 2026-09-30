@@ -265,13 +265,14 @@ fn render_chart(
                     }
                 }) }
                 if p95_legend {
-                    { for series.iter().filter_map(|item| {
-                        item.points.iter().any(|point| point.p95.is_some()).then(|| {
+                    { for series
+                        .iter()
+                        .filter(|item| item.points.iter().any(|point| point.p95.is_some()))
+                        .map(|item| {
                             let p95 = path_data(&item.points, |point| point.p95, min, max, axis_scale);
                             html! {
                                 <path d={p95} fill="none" stroke={item.color} stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="6 5" />
                             }
-                        })
                     }) }
                 }
             </svg>
