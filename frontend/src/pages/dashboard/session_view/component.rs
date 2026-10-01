@@ -20,6 +20,7 @@ use gloo_net::http::Request;
 use shared::api::{
     EditStackItem, EditStackResponse, ForwardInfo, TurnMetricsResponse, UpdateEditStackItemRequest,
 };
+use shared::strings::truncate_with_ellipsis;
 use shared::{
     ClientToServer, DeliveryMeta, PortalMeta, ReasoningEffort, SendMode, SessionInfo, TurnMetrics,
 };
@@ -120,14 +121,6 @@ fn is_mobile_surface_viewport() -> bool {
         .and_then(|window| window.inner_width().ok())
         .and_then(|value| value.as_f64())
         .is_some_and(|width| width < 700.0)
-}
-
-fn truncate_chars(value: &str, max_chars: usize) -> String {
-    let mut output = value.chars().take(max_chars).collect::<String>();
-    if value.chars().count() > max_chars {
-        output.push('…');
-    }
-    output
 }
 
 fn pretty_json(value: &serde_json::Value) -> Option<String> {
@@ -2179,13 +2172,13 @@ impl SessionView {
                         let body = if !utils::is_non_blank(&item.body) {
                             "(no text note)".to_string()
                         } else {
-                            truncate_chars(&item.body, EDIT_STACK_BODY_PREVIEW_CHARS)
+                            truncate_with_ellipsis(&item.body, EDIT_STACK_BODY_PREVIEW_CHARS)
                         };
                         let context = item
                             .context
                             .as_ref()
                             .and_then(pretty_json)
-                            .map(|value| truncate_chars(&value, EDIT_STACK_CONTEXT_PREVIEW_CHARS));
+                            .map(|value| truncate_with_ellipsis(&value, EDIT_STACK_CONTEXT_PREVIEW_CHARS));
                         let creator = item.created_by_name.clone();
                         let send_one = ctx.link().callback(move |_| SessionViewMsg::SendEditStackItem(item_id));
                         let dismiss = ctx.link().callback(move |_| SessionViewMsg::DismissEditStackItem(item_id));

@@ -67,9 +67,10 @@ pub fn trimmed_non_blank(value: Option<&str>) -> Option<&str> {
 ///
 /// Short input returns as-is; otherwise the first `max_chars - 1` chars plus
 /// the ellipsis marker, so output never exceeds `max_chars` chars. Single
-/// home for the repeated `take(MAX - 1)` + `push('…')` shape in notification
-/// snippet caps so the call sites cannot drift (e.g. one keeping `MAX` chars
-/// before the marker while another keeps `MAX - 1`).
+/// home for the repeated `take(MAX - 1)` + `push('…')` shape in capped
+/// preview and notification snippet surfaces so the call sites cannot drift
+/// (e.g. one keeping `MAX` chars before the marker while another keeps
+/// `MAX - 1`).
 #[must_use]
 pub fn truncate_with_ellipsis(s: &str, max_chars: usize) -> String {
     if s.chars().count() <= max_chars {
