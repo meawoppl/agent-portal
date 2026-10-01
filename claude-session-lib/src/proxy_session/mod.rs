@@ -66,6 +66,10 @@ pub struct ProxySessionConfig {
     pub auth_token: Option<String>,
     pub working_directory: String,
     pub resume: bool,
+    /// Whether the next non-slash user input should carry the Portal feature
+    /// reminder. Fresh contexts need it; real resumes already have it in their
+    /// transcript, so re-sending it just burns context on every process restart.
+    pub prime_portal_reminder_on_first_input: bool,
     pub git_branch: Option<String>,
     /// Extra arguments to pass through to the claude CLI
     pub claude_args: Vec<String>,
@@ -88,6 +92,25 @@ pub struct ProxySessionConfig {
     pub fork_from_session_id: Option<Uuid>,
     /// Optional Codex native turn id; `None` forks the latest turn.
     pub fork_point_turn_id: Option<String>,
+}
+
+/// Decide whether a launch needs the Portal reminder folded onto its first
+/// user input.
+///
+/// Most agents can answer this from `resume`: a resumed context should already
+/// contain the reminder, while a fresh launch has never seen it. Codex is the
+/// one wrinkle: a `resume` launch without a persisted app-server thread id
+/// silently starts a fresh thread, so it still needs the reminder.
+pub fn should_prime_portal_reminder_on_first_input(
+    agent_type: shared::AgentType,
+    resume: bool,
+    codex_thread_id: Option<&str>,
+) -> bool {
+    if !resume {
+        return true;
+    }
+
+    agent_type == shared::AgentType::Codex && codex_thread_id.is_none()
 }
 
 /// The local hostname, or `"unknown"` when the OS lookup fails.
@@ -241,7 +264,9 @@ impl<'a, A: Agent> SessionState<'a, A> {
             output_buffer,
             backoff: Backoff::new(),
             first_connection: true,
-            reminder_pending: Arc::new(AtomicBool::new(true)),
+            reminder_pending: Arc::new(AtomicBool::new(
+                config.prime_portal_reminder_on_first_input,
+            )),
             disconnected_at: None,
             disconnected_at_utc: None,
             last_disconnect_graceful: false,
@@ -1464,6 +1489,50 @@ mod tests {
         note_disconnect(&mut at, &mut at_utc, &mut graceful, false);
         assert!(!graceful);
         assert!(at.is_some());
+    }
+
+    #[test]
+    fn portal_reminder_primes_fresh_contexts_only() {
+        assert!(should_prime_portal_reminder_on_first_input(
+            shared::AgentType::Claude,
+            false,
+            None,
+        ));
+        assert!(should_prime_portal_reminder_on_first_input(
+            shared::AgentType::Codex,
+            false,
+            None,
+        ));
+        assert!(should_prime_portal_reminder_on_first_input(
+            shared::AgentType::Muse,
+            false,
+            None,
+        ));
+
+        assert!(!should_prime_portal_reminder_on_first_input(
+            shared::AgentType::Claude,
+            true,
+            None,
+        ));
+        assert!(!should_prime_portal_reminder_on_first_input(
+            shared::AgentType::Muse,
+            true,
+            None,
+        ));
+    }
+
+    #[test]
+    fn codex_resume_without_a_thread_is_fresh_context_for_reminder() {
+        assert!(should_prime_portal_reminder_on_first_input(
+            shared::AgentType::Codex,
+            true,
+            None,
+        ));
+        assert!(!should_prime_portal_reminder_on_first_input(
+            shared::AgentType::Codex,
+            true,
+            Some("thread-123"),
+        ));
     }
 
     use super::*;

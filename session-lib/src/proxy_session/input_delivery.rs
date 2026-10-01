@@ -42,11 +42,13 @@ where
 
     debug!("sending to agent process: {}", truncate(&input.text, 100));
 
-    // First input of this agent process carries the portal-features reminder.
-    // `swap` makes the claim atomic, so a burst of queued inputs prefixes
-    // exactly one of them. Slash commands never carry it (the prefix would stop
-    // the CLI from recognising the command), and `/clear` re-arms it because
-    // the conversation it starts has never seen the reminder.
+    // First input of a fresh agent context carries the portal-features
+    // reminder. `swap` makes the claim atomic, so a burst of queued inputs
+    // prefixes exactly one of them. Real resumes initialize this flag false
+    // because their transcript already contains the reminder. Slash commands
+    // never carry it (the prefix would stop the CLI from recognising the
+    // command), and `/clear` re-arms it because the conversation it starts has
+    // never seen the reminder.
     let slash_command = portal_reminder::is_slash_command(&input.text);
     if slash_command && portal_reminder::is_clear_command(&input.text) {
         reminder_pending.store(true, Ordering::SeqCst);
