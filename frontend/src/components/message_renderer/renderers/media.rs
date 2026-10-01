@@ -61,9 +61,60 @@ fn needs_size_fallback(media_type: &str) -> bool {
     media_type == "image/svg+xml"
 }
 
+const LIGHTBOX_MIN_SCALE: f64 = 0.5;
+const LIGHTBOX_MAX_SCALE: f64 = 12.0;
+
+#[derive(Clone, Copy, PartialEq)]
+struct ImageLightboxView {
+    scale: f64,
+    x: f64,
+    y: f64,
+}
+
+impl Default for ImageLightboxView {
+    fn default() -> Self {
+        Self {
+            scale: 1.0,
+            x: 0.0,
+            y: 0.0,
+        }
+    }
+}
+
+impl ImageLightboxView {
+    fn constrain(self) -> Self {
+        let scale = self.scale.clamp(LIGHTBOX_MIN_SCALE, LIGHTBOX_MAX_SCALE);
+        if scale <= 1.0 {
+            return Self::default();
+        }
+        Self {
+            scale,
+            x: self.x,
+            y: self.y,
+        }
+    }
+
+    fn transform(self) -> String {
+        format!(
+            "translate({:.1}px, {:.1}px) scale({:.4})",
+            self.x, self.y, self.scale
+        )
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+struct ImageLightboxDrag {
+    pointer_id: i32,
+    start_client_x: f64,
+    start_client_y: f64,
+    start_view: ImageLightboxView,
+}
+
 #[function_component(ImageViewer)]
 fn image_viewer(props: &ImageViewerProps) -> Html {
     let expanded = use_state(|| false);
+    let lightbox_view = use_state(ImageLightboxView::default);
+    let lightbox_drag = use_state(|| None::<ImageLightboxDrag>);
     // The bytes behind a served-image URL are TTL/LRU-bounded, so a persisted
     // transcript row can outlive them. When the <img> fails to load, degrade to
     // a "media expired" placeholder rather than a broken image icon.
@@ -86,12 +137,132 @@ fn image_viewer(props: &ImageViewerProps) -> Html {
 
     let on_thumb_click = {
         let expanded = expanded.clone();
-        Callback::from(move |_: MouseEvent| expanded.set(true))
+        let lightbox_view = lightbox_view.clone();
+        let lightbox_drag = lightbox_drag.clone();
+        Callback::from(move |_: MouseEvent| {
+            lightbox_view.set(ImageLightboxView::default());
+            lightbox_drag.set(None);
+            expanded.set(true);
+        })
     };
 
     let close_lightbox = {
         let expanded = expanded.clone();
-        Callback::from(move |()| expanded.set(false))
+        let lightbox_drag = lightbox_drag.clone();
+        Callback::from(move |()| {
+            lightbox_drag.set(None);
+            expanded.set(false);
+        })
+    };
+
+    let reset_lightbox = {
+        let lightbox_view = lightbox_view.clone();
+        let lightbox_drag = lightbox_drag.clone();
+        Callback::from(move |_: MouseEvent| {
+            lightbox_drag.set(None);
+            lightbox_view.set(ImageLightboxView::default());
+        })
+    };
+
+    let on_lightbox_wheel = {
+        let lightbox_view = lightbox_view.clone();
+        Callback::from(move |event: WheelEvent| {
+            event.prevent_default();
+            event.stop_propagation();
+
+            let current = *lightbox_view;
+            let direction = if event.delta_y() < 0.0 { 1.0 } else { -1.0 };
+            let multiplier = if direction > 0.0 { 1.18 } else { 1.0 / 1.18 };
+            let next_scale =
+                (current.scale * multiplier).clamp(LIGHTBOX_MIN_SCALE, LIGHTBOX_MAX_SCALE);
+
+            let Some(window) = web_sys::window() else {
+                lightbox_view.set(
+                    ImageLightboxView {
+                        scale: next_scale,
+                        ..current
+                    }
+                    .constrain(),
+                );
+                return;
+            };
+            let viewport_width = window
+                .inner_width()
+                .ok()
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0);
+            let viewport_height = window
+                .inner_height()
+                .ok()
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0);
+            let focus_x = event.client_x() as f64 - viewport_width / 2.0;
+            let focus_y = event.client_y() as f64 - viewport_height / 2.0;
+            let ratio = next_scale / current.scale.max(0.001);
+            lightbox_view.set(
+                ImageLightboxView {
+                    scale: next_scale,
+                    x: focus_x - (focus_x - current.x) * ratio,
+                    y: focus_y - (focus_y - current.y) * ratio,
+                }
+                .constrain(),
+            );
+        })
+    };
+
+    let on_lightbox_pointer_down = {
+        let lightbox_view = lightbox_view.clone();
+        let lightbox_drag = lightbox_drag.clone();
+        Callback::from(move |event: PointerEvent| {
+            if event.button() != 0 {
+                return;
+            }
+            event.prevent_default();
+            event.stop_propagation();
+            lightbox_drag.set(Some(ImageLightboxDrag {
+                pointer_id: event.pointer_id(),
+                start_client_x: event.client_x() as f64,
+                start_client_y: event.client_y() as f64,
+                start_view: *lightbox_view,
+            }));
+        })
+    };
+
+    let on_lightbox_pointer_move = {
+        let lightbox_view = lightbox_view.clone();
+        let lightbox_drag = lightbox_drag.clone();
+        Callback::from(move |event: PointerEvent| {
+            let Some(drag) = *lightbox_drag else {
+                return;
+            };
+            if drag.pointer_id != event.pointer_id() {
+                return;
+            }
+            event.prevent_default();
+            event.stop_propagation();
+            lightbox_view.set(
+                ImageLightboxView {
+                    x: drag.start_view.x + event.client_x() as f64 - drag.start_client_x,
+                    y: drag.start_view.y + event.client_y() as f64 - drag.start_client_y,
+                    ..drag.start_view
+                }
+                .constrain(),
+            );
+        })
+    };
+
+    let on_lightbox_pointer_end = {
+        let lightbox_drag = lightbox_drag.clone();
+        Callback::from(move |event: PointerEvent| {
+            let should_clear = lightbox_drag
+                .as_ref()
+                .is_some_and(|drag| drag.pointer_id == event.pointer_id());
+            if should_clear {
+                event.prevent_default();
+                event.stop_propagation();
+                lightbox_drag.set(None);
+            }
+        })
     };
 
     let ext = match props.media_type.as_str() {
@@ -117,9 +288,31 @@ fn image_viewer(props: &ImageViewerProps) -> Html {
             </div>
             if *expanded {
                 <DismissibleBackdrop class="image-lightbox" on_close={close_lightbox.clone()}>
-                    <div class="image-lightbox-content" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
-                        <img class={classes!(size_fallback)} src={props.src.clone()} alt="Full size image" />
-                        <div class="image-lightbox-controls">
+                    <div
+                        class={classes!("image-lightbox-content", lightbox_drag.is_some().then_some("dragging"))}
+                        onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}
+                        onwheel={on_lightbox_wheel}
+                        onpointerdown={on_lightbox_pointer_down}
+                        onpointermove={on_lightbox_pointer_move}
+                        onpointerup={on_lightbox_pointer_end.clone()}
+                        onpointercancel={on_lightbox_pointer_end}
+                        ondblclick={reset_lightbox.clone()}
+                    >
+                        <img
+                            class={classes!(size_fallback)}
+                            style={lightbox_view.transform()}
+                            src={props.src.clone()}
+                            alt="Full size image"
+                            draggable="false"
+                        />
+                        <div
+                            class="image-lightbox-controls"
+                            onpointerdown={Callback::from(|event: PointerEvent| event.stop_propagation())}
+                            onwheel={Callback::from(|event: WheelEvent| event.stop_propagation())}
+                        >
+                            <button class="image-lightbox-reset" onclick={reset_lightbox}>
+                                { "Reset" }
+                            </button>
                             <a
                                 class="image-lightbox-download"
                                 href={props.src.clone()}
