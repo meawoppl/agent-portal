@@ -1,0 +1,123 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-labelledby="title desc">
+  <title id="title">Compact dashboard headers on mobile</title>
+  <desc id="desc">Before and after mobile dashboard layouts show wrapped header chrome replaced by compact single-row controls and session metadata, leaving more room for the transcript.</desc>
+  <rect width="2000" height="1200" fill="#1a1b26"/>
+  <rect x="50" y="48" width="1900" height="1104" rx="34" fill="#16161e" stroke="#3d4666" stroke-width="3"/>
+
+  <text x="92" y="120" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="54" font-weight="700">More transcript, less mobile dashboard chrome</text>
+  <text x="92" y="168" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="27">The same controls stay available while three wrapping header bands collapse into compact one-row surfaces.</text>
+  <line x1="1000" y1="205" x2="1000" y2="1100" stroke="#3d4666" stroke-width="3" stroke-dasharray="14 16"/>
+
+  <text x="100" y="254" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25" font-weight="700" letter-spacing="4">BEFORE</text>
+  <text x="1080" y="254" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25" font-weight="700" letter-spacing="4">AFTER</text>
+
+  <g transform="translate(170,290)">
+    <rect x="0" y="0" width="660" height="760" rx="44" fill="#1e202e" stroke="#565f89" stroke-width="4"/>
+    <rect x="26" y="24" width="608" height="712" rx="24" fill="#1a1b26" stroke="#3d4666" stroke-width="2"/>
+
+    <rect x="26" y="24" width="608" height="52" rx="24" fill="#f7768e"/>
+    <text x="52" y="58" fill="#16161e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="20" font-weight="700">Update available</text>
+    <rect x="420" y="34" width="188" height="32" rx="9" fill="#16161e"/>
+    <text x="438" y="57" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="16" font-weight="700">Reload v2.15.16</text>
+
+    <rect x="26" y="76" width="608" height="178" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+    <text x="48" y="111" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700">Agent Portal</text>
+    <rect x="48" y="126" width="278" height="38" rx="19" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+    <text x="66" y="151" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="16">Tokens / cost / elapsed</text>
+    <g fill="#1e202e" stroke="#565f89" stroke-width="2">
+      <rect x="48" y="178" width="126" height="38" rx="10"/>
+      <rect x="184" y="178" width="80" height="38" rx="10"/>
+      <rect x="274" y="178" width="86" height="38" rx="10"/>
+      <rect x="370" y="178" width="86" height="38" rx="10"/>
+      <rect x="466" y="178" width="84" height="38" rx="10"/>
+    </g>
+    <text x="64" y="203" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="15">+ Launch</text>
+    <text x="201" y="203" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="15">Admin</text>
+    <text x="290" y="203" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="15">History</text>
+    <text x="385" y="203" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="15">Settings</text>
+    <text x="481" y="203" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="15">Logout</text>
+    <text x="326" y="241" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22">^</text>
+
+    <rect x="26" y="254" width="608" height="70" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+    <text x="48" y="280" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="700">SESSION</text>
+    <rect x="126" y="266" width="482" height="43" rx="10" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+    <text x="146" y="294" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="18">mobile header work</text>
+
+    <rect x="26" y="324" width="608" height="108" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+    <text x="48" y="356" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="19" font-weight="700">mobile header work</text>
+    <g fill="#1e202e" stroke="#565f89" stroke-width="2">
+      <rect x="48" y="370" width="118" height="36" rx="18"/>
+      <rect x="176" y="370" width="130" height="36" rx="18"/>
+      <rect x="316" y="370" width="94" height="36" rx="18"/>
+      <rect x="420" y="370" width="92" height="36" rx="18"/>
+    </g>
+    <text x="68" y="394" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="15">model</text>
+    <text x="196" y="394" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="15">launcher</text>
+    <text x="336" y="394" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="15">queue</text>
+    <text x="440" y="394" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="15">fork</text>
+
+    <rect x="48" y="458" width="564" height="96" rx="18" fill="#1e202e"/>
+    <rect x="48" y="574" width="448" height="76" rx="18" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+    <rect x="48" y="670" width="518" height="42" rx="16" fill="#1e202e"/>
+    <text x="68" y="515" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="19">Only about half the phone remains for chat</text>
+  </g>
+
+  <g transform="translate(1170,290)">
+    <rect x="0" y="0" width="660" height="760" rx="44" fill="#1e202e" stroke="#7aa2f7" stroke-width="4"/>
+    <rect x="26" y="24" width="608" height="712" rx="24" fill="#1a1b26" stroke="#3d4666" stroke-width="2"/>
+
+    <rect x="26" y="24" width="608" height="42" rx="24" fill="#f7768e"/>
+    <rect x="418" y="30" width="190" height="30" rx="9" fill="#16161e"/>
+    <text x="438" y="51" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="700">Reload v2.15.16</text>
+
+    <rect x="26" y="66" width="608" height="54" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+    <g fill="#1e202e" stroke="#565f89" stroke-width="2">
+      <rect x="42" y="77" width="74" height="34" rx="9"/>
+      <rect x="126" y="77" width="78" height="34" rx="9"/>
+      <rect x="214" y="77" width="82" height="34" rx="9"/>
+      <rect x="306" y="77" width="86" height="34" rx="9"/>
+      <rect x="402" y="77" width="82" height="34" rx="9"/>
+    </g>
+    <text x="57" y="100" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="14">+ New</text>
+    <text x="143" y="100" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="14">Admin</text>
+    <text x="230" y="100" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="14">History</text>
+    <text x="321" y="100" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="14">Settings</text>
+    <text x="418" y="100" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="14">Logout</text>
+    <text x="588" y="101" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="20">^</text>
+
+    <rect x="26" y="120" width="608" height="55" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+    <rect x="42" y="130" width="566" height="35" rx="9" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+    <text x="61" y="153" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="17">mobile header work</text>
+
+    <rect x="26" y="175" width="608" height="48" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+    <g fill="#1e202e" stroke="#565f89" stroke-width="2">
+      <rect x="42" y="182" width="108" height="32" rx="16"/>
+      <rect x="160" y="182" width="88" height="32" rx="16"/>
+      <rect x="258" y="182" width="88" height="32" rx="16"/>
+      <rect x="356" y="182" width="80" height="32" rx="16"/>
+    </g>
+    <text x="61" y="203" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="14">model</text>
+    <text x="178" y="203" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="14">queue</text>
+    <text x="277" y="203" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="14">status</text>
+    <text x="375" y="203" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="14">fork</text>
+
+    <rect x="48" y="250" width="564" height="96" rx="18" fill="#1e202e"/>
+    <rect x="48" y="366" width="448" height="76" rx="18" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+    <rect x="48" y="462" width="518" height="86" rx="18" fill="#1e202e"/>
+    <rect x="48" y="568" width="462" height="64" rx="18" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+    <rect x="48" y="652" width="544" height="60" rx="18" fill="#1e202e"/>
+    <text x="68" y="307" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="19">Transcript begins much higher</text>
+  </g>
+
+  <path d="M870 654 C930 654 948 654 982 654" fill="none" stroke="#7aa2f7" stroke-width="7" stroke-linecap="round"/>
+  <path d="M968 640 L992 654 L968 668" fill="none" stroke="#7aa2f7" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <g transform="translate(300,1080)" font-family="Inter, ui-sans-serif, system-ui, sans-serif">
+    <circle cx="0" cy="0" r="13" fill="#9ece6a"/>
+    <text x="24" y="8" fill="#c0caf5" font-size="22" font-weight="700">One-row controls</text>
+    <circle cx="350" cy="0" r="13" fill="#7aa2f7"/>
+    <text x="374" y="8" fill="#c0caf5" font-size="22" font-weight="700">No duplicate labels</text>
+    <circle cx="770" cy="0" r="13" fill="#e0af68"/>
+    <text x="794" y="8" fill="#c0caf5" font-size="22" font-weight="700">Horizontal overflow at tiny widths</text>
+  </g>
+</svg>
