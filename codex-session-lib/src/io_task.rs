@@ -905,6 +905,10 @@ pub(crate) async fn codex_io_task(
                                 }
                             }
                         }
+                        IoCommand::Shutdown { completed } => {
+                            let _ = completed.send(());
+                            break;
+                        }
                     }
                 }
             }
@@ -950,6 +954,10 @@ pub(crate) async fn codex_io_task(
                     }
                     Some(IoCommand::Interrupt) => {
                         // No active turn — nothing to interrupt.
+                    }
+                    Some(IoCommand::Shutdown { completed }) => {
+                        let _ = completed.send(());
+                        break;
                     }
                     None => {
                         let _ = event_tx.send(IoEvent::Exited { code: 0 });
@@ -1058,6 +1066,10 @@ pub(crate) async fn codex_io_task(
                     }
                     Some(IoCommand::Interrupt) => {
                         // No active turn — nothing to interrupt.
+                    }
+                    Some(IoCommand::Shutdown { completed }) => {
+                        let _ = completed.send(());
+                        break;
                     }
                     None => {
                         let _ = event_tx.send(IoEvent::Exited { code: 0 });

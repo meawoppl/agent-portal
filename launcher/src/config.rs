@@ -193,6 +193,7 @@ fn plugin_skill_context_from_config(
             let reminder_agent = match agent_type {
                 AgentType::Codex => Some("codex"),
                 AgentType::Muse => Some("muse"),
+                AgentType::Antigravity => Some("antigravity"),
                 AgentType::Claude => None,
             };
             if reminder_agent.is_some_and(|agent| skill_applies_to(&skill, agent)) {
@@ -625,7 +626,7 @@ mod tests {
 [[skills]]
 name = "manifest-layout"
 path = "nested/layout/SKILL.md"
-agents = ["claude", "codex"]
+agents = ["claude", "codex", "antigravity"]
 "#,
         )
         .unwrap();
@@ -687,6 +688,13 @@ description: Route KiCad PCB layouts.
 
         let context = plugin_skill_context_from_config(&config, &generated_root, AgentType::Muse);
         assert!(context.reminder.is_none());
+
+        let context =
+            plugin_skill_context_from_config(&config, &generated_root, AgentType::Antigravity);
+        assert!(context.claude_plugin_dirs.is_empty());
+        assert!(context.cleanup_dir.is_none());
+        let reminder = context.reminder.unwrap();
+        assert!(reminder.contains("`kicad-pcb:kicad-layout`"));
     }
 
     #[test]

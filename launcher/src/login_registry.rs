@@ -81,6 +81,12 @@ impl LoginRegistry {
             AgentType::Muse => {
                 return Err("muse sign-in is not wired up yet".to_string());
             }
+            AgentType::Antigravity => {
+                return Err(
+                    "antigravity sign-in uses GEMINI_API_KEY or Vertex ADC; no interactive sign-in flow"
+                        .to_string(),
+                );
+            }
         };
         self.flows.insert(flow_id, Arc::new(session));
         Ok((presentable, interaction))

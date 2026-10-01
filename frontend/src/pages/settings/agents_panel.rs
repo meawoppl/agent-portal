@@ -37,10 +37,11 @@ pub(super) struct InstallTarget {
 }
 
 /// Columns of the matrix, in display order. Mirrors `AgentType`.
-pub(super) const AGENTS: [(AgentType, &str); 3] = [
+pub(super) const AGENTS: [(AgentType, &str); 4] = [
     (AgentType::Claude, "Claude"),
     (AgentType::Codex, "Codex"),
     (AgentType::Muse, "Muse"),
+    (AgentType::Antigravity, "Antigravity"),
 ];
 
 /// Per-launcher probe outcome. The whole map is set once, after every probe
@@ -129,7 +130,9 @@ fn sign_in_button(
     // launcher-side interactive device-flow driver is not wired yet. Do not
     // offer a button that can only fail; host/env login remains visible after
     // Refresh and Claude/Codex retain the complete in-portal flow.
-    if agent == AgentType::Muse || matches!(login, AgentLoginStatus::LoggedIn { .. }) {
+    if matches!(agent, AgentType::Muse | AgentType::Antigravity)
+        || matches!(login, AgentLoginStatus::LoggedIn { .. })
+    {
         return None;
     }
     let target = LoginTarget {
@@ -205,13 +208,24 @@ mod tests {
     }
 
     #[test]
-    fn matrix_covers_every_agent_without_offering_broken_muse_login() {
-        assert_eq!(AGENTS.len(), 3);
+    fn matrix_covers_every_agent_without_offering_broken_preview_logins() {
+        assert_eq!(AGENTS.len(), 4);
         assert!(AGENTS.iter().any(|(agent, _)| *agent == AgentType::Muse));
+        assert!(AGENTS
+            .iter()
+            .any(|(agent, _)| *agent == AgentType::Antigravity));
         assert!(sign_in_button(
             &AgentLoginStatus::LoggedOut,
             AgentType::Muse,
             "Muse",
+            Uuid::nil(),
+            &Callback::noop(),
+        )
+        .is_none());
+        assert!(sign_in_button(
+            &AgentLoginStatus::LoggedOut,
+            AgentType::Antigravity,
+            "Antigravity",
             Uuid::nil(),
             &Callback::noop(),
         )

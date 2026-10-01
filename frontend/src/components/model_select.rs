@@ -14,6 +14,12 @@ use shared::AgentType;
 use web_sys::HtmlSelectElement;
 use yew::prelude::*;
 
+const ANTIGRAVITY_MODELS: &[(&str, &str)] = &[
+    ("gemini-flash-latest", "Gemini Flash latest"),
+    ("gemini-2.5-flash", "Gemini 2.5 Flash"),
+    ("gemini-2.5-pro", "Gemini 2.5 Pro"),
+];
+
 /// Build the CLI args that select `model_value` for the given agent. An empty
 /// value means "agent default" and emits no args. Mirrors the mapping used when
 /// launching a session so the two paths stay identical.
@@ -24,7 +30,9 @@ pub fn model_cli_args(agent_type: AgentType, model_value: &str) -> Vec<String> {
     match agent_type {
         AgentType::Claude => vec!["--model".to_string(), model_value.to_string()],
         AgentType::Codex => vec!["-c".to_string(), format!("model={model_value}")],
-        AgentType::Muse => vec!["--model".to_string(), model_value.to_string()],
+        AgentType::Muse | AgentType::Antigravity => {
+            vec!["--model".to_string(), model_value.to_string()]
+        }
     }
 }
 
@@ -40,6 +48,10 @@ fn model_catalog(agent_type: AgentType) -> Vec<(&'static str, &'static str, bool
         AgentType::Muse => MuseModel::known()
             .iter()
             .map(|m| (m.cli_arg(), m.display_name(), false))
+            .collect(),
+        AgentType::Antigravity => ANTIGRAVITY_MODELS
+            .iter()
+            .map(|(cli, name)| (*cli, *name, false))
             .collect(),
         AgentType::Codex => CodexModel::known()
             .iter()
@@ -74,7 +86,7 @@ pub fn extract_model_arg(args: &[String], agent_type: AgentType) -> (Option<Stri
     let mut i = 0;
     while i < args.len() {
         let matched: Option<String> = match agent_type {
-            AgentType::Claude | AgentType::Muse => {
+            AgentType::Claude | AgentType::Muse | AgentType::Antigravity => {
                 if args[i] == "--model"
                     && i + 1 < args.len()
                     && is_known_model(agent_type, &args[i + 1])
@@ -158,7 +170,7 @@ pub fn model_select(props: &ModelSelectProps) -> Html {
                 </optgroup>
             </>
         },
-        AgentType::Codex | AgentType::Muse => html! {
+        AgentType::Codex | AgentType::Muse | AgentType::Antigravity => html! {
             { for catalog.iter().map(|(cli, label, _)| option(cli, label)) }
         },
     };
@@ -199,6 +211,10 @@ mod tests {
         MuseModel::known()[0].cli_arg().to_string()
     }
 
+    fn a_known_antigravity_model() -> String {
+        ANTIGRAVITY_MODELS[0].0.to_string()
+    }
+
     #[test]
     fn extract_claude_model_and_strips_it() {
         let model = a_known_claude_model();
@@ -224,6 +240,17 @@ mod tests {
         let model = a_known_muse_model();
         let (found, rest) =
             extract_model_arg(&args(&["--model", &model, "--verbose"]), AgentType::Muse);
+        assert_eq!(found.as_deref(), Some(model.as_str()));
+        assert_eq!(rest, args(&["--verbose"]));
+    }
+
+    #[test]
+    fn extract_antigravity_model_and_strips_it() {
+        let model = a_known_antigravity_model();
+        let (found, rest) = extract_model_arg(
+            &args(&["--model", &model, "--verbose"]),
+            AgentType::Antigravity,
+        );
         assert_eq!(found.as_deref(), Some(model.as_str()));
         assert_eq!(rest, args(&["--verbose"]));
     }
@@ -287,6 +314,14 @@ mod tests {
         assert_eq!(found.as_deref(), Some(muse.as_str()));
         assert!(rest.is_empty());
 
+        let antigravity = a_known_antigravity_model();
+        let (found, rest) = extract_model_arg(
+            &model_cli_args(AgentType::Antigravity, &antigravity),
+            AgentType::Antigravity,
+        );
+        assert_eq!(found.as_deref(), Some(antigravity.as_str()));
+        assert!(rest.is_empty());
+
         let codex = a_known_codex_model();
         let (found, rest) =
             extract_model_arg(&model_cli_args(AgentType::Codex, &codex), AgentType::Codex);
@@ -299,5 +334,6 @@ mod tests {
         assert!(model_cli_args(AgentType::Claude, "").is_empty());
         assert!(model_cli_args(AgentType::Codex, "").is_empty());
         assert!(model_cli_args(AgentType::Muse, "").is_empty());
+        assert!(model_cli_args(AgentType::Antigravity, "").is_empty());
     }
 }

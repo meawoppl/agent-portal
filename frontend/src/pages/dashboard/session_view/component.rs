@@ -1171,7 +1171,10 @@ impl Component for SessionView {
                     <span class={status_class}>{ ctx.props().session.status.as_str() }</span>
                     if ctx.props().session.my_role == shared::SessionRole::Owner
                         && ctx.props().session.launcher_id.is_some()
-                        && ctx.props().session.agent_type != shared::AgentType::Muse
+                        && !matches!(
+                            ctx.props().session.agent_type,
+                            shared::AgentType::Muse | shared::AgentType::Antigravity
+                        )
                     {
                         <button
                             type="button"

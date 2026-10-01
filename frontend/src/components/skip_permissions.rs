@@ -16,6 +16,7 @@ const CODEX_SKIP_PERMISSIONS_ARGS: &[&str] = &[
     "sandbox_mode=danger-full-access",
 ];
 const MUSE_SKIP_PERMISSIONS_ARGS: &[&str] = &["--yolo"];
+const ANTIGRAVITY_SKIP_PERMISSIONS_ARGS: &[&str] = &[];
 
 /// CLI arguments appended when the user checks the skip-permissions box.
 pub fn skip_permissions_args(agent_type: AgentType) -> &'static [&'static str] {
@@ -23,6 +24,7 @@ pub fn skip_permissions_args(agent_type: AgentType) -> &'static [&'static str] {
         AgentType::Claude => CLAUDE_SKIP_PERMISSIONS_ARGS,
         AgentType::Codex => CODEX_SKIP_PERMISSIONS_ARGS,
         AgentType::Muse => MUSE_SKIP_PERMISSIONS_ARGS,
+        AgentType::Antigravity => ANTIGRAVITY_SKIP_PERMISSIONS_ARGS,
     }
 }
 
@@ -32,6 +34,7 @@ pub fn skip_permissions_label(agent_type: AgentType) -> &'static str {
         AgentType::Claude => "--dangerously-skip-permissions",
         AgentType::Codex => "-c approval_policy=never -c sandbox_mode=danger-full-access",
         AgentType::Muse => "YOLO mode (--yolo: disables approval and sandbox)",
+        AgentType::Antigravity => "read-only preview (no permission widening)",
     }
 }
 
@@ -122,13 +125,22 @@ mod tests {
 
     #[test]
     fn strip_recognizes_exactly_what_skip_permissions_args_emits() {
-        for agent_type in [AgentType::Claude, AgentType::Codex, AgentType::Muse] {
+        for agent_type in [
+            AgentType::Claude,
+            AgentType::Codex,
+            AgentType::Muse,
+            AgentType::Antigravity,
+        ] {
             let emitted: Vec<String> = skip_permissions_args(agent_type)
                 .iter()
                 .map(|a| a.to_string())
                 .collect();
             let (has_skip, other_args) = strip_skip_permissions_args(&emitted, agent_type);
-            assert!(has_skip, "{agent_type:?} args should be recognized");
+            assert_eq!(
+                has_skip,
+                !emitted.is_empty(),
+                "{agent_type:?} args should be recognized when it emits args"
+            );
             assert!(other_args.is_empty(), "{agent_type:?} args fully stripped");
         }
     }

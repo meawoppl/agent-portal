@@ -319,6 +319,7 @@ pub(crate) fn is_awaiting(
                 | AgentFrameKind::CodexItemUpdated
                 | AgentFrameKind::CodexItemCompleted
                 | AgentFrameKind::MuseRecord
+                | AgentFrameKind::AntigravityEvent
         ) {
             return false;
         }
@@ -349,8 +350,8 @@ pub(super) fn parse_iso_ms_utc(iso: &str) -> f64 {
 /// Tries `shared::ClaudeOutput` first (the typed Claude wire shape, where
 /// system messages disambiguate into the four sparkline range-marker tags),
 /// then falls back to the local lenient `ClaudeMessage`. If both fail, tries
-/// `CodexEvent` and finally `muse_record` shapes, mapping each into a
-/// shared [`ActivityTag`] so Codex and Muse sessions get colored sparklines
+/// `CodexEvent`, `muse_record`, and Antigravity preview shapes, mapping each into a
+/// shared [`ActivityTag`] so non-Claude sessions get colored sparklines
 /// with the same palette as Claude (assistant=blue, result=orange, error=red).
 /// Returns [`ActivityTag::Unknown`] when nothing parses.
 pub(super) fn classify_output_msg_type(output: &str) -> ActivityTag {
@@ -389,7 +390,50 @@ pub(super) fn classify_output_msg_type(output: &str) -> ActivityTag {
     if let Some(tag) = classify_muse_event(output) {
         return tag;
     }
+    if let Some(tag) = classify_antigravity_event(output) {
+        return tag;
+    }
     ActivityTag::Unknown
+}
+
+fn classify_antigravity_event(output: &str) -> Option<ActivityTag> {
+    let value: serde_json::Value = serde_json::from_str(output).ok()?;
+    match value.get("type").and_then(serde_json::Value::as_str) {
+        Some("antigravity_turn_completed") => {
+            if value
+                .get("is_error")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+            {
+                Some(ActivityTag::Error)
+            } else {
+                Some(ActivityTag::Result)
+            }
+        }
+        Some("antigravity_event") => match value.get("event").and_then(serde_json::Value::as_str) {
+            Some("trajectory_state_update")
+                if value
+                    .get("state")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|state| {
+                        state.contains("ERROR") || state.contains("CANCELLED")
+                    }) =>
+            {
+                Some(ActivityTag::Error)
+            }
+            Some("step_update")
+                if value
+                    .get("error_message")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|message| !message.is_empty()) =>
+            {
+                Some(ActivityTag::Error)
+            }
+            Some("step_update" | "trajectory_state_update") => Some(ActivityTag::Assistant),
+            _ => Some(ActivityTag::Suppressed),
+        },
+        _ => None,
+    }
 }
 
 /// Typed envelope for the frontend's `muse_record` wire frame.
@@ -1243,6 +1287,21 @@ mod tests {
         assert_eq!(classify_output_msg_type(json), ActivityTag::Unknown);
     }
 
+    #[test]
+    fn classify_antigravity_step_update_is_assistant() {
+        let json = r#"{"type":"antigravity_event","event":"step_update","step_kind":"message","text":"working"}"#;
+        assert_eq!(classify_output_msg_type(json), ActivityTag::Assistant);
+    }
+
+    #[test]
+    fn classify_antigravity_terminal_is_result_or_error() {
+        let ok =
+            r#"{"type":"antigravity_turn_completed","is_error":false,"stop_reason":"complete"}"#;
+        let err = r#"{"type":"antigravity_turn_completed","is_error":true,"stop_reason":"failed"}"#;
+        assert_eq!(classify_output_msg_type(ok), ActivityTag::Result);
+        assert_eq!(classify_output_msg_type(err), ActivityTag::Error);
+    }
+
     // --- classify_muse_event: Muse ticks reuse Claude palette ---
 
     #[test]
@@ -1519,6 +1578,23 @@ mod tests {
             r#"{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":2}}"#.to_string(),
         ];
         assert!(is_awaiting(msgs.iter(), shared::AgentType::Codex));
+    }
+
+    #[test]
+    fn is_awaiting_true_for_antigravity_turn_completed() {
+        let msgs = [
+            r#"{"type":"antigravity_event","event":"step_update","step_kind":"message","text":"working"}"#.to_string(),
+            r#"{"type":"antigravity_turn_completed","is_error":false,"stop_reason":"complete"}"#.to_string(),
+        ];
+        assert!(is_awaiting(msgs.iter(), shared::AgentType::Antigravity));
+    }
+
+    #[test]
+    fn is_awaiting_false_for_antigravity_working_event() {
+        let msgs = [
+            r#"{"type":"antigravity_event","event":"step_update","step_kind":"message","text":"working"}"#.to_string(),
+        ];
+        assert!(!is_awaiting(msgs.iter(), shared::AgentType::Antigravity));
     }
 
     // --- extract_user_text ---

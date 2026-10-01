@@ -23,6 +23,9 @@ pub enum AgentFrame {
     /// the task-tree reducer consumes `serde_json::Value` directly, so a
     /// typed intermediate here would be parsed only to be re-serialized.
     Muse(serde_json::Value),
+    /// One Agent Portal-authored Antigravity preview frame (`type:
+    /// "antigravity_event"` or `"antigravity_turn_completed"`).
+    Antigravity(serde_json::Value),
     RawJson,
 }
 
@@ -57,6 +60,8 @@ pub enum AgentFrameKind {
     MuseRecord,
     MuseRunTerminalCompleted,
     MuseRunTerminalFailed,
+    AntigravityEvent,
+    AntigravityTurnCompleted,
     RawJson,
 }
 
@@ -69,6 +74,7 @@ impl AgentFrameKind {
                 | Self::CodexTurnFailed
                 | Self::MuseRunTerminalCompleted
                 | Self::MuseRunTerminalFailed
+                | Self::AntigravityTurnCompleted
         )
     }
 }
@@ -78,6 +84,7 @@ pub enum FrameRenderer {
     Claude,
     Codex,
     Muse,
+    Antigravity,
     RawJson,
 }
 
@@ -132,6 +139,16 @@ impl AgentFrame {
             }
         }
 
+        if agent_type == shared::AgentType::Antigravity {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(json) {
+                if let Some("antigravity_event" | "antigravity_turn_completed") =
+                    value.get("type").and_then(|t| t.as_str())
+                {
+                    return Self::Antigravity(value);
+                }
+            }
+        }
+
         Self::RawJson
     }
 
@@ -147,6 +164,10 @@ impl AgentFrame {
                     _ => AgentFrameKind::MuseRecord,
                 }
             }
+            Self::Antigravity(value) => match value.get("type").and_then(|v| v.as_str()) {
+                Some("antigravity_turn_completed") => AgentFrameKind::AntigravityTurnCompleted,
+                _ => AgentFrameKind::AntigravityEvent,
+            },
             Self::RawJson => AgentFrameKind::RawJson,
         }
     }
@@ -182,6 +203,9 @@ impl FrameRenderer {
             AgentFrameKind::MuseRecord
             | AgentFrameKind::MuseRunTerminalCompleted
             | AgentFrameKind::MuseRunTerminalFailed => Self::Muse,
+            AgentFrameKind::AntigravityEvent | AgentFrameKind::AntigravityTurnCompleted => {
+                Self::Antigravity
+            }
             AgentFrameKind::RawJson => Self::RawJson,
         }
     }
@@ -338,5 +362,39 @@ mod tests {
             AgentFrameRegistry::renderer_for(&frame),
             FrameRenderer::RawJson
         );
+    }
+
+    #[test]
+    fn parses_antigravity_frames_only_for_antigravity_sessions() {
+        let json = serde_json::json!({
+            "type": "antigravity_event",
+            "event": "step_update",
+            "step_kind": "message",
+            "text": "hello"
+        });
+
+        let antigravity = parse_for(shared::AgentType::Antigravity, json.clone());
+        assert_eq!(antigravity.kind(), AgentFrameKind::AntigravityEvent);
+        assert_eq!(
+            AgentFrameRegistry::renderer_for(&antigravity),
+            FrameRenderer::Antigravity
+        );
+
+        let claude = parse_for(shared::AgentType::Claude, json);
+        assert_eq!(claude.kind(), AgentFrameKind::RawJson);
+    }
+
+    #[test]
+    fn antigravity_turn_completed_is_a_terminator() {
+        let frame = parse_for(
+            shared::AgentType::Antigravity,
+            serde_json::json!({
+                "type": "antigravity_turn_completed",
+                "is_error": false
+            }),
+        );
+
+        assert_eq!(frame.kind(), AgentFrameKind::AntigravityTurnCompleted);
+        assert!(frame.kind().is_terminator());
     }
 }

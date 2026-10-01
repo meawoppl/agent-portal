@@ -92,6 +92,10 @@ pub async fn muse_io_task(
             IoCommand::Interrupt => {
                 tracing::debug!("muse: interrupt outside an active turn — no child to kill");
             }
+            IoCommand::Shutdown { completed } => {
+                let _ = completed.send(());
+                break;
+            }
         }
     }
 }

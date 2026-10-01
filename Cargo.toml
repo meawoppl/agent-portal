@@ -9,6 +9,7 @@ members = [
     "claude-session-lib",
     "codex-session-lib",
     "muse-session-lib",
+    "antigravity-session-lib",
     "launcher",
     "portal-auth",
     "portal-stt",
@@ -24,7 +25,7 @@ resolver = "2"
 # `major.minor.{git commit count}`, derived at build time by `shared/build.rs`
 # so no PR ever edits a version line (issue #1096). Runtime version =
 # `shared::VERSION`.
-version = "2.14.15"
+version = "2.15.15"
 edition = "2021"
 authors = ["Matthew Goodman <d3a6d0cec0c16f3e@inboxnegative.com>"]
 
@@ -81,6 +82,7 @@ claude-codes = { version = "2.1.287", default-features = false, features = ["typ
 # Muse CLI integration
 muse-codes = { version = "1.4.3", default-features = false, features = ["types"] }
 codex-codes = { version = "0.159.3", default-features = false, features = ["types"] }
+antigravity-codes = { version = "0.1.20", default-features = false, features = ["types"] }
 
 # Web Push (VAPID + RFC8291 encryption). `default-features = false` drops the
 # bundled HTTP clients (isahc/libcurl and hyper) — we build the message here and

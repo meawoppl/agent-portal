@@ -270,6 +270,20 @@
 .pill-watermark.claude { background-image: url('/anthropic-mark.svg'); }
 .pill-watermark.codex  { background-image: url('/openai-mark.png'); }
 
+.pill-watermark.antigravity {
+    color: #bb9af7;
+    display: grid;
+    font-family: monospace;
+    font-size: 46px;
+    font-weight: 700;
+    line-height: 1;
+    place-items: center;
+}
+
+.pill-watermark.antigravity::before {
+    content: "A";
+}
+
 /* Muse watermark 30% larger (64×1.3 = 83.2) — recentered so horizontal center stays at x=16 (left = 16 - 83.2/2 = -25.6) */
 .pill-watermark.muse {
     background-image: url('/meta-mark.svg');
@@ -580,6 +594,16 @@
 .agent-broadcast-orb.codex {
     --pl-core: #b9a8ff;
     --pl-edge: #5b57fb;
+}
+
+.agent-broadcast-orb.muse {
+    --pl-core: #b7d9ff;
+    --pl-edge: #7aa2f7;
+}
+
+.agent-broadcast-orb.antigravity {
+    --pl-core: #e7d7ff;
+    --pl-edge: #bb9af7;
 }
 
 .agent-broadcast-orb {

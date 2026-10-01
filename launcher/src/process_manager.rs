@@ -5,6 +5,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
+use antigravity_session_lib::AntigravityAgent;
 use claude_session_lib::proxy_session::{
     ClaudeConversationIdSink, CodexThreadIdSink, MediaDisplaySink,
 };
@@ -291,6 +292,9 @@ impl ProcessManager {
                     }
                 }
                 shared::AgentType::Muse => anyhow::bail!("Muse sessions cannot be forked"),
+                shared::AgentType::Antigravity => {
+                    anyhow::bail!("Antigravity sessions cannot be forked")
+                }
             }
         }
 
@@ -440,6 +444,7 @@ enum AnySession {
     Claude(Session<ClaudeAgent>),
     Codex(Session<CodexAgent>),
     Muse(Session<MuseAgent>),
+    Antigravity(Session<AntigravityAgent>),
 }
 
 impl AnySession {
@@ -450,6 +455,9 @@ impl AnySession {
             }
             shared::AgentType::Codex => Ok(Self::Codex(Session::<CodexAgent>::new(config).await?)),
             shared::AgentType::Muse => Ok(Self::Muse(Session::<MuseAgent>::new(config).await?)),
+            shared::AgentType::Antigravity => Ok(Self::Antigravity(
+                Session::<AntigravityAgent>::new(config).await?,
+            )),
         }
     }
 
@@ -458,6 +466,7 @@ impl AnySession {
             Self::Claude(s) => s.stop().await,
             Self::Codex(s) => s.stop().await,
             Self::Muse(s) => s.stop().await,
+            Self::Antigravity(s) => s.stop().await,
         }
     }
 }
@@ -599,6 +608,9 @@ async fn run_session_task(
                         run_connection_loop(&config, s, input_tx, &mut input_rx).await
                     }
                     AnySession::Muse(s) => {
+                        run_connection_loop(&config, s, input_tx, &mut input_rx).await
+                    }
+                    AnySession::Antigravity(s) => {
                         run_connection_loop(&config, s, input_tx, &mut input_rx).await
                     }
                 }
@@ -791,10 +803,12 @@ fn plugin_skill_launch_policy(
                 reminder: None,
             }
         }
-        shared::AgentType::Codex | shared::AgentType::Muse => PluginSkillLaunchPolicy {
-            extra_args,
-            reminder,
-        },
+        shared::AgentType::Codex | shared::AgentType::Muse | shared::AgentType::Antigravity => {
+            PluginSkillLaunchPolicy {
+                extra_args,
+                reminder,
+            }
+        }
     }
 }
 
@@ -832,8 +846,12 @@ mod tests {
     }
 
     #[test]
-    fn codex_and_muse_get_skill_reminders_not_claude_plugin_dirs() {
-        for agent_type in [shared::AgentType::Codex, shared::AgentType::Muse] {
+    fn non_claude_agents_get_skill_reminders_not_claude_plugin_dirs() {
+        for agent_type in [
+            shared::AgentType::Codex,
+            shared::AgentType::Muse,
+            shared::AgentType::Antigravity,
+        ] {
             let policy = plugin_skill_launch_policy(
                 agent_type,
                 vec!["--some-arg".to_string()],

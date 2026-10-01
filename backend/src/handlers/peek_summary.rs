@@ -76,6 +76,7 @@ fn summarize(agent_type: &str, role: &str, content: &str) -> (&'static str, Stri
         "claude" => summarize_claude(content),
         "codex" => summarize_codex(content),
         "muse" => summarize_muse(content),
+        "antigravity" => summarize_antigravity(content),
         _ => fallback(content),
     }
 }
@@ -269,6 +270,47 @@ fn summarize_muse(content: &str) -> (&'static str, String) {
         ),
         Ok(MusePayload::ModelConfigured(m)) => ("system", format!("model: {}", m.model_id)),
         _ => ("system", format!("muse {}", record.payload_type)),
+    }
+}
+
+fn summarize_antigravity(content: &str) -> (&'static str, String) {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(content) else {
+        return summarize_local_or_fallback(content);
+    };
+    match value.get("type").and_then(|value| value.as_str()) {
+        Some("antigravity_turn_completed") => {
+            let stop = value
+                .get("stop_reason")
+                .and_then(|value| value.as_str())
+                .unwrap_or("complete");
+            if value
+                .get("is_error")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false)
+            {
+                ("turn_end", format!("turn failed: {stop}"))
+            } else {
+                ("turn_end", format!("turn complete: {stop}"))
+            }
+        }
+        Some("antigravity_event") => {
+            let event = value
+                .get("event")
+                .and_then(|value| value.as_str())
+                .unwrap_or("event");
+            if let Some(text) = value.get("text").and_then(|value| value.as_str()) {
+                return ("text", excerpt(text));
+            }
+            if let Some(summary) = value
+                .get("error_message")
+                .and_then(|value| value.as_str())
+                .filter(|message| !message.is_empty())
+            {
+                return ("error", format!("error: {}", excerpt(summary)));
+            }
+            ("system", format!("antigravity {event}"))
+        }
+        _ => summarize_local_or_fallback(content),
     }
 }
 

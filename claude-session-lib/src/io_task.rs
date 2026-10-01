@@ -636,6 +636,10 @@ pub(crate) async fn claude_io_task(
                         // the CLI side when no turn is active.
                         client.send(&interrupt_input()).await.map(|_| ())
                     }
+                    IoCommand::Shutdown { completed } => {
+                        let _ = completed.send(());
+                        break;
+                    }
                 };
                 if let Err(e) = result {
                     let _ = event_tx.send(IoEvent::Error(SessionError::Agent(e.to_string())));
@@ -986,6 +990,10 @@ pub(crate) async fn claude_io_task(
                                                 SessionError::Agent(e.to_string()),
                                             ));
                                         }
+                                    }
+                                    IoCommand::Shutdown { completed } => {
+                                        let _ = completed.send(());
+                                        break;
                                     }
                                 }
                             }

@@ -445,9 +445,16 @@ fn edit_stack_output_releases_next(agent_type: &str, content: &serde_json::Value
             .get("payload_type")
             .and_then(|value| value.as_str())
             .is_some_and(|kind| kind.starts_with("run.terminal.")),
+        "antigravity" => matches!(kind, Some("antigravity_turn_completed")),
         _ => matches!(
             kind,
-            Some("result" | "turn.completed" | "turn.failed" | "error")
+            Some(
+                "result"
+                    | "turn.completed"
+                    | "turn.failed"
+                    | "antigravity_turn_completed"
+                    | "error"
+            )
         ),
     }
 }

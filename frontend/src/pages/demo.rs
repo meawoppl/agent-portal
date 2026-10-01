@@ -777,10 +777,11 @@ fn radio_messages(
     ];
 
     match own_agent_type {
-        // The demo transcript is hand-authored per agent; Muse has no
+        // The demo transcript is hand-authored per agent; Muse and
+        // Antigravity have no
         // scripted cards yet, so it reuses the Claude script (the demo is
         // illustrative, not a protocol fixture).
-        AgentType::Claude | AgentType::Muse => {
+        AgentType::Claude | AgentType::Muse | AgentType::Antigravity => {
             messages.push(assistant_text(
                 "2026-07-20T04:01:15.000000Z",
                 "Claude Sonnet 4.5",

@@ -287,6 +287,46 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
                 };
             }
 
+            if *category == GroupCategory::Antigravity {
+                let parts: Vec<Html> = messages
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, message)| {
+                        let content = dispatch::render_identity_group_part(
+                            message,
+                            props.agent_type,
+                            props.session_id,
+                            &props.continuation_statuses,
+                            props.on_schedule_continuation.clone(),
+                        )?;
+                        let key = message
+                            .raw_iso()
+                            .map(|iso| format!("a-{iso}"))
+                            .unwrap_or_else(|| format!("a{i}"));
+                        Some(html! { <div {key} class="grouped-message-part">{ content }</div> })
+                    })
+                    .collect();
+                if parts.is_empty() {
+                    return html! {};
+                }
+                let visible_count = parts.len();
+                return html! {
+                    <div class="claude-message antigravity-message" title={ts.unwrap_or_default()}>
+                        <div class="message-header">
+                            <span class={classes!("message-type-badge", badge_class.clone())}>{ label }</span>
+                            if visible_count > 1 {
+                                <span class="message-count" title={format!("{} consecutive events", visible_count)}>
+                                    { format!("× {}", visible_count) }
+                                </span>
+                            }
+                        </div>
+                        <div class="message-body grouped-message-body">
+                            { for parts.into_iter() }
+                        </div>
+                    </div>
+                };
+            }
+
             // A run of reconnect notices collapses to one line.
             if *category == GroupCategory::Portal {
                 if let Some(notices) = reconnect_notice_run(messages) {
@@ -305,7 +345,9 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
                 GroupCategory::Portal => "portal-message",
                 GroupCategory::Assistant | GroupCategory::Codex => "assistant-message",
                 // Handled above with an early return; arm kept for exhaustiveness.
-                GroupCategory::Thinking | GroupCategory::Muse => "assistant-message",
+                GroupCategory::Thinking | GroupCategory::Muse | GroupCategory::Antigravity => {
+                    "assistant-message"
+                }
             };
             let visible = visible_group_indices(*category, messages);
             // Render each member first, dropping the ones that produce nothing
