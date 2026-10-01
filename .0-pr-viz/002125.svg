@@ -25,7 +25,7 @@
     <rect x="70" y="280" width="830" height="150" rx="18" fill="#1a1b26" stroke="#f7768e" stroke-width="3"/>
     <text x="100" y="324" fill="#f7768e" font-size="26" font-weight="700">Local copy in component.rs</text>
     <text x="100" y="365" fill="#c0caf5" font-size="23" font-family="monospace">fn truncate_chars(value, max)</text>
-    <text x="100" y="399" fill="#c0caf5" font-size="23" font-family="monospace">take(max) then push('…'): up to max + 1</text>
+    <text x="100" y="399" fill="#c0caf5" font-size="23" font-family="monospace">take(max) then push('...'): up to max + 1</text>
 
     <rect x="70" y="480" width="830" height="160" rx="18" fill="#1a1b26" stroke="#f7768e" stroke-width="3"/>
     <text x="100" y="524" fill="#f7768e" font-size="26" font-weight="700">Two previews fed by the copy</text>
@@ -45,7 +45,7 @@
     <rect x="1100" y="280" width="780" height="150" rx="18" fill="#1a1b26" stroke="#9ece6a" stroke-width="3"/>
     <text x="1130" y="324" fill="#9ece6a" font-size="26" font-weight="700">One shared helper</text>
     <text x="1130" y="365" fill="#c0caf5" font-size="23" font-family="monospace">shared::strings::truncate_with_ellipsis</text>
-    <text x="1130" y="399" fill="#c0caf5" font-size="23" font-family="monospace">take(MAX - 1) then push('…'): at most MAX</text>
+    <text x="1130" y="399" fill="#c0caf5" font-size="23" font-family="monospace">take(MAX - 1) then push('...'): at most MAX</text>
 
     <rect x="1100" y="480" width="780" height="160" rx="18" fill="#1a1b26" stroke="#9ece6a" stroke-width="3"/>
     <text x="1130" y="524" fill="#9ece6a" font-size="26" font-weight="700">Same two previews, routed over</text>
