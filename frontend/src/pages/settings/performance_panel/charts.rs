@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use shared::api::MetricBucket;
 use yew::prelude::*;
 
-use super::model::{bucket_group_key, pair_label, AxisScale, GroupBy, GroupKey};
+use super::model::{bucket_group_key, pair_label, AxisScale, GroupBy, GroupKey, TimeWindow};
 
 const WIDTH: f64 = 960.0;
 const HEIGHT: f64 = 260.0;
@@ -48,8 +48,10 @@ pub(super) fn render_charts(
     group_by: &GroupBy,
     axis_scale: AxisScale,
     show_p95: bool,
+    window: TimeWindow,
 ) -> Html {
     let scoped = scoped_buckets(buckets, group_by);
+    let tokens = cumulative_token_series(buckets, group_by, window);
     let throughput = metric_series(
         &scoped,
         group_by,
@@ -95,12 +97,103 @@ pub(super) fn render_charts(
 
     html! {
         <div class="performance-charts">
+            { render_chart("Total tokens consumed", "tokens", "Selected window", &tokens, axis_scale, false) }
             { render_chart("Throughput", "tok/s", &subtitle, &throughput, axis_scale, show_p95) }
             { render_chart("Time to first token", "seconds", &subtitle, &ttft, axis_scale, show_p95) }
             { render_chart("Cache hit rate", "%", &subtitle, &cache, axis_scale, false) }
             { render_chart("Cost per 1k output tokens", "USD", &subtitle, &cost, axis_scale, false) }
         </div>
     }
+}
+
+/// Build cumulative token traces with an explicit zero at the selected-window
+/// boundary. The total always covers every model; selecting a group narrows the
+/// comparison traces without changing that overall reference line.
+fn cumulative_token_series(
+    buckets: &[MetricBucket],
+    group_by: &GroupBy,
+    window: TimeWindow,
+) -> Vec<Series> {
+    let axis = buckets
+        .iter()
+        .map(|bucket| bucket.bucket_start)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let groups = match group_by {
+        GroupBy::All => buckets
+            .iter()
+            .map(bucket_group_key)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>(),
+        GroupBy::Pair(pair) => vec![pair.clone()],
+    };
+
+    let mut grouped: BTreeMap<(GroupKey, _), i64> = BTreeMap::new();
+    let mut totals: BTreeMap<_, i64> = BTreeMap::new();
+    for bucket in buckets {
+        let tokens = bucket.consumed_tokens();
+        let group_total = grouped
+            .entry((bucket_group_key(bucket), bucket.bucket_start))
+            .or_default();
+        *group_total = group_total.saturating_add(tokens);
+        let bucket_total = totals.entry(bucket.bucket_start).or_default();
+        *bucket_total = bucket_total.saturating_add(tokens);
+    }
+
+    let start_label = format!("{} ago", window.label());
+    let mut series = groups
+        .into_iter()
+        .enumerate()
+        .map(|(index, group)| {
+            let mut cumulative = 0_i64;
+            let mut points = vec![Point {
+                label: start_label.clone(),
+                value: Some(0.0),
+                p95: None,
+            }];
+            points.extend(axis.iter().map(|start| {
+                cumulative = cumulative
+                    .saturating_add(grouped.get(&(group.clone(), *start)).copied().unwrap_or(0));
+                Point {
+                    label: start.format("%m/%d").to_string(),
+                    value: Some(cumulative as f64),
+                    p95: None,
+                }
+            }));
+            Series {
+                label: format!(
+                    "{} · {}",
+                    pair_label(&group),
+                    shared::fmt::format_token_count(cumulative)
+                ),
+                color: series_color(index),
+                points,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let mut cumulative = 0_i64;
+    let mut points = vec![Point {
+        label: start_label,
+        value: Some(0.0),
+        p95: None,
+    }];
+    points.extend(axis.iter().map(|start| {
+        cumulative = cumulative.saturating_add(totals.get(start).copied().unwrap_or(0));
+        Point {
+            label: start.format("%m/%d").to_string(),
+            value: Some(cumulative as f64),
+            p95: None,
+        }
+    }));
+    series.push(Series {
+        label: format!("Total · {}", shared::fmt::format_token_count(cumulative)),
+        color: shared::palette::TEXT_LIGHT.to_string(),
+        points,
+    });
+    series
 }
 
 fn scoped_buckets<'a>(buckets: &'a [MetricBucket], group_by: &GroupBy) -> Vec<&'a MetricBucket> {
@@ -420,6 +513,8 @@ fn grid_lines(min: f64, max: f64, unit: &'static str) -> Vec<Html> {
 fn format_value(value: f64, unit: &str) -> String {
     if unit == "USD" {
         format!("${value:.3}")
+    } else if unit == "tokens" {
+        shared::fmt::format_token_count(value.round() as i64)
     } else if value.abs() >= 100.0 {
         format!("{value:.0}")
     } else if value.abs() >= 10.0 {
@@ -526,5 +621,43 @@ mod tests {
         let unique: BTreeSet<_> = colors.iter().cloned().collect();
 
         assert_eq!(unique.len(), colors.len(), "{colors:?}");
+    }
+
+    #[test]
+    fn cumulative_tokens_start_at_zero_and_include_per_model_and_total() {
+        let first = chrono::Utc.with_ymd_and_hms(2026, 9, 1, 0, 0, 0).unwrap();
+        let second = chrono::Utc.with_ymd_and_hms(2026, 9, 2, 0, 0, 0).unwrap();
+        let opus = MetricBucketBuilder::new(first)
+            .model(Some("claude-opus-test"))
+            .input_sum(100)
+            .output_sum(20)
+            .cache_read_sum(30)
+            .cache_creation_sum(10)
+            .build();
+        let sonnet = MetricBucketBuilder::new(second)
+            .model(Some("claude-sonnet-test"))
+            .input_sum(200)
+            .output_sum(40)
+            .cache_read_sum(60)
+            .cache_creation_sum(20)
+            .build();
+
+        let series = cumulative_token_series(&[opus, sonnet], &GroupBy::All, TimeWindow::Days30);
+
+        assert_eq!(series.len(), 3);
+        assert!(series
+            .iter()
+            .all(|series| series.points[0].value == Some(0.0)));
+        let total = series
+            .iter()
+            .find(|series| series.label.starts_with("Total"))
+            .unwrap();
+        assert_eq!(total.points.last().unwrap().value, Some(480.0));
+        assert!(series
+            .iter()
+            .any(|series| series.label.contains("claude-opus-test")));
+        assert!(series
+            .iter()
+            .any(|series| series.label.contains("claude-sonnet-test")));
     }
 }
