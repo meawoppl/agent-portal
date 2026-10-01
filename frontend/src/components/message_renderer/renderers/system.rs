@@ -179,6 +179,46 @@ fn render_compaction_completed(msg: &shared::SystemMessage) -> Html {
     }
 }
 
+fn is_local_bash_task(task: Option<&shared::TaskStartedMessage>) -> bool {
+    matches!(
+        task.and_then(|t| t.task_type.as_ref()),
+        Some(shared::TaskType::LocalBash)
+    )
+}
+
+fn looks_like_shell_command(text: &str) -> bool {
+    let trimmed = text.trim_start();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    if text.contains(" && ")
+        || text.contains(" || ")
+        || text.contains(" | ")
+        || text.contains("$(")
+        || text.contains("<<")
+    {
+        return true;
+    }
+
+    const SHELL_PREFIXES: &[&str] = &[
+        "./", "bash ", "cargo ", "cat ", "cd ", "cp ", "curl ", "deno ", "docker ", "env ",
+        "find ", "git ", "grep ", "just ", "kubectl ", "ls ", "make ", "mkdir ", "mv ", "node ",
+        "npm ", "pnpm ", "python ", "python3 ", "rg ", "rm ", "sed ", "sh ", "wget ", "yarn ",
+        "zsh ",
+    ];
+
+    text.lines()
+        .map(str::trim_start)
+        .any(|line| SHELL_PREFIXES.iter().any(|prefix| line.starts_with(prefix)))
+}
+
+fn render_task_code(text: &str) -> Html {
+    html! {
+        <pre class="task-code"><code>{ text }</code></pre>
+    }
+}
+
 fn render_task_started(msg: &shared::SystemMessage, timestamp: Option<&str>) -> Html {
     let task = msg.as_task_started();
     let description = task
@@ -186,6 +226,12 @@ fn render_task_started(msg: &shared::SystemMessage, timestamp: Option<&str>) -> 
         .map(|t| t.description.as_str())
         .unwrap_or("Background task");
     let task_id = task.as_ref().map(|t| t.task_id.as_str()).unwrap_or("");
+    let is_bash = is_local_bash_task(task.as_ref());
+    let message_classes = if is_bash {
+        classes!("claude-message", "task-message")
+    } else {
+        classes!("claude-message", "task-message", "compact")
+    };
 
     let type_label = task
         .as_ref()
@@ -199,12 +245,29 @@ fn render_task_started(msg: &shared::SystemMessage, timestamp: Option<&str>) -> 
         .unwrap_or("Task");
 
     html! {
-        <div class="claude-message task-message compact" title={format!("Task ID: {}", task_id)}>
+        <div class={message_classes} title={format!("Task ID: {}", task_id)}>
             <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
                 <span class="message-type-badge task">{ "Task Started" }</span>
                 <span class="task-type-badge">{ type_label }</span>
-                <span class="task-description-inline">{ description }</span>
+                {
+                    if is_bash {
+                        html! {}
+                    } else {
+                        html! { <span class="task-description-inline">{ description }</span> }
+                    }
+                }
             </div>
+            {
+                if is_bash {
+                    html! {
+                        <div class="message-body">
+                            { render_task_code(description) }
+                        </div>
+                    }
+                } else {
+                    html! {}
+                }
+            }
         </div>
     }
 }
@@ -258,13 +321,18 @@ fn render_task_notification(msg: &shared::SystemMessage, timestamp: Option<&str>
             </div>
             {
                 if let Some(summary) = summary_text {
+                    let body = if looks_like_shell_command(summary) {
+                        render_task_code(summary)
+                    } else {
+                        html! { <div class="task-summary">{ summary }</div> }
+                    };
                     html! {
                         <div class="message-body">
                             // Plain text, not markdown: the summary is often the
                             // raw shell command of a background task, where
                             // `$(...)` pairs typeset as math and `![..](..)`
                             // becomes an image.
-                            <div class="task-summary">{ summary }</div>
+                            { body }
                         </div>
                     }
                 } else { html! {} }
@@ -333,6 +401,27 @@ mod tests {
     fn task_tokens_use_one_decimal_k_at_or_above_1000() {
         assert_eq!(compact_labeled(1000, "tokens"), "1.0k tokens");
         assert_eq!(compact_labeled(1500, "tokens"), "1.5k tokens");
+    }
+
+    #[test]
+    fn shell_detection_catches_background_bash_commands() {
+        assert!(looks_like_shell_command(
+            "cd /tmp && sed -n '1,120p' Cargo.toml"
+        ));
+        assert!(looks_like_shell_command(
+            "python3 - <<'PY'\nprint('hello')\nPY"
+        ));
+        assert!(looks_like_shell_command("./scripts/dev.sh build"));
+    }
+
+    #[test]
+    fn shell_detection_leaves_prose_as_prose() {
+        assert!(!looks_like_shell_command(
+            "Reviewed the code and found two call sites that need follow-up."
+        ));
+        assert!(!looks_like_shell_command(
+            "The task completed successfully after checking the relevant files."
+        ));
     }
 
     #[test]
