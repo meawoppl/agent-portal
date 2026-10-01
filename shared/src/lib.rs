@@ -156,6 +156,7 @@ pub mod model_version;
 pub use model_version::{compact_model_version, context_window_for};
 
 // API client types and trait
+pub mod antigravity;
 pub mod api;
 pub mod local_frame;
 pub use api::{
@@ -298,8 +299,11 @@ impl AgentType {
                 args: vec!["-c", "curl -fsSL https://dev.meta.ai/install.sh | bash"],
             },
             AgentType::Antigravity => AgentInstallCommand {
-                program: "python3",
-                args: vec!["-m", "pip", "install", "--user", "google-antigravity"],
+                program: "bash",
+                args: vec![
+                    "-c",
+                    "set -eu; root=\"${XDG_DATA_HOME:-$HOME/.local/share}/agent-portal/antigravity\"; python3 -m venv \"$root/venv\"; \"$root/venv/bin/python\" -m pip install --upgrade google-antigravity; harness=$(\"$root/venv/bin/python\" -c 'import pathlib, google.antigravity as a; print(pathlib.Path(a.__file__).parent / \"bin\" / \"localharness\")'); ln -sf \"$harness\" \"$root/venv/bin/localharness\"",
+                ],
             },
         }
     }

@@ -173,6 +173,7 @@ fn turn_signal_value_is_busy(agent_type: &str, value: &serde_json::Value) -> boo
             .get("payload_type")
             .and_then(|value| value.as_str())
             .is_some_and(|kind| kind.starts_with("run.terminal.")),
+        "antigravity" => kind != Some(shared::antigravity::TURN_COMPLETED_FRAME_TYPE),
         _ => !matches!(
             kind,
             Some("result" | "turn.completed" | "turn.failed" | "error")
@@ -802,6 +803,20 @@ mod tests {
             turn_signal_activity_state(
                 "muse",
                 r#"{"type":"muse_record","payload_type":"run.terminal.completed"}"#
+            ),
+            SessionActivityState::Idle
+        );
+        assert_eq!(
+            turn_signal_activity_state(
+                "antigravity",
+                r#"{"type":"antigravity_step","kind":"message"}"#
+            ),
+            SessionActivityState::Busy
+        );
+        assert_eq!(
+            turn_signal_activity_state(
+                "antigravity",
+                r#"{"type":"antigravity_turn_completed","status":"completed"}"#
             ),
             SessionActivityState::Idle
         );

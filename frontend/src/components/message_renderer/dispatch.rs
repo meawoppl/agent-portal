@@ -94,7 +94,8 @@ pub(crate) fn render_frame(ctx: FrameRenderContext<'_>) -> Html {
             }
             AgentFrame::Codex(_)
             | AgentFrame::Muse(_)
-            | AgentFrame::Antigravity(_)
+            | AgentFrame::AntigravityStep(_)
+            | AgentFrame::AntigravityTurnCompleted(_)
             | AgentFrame::RawJson => render_raw_json(json),
         },
         FrameRenderer::Codex => match frame {
@@ -126,60 +127,49 @@ pub(crate) fn render_frame(ctx: FrameRenderContext<'_>) -> Html {
             _ => html! {},
         },
         FrameRenderer::Antigravity => match frame {
-            AgentFrame::Antigravity(value) => render_antigravity(&value, ctx.turn_metrics),
+            AgentFrame::AntigravityStep(step) => render_antigravity_step(&step),
+            AgentFrame::AntigravityTurnCompleted(terminal) => {
+                render_antigravity_terminal(&terminal, ctx.turn_metrics)
+            }
             _ => html! {},
         },
         FrameRenderer::RawJson => render_raw_json(json),
     }
 }
 
-fn render_antigravity(value: &Value, turn_metrics: Option<&shared::TurnMetrics>) -> Html {
-    if value.get("type").and_then(Value::as_str) == Some("antigravity_turn_completed") {
-        let status = value
-            .get("status")
-            .and_then(Value::as_str)
-            .unwrap_or("completed");
-        return html! {
-            <div class="claude-message result-message">
-                <div class="message-header">
-                    <span class="message-type-badge result">{ "Antigravity" }</span>
-                    <span>{ status }</span>
-                </div>
-                { super::turn_metrics_footer::render_turn_metrics_footer(turn_metrics) }
+fn render_antigravity_terminal(
+    terminal: &shared::antigravity::AntigravityTurnCompletedEnvelope,
+    turn_metrics: Option<&shared::TurnMetrics>,
+) -> Html {
+    html! {
+        <div class="claude-message result-message">
+            <div class="message-header">
+                <span class="message-type-badge result">{ "Antigravity" }</span>
+                <span>{ terminal.status.as_str() }</span>
             </div>
-        };
+            { super::turn_metrics_footer::render_turn_metrics_footer(turn_metrics) }
+        </div>
     }
+}
 
-    let kind = value.get("kind").and_then(Value::as_str).unwrap_or("Step");
-    let text = value
-        .get("text")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let thinking = value
-        .get("thinking")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let error = value
-        .get("error_message")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
+fn render_antigravity_step(step: &shared::antigravity::AntigravityStepEnvelope) -> Html {
     html! {
         <div class="claude-message assistant-message antigravity-message">
             <div class="message-header">
                 <span class="message-type-badge assistant">{ "Antigravity" }</span>
-                <span>{ kind }</span>
+                <span>{ step.kind.display_name() }</span>
             </div>
             <div class="message-body">
-                if !thinking.is_empty() {
+                if !step.thinking.is_empty() {
                     <details class="thinking-section">
                         <summary>{ "Thinking" }</summary>
-                        <pre>{ thinking }</pre>
+                        <pre>{ &step.thinking }</pre>
                     </details>
                 }
-                if !text.is_empty() {
-                    <div class="text-content">{ text }</div>
+                if !step.text.is_empty() {
+                    <div class="text-content">{ &step.text }</div>
                 }
-                if !error.is_empty() {
+                if let Some(error) = step.error_message.as_deref() {
                     <div class="error-message">{ error }</div>
                 }
             </div>
@@ -227,7 +217,7 @@ pub(crate) fn render_identity_group_part(
         AgentFrame::Codex(event) => {
             crate::components::codex_renderer::render_codex_frame_content(&event, session_id)
         }
-        AgentFrame::Antigravity(value) => Some(render_antigravity(&value, None)),
+        AgentFrame::AntigravityStep(step) => Some(render_antigravity_step(&step)),
         _ => None,
     }
 }

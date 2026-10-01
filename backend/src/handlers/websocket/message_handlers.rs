@@ -451,6 +451,7 @@ fn edit_stack_output_releases_next(agent_type: &str, content: &serde_json::Value
             .get("payload_type")
             .and_then(|value| value.as_str())
             .is_some_and(|kind| kind.starts_with("run.terminal.")),
+        "antigravity" => kind == Some(shared::antigravity::TURN_COMPLETED_FRAME_TYPE),
         _ => matches!(
             kind,
             Some("result" | "turn.completed" | "turn.failed" | "error")
@@ -810,6 +811,10 @@ mod tests {
             "muse",
             &serde_json::json!({"type": "muse_record", "payload_type": "run.terminal.completed"})
         ));
+        assert!(edit_stack_output_releases_next(
+            "antigravity",
+            &serde_json::json!({"type": "antigravity_turn_completed", "status": "completed"})
+        ));
 
         assert!(!edit_stack_output_releases_next(
             "claude",
@@ -822,6 +827,10 @@ mod tests {
         assert!(!edit_stack_output_releases_next(
             "muse",
             &serde_json::json!({"type": "muse_record", "payload_type": "tool.result"})
+        ));
+        assert!(!edit_stack_output_releases_next(
+            "antigravity",
+            &serde_json::json!({"type": "antigravity_step", "kind": "message"})
         ));
     }
 }

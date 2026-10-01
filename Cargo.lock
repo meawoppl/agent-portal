@@ -265,6 +265,7 @@ dependencies = [
  "antigravity-codes",
  "chrono",
  "directories",
+ "serde",
  "serde_json",
  "session-lib",
  "shared",
@@ -6732,6 +6733,7 @@ dependencies = [
 name = "shared"
 version = "2.14.15"
 dependencies = [
+ "antigravity-codes",
  "base64 0.22.1",
  "chrono",
  "claude-codes",

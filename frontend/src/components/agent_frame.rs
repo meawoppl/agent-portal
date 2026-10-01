@@ -23,9 +23,10 @@ pub enum AgentFrame {
     /// the task-tree reducer consumes `serde_json::Value` directly, so a
     /// typed intermediate here would be parsed only to be re-serialized.
     Muse(serde_json::Value),
-    /// Portal's stable envelope around an assembled Antigravity step or turn
-    /// terminal. The native protobuf-JSON update remains under `update`.
-    Antigravity(serde_json::Value),
+    /// Portal's stable envelope around an assembled Antigravity step. The
+    /// native protobuf-JSON update remains under `update`.
+    AntigravityStep(shared::antigravity::AntigravityStepEnvelope),
+    AntigravityTurnCompleted(shared::antigravity::AntigravityTurnCompletedEnvelope),
     RawJson,
 }
 
@@ -140,12 +141,18 @@ impl AgentFrame {
         }
 
         if agent_type == shared::AgentType::Antigravity {
-            if let Ok(value) = serde_json::from_str::<serde_json::Value>(json) {
-                if matches!(
-                    value.get("type").and_then(|t| t.as_str()),
-                    Some("antigravity_step" | "antigravity_turn_completed")
-                ) {
-                    return Self::Antigravity(value);
+            if let Ok(frame) =
+                serde_json::from_str::<shared::antigravity::AntigravityStepEnvelope>(json)
+            {
+                if frame.is_valid() {
+                    return Self::AntigravityStep(frame);
+                }
+            }
+            if let Ok(frame) =
+                serde_json::from_str::<shared::antigravity::AntigravityTurnCompletedEnvelope>(json)
+            {
+                if frame.is_valid() {
+                    return Self::AntigravityTurnCompleted(frame);
                 }
             }
         }
@@ -165,10 +172,8 @@ impl AgentFrame {
                     _ => AgentFrameKind::MuseRecord,
                 }
             }
-            Self::Antigravity(value) => match value.get("type").and_then(|v| v.as_str()) {
-                Some("antigravity_turn_completed") => AgentFrameKind::AntigravityTurnCompleted,
-                _ => AgentFrameKind::AntigravityStep,
-            },
+            Self::AntigravityStep(_) => AgentFrameKind::AntigravityStep,
+            Self::AntigravityTurnCompleted(_) => AgentFrameKind::AntigravityTurnCompleted,
             Self::RawJson => AgentFrameKind::RawJson,
         }
     }
@@ -367,13 +372,20 @@ mod tests {
 
     #[test]
     fn antigravity_envelopes_are_scoped_and_terminal_is_a_terminator() {
-        let step = serde_json::json!({
-            "type": "antigravity_step",
-            "trajectory_id": "cascade-1",
-            "step_index": 1,
-            "kind": "Message",
-            "text": "hello"
-        });
+        let step = serde_json::to_value(shared::antigravity::AntigravityStepEnvelope {
+            frame_type: shared::antigravity::STEP_FRAME_TYPE.to_string(),
+            trajectory_id: "cascade-1".to_string(),
+            step_index: 1,
+            kind: shared::antigravity::AntigravityStepKind::Message,
+            state: Default::default(),
+            source: Default::default(),
+            target: Default::default(),
+            text: "hello".to_string(),
+            thinking: String::new(),
+            error_message: None,
+            update: Default::default(),
+        })
+        .unwrap();
         let frame = parse_for(shared::AgentType::Antigravity, step.clone());
         assert_eq!(frame.kind(), AgentFrameKind::AntigravityStep);
         assert_eq!(

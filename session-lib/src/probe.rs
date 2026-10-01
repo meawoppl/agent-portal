@@ -87,6 +87,7 @@ fn probe_antigravity() -> ProbeResult {
         .map(PathBuf::from)
         .filter(|path| path.is_file())
         .or_else(|| which::which("localharness").ok())
+        .or_else(|| antigravity_managed_harness_path().filter(|path| path.is_file()))
         .or_else(discover_python_antigravity_harness);
     let version = resolved_path.as_ref().and_then(|_| {
         let output = Command::new("python3")
@@ -106,6 +107,20 @@ fn probe_antigravity() -> ProbeResult {
         version,
         sandbox_ok: None,
     }
+}
+
+/// Stable path populated by Agent Portal's launcher-owned Antigravity venv.
+/// Keeping the environment private avoids PEP 668 failures and prevents an
+/// install from mutating the host Python environment.
+pub fn antigravity_managed_harness_path() -> Option<PathBuf> {
+    directories::ProjectDirs::from("org", "CosmicFrontier", "agent-portal").map(|project| {
+        project
+            .data_dir()
+            .join("antigravity")
+            .join("venv")
+            .join("bin")
+            .join("localharness")
+    })
 }
 
 fn discover_python_antigravity_harness() -> Option<PathBuf> {

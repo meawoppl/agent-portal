@@ -40,9 +40,10 @@ as a Claude/Codex JSON adapter.
   turn and relaunches the same cascade for the next input. The SDK warms its
   step assembler from replayed initialize history without re-emitting it, so
   this is durable without duplicating the Portal transcript.
-- Installation uses the PyPI package. Discovery checks
-  `ANTIGRAVITY_HARNESS_PATH`, `localharness` on `PATH`, and the binary embedded
-  in an installed Python wheel.
+- Installation uses the PyPI package in a launcher-owned virtual environment,
+  avoiding PEP 668 host-Python restrictions. Discovery checks
+  `ANTIGRAVITY_HARNESS_PATH`, `localharness` on `PATH`, that managed venv, and
+  the binary embedded in an independently installed Python wheel.
 - Credential readiness currently means a non-blank `GEMINI_API_KEY` in the
   launcher's environment.
 
@@ -60,13 +61,14 @@ not offer a skip-permissions switch for Antigravity.
 
 | Failure | Detection | User-visible behavior | Recovery |
 |---|---|---|---|
-| Wheel/harness absent | launcher probe and SDK launch | “not installed” matrix state or a persisted launch error | Install `google-antigravity`, then refresh probes |
+| Wheel/harness absent | launcher probe and SDK launch | “not installed” matrix state or a persisted launch error | Use the Install action, which creates a launcher-owned venv, then refresh probes |
 | `GEMINI_API_KEY` absent | before process spawn | explicit persisted error naming the missing variable | configure the launcher service environment and restart it |
 | Handshake/socket/init failure | `Client::launch` | harness diagnosis (including captured stderr) is persisted | correct binary/model/credentials; resume/relaunch |
 | Prompt rejected | `Client::send` | delivery acknowledgement fails and a transcript error is emitted | correct configuration and retry |
 | Turn failure | `Turn::next_step` | completed output remains visible, followed by failure and a failed terminal | retry a new turn |
 | Interrupt | `Client::cancel`, then drain to cancelled/idle with a 10 s bound | cancelled terminal; timeout becomes a visible error, then bounded shutdown | send another turn; it relaunches the persisted cascade |
 | Persistence acknowledgement stalls | bounded `Client::shutdown` after a terminal turn | visible persistence error; dropping the client kills the harness | retry from the last acknowledged cascade state |
+| Persisted storage is deleted or unavailable on a different launcher host | upstream currently exposes the requested cascade id but not an unambiguous “resumed vs created” result | the strict id check can still pass while the harness begins an empty cascade; Portal history remains visible but is not silently replayed into the model | restore/migrate the Antigravity storage directory; upstream resume-state metadata is requested in the linked SDK issue |
 | New/unknown native fields | preserved native update in `antigravity_step.update` | known summary still renders; evidence remains in history | extend SDK types/renderer from captured payload |
 
 ## Follow-up work before removing “experimental”
