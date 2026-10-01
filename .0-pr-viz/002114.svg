@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-labelledby="title desc">
+  <title id="title">PR 2114 task lifecycle formatting summary</title>
+  <desc id="desc">Background Bash task lifecycle messages move shell commands out of cramped inline prose and into scrollable code blocks.</desc>
+  <rect width="2000" height="1200" fill="#16161e"/>
+  <text x="55" y="76" fill="#a9b1d6" font-family="Inter, Arial, sans-serif" font-size="24" letter-spacing="1">PR #2114 · Format Claude bash task lifecycle messages</text>
+  <text x="55" y="130" fill="#e6e9f5" font-family="Inter, Arial, sans-serif" font-size="34">Bash task text used to wrap as prose; now shell-like lifecycle payloads render as code.</text>
+  <line x1="55" y1="166" x2="1945" y2="166" stroke="#3d4666" stroke-width="2"/>
+
+  <text x="75" y="225" fill="#f7768e" font-family="Inter, Arial, sans-serif" font-size="22" font-weight="700" letter-spacing="4">BEFORE</text>
+  <text x="1055" y="225" fill="#9ece6a" font-family="Inter, Arial, sans-serif" font-size="22" font-weight="700" letter-spacing="4">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1140" stroke="#565f89" stroke-width="2" stroke-dasharray="12 14"/>
+
+  <rect x="75" y="275" width="850" height="210" rx="10" fill="#1a1b26" stroke="#565f89" stroke-width="3"/>
+  <text x="105" y="325" fill="#7aa2f7" font-family="Inter, Arial, sans-serif" font-size="26" font-weight="700">render_task_started</text>
+  <text x="105" y="370" fill="#c0caf5" font-family="Inter, Arial, sans-serif" font-size="23">All task descriptions stayed inside task-description-inline.</text>
+  <text x="105" y="408" fill="#c0caf5" font-family="Inter, Arial, sans-serif" font-size="23">Long local_bash commands squeezed into a header row.</text>
+  <text x="105" y="446" fill="#f7768e" font-family="Inter, Arial, sans-serif" font-size="23">Result: scripts wrapped like prose and became hard to scan.</text>
+
+  <rect x="75" y="545" width="850" height="210" rx="10" fill="#1a1b26" stroke="#565f89" stroke-width="3"/>
+  <text x="105" y="595" fill="#7aa2f7" font-family="Inter, Arial, sans-serif" font-size="26" font-weight="700">render_task_notification</text>
+  <text x="105" y="640" fill="#c0caf5" font-family="Inter, Arial, sans-serif" font-size="23">Task completions only expose summary text, not task_type.</text>
+  <text x="105" y="678" fill="#c0caf5" font-family="Inter, Arial, sans-serif" font-size="23">The renderer treated shell output and agent prose the same.</text>
+  <text x="105" y="716" fill="#f7768e" font-family="Inter, Arial, sans-serif" font-size="23">Result: completed bash cards could become giant prose blocks.</text>
+
+  <rect x="1075" y="275" width="850" height="245" rx="10" fill="#1a1b26" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1105" y="325" fill="#7aa2f7" font-family="Inter, Arial, sans-serif" font-size="26" font-weight="700">TaskType::LocalBash gate</text>
+  <text x="1105" y="370" fill="#c0caf5" font-family="Inter, Arial, sans-serif" font-size="23">Started events check TaskType::LocalBash explicitly.</text>
+  <text x="1105" y="408" fill="#c0caf5" font-family="Inter, Arial, sans-serif" font-size="23">Bash descriptions move into render_task_code.</text>
+  <rect x="1105" y="440" width="760" height="48" rx="6" fill="#1e202e" stroke="#bb9af7" stroke-width="2"/>
+  <text x="1125" y="472" fill="#9ece6a" font-family="SFMono-Regular, Consolas, monospace" font-size="22">cd /tmp &amp;&amp; sed -n '1,120p' Cargo.toml</text>
+
+  <rect x="1075" y="575" width="850" height="270" rx="10" fill="#1a1b26" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1105" y="625" fill="#7aa2f7" font-family="Inter, Arial, sans-serif" font-size="26" font-weight="700">looks_like_shell_command</text>
+  <text x="1105" y="670" fill="#c0caf5" font-family="Inter, Arial, sans-serif" font-size="23">Completion summaries keep prose unless they look shell-like.</text>
+  <text x="1105" y="708" fill="#c0caf5" font-family="Inter, Arial, sans-serif" font-size="23">Signals include command prefixes, pipes, heredocs, and &amp;&amp;.</text>
+  <rect x="1105" y="740" width="760" height="48" rx="6" fill="#1e202e" stroke="#bb9af7" stroke-width="2"/>
+  <text x="1125" y="772" fill="#9ece6a" font-family="SFMono-Regular, Consolas, monospace" font-size="22">python3 - &lt;&lt;'PY' ... PY</text>
+  <text x="1105" y="820" fill="#9ece6a" font-family="Inter, Arial, sans-serif" font-size="23">Agent prose stays in task-summary.</text>
+
+  <rect x="1075" y="890" width="850" height="165" rx="10" fill="#1a1b26" stroke="#7dcfff" stroke-width="3"/>
+  <text x="1105" y="942" fill="#7dcfff" font-family="Inter, Arial, sans-serif" font-size="26" font-weight="700">CSS guarantee</text>
+  <text x="1105" y="988" fill="#c0caf5" font-family="Inter, Arial, sans-serif" font-size="23">.task-code uses monospace and preformatted whitespace.</text>
+  <text x="1105" y="1026" fill="#c0caf5" font-family="Inter, Arial, sans-serif" font-size="23">Overflow scrolling keeps long shell scripts readable.</text>
+  <text x="1105" y="1064" fill="#c0caf5" font-family="Inter, Arial, sans-serif" font-size="23">Sub-agent notes still render as prose.</text>
+
+  <text x="55" y="1172" fill="#a9b1d6" font-family="Inter, Arial, sans-serif" font-size="22">Scope: completion frames still lack task_type, so command formatting there remains conservative heuristic inference.</text>
+</svg>
