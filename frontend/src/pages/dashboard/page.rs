@@ -753,7 +753,15 @@ pub fn dashboard_page() -> Html {
                         onclick={toggle_launch_dialog.clone()}
                         title={if ui_state.show_launch_dialog { "Close" } else { "Launch a session or install agent-portal" }}
                     >
-                        { if ui_state.show_launch_dialog { "Close" } else { "+ Launch Session" } }
+                        {
+                            if ui_state.show_launch_dialog {
+                                "Close"
+                            } else if is_mobile_dashboard {
+                                "+ New"
+                            } else {
+                                "+ Launch Session"
+                            }
+                        }
                     </button>
                     {
                         if is_admin {
