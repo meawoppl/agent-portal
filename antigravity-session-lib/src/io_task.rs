@@ -49,8 +49,9 @@ pub async fn antigravity_io_task(
     let mut tracker = TurnTracker::new(config.session_id);
     let mut client = client;
     let mut pending = VecDeque::new();
+    let mut stopping = false;
 
-    loop {
+    'commands: loop {
         let command = if let Some(command) = pending.pop_front() {
             command
         } else if let Some(command) = command_rx.recv().await {
@@ -155,6 +156,7 @@ pub async fn antigravity_io_task(
                             // persistence acknowledgement is requested.
                             None => {
                                 interrupted = true;
+                                stopping = true;
                                 break;
                             },
                         }
@@ -220,6 +222,9 @@ pub async fn antigravity_io_task(
                 // This trades a small launch cost for durable, restart-safe
                 // history without weakening the generic Session contract.
                 shutdown_client(active_client, &event_tx).await;
+                if stopping {
+                    break 'commands;
+                }
             }
             IoCommand::Interrupt => {
                 tracing::debug!("Antigravity interrupt received while idle");

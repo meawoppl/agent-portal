@@ -71,6 +71,11 @@ not offer a skip-permissions switch for Antigravity.
 | Persisted storage is deleted or unavailable on a different launcher host | upstream currently exposes the requested cascade id but not an unambiguous “resumed vs created” result | the strict id check can still pass while the harness begins an empty cascade; Portal history remains visible but is not silently replayed into the model | restore/migrate the Antigravity storage directory; upstream resume-state metadata is requested in the linked SDK issue |
 | New/unknown native fields | preserved native update in `antigravity_step.update` | known summary still renders; evidence remains in history | extend SDK types/renderer from captured payload |
 
+Inputs received while a turn is running are FIFO queued. An interrupt cancels
+only the active turn; already-queued inputs begin afterward. Closing the session
+command channel is different: it cancels the active turn and drops queued work
+without launching another harness during shutdown.
+
 ## Follow-up work before removing “experimental”
 
 1. Add a neutral pending-question/confirmation channel and map Antigravity's
