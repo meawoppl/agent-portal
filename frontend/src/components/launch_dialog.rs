@@ -565,8 +565,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
             let launcher_id = *selected_launcher;
             let selected_agent_type = *agent_type;
             let want_worktree = *create_worktree;
-            let name = (*session_name).trim().to_string();
-            let name = if name.is_empty() { None } else { Some(name) };
+            let name = utils::owned_non_blank(&session_name);
             let launching = launching.clone();
             let error_msg = error_msg.clone();
             let on_close = on_close.clone();
