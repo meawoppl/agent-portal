@@ -16,6 +16,7 @@ const CODEX_SKIP_PERMISSIONS_ARGS: &[&str] = &[
     "sandbox_mode=danger-full-access",
 ];
 const MUSE_SKIP_PERMISSIONS_ARGS: &[&str] = &["--yolo"];
+const NO_SKIP_PERMISSIONS_ARGS: &[&str] = &[];
 
 /// CLI arguments appended when the user checks the skip-permissions box.
 pub fn skip_permissions_args(agent_type: AgentType) -> &'static [&'static str] {
@@ -23,6 +24,7 @@ pub fn skip_permissions_args(agent_type: AgentType) -> &'static [&'static str] {
         AgentType::Claude => CLAUDE_SKIP_PERMISSIONS_ARGS,
         AgentType::Codex => CODEX_SKIP_PERMISSIONS_ARGS,
         AgentType::Muse => MUSE_SKIP_PERMISSIONS_ARGS,
+        AgentType::Antigravity => NO_SKIP_PERMISSIONS_ARGS,
     }
 }
 
@@ -32,6 +34,7 @@ pub fn skip_permissions_label(agent_type: AgentType) -> &'static str {
         AgentType::Claude => "--dangerously-skip-permissions",
         AgentType::Codex => "-c approval_policy=never -c sandbox_mode=danger-full-access",
         AgentType::Muse => "YOLO mode (--yolo: disables approval and sandbox)",
+        AgentType::Antigravity => "Antigravity is read-only in this preview",
     }
 }
 

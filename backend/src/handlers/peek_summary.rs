@@ -76,6 +76,7 @@ fn summarize(agent_type: &str, role: &str, content: &str) -> (&'static str, Stri
         "claude" => summarize_claude(content),
         "codex" => summarize_codex(content),
         "muse" => summarize_muse(content),
+        "antigravity" => summarize_antigravity(content),
         _ => fallback(content),
     }
 }
@@ -272,6 +273,32 @@ fn summarize_muse(content: &str) -> (&'static str, String) {
     }
 }
 
+fn summarize_antigravity(content: &str) -> (&'static str, String) {
+    if let Ok(terminal) =
+        serde_json::from_str::<shared::antigravity::AntigravityTurnCompletedEnvelope>(content)
+    {
+        if terminal.is_valid() {
+            return ("turn_end", format!("turn {}", terminal.status.as_str()));
+        }
+    }
+    if let Ok(step) = serde_json::from_str::<shared::antigravity::AntigravityStepEnvelope>(content)
+    {
+        if step.is_valid() {
+            if let Some(error) = step.error_message.as_deref() {
+                return ("error", format!("error: {}", excerpt(error)));
+            }
+            if !step.text.trim().is_empty() {
+                return ("text", excerpt(&step.text));
+            }
+            if !step.thinking.trim().is_empty() {
+                return ("thinking", "thinking…".to_string());
+            }
+            return ("tool_use", step.kind.display_name().to_string());
+        }
+    }
+    summarize_local_or_fallback(content)
+}
+
 /// Non-wire shapes shared across agents: the portal's local frames (a plain
 /// user echo `{type:"user",content}`, a portal text card, a local error).
 /// Anything else falls to the bounded discriminator fallback.
@@ -406,5 +433,38 @@ mod tests {
         let m = summarize_row("muse", "assistant", content);
         assert_eq!(m.kind, "turn_end");
         assert_eq!(m.summary, "run completed: done");
+    }
+
+    #[test]
+    fn antigravity_terminal_reads_as_turn_end() {
+        let content =
+            serde_json::to_string(&shared::antigravity::AntigravityTurnCompletedEnvelope::new(
+                shared::antigravity::AntigravityTurnStatus::Completed,
+            ))
+            .unwrap();
+        let m = summarize_row("antigravity", "assistant", &content);
+        assert_eq!(m.kind, "turn_end");
+        assert_eq!(m.summary, "turn completed");
+    }
+
+    #[test]
+    fn antigravity_step_reads_as_text() {
+        let content = serde_json::to_string(&shared::antigravity::AntigravityStepEnvelope {
+            frame_type: shared::antigravity::STEP_FRAME_TYPE.to_string(),
+            trajectory_id: "cascade".to_string(),
+            step_index: 1,
+            kind: shared::antigravity::AntigravityStepKind::Message,
+            state: Default::default(),
+            source: Default::default(),
+            target: Default::default(),
+            text: "hello from Antigravity".to_string(),
+            thinking: String::new(),
+            error_message: None,
+            update: Default::default(),
+        })
+        .unwrap();
+        let m = summarize_row("antigravity", "assistant", &content);
+        assert_eq!(m.kind, "text");
+        assert_eq!(m.summary, "hello from Antigravity");
     }
 }

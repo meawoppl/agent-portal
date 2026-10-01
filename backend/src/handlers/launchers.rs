@@ -287,8 +287,10 @@ pub async fn fork_session(
         ));
     }
     let agent_type = AgentType::parse_or_default(&source.agent_type);
-    if agent_type == AgentType::Muse {
-        return Err(AppError::BadRequest("Muse sessions cannot be forked"));
+    if matches!(agent_type, AgentType::Muse | AgentType::Antigravity) {
+        return Err(AppError::BadRequest(
+            "This agent does not support session forking yet",
+        ));
     }
     if agent_type != AgentType::Codex && req.fork_point_turn_id.is_some() {
         return Err(AppError::BadRequest(
@@ -427,7 +429,7 @@ fn apply_model_override(args: Vec<String>, agent_type: AgentType, model: String)
         }
     }
     match agent_type {
-        AgentType::Claude => next.extend(["--model".to_string(), model]),
+        AgentType::Claude | AgentType::Antigravity => next.extend(["--model".to_string(), model]),
         AgentType::Codex => next.extend(["-c".to_string(), format!("model={model}")]),
         AgentType::Muse => {}
     }

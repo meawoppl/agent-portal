@@ -277,6 +277,7 @@
     height: 83.2px;
     left: -25.6px;
 }
+.pill-watermark.antigravity { background-image: url('/antigravity-mark.svg'); }
 
 /* Model-version watermark — the session's compact model number (e.g. "4.8")
    rendered in the same faint grey/opacity treatment as the agent logo. The

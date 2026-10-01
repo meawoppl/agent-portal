@@ -220,49 +220,55 @@ pub fn handle_claude_output(ctx: ClaudeOutputContext<'_>, frame: ClaudeOutputFra
         None
     };
 
-    // Validate that content roundtrips through ClaudeOutput parsing (frontend depends on this)
-    match shared::ClaudeOutput::deserialize(&content) {
-        Ok(parsed) => {
-            if let shared::ClaudeOutput::System(ref sys) = parsed {
-                if sys.is_task_started() && sys.as_task_started().is_none() {
-                    warn!(
-                        "task_started message matched subtype but failed struct parse: {}",
-                        content
-                    );
-                }
-                if sys.is_task_progress() && sys.as_task_progress().is_none() {
-                    warn!(
-                        "task_progress message matched subtype but failed struct parse: {}",
-                        content
-                    );
-                }
-                if sys.is_task_notification() {
-                    match sys.as_task_notification() {
-                        Some(notif) => {
-                            // A sub-agent (Task tool) just finished. Its tokens
-                            // aren't in the parent's `result.usage`, so fold the
-                            // completed task's cumulative `total_tokens` into the
-                            // session's running sub-agent total (see
-                            // `SessionManager::subagent_tokens`). `task_notification`
-                            // fires once per task, so summing is exact.
-                            if let (Some(sid), Some(usage)) = (db_session_id, notif.usage.as_ref())
-                            {
-                                session_manager.add_subagent_tokens(sid, usage.total_tokens as i64);
+    // Validate Claude frames against the Claude SDK. Other agents deliberately
+    // carry different protocol envelopes; trying to parse them here only
+    // creates false warnings and historically obscured real wire drift.
+    if agent_type == AgentType::Claude {
+        match shared::ClaudeOutput::deserialize(&content) {
+            Ok(parsed) => {
+                if let shared::ClaudeOutput::System(ref sys) = parsed {
+                    if sys.is_task_started() && sys.as_task_started().is_none() {
+                        warn!(
+                            "task_started message matched subtype but failed struct parse: {}",
+                            content
+                        );
+                    }
+                    if sys.is_task_progress() && sys.as_task_progress().is_none() {
+                        warn!(
+                            "task_progress message matched subtype but failed struct parse: {}",
+                            content
+                        );
+                    }
+                    if sys.is_task_notification() {
+                        match sys.as_task_notification() {
+                            Some(notif) => {
+                                // A sub-agent (Task tool) just finished. Its tokens
+                                // aren't in the parent's `result.usage`, so fold the
+                                // completed task's cumulative `total_tokens` into the
+                                // session's running sub-agent total (see
+                                // `SessionManager::subagent_tokens`). `task_notification`
+                                // fires once per task, so summing is exact.
+                                if let (Some(sid), Some(usage)) =
+                                    (db_session_id, notif.usage.as_ref())
+                                {
+                                    session_manager
+                                        .add_subagent_tokens(sid, usage.total_tokens as i64);
+                                }
                             }
-                        }
-                        None => warn!(
+                            None => warn!(
                             "task_notification message matched subtype but failed struct parse: {}",
                             content
                         ),
+                        }
                     }
                 }
             }
-        }
-        Err(e) => {
-            warn!(
-                "ClaudeOutput parse failed for message: {} — raw: {}",
-                e, content
-            );
+            Err(e) => {
+                warn!(
+                    "ClaudeOutput parse failed for message: {} — raw: {}",
+                    e, content
+                );
+            }
         }
     }
 
@@ -445,6 +451,7 @@ fn edit_stack_output_releases_next(agent_type: &str, content: &serde_json::Value
             .get("payload_type")
             .and_then(|value| value.as_str())
             .is_some_and(|kind| kind.starts_with("run.terminal.")),
+        "antigravity" => kind == Some(shared::antigravity::TURN_COMPLETED_FRAME_TYPE),
         _ => matches!(
             kind,
             Some("result" | "turn.completed" | "turn.failed" | "error")
@@ -804,6 +811,10 @@ mod tests {
             "muse",
             &serde_json::json!({"type": "muse_record", "payload_type": "run.terminal.completed"})
         ));
+        assert!(edit_stack_output_releases_next(
+            "antigravity",
+            &serde_json::json!({"type": "antigravity_turn_completed", "status": "completed"})
+        ));
 
         assert!(!edit_stack_output_releases_next(
             "claude",
@@ -816,6 +827,10 @@ mod tests {
         assert!(!edit_stack_output_releases_next(
             "muse",
             &serde_json::json!({"type": "muse_record", "payload_type": "tool.result"})
+        ));
+        assert!(!edit_stack_output_releases_next(
+            "antigravity",
+            &serde_json::json!({"type": "antigravity_step", "kind": "message"})
         ));
     }
 }

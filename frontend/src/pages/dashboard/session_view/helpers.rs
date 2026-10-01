@@ -319,6 +319,7 @@ pub(crate) fn is_awaiting(
                 | AgentFrameKind::CodexItemUpdated
                 | AgentFrameKind::CodexItemCompleted
                 | AgentFrameKind::MuseRecord
+                | AgentFrameKind::AntigravityStep
         ) {
             return false;
         }

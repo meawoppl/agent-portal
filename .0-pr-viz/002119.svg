@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-labelledby="title desc">
+  <title id="title">Antigravity becomes a typed read-only Portal agent</title>
+  <desc id="desc">Architecture diagram showing Antigravity launch, typed step streaming, terminal persistence, metrics, and the deliberate read-only safety boundary.</desc>
+  <rect width="2000" height="1200" fill="#1a1b26"/>
+
+  <text x="80" y="105" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="50" font-weight="700">Antigravity Joins Portal as a Typed Agent</text>
+  <text x="80" y="158" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="27">A persistence-safe preview: native localharness transport, durable final steps, ephemeral streaming, and read-only tools.</text>
+
+  <rect x="80" y="220" width="430" height="220" rx="18" fill="#16161e" stroke="#7aa2f7" stroke-width="3"/>
+  <text x="120" y="278" fill="#7aa2f7" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="29" font-weight="700">Launch and probe</text>
+  <text x="120" y="327" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">AgentType::Antigravity</text>
+  <text x="120" y="368" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22">google-antigravity wheel</text>
+  <text x="120" y="402" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22">GEMINI_API_KEY + Flash default</text>
+
+  <line x1="510" y1="330" x2="610" y2="330" stroke="#7dcfff" stroke-width="5"/>
+  <path d="M590 314 L618 330 L590 346" fill="none" stroke="#7dcfff" stroke-width="5"/>
+
+  <rect x="620" y="220" width="500" height="220" rx="18" fill="#16161e" stroke="#7dcfff" stroke-width="3"/>
+  <text x="660" y="278" fill="#7dcfff" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="29" font-weight="700">antigravity-session-lib</text>
+  <text x="660" y="327" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">Client + StepAssembler</text>
+  <text x="660" y="368" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22">Strict Portal UUID cascade id</text>
+  <text x="660" y="402" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22">Persistent launcher storage</text>
+
+  <line x1="1120" y1="330" x2="1220" y2="330" stroke="#bb9af7" stroke-width="5"/>
+  <path d="M1200 314 L1228 330 L1200 346" fill="none" stroke="#bb9af7" stroke-width="5"/>
+
+  <rect x="1230" y="220" width="690" height="220" rx="18" fill="#16161e" stroke="#bb9af7" stroke-width="3"/>
+  <text x="1270" y="278" fill="#bb9af7" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="29" font-weight="700">Typed Portal output</text>
+  <text x="1270" y="327" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">antigravity_step: native update preserved</text>
+  <text x="1270" y="368" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22">Active snapshots are ephemeral</text>
+  <text x="1270" y="402" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22">Final steps and turn terminal are durable</text>
+
+  <text x="80" y="515" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700" letter-spacing="3">TERMINAL TURN LIFECYCLE</text>
+  <rect x="80" y="555" width="1840" height="250" rx="18" fill="#16161e" stroke="#3d4666" stroke-width="3"/>
+
+  <rect x="120" y="620" width="300" height="110" rx="14" fill="#1e202e" stroke="#7aa2f7" stroke-width="2"/>
+  <text x="165" y="672" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24" font-weight="700">Accepted input</text>
+  <text x="165" y="707" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="20">delivery ack</text>
+  <line x1="420" y1="675" x2="525" y2="675" stroke="#565f89" stroke-width="4"/>
+  <path d="M505 660 L533 675 L505 690" fill="none" stroke="#565f89" stroke-width="4"/>
+
+  <rect x="535" y="620" width="350" height="110" rx="14" fill="#1e202e" stroke="#7dcfff" stroke-width="2"/>
+  <text x="578" y="672" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24" font-weight="700">FullyIdle / Cancelled</text>
+  <text x="578" y="707" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="20">main trajectory only</text>
+  <line x1="885" y1="675" x2="990" y2="675" stroke="#565f89" stroke-width="4"/>
+  <path d="M970 660 L998 675 L970 690" fill="none" stroke="#565f89" stroke-width="4"/>
+
+  <rect x="1000" y="620" width="350" height="110" rx="14" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1045" y="672" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24" font-weight="700">shutdown() acknowledgement</text>
+  <text x="1045" y="707" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="20">10 second persistence bound</text>
+  <line x1="1350" y1="675" x2="1455" y2="675" stroke="#565f89" stroke-width="4"/>
+  <path d="M1435 660 L1463 675 L1435 690" fill="none" stroke="#565f89" stroke-width="4"/>
+
+  <rect x="1465" y="620" width="410" height="110" rx="14" fill="#1e202e" stroke="#bb9af7" stroke-width="2"/>
+  <text x="1510" y="672" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24" font-weight="700">Relaunch same cascade</text>
+  <text x="1510" y="707" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="20">history warms; never re-emits</text>
+
+  <rect x="80" y="870" width="890" height="235" rx="18" fill="#16161e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="120" y="930" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="30" font-weight="700">Included in the preview</text>
+  <text x="120" y="980" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">Streaming cards, explicit terminals, typed inter-agent provenance</text>
+  <text x="120" y="1022" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">Gemini usage deltas feed TurnMetrics and performance views</text>
+  <text x="120" y="1064" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">Launch, schedule, settings, pills, probes, and install flow</text>
+
+  <rect x="1030" y="870" width="890" height="235" rx="18" fill="#16161e" stroke="#f7768e" stroke-width="3"/>
+  <text x="1070" y="930" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="30" font-weight="700">Deliberate safety boundary</text>
+  <text x="1070" y="980" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">HarnessSideTools::read_only() only</text>
+  <text x="1070" y="1022" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">No write or shell tools before Portal permission bridging</text>
+  <text x="1070" y="1064" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="23">No fork UI; unknown native fields remain preserved evidence</text>
+
+  <text x="80" y="1160" fill="#565f89" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22">Spec: docs/ANTIGRAVITY_SUPPORT.md | Runtime: antigravity-codes 0.1.20</text>
+</svg>

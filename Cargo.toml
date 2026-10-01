@@ -9,6 +9,7 @@ members = [
     "claude-session-lib",
     "codex-session-lib",
     "muse-session-lib",
+    "antigravity-session-lib",
     "launcher",
     "portal-auth",
     "portal-stt",
@@ -81,6 +82,7 @@ claude-codes = { version = "2.1.286", default-features = false, features = ["typ
 # Muse CLI integration
 muse-codes = { version = "1.4.2", default-features = false, features = ["types"] }
 codex-codes = { version = "0.159.2", default-features = false, features = ["types"] }
+antigravity-codes = { version = "0.1.20", default-features = false, features = ["types"] }
 
 # Web Push (VAPID + RFC8291 encryption). `default-features = false` drops the
 # bundled HTTP clients (isahc/libcurl and hyper) — we build the message here and
