@@ -173,9 +173,16 @@ fn turn_signal_value_is_busy(agent_type: &str, value: &serde_json::Value) -> boo
             .get("payload_type")
             .and_then(|value| value.as_str())
             .is_some_and(|kind| kind.starts_with("run.terminal.")),
+        "antigravity" => kind != Some("antigravity_turn_completed"),
         _ => !matches!(
             kind,
-            Some("result" | "turn.completed" | "turn.failed" | "error")
+            Some(
+                "result"
+                    | "turn.completed"
+                    | "turn.failed"
+                    | "antigravity_turn_completed"
+                    | "error"
+            )
         ),
     }
 }

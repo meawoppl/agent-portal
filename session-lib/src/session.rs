@@ -505,6 +505,21 @@ impl<A: Agent> Session<A> {
     pub async fn stop(&mut self) -> Result<(), SessionError> {
         // Capture a queued pid before dropping the receiver below.
         self.capture_pending_agent_pid();
+
+        if let (Some(timeout), Some(command_tx)) =
+            (A::graceful_stop_timeout(), self.command_tx.as_ref())
+        {
+            let (completed_tx, completed_rx) = oneshot::channel();
+            if command_tx
+                .send(IoCommand::Shutdown {
+                    completed: completed_tx,
+                })
+                .is_ok()
+            {
+                let _ = tokio::time::timeout(timeout, completed_rx).await;
+            }
+        }
+
         // Drop the channels first so the I/O task stops accepting input.
         self.command_tx = None;
         self.event_rx = None;
@@ -610,10 +625,20 @@ mod tests {
             _event_tx: mpsc::UnboundedSender<IoEvent>,
         ) -> Result<tokio::task::JoinHandle<()>, SessionError> {
             Ok(tokio::spawn(async move {
-                if let Some(IoCommand::UserInput { delivered, .. }) = command_rx.recv().await {
-                    let _delivered = delivered;
-                    COMMAND_RECEIVED.store(true, Ordering::SeqCst);
-                    std::future::pending::<()>().await;
+                loop {
+                    match command_rx.recv().await {
+                        Some(IoCommand::UserInput { delivered, .. }) => {
+                            let _delivered = delivered;
+                            COMMAND_RECEIVED.store(true, Ordering::SeqCst);
+                            std::future::pending::<()>().await;
+                        }
+                        Some(IoCommand::Shutdown { completed }) => {
+                            let _ = completed.send(());
+                            break;
+                        }
+                        Some(IoCommand::Permission { .. } | IoCommand::Interrupt) => {}
+                        None => break,
+                    }
                 }
             }))
         }

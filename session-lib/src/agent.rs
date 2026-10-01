@@ -15,6 +15,17 @@ use crate::snapshot::SessionConfig;
 
 /// Per-agent backend for [`crate::Session`].
 pub trait Agent: Send + Sync + 'static {
+    /// Optional timeout for an agent-specific graceful shutdown handshake.
+    ///
+    /// Most backends are killed by dropping/aborting their I/O task. Agents
+    /// whose persistent state is flushed by an explicit protocol exchange can
+    /// opt in here; `Session::stop` sends [`IoCommand::Shutdown`] and waits up
+    /// to this duration before falling back to the existing abort + group-kill
+    /// path.
+    fn graceful_stop_timeout() -> Option<std::time::Duration> {
+        None
+    }
+
     /// Spawn the per-session I/O task and return its `JoinHandle`.
     ///
     /// The task is responsible for:

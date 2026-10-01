@@ -106,6 +106,7 @@ fn args_placeholder(agent_type: shared::AgentType) -> &'static str {
         shared::AgentType::Claude => "ex: --model sonnet --allowedTools \"Bash Edit\"",
         shared::AgentType::Codex => "ex: -c model=gpt-5.5 -c model_reasoning_effort=high",
         shared::AgentType::Muse => "ex: --reasoning-effort high --preset native-basic",
+        shared::AgentType::Antigravity => "ex: --model gemini-2.5-pro",
     }
 }
 
@@ -423,6 +424,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                 agent_type.set(match val.as_str() {
                     "codex" => shared::AgentType::Codex,
                     "muse" => shared::AgentType::Muse,
+                    "antigravity" => shared::AgentType::Antigravity,
                     _ => shared::AgentType::Claude,
                 });
                 model_arg.set(String::new());
@@ -681,6 +683,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     let claude_label = install_label(AgentType::Claude);
     let codex_label = install_label(AgentType::Codex);
     let muse_label = install_label(AgentType::Muse);
+    let antigravity_label = install_label(AgentType::Antigravity);
     let selected_agent_missing = agent_installed(&agent_installs, *agent_type) == Some(false);
     let still_probing = *probing_agents && agent_installs.is_empty();
     let selected_agent_label = agent_type.display_name();
@@ -792,6 +795,9 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                             <option value="muse" selected={*agent_type == AgentType::Muse}>
                                 { &muse_label }
                             </option>
+                            <option value="antigravity" selected={*agent_type == AgentType::Antigravity}>
+                                { &antigravity_label }
+                            </option>
                         </select>
                     </div>
 
@@ -811,6 +817,11 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                     if *agent_type == AgentType::Muse {
                         <div class="launch-note launch-note-warn">
                             { "Muse support is highly experimental." }
+                        </div>
+                    }
+                    if *agent_type == AgentType::Antigravity {
+                        <div class="launch-note launch-note-warn">
+                            { "Antigravity support is a read-only preview. It requires GEMINI_API_KEY or Vertex ADC on the launcher host." }
                         </div>
                     }
 
@@ -891,18 +902,20 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                         />
                     </div>
 
-                    // Permission bypass checkbox (agent-specific)
-                    <div class="launch-field launch-checkbox">
-                        <label>
-                            <input
-                                type="checkbox"
-                                checked={*skip_permissions}
-                                onchange={on_skip_permissions.clone()}
-                                onkeydown={on_checkbox_enter.clone()}
-                            />
-                            { format!(" {}", skip_permissions_label(*agent_type)) }
-                        </label>
-                    </div>
+                    if !skip_permissions_args(*agent_type).is_empty() {
+                        // Permission bypass checkbox (agent-specific)
+                        <div class="launch-field launch-checkbox">
+                            <label>
+                                <input
+                                    type="checkbox"
+                                    checked={*skip_permissions}
+                                    onchange={on_skip_permissions.clone()}
+                                    onkeydown={on_checkbox_enter.clone()}
+                                />
+                                { format!(" {}", skip_permissions_label(*agent_type)) }
+                            </label>
+                        </div>
+                    }
 
                     // Git worktree: create an isolated worktree for this session
                     // when the chosen directory lives in a git repository.

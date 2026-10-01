@@ -115,6 +115,12 @@
     text-transform: none;
 }
 
+.message-type-badge.antigravity {
+    background: rgba(187, 154, 247, 0.2);
+    color: #bb9af7;
+    text-transform: none;
+}
+
 /* Inter-agent message (`agent-portal message send`): the "external" link hue
    so it reads as coming from another agent, distinct from the user's own. */
 .message-type-badge.other-agent {
@@ -208,6 +214,73 @@
    left-accent treatment so muse reads as its own agent, not an assistant. */
 .muse-message {
     border-left: 3px solid var(--accent);
+}
+
+.antigravity-message {
+    border-left: 3px solid #bb9af7;
+}
+
+.antigravity-kind,
+.antigravity-status {
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+}
+
+.antigravity-status {
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0.1rem 0.45rem;
+}
+
+.antigravity-status.active {
+    border-color: rgba(122, 162, 247, 0.42);
+    color: var(--accent);
+}
+
+.antigravity-status.done {
+    border-color: rgba(158, 206, 106, 0.42);
+    color: var(--success);
+}
+
+.antigravity-status.error,
+.antigravity-error {
+    color: var(--error);
+}
+
+.antigravity-meta,
+.antigravity-terminal,
+.antigravity-trajectory {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+    margin-bottom: 0.35rem;
+}
+
+.antigravity-text {
+    color: var(--text-primary);
+}
+
+.antigravity-thinking {
+    margin-top: 0.35rem;
+}
+
+.antigravity-thinking summary {
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.8rem;
+}
+
+.antigravity-action {
+    background: rgba(0, 0, 0, 0.22);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+    margin: 0.35rem 0 0;
+    overflow-x: auto;
+    padding: 0.5rem;
+    white-space: pre-wrap;
 }
 
 .continuation-card {

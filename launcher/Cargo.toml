@@ -43,6 +43,7 @@ session-lib = { path = "../session-lib" }
 claude-session-lib = { path = "../claude-session-lib" }
 codex-session-lib = { path = "../codex-session-lib" }
 muse-session-lib = { path = "../muse-session-lib" }
+antigravity-session-lib = { path = "../antigravity-session-lib" }
 ws-bridge = { workspace = true, features = ["native-client"] }
 portal-update = { path = "../portal-update" }
 # rustls (not native-tls) so the released agent-portal binary doesn't link

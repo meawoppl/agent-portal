@@ -1,0 +1,23 @@
+[package]
+name = "antigravity-session-lib"
+version.workspace = true
+edition.workspace = true
+description = "Antigravity localharness backend for session-lib (AntigravityAgent preview)."
+license = "MIT"
+
+[dependencies]
+session-lib = { path = "../session-lib" }
+shared = { path = "../shared" }
+antigravity-codes = { workspace = true, features = ["async-client"] }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true, features = ["clock"] }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[lints]
+workspace = true

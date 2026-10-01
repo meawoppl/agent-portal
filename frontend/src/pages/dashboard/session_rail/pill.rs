@@ -288,6 +288,7 @@ impl PillViewModel {
                 shared::AgentType::Claude => "pill-watermark claude",
                 shared::AgentType::Codex => "pill-watermark codex",
                 shared::AgentType::Muse => "pill-watermark muse",
+                shared::AgentType::Antigravity => "pill-watermark antigravity",
             },
             model_watermark: session
                 .last_model

@@ -61,6 +61,7 @@ pub(super) async fn handle_next_event<A: Agent>(
             // every-100-messages fallback (#1653).
             let has_git_signal = match state.agent_type {
                 shared::AgentType::Muse => muse_output_has_git_signal(value),
+                shared::AgentType::Antigravity => false,
                 _ => codex_output_has_git_signal(value),
             };
             if has_git_signal {

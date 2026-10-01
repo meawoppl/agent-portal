@@ -23,6 +23,8 @@ pub enum GroupCategory {
     /// the group renders as ONE task-tree card (see `MessageGroupRenderer`)
     /// instead of one raw-JSON bubble each.
     Muse,
+    /// Consecutive Agent Portal-authored Antigravity preview frames.
+    Antigravity,
     /// Consecutive `system`/`thinking_tokens` markers emitted by the Claude CLI.
     /// These carry no renderable body — the portal collapses a run of them into
     /// a single compact `thinking × N` chip instead of one empty badge each.
@@ -42,6 +44,7 @@ impl GroupCategory {
             GroupCategory::Codex => "x",
             GroupCategory::Thinking => "t",
             GroupCategory::Muse => "m",
+            GroupCategory::Antigravity => "a",
         }
     }
 }
@@ -273,10 +276,11 @@ pub(super) fn classify(
         return Some(source_identity(source, current_user_id));
     }
 
-    let assistant_identity_label = if agent_type == shared::AgentType::Codex {
-        "Codex"
-    } else {
-        "Claude"
+    let assistant_identity_label = match agent_type {
+        shared::AgentType::Codex => "Codex",
+        shared::AgentType::Muse => "Muse",
+        shared::AgentType::Antigravity => "Antigravity",
+        shared::AgentType::Claude => "Claude",
     };
 
     match AgentFrameRegistry::parse(json, agent_type) {
@@ -372,6 +376,13 @@ pub(super) fn classify(
                 category: GroupCategory::Muse,
                 label: "Muse".to_string(),
                 badge_class: "assistant".to_string(),
+            });
+        }
+        AgentFrame::Antigravity(_) => {
+            return Some(MessageIdentity {
+                category: GroupCategory::Antigravity,
+                label: "Antigravity".to_string(),
+                badge_class: "antigravity".to_string(),
             });
         }
         _ => {}

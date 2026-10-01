@@ -162,7 +162,7 @@ impl TurnMetrics {
             // Muse: no token-usage events exist in the observed 0.1.0 stream;
             // whatever the proxy reports (typically 0 until usage lands on
             // the wire) passes through flat, Codex-style.
-            AgentType::Codex | AgentType::Muse => self.input_tokens,
+            AgentType::Codex | AgentType::Muse | AgentType::Antigravity => self.input_tokens,
             // Claude fallback (older proxy, or no usable assistant usage this
             // turn): the disjoint buckets sum to the prompt. Correct for a
             // single-call turn and an over-count for a multi-call one — the
@@ -273,7 +273,7 @@ impl MetricBucket {
                 .input_tokens_sum
                 .saturating_add(self.cache_read_tokens_sum)
                 .saturating_add(self.cache_creation_tokens_sum),
-            AgentType::Codex | AgentType::Muse => self.input_tokens_sum,
+            AgentType::Codex | AgentType::Muse | AgentType::Antigravity => self.input_tokens_sum,
         };
         input
             .saturating_add(self.output_tokens_sum)
@@ -326,6 +326,7 @@ mod tests {
         assert_eq!(token_bucket(AgentType::Claude).consumed_tokens(), 465);
         assert_eq!(token_bucket(AgentType::Codex).consumed_tokens(), 125);
         assert_eq!(token_bucket(AgentType::Muse).consumed_tokens(), 125);
+        assert_eq!(token_bucket(AgentType::Antigravity).consumed_tokens(), 125);
     }
 
     /// Build a minimal turn with the token fields that drive the gauge.

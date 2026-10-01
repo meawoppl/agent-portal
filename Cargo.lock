@@ -91,8 +91,9 @@ dependencies = [
 
 [[package]]
 name = "agent-portal"
-version = "2.14.15"
+version = "2.15.15"
 dependencies = [
+ "antigravity-session-lib",
  "anyhow",
  "chrono",
  "chrono-tz",
@@ -124,7 +125,7 @@ dependencies = [
 
 [[package]]
 name = "agent-portal-mobile"
-version = "2.14.15"
+version = "2.15.15"
 dependencies = [
  "agent-portal-mobile-status-notification",
  "plist",
@@ -241,6 +242,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "antigravity-codes"
+version = "0.1.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8591efcc5ba5a0a0ae495530025adb4dae67526c916956f3ac6c95a3c69c7f10"
+dependencies = [
+ "base64 0.22.1",
+ "futures-util",
+ "log",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-tungstenite 0.24.0",
+ "which",
+]
+
+[[package]]
+name = "antigravity-session-lib"
+version = "2.15.15"
+dependencies = [
+ "antigravity-codes",
+ "chrono",
+ "serde",
+ "serde_json",
+ "session-lib",
+ "shared",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "anyhow"
 version = "1.0.102"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -254,7 +288,7 @@ checksum = "d301b3b94cb4b2f23d7917810addbbaff90738e0ca2be692bd027e70d7e0330c"
 
 [[package]]
 name = "archive-format"
-version = "2.14.15"
+version = "2.15.15"
 dependencies = [
  "chrono",
  "object_store",
@@ -643,7 +677,7 @@ dependencies = [
 
 [[package]]
 name = "backend"
-version = "2.14.15"
+version = "2.15.15"
 dependencies = [
  "a2",
  "anyhow",
@@ -1179,7 +1213,7 @@ dependencies = [
 
 [[package]]
 name = "claude-portal"
-version = "2.14.15"
+version = "2.15.15"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1211,7 +1245,7 @@ dependencies = [
 
 [[package]]
 name = "claude-session-lib"
-version = "2.14.15"
+version = "2.15.15"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1276,7 +1310,7 @@ dependencies = [
 
 [[package]]
 name = "codex-session-lib"
-version = "2.14.15"
+version = "2.15.15"
 dependencies = [
  "chrono",
  "claude-codes",
@@ -2478,7 +2512,7 @@ dependencies = [
 
 [[package]]
 name = "frontend"
-version = "2.14.15"
+version = "2.15.15"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -4503,7 +4537,7 @@ dependencies = [
 
 [[package]]
 name = "muse-session-lib"
-version = "2.14.15"
+version = "2.15.15"
 dependencies = [
  "chrono",
  "claude-codes",
@@ -5433,7 +5467,7 @@ dependencies = [
 
 [[package]]
 name = "portal-auth"
-version = "2.14.15"
+version = "2.15.15"
 dependencies = [
  "anyhow",
  "colored",
@@ -5448,7 +5482,7 @@ dependencies = [
 
 [[package]]
 name = "portal-stt"
-version = "2.14.15"
+version = "2.15.15"
 dependencies = [
  "anyhow",
  "aws-credential-types",
@@ -5469,7 +5503,7 @@ dependencies = [
 
 [[package]]
 name = "portal-update"
-version = "2.14.15"
+version = "2.15.15"
 dependencies = [
  "anyhow",
  "hex",
@@ -6608,7 +6642,7 @@ dependencies = [
 
 [[package]]
 name = "session-lib"
-version = "2.14.15"
+version = "2.15.15"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -6697,7 +6731,7 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "2.14.15"
+version = "2.15.15"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -7664,6 +7698,18 @@ dependencies = [
 
 [[package]]
 name = "tokio-tungstenite"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edc5f74e248dc973e0dbb7b74c7e0d6fcc301c694ff50049504004ef4d0cdcd9"
+dependencies = [
+ "futures-util",
+ "log",
+ "tokio",
+ "tungstenite 0.24.0",
+]
+
+[[package]]
+name = "tokio-tungstenite"
 version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d25a406cddcc431a75d3d9afc6a7c0f7428d4891dd973e4d54c56b46127bf857"
@@ -8065,6 +8111,24 @@ name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
+
+[[package]]
+name = "tungstenite"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "18e5b8366ee7a95b16d32197d0b2604b43a0be89dc5fac9f8e96ccafbaedda8a"
+dependencies = [
+ "byteorder",
+ "bytes",
+ "data-encoding",
+ "http 1.5.0",
+ "httparse",
+ "log",
+ "rand 0.8.6",
+ "sha1",
+ "thiserror 1.0.69",
+ "utf-8",
+]
 
 [[package]]
 name = "tungstenite"

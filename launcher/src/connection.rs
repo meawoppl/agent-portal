@@ -469,6 +469,7 @@ fn probe_agents_for_response() -> Vec<shared::AgentInstall> {
                     // Muse persists no account identity (no whoami at 0.1.0),
                     // so the cell is presence-only.
                     shared::AgentType::Muse => session_lib::probe::probe_muse_login(),
+                    shared::AgentType::Antigravity => session_lib::probe::probe_antigravity_login(),
                 }
             } else {
                 shared::AgentLoginStatus::Unknown
