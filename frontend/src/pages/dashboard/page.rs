@@ -637,8 +637,8 @@ pub fn dashboard_page() -> Html {
     };
 
     // Computed values.
-    // The rail's red "needs response" outline and this count show sessions still
-    // awaiting a reply that the user hasn't looked at yet — awaiting minus the
+    // The rail's red "needs response" outline and the tab-title count show sessions
+    // still awaiting a reply that the user hasn't looked at yet — awaiting minus the
     // ones whose current awaiting state has been seen (see DashboardSessionState
     // `seen_awaiting`). Viewing a session clears it here without disturbing the
     // underlying "agent is parked" flag.
@@ -740,28 +740,14 @@ pub fn dashboard_page() -> Html {
 
             // Header. The collapse toggle shrinks it to a slim full-width
             // pull strip (title and actions hidden) for vertical space —
-            // most valuable on phones, available everywhere. The strip tints
-            // when sessions await permission so the collapsed header never
-            // hides that signal.
+            // most valuable on phones, available everywhere.
             <header class={classes!(
                 "focus-flow-header",
                 ui_state.header_collapsed.then_some("collapsed"),
-                (ui_state.header_collapsed && waiting_count > 0).then_some("has-waiting"),
             )}>
                 <h1>{ app_title.clone() }</h1>
                 <div class="header-actions">
                     <TurnMetricsHeaderPill metrics={ws_hook.recent_turn_metrics.clone()} />
-                    {
-                        if waiting_count > 0 {
-                            html! {
-                                <span class="waiting-badge">
-                                    { format!("{} waiting", waiting_count) }
-                                </span>
-                            }
-                        } else {
-                            html! {}
-                        }
-                    }
                     <button
                         class={classes!("new-session-button", if ui_state.show_launch_dialog { "active" } else { "" })}
                         onclick={toggle_launch_dialog.clone()}
@@ -808,17 +794,7 @@ pub fn dashboard_page() -> Html {
                     title={if ui_state.header_collapsed { "Expand header" } else { "Collapse header" }}
                     aria-label={if ui_state.header_collapsed { "Expand header" } else { "Collapse header" }}
                 >
-                    {
-                        if ui_state.header_collapsed {
-                            if waiting_count > 0 {
-                                format!("▾ {waiting_count} waiting")
-                            } else {
-                                "▾".to_string()
-                            }
-                        } else {
-                            "▴".to_string()
-                        }
-                    }
+                    { if ui_state.header_collapsed { "▾" } else { "▴" } }
                 </button>
             </header>
 

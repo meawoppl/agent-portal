@@ -79,8 +79,7 @@
         gap: 0;
     }
 
-    .total-spend-badge,
-    .waiting-badge {
+    .total-spend-badge {
         font-size: 0.7rem;
         padding: 0.2rem 0.5rem;
     }

@@ -72,13 +72,6 @@
     padding: 0.15rem 0 0.25rem;
 }
 
-/* Collapsed must not hide the "agent is blocked on you" signal: the pull
-   strip takes the waiting badge's color and shows the count inline. */
-.focus-flow-header.collapsed.has-waiting .header-collapse-toggle {
-    color: var(--error);
-    font-weight: 600;
-}
-
 .total-spend-badge {
     background: rgba(158, 206, 106, 0.2);
     color: var(--success);
@@ -172,16 +165,6 @@
     80% { transform: translate(4px, -2px) rotate(5deg) scale(0.93); }
     90% { transform: translate(-2px, 1px) rotate(-2deg) scale(1.07); }
     100% { transform: translate(3px, -1px) rotate(3deg) scale(1); }
-}
-
-.waiting-badge {
-    background: rgba(247, 118, 142, 0.2);
-    color: var(--error);
-    padding: 0.25rem 0.75rem;
-    border-radius: 12px;
-    font-size: 0.8rem;
-    font-weight: 500;
-    animation: pulse 2s infinite;
 }
 
 /* Reconnection banner */
