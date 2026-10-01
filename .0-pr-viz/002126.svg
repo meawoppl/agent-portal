@@ -1,74 +1,75 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-labelledby="title desc">
   <title id="title">Fullscreen zoomable image lightbox</title>
   <desc id="desc">Visual summary of image and SVG previews opening into a fullscreen, scroll-zoomable, pannable lightbox in Agent Portal.</desc>
   <defs>
-    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
-      <path d="M0,0 L0,6 L9,3 z" fill="#7aa2f7"/>
+    <marker id="arrow" markerWidth="14" markerHeight="14" refX="12" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,10 L14,5 z" fill="#7aa2f7"/>
     </marker>
-    <style>
-      .bg { fill: #1a1b26; }
-      .panel { fill: #24283b; stroke: #565f89; stroke-width: 2; rx: 18; }
-      .thumb { fill: #1f2335; stroke: #7aa2f7; stroke-width: 2; rx: 10; }
-      .overlay { fill: #07080d; stroke: #7aa2f7; stroke-width: 2; rx: 18; }
-      .image { fill: #c0caf5; stroke: #7dcfff; stroke-width: 2; rx: 8; }
-      .image2 { fill: #1a1b26; stroke: #9ece6a; stroke-width: 3; rx: 8; }
-      .control { fill: #2f354f; stroke: #565f89; stroke-width: 1.5; rx: 8; }
-      .accent { fill: #7aa2f7; }
-      .green { fill: #9ece6a; }
-      .orange { fill: #e0af68; }
-      .red { fill: #f7768e; }
-      .title { fill: #c0caf5; font: 700 38px Inter, ui-sans-serif, system-ui, sans-serif; }
-      .subtitle { fill: #a9b1d6; font: 500 18px Inter, ui-sans-serif, system-ui, sans-serif; }
-      .h { fill: #c0caf5; font: 700 22px Inter, ui-sans-serif, system-ui, sans-serif; }
-      .t { fill: #a9b1d6; font: 500 16px Inter, ui-sans-serif, system-ui, sans-serif; }
-      .small { fill: #c0caf5; font: 700 13px Inter, ui-sans-serif, system-ui, sans-serif; }
-      .flow { fill: none; stroke: #7aa2f7; stroke-width: 3; marker-end: url(#arrow); stroke-linecap: round; }
-    </style>
   </defs>
-  <rect class="bg" width="1200" height="675"/>
-  <text class="title" x="52" y="64">Image and SVG previews open fullscreen</text>
-  <text class="subtitle" x="52" y="96">Scroll or trackpad gesture zooms, drag pans, double-click or Reset fits the image again.</text>
 
-  <g transform="translate(54,142)">
-    <rect class="panel" width="348" height="430"/>
-    <text class="h" x="26" y="42">Transcript preview</text>
-    <text class="t" x="26" y="72">Same inline frame for PNG, JPEG, WebP, GIF, and SVG.</text>
-    <rect class="thumb" x="26" y="112" width="296" height="190"/>
-    <path class="green" d="M64 254 L126 190 L178 234 L216 204 L286 272 L64 272z"/>
-    <circle class="orange" cx="258" cy="154" r="22"/>
-    <rect class="control" x="26" y="328" width="132" height="42"/>
-    <text class="small" x="58" y="354">click preview</text>
-    <rect class="control" x="174" y="328" width="148" height="42"/>
-    <text class="small" x="208" y="354">load image</text>
+  <rect width="2000" height="1200" fill="#1a1b26"/>
+  <rect x="70" y="68" width="1860" height="1064" rx="34" fill="#16161e" stroke="#3d4666" stroke-width="3"/>
+
+  <text x="112" y="145" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="58" font-weight="700">Image and SVG previews now open fullscreen</text>
+  <text x="112" y="198" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="29" font-weight="500">Wheel or trackpad zooms around the cursor. Drag pans the zoomed image. Reset or double-click fits it again.</text>
+
+  <line x1="1000" y1="250" x2="1000" y2="1085" stroke="#3d4666" stroke-width="3" stroke-dasharray="16 18"/>
+
+  <g transform="translate(112,276)">
+    <text x="0" y="0" fill="#e0af68" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="30" font-weight="700">Before</text>
+    <text x="0" y="46" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="38" font-weight="700">Centered preview modal</text>
+    <text x="0" y="90" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25" font-weight="500">The preview stayed inside a framed card, so large SVGs</text>
+    <text x="0" y="124" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25" font-weight="500">or screenshots were hard to inspect.</text>
+
+    <rect x="34" y="188" width="742" height="556" rx="28" fill="#1e202e" stroke="#565f89" stroke-width="3"/>
+    <rect x="82" y="246" width="646" height="390" rx="20" fill="#1a1b26" stroke="#565f89" stroke-width="3"/>
+    <rect x="154" y="324" width="502" height="238" rx="16" fill="#1e202e" stroke="#7aa2f7" stroke-width="4"/>
+    <path d="M212 516 L318 404 L408 486 L474 436 L604 522 L212 522 z" fill="#9ece6a"/>
+    <circle cx="586" cy="376" r="34" fill="#e0af68"/>
+    <text x="190" y="606" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="600">Clicking opens the same constrained viewing surface</text>
+
+    <rect x="118" y="798" width="584" height="92" rx="16" fill="#1e202e" stroke="#565f89" stroke-width="3"/>
+    <circle cx="164" cy="844" r="18" fill="#f7768e"/>
+    <text x="202" y="854" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">No scroll zoom, no direct pan, limited SVG scale</text>
   </g>
 
-  <path class="flow" d="M430 358 C500 358, 510 338, 570 338"/>
+  <path d="M875 612 C930 612 940 612 974 612" fill="none" stroke="#7aa2f7" stroke-width="7" stroke-linecap="round" marker-end="url(#arrow)"/>
 
-  <g transform="translate(570,132)">
-    <rect class="overlay" width="574" height="450"/>
-    <text class="h" x="28" y="46">Fullscreen lightbox viewport</text>
-    <text class="t" x="28" y="76">The image fills the screen surface instead of a centered card.</text>
-    <rect class="image2" x="82" y="112" width="410" height="270"/>
-    <path class="accent" d="M126 338 L236 210 L302 284 L360 234 L462 340 L126 340z"/>
-    <path class="green" d="M208 162 h196 v14 H208zM208 194 h142 v14 H208zM208 226 h226 v14 H208z"/>
-    <circle class="orange" cx="428" cy="168" r="24"/>
+  <g transform="translate(1070,276)">
+    <text x="0" y="0" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="30" font-weight="700">After</text>
+    <text x="0" y="46" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="38" font-weight="700">Fullscreen inspection surface</text>
+    <text x="0" y="90" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25" font-weight="500">Image previews become a viewport tool instead of a card.</text>
+    <text x="0" y="124" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25" font-weight="500">The same path covers PNG, JPEG, WebP, GIF, and SVG.</text>
 
-    <g transform="translate(280,22)">
-      <rect class="control" width="72" height="34"/>
-      <text class="small" x="20" y="22">Reset</text>
-      <rect class="control" x="82" width="100" height="34"/>
-      <text class="small" x="104" y="22">Download</text>
-      <rect class="control" x="192" width="40" height="34"/>
-      <text class="small" x="207" y="22">x</text>
+    <rect x="0" y="188" width="798" height="556" rx="28" fill="#1a1b26" stroke="#7aa2f7" stroke-width="4"/>
+    <rect x="52" y="246" width="694" height="390" rx="18" fill="#1e202e" stroke="#9ece6a" stroke-width="4"/>
+    <path d="M110 590 L278 410 L390 528 L478 462 L692 594 L110 594 z" fill="#7aa2f7"/>
+    <path d="M214 330 h322 v24 H214z M214 380 h230 v24 H214z M214 430 h374 v24 H214z" fill="#9ece6a"/>
+    <circle cx="648" cy="336" r="38" fill="#e0af68"/>
+
+    <g transform="translate(388,210)">
+      <rect x="0" y="0" width="112" height="52" rx="13" fill="#1e202e" stroke="#565f89" stroke-width="3"/>
+      <text x="28" y="35" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700">Reset</text>
+      <rect x="128" y="0" width="158" height="52" rx="13" fill="#1e202e" stroke="#565f89" stroke-width="3"/>
+      <text x="158" y="35" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700">Download</text>
+      <rect x="302" y="0" width="58" height="52" rx="13" fill="#1e202e" stroke="#565f89" stroke-width="3"/>
+      <text x="322" y="35" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24" font-weight="700">x</text>
     </g>
 
-    <g transform="translate(74,402)">
-      <circle class="accent" cx="13" cy="13" r="13"/>
-      <text class="small" x="34" y="18">wheel zooms around cursor</text>
-      <circle class="green" cx="242" cy="13" r="13"/>
-      <text class="small" x="263" y="18">drag pans when zoomed</text>
-      <circle class="orange" cx="454" cy="13" r="13"/>
-      <text class="small" x="475" y="18">Escape closes</text>
+    <g transform="translate(28,796)">
+      <rect x="0" y="0" width="224" height="82" rx="18" fill="#1e202e" stroke="#3d4666" stroke-width="3"/>
+      <circle cx="38" cy="41" r="16" fill="#7aa2f7"/>
+      <text x="66" y="49" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24" font-weight="700">wheel zoom</text>
+
+      <rect x="248" y="0" width="194" height="82" rx="18" fill="#1e202e" stroke="#3d4666" stroke-width="3"/>
+      <circle cx="286" cy="41" r="16" fill="#9ece6a"/>
+      <text x="314" y="49" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24" font-weight="700">drag pan</text>
+
+      <rect x="466" y="0" width="250" height="82" rx="18" fill="#1e202e" stroke="#3d4666" stroke-width="3"/>
+      <circle cx="504" cy="41" r="16" fill="#e0af68"/>
+      <text x="532" y="49" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24" font-weight="700">Reset fits image</text>
     </g>
   </g>
+
+  <text x="112" y="1080" fill="#565f89" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24" font-weight="600">Implementation: ImageLightboxView owns pan and scale state; wheel, pointer drag, double-click, Escape, Reset, Download, and SVG sizing share one fullscreen path.</text>
 </svg>
