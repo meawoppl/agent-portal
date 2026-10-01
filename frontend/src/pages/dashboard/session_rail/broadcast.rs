@@ -233,6 +233,7 @@ pub(super) fn render_broadcasts(
                     AgentType::Claude => "claude",
                     AgentType::Codex => "codex",
                     AgentType::Muse => "muse",
+                    AgentType::Antigravity => "antigravity",
                 };
                 let (s1, s2, s3) = plasma_seeds(&view);
                 let style =

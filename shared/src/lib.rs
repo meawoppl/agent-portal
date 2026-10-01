@@ -226,6 +226,8 @@ pub enum AgentType {
     Codex,
     /// Meta Muse Code (`muse` CLI) — journal-stream agent, spawn-per-turn.
     Muse,
+    /// Google Antigravity (`localharness`) — WebSocket agent runtime.
+    Antigravity,
 }
 
 impl AgentType {
@@ -234,6 +236,7 @@ impl AgentType {
             AgentType::Claude => "claude",
             AgentType::Codex => "codex",
             AgentType::Muse => "muse",
+            AgentType::Antigravity => "antigravity",
         }
     }
 
@@ -253,6 +256,7 @@ impl AgentType {
             AgentType::Claude => "Claude",
             AgentType::Codex => "Codex",
             AgentType::Muse => "Muse",
+            AgentType::Antigravity => "Antigravity",
         }
     }
 
@@ -293,6 +297,10 @@ impl AgentType {
                 program: "bash",
                 args: vec!["-c", "curl -fsSL https://dev.meta.ai/install.sh | bash"],
             },
+            AgentType::Antigravity => AgentInstallCommand {
+                program: "python3",
+                args: vec!["-m", "pip", "install", "--user", "google-antigravity"],
+            },
         }
     }
 }
@@ -332,6 +340,7 @@ impl std::str::FromStr for AgentType {
             "claude" => Ok(AgentType::Claude),
             "codex" => Ok(AgentType::Codex),
             "muse" => Ok(AgentType::Muse),
+            "antigravity" => Ok(AgentType::Antigravity),
             other => Err(format!("unknown agent type: {}", other)),
         }
     }
@@ -1506,7 +1515,12 @@ mod tests {
     fn agent_type_display_names_are_capitalized() {
         // `display_name` is the single source of truth for the human label;
         // it must stay the capitalized wire name for every variant.
-        for agent in [AgentType::Claude, AgentType::Codex, AgentType::Muse] {
+        for agent in [
+            AgentType::Claude,
+            AgentType::Codex,
+            AgentType::Muse,
+            AgentType::Antigravity,
+        ] {
             let wire = agent.as_str();
             let mut expected = String::from(&wire[..1].to_ascii_uppercase());
             expected.push_str(&wire[1..]);
@@ -1515,6 +1529,7 @@ mod tests {
         assert_eq!(AgentType::Claude.display_name(), "Claude");
         assert_eq!(AgentType::Codex.display_name(), "Codex");
         assert_eq!(AgentType::Muse.display_name(), "Muse");
+        assert_eq!(AgentType::Antigravity.display_name(), "Antigravity");
     }
 
     #[test]
@@ -1592,6 +1607,10 @@ mod tests {
         assert_eq!(AgentType::parse_or_default("codex"), AgentType::Codex);
         assert_eq!(AgentType::parse_or_default("muse"), AgentType::Muse);
         assert_eq!(AgentType::parse_or_default("Muse"), AgentType::Muse);
+        assert_eq!(
+            AgentType::parse_or_default("antigravity"),
+            AgentType::Antigravity
+        );
         assert_eq!(AgentType::parse_or_default("bogus"), AgentType::Claude);
         assert_eq!(AgentType::parse_or_default(""), AgentType::Claude);
     }
@@ -1840,7 +1859,12 @@ mod agent_type_parse_roundtrip {
     /// trip for every variant so adding one can't reintroduce that.
     #[test]
     fn every_agent_type_round_trips_through_its_string_form() {
-        for agent in [AgentType::Claude, AgentType::Codex, AgentType::Muse] {
+        for agent in [
+            AgentType::Claude,
+            AgentType::Codex,
+            AgentType::Muse,
+            AgentType::Antigravity,
+        ] {
             let s = agent.as_str();
             let parsed: AgentType = s.parse().unwrap_or_else(|_| {
                 panic!("{s} must parse back; the backend's unwrap_or(Claude) would mask it")

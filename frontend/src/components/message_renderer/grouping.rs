@@ -374,6 +374,21 @@ pub(super) fn classify(
                 badge_class: "assistant".to_string(),
             });
         }
+        AgentFrame::Antigravity(value)
+            if value.get("type").and_then(serde_json::Value::as_str)
+                == Some("antigravity_turn_completed") =>
+        {
+            // Keep the turn terminal as a singleton so its metrics footer can
+            // receive the turn-indexed payload from SessionView.
+            return None;
+        }
+        AgentFrame::Antigravity(_) => {
+            return Some(MessageIdentity {
+                category: GroupCategory::Assistant,
+                label: "Antigravity".to_string(),
+                badge_class: "assistant".to_string(),
+            });
+        }
         _ => {}
     }
 

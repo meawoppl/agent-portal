@@ -185,7 +185,10 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                 // Preserve the established auto-enabled setting for Claude and
                 // Codex schedules, but Muse's broader YOLO mode must be an
                 // explicit opt-in because it also disables the sandbox.
-                skip_permissions: session_agent_type != shared::AgentType::Muse,
+                skip_permissions: !matches!(
+                    session_agent_type,
+                    shared::AgentType::Muse | shared::AgentType::Antigravity
+                ),
                 ..Default::default()
             });
             error_msg.set(None);
@@ -607,6 +610,7 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                                                 <option value="claude">{ "Claude" }</option>
                                                 <option value="codex">{ "Codex" }</option>
                                                 <option value="muse">{ "Muse" }</option>
+                                                <option value="antigravity">{ "Antigravity" }</option>
                                             </select>
                                         </div>
                                     </div>
@@ -757,16 +761,18 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                                             oninput={set_field(|f, v| f.extra_args = v)}
                                         />
                                     </div>
-                                    <div class="sched-field sched-checkbox">
-                                        <label>
-                                            <input
-                                                type="checkbox"
-                                                checked={form.skip_permissions}
-                                                onchange={on_skip_permissions}
-                                            />
-                                            { format!(" {}", skip_permissions_label(form.agent_type)) }
-                                        </label>
-                                    </div>
+                                    if form.agent_type != shared::AgentType::Antigravity {
+                                        <div class="sched-field sched-checkbox">
+                                            <label>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={form.skip_permissions}
+                                                    onchange={on_skip_permissions}
+                                                />
+                                                { format!(" {}", skip_permissions_label(form.agent_type)) }
+                                            </label>
+                                        </div>
+                                    }
                                     <div class="sched-form-actions">
                                         <button type="button" class="sched-btn" onclick={close_form}>
                                             { "Cancel" }

@@ -290,8 +290,10 @@ fn render_menu_content(session: &SessionInfo, props: &SessionRailMenuProps) -> H
     };
     let fork_option = if session.my_role == SessionRole::Owner
         && session.launcher_id.is_some()
-        && session.agent_type != shared::AgentType::Muse
-    {
+        && !matches!(
+            session.agent_type,
+            shared::AgentType::Muse | shared::AgentType::Antigravity
+        ) {
         menu_option(
             classes!("fork"),
             "Fork Session…",

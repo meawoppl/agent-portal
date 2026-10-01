@@ -451,7 +451,7 @@ pub async fn run_launcher_loop(
     }
 }
 
-/// Probe both supported agent CLIs and convert into the wire shape used in
+/// Probe every supported agent runtime and convert into the wire shape used in
 /// `LauncherToServer::ProbeAgentsResult`. Runs `which::which` + `--version`
 /// synchronously, so callers must run this from a `spawn_blocking` task.
 fn probe_agents_for_response() -> Vec<shared::AgentInstall> {
@@ -469,6 +469,7 @@ fn probe_agents_for_response() -> Vec<shared::AgentInstall> {
                     // Muse persists no account identity (no whoami at 0.1.0),
                     // so the cell is presence-only.
                     shared::AgentType::Muse => session_lib::probe::probe_muse_login(),
+                    shared::AgentType::Antigravity => session_lib::probe::probe_antigravity_login(),
                 }
             } else {
                 shared::AgentLoginStatus::Unknown

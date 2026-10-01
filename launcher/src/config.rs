@@ -193,6 +193,7 @@ fn plugin_skill_context_from_config(
             let reminder_agent = match agent_type {
                 AgentType::Codex => Some("codex"),
                 AgentType::Muse => Some("muse"),
+                AgentType::Antigravity => Some("antigravity"),
                 AgentType::Claude => None,
             };
             if reminder_agent.is_some_and(|agent| skill_applies_to(&skill, agent)) {
