@@ -571,6 +571,9 @@ mod tests {
             origin: None,
             // 2.1.163/2.1.164 additions — also absent here.
             request_sent_wall_ms: None,
+            // Server receipt and prompt-size timing are absent in local results.
+            first_request_input_tokens: None,
+            user_message_server_received_wall_ms: None,
             user_message_uuid: None,
             user_message_uuids: Vec::new(),
             queued_turn_count: None,
