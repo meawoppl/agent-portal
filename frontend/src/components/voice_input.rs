@@ -532,11 +532,10 @@ impl Component for VoiceInput {
             }
             VoiceInputMsg::Transcribed(text) => {
                 self.transcribing = false;
-                let trimmed = text.trim();
                 // Silence transcribes to nothing; that is not an error, and
                 // surfacing one for it would be noise.
-                if !trimmed.is_empty() {
-                    ctx.props().on_transcription.emit(trimmed.to_string());
+                if let Some(trimmed) = utils::owned_non_blank(&text) {
+                    ctx.props().on_transcription.emit(trimmed);
                 }
                 true
             }
@@ -581,9 +580,8 @@ impl Component for VoiceInput {
                 }
                 self.carryover.clear();
                 self.latest_preview.clear();
-                let trimmed = text.trim();
-                if !trimmed.is_empty() {
-                    ctx.props().on_transcription.emit(trimmed.to_string());
+                if let Some(trimmed) = utils::owned_non_blank(&text) {
+                    ctx.props().on_transcription.emit(trimmed);
                 }
                 false
             }
@@ -853,9 +851,8 @@ impl VoiceInput {
         };
         self.carryover.clear();
         self.latest_preview.clear();
-        let trimmed = text.trim();
-        if !trimmed.is_empty() {
-            ctx.props().on_transcription.emit(trimmed.to_string());
+        if let Some(trimmed) = utils::owned_non_blank(&text) {
+            ctx.props().on_transcription.emit(trimmed);
         }
     }
 

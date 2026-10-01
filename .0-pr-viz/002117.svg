@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-labelledby="title desc">
+  <title id="title">Voice transcription blank checks route through shared</title>
+  <desc id="desc">Three emit sites in voice_input.rs stop hand-rolling trim and empty checks and compose utils owned_non_blank instead, with identical silence handling.</desc>
+  <rect width="2000" height="1200" fill="#1a1b26"/>
+
+  <text x="80" y="105" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="50" font-weight="700">Voice Emit Sites Route Through Shared</text>
+  <text x="80" y="158" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="28">Three transcription emit sites compose utils owned_non_blank; the hand-rolled trim shape is gone.</text>
+
+  <line x1="1000" y1="210" x2="1000" y2="1050" stroke="#3d4666" stroke-width="3" stroke-dasharray="10 12"/>
+
+  <text x="90" y="250" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700" letter-spacing="4">BEFORE</text>
+  <text x="90" y="298" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="27">voice_input.rs owned the trim shape three times</text>
+  <text x="90" y="335" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">Three copies of trim + is_empty + to_string ahead of every emit.</text>
+
+  <rect x="90" y="385" width="830" height="430" rx="16" fill="#16161e" stroke="#3d4666" stroke-width="2"/>
+  <text x="130" y="440" fill="#7aa2f7" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">frontend voice_input.rs</text>
+  <text x="130" y="478" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">trim, check, emit - copied at each site</text>
+  <rect x="130" y="510" width="750" height="64" rx="10" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="155" y="551" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25">Transcribed arm: trim + is_empty + emit</text>
+  <rect x="130" y="590" width="750" height="64" rx="10" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="155" y="631" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25">Final arm: trim + is_empty + emit</text>
+  <rect x="130" y="670" width="750" height="64" rx="10" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="155" y="711" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25">flush_pending_browser_text: same again</text>
+  <text x="130" y="790" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25">3 copies of the shape utils already owns.</text>
+
+  <text x="1080" y="250" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700" letter-spacing="4">AFTER</text>
+  <text x="1080" y="298" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="27">utils owns trim and blank; call sites emit</text>
+  <text x="1080" y="335" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">Same behavior; silence still transcribes to nothing, quietly.</text>
+
+  <rect x="1080" y="385" width="830" height="430" rx="16" fill="#16161e" stroke="#3d4666" stroke-width="2"/>
+  <text x="1120" y="440" fill="#7aa2f7" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">utils::owned_non_blank</text>
+  <text x="1120" y="478" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">re-export of shared::strings (one home)</text>
+  <rect x="1120" y="510" width="750" height="64" rx="10" fill="#1e202e" stroke="#7aa2f7" stroke-width="2"/>
+  <text x="1145" y="551" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25">trim + reject blank (one home)</text>
+  <line x1="1495" y1="574" x2="1495" y2="640" stroke="#9ece6a" stroke-width="4"/>
+  <path d="M1480 625 L1495 648 L1510 625" fill="none" stroke="#9ece6a" stroke-width="4"/>
+  <rect x="1120" y="648" width="750" height="64" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1145" y="689" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25">if let Some - emit (x3 call sites)</text>
+  <text x="1120" y="770" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25">678 frontend tests pass; clippy and fmt clean.</text>
+  <text x="1120" y="806" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">WASM check clean; silence path untouched.</text>
+
+  <rect x="190" y="1080" width="1620" height="70" rx="14" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+  <text x="230" y="1125" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">Scope: DRY refactor only; transcription delivery and silence handling are unchanged.</text>
+</svg>
