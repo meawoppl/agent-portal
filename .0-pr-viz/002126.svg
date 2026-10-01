@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675" role="img" aria-labelledby="title desc">
+  <title id="title">Fullscreen zoomable image lightbox</title>
+  <desc id="desc">Visual summary of image and SVG previews opening into a fullscreen, scroll-zoomable, pannable lightbox in Agent Portal.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#7aa2f7"/>
+    </marker>
+    <style>
+      .bg { fill: #1a1b26; }
+      .panel { fill: #24283b; stroke: #565f89; stroke-width: 2; rx: 18; }
+      .thumb { fill: #1f2335; stroke: #7aa2f7; stroke-width: 2; rx: 10; }
+      .overlay { fill: #07080d; stroke: #7aa2f7; stroke-width: 2; rx: 18; }
+      .image { fill: #c0caf5; stroke: #7dcfff; stroke-width: 2; rx: 8; }
+      .image2 { fill: #1a1b26; stroke: #9ece6a; stroke-width: 3; rx: 8; }
+      .control { fill: #2f354f; stroke: #565f89; stroke-width: 1.5; rx: 8; }
+      .accent { fill: #7aa2f7; }
+      .green { fill: #9ece6a; }
+      .orange { fill: #e0af68; }
+      .red { fill: #f7768e; }
+      .title { fill: #c0caf5; font: 700 38px Inter, ui-sans-serif, system-ui, sans-serif; }
+      .subtitle { fill: #a9b1d6; font: 500 18px Inter, ui-sans-serif, system-ui, sans-serif; }
+      .h { fill: #c0caf5; font: 700 22px Inter, ui-sans-serif, system-ui, sans-serif; }
+      .t { fill: #a9b1d6; font: 500 16px Inter, ui-sans-serif, system-ui, sans-serif; }
+      .small { fill: #c0caf5; font: 700 13px Inter, ui-sans-serif, system-ui, sans-serif; }
+      .flow { fill: none; stroke: #7aa2f7; stroke-width: 3; marker-end: url(#arrow); stroke-linecap: round; }
+    </style>
+  </defs>
+  <rect class="bg" width="1200" height="675"/>
+  <text class="title" x="52" y="64">Image and SVG previews open fullscreen</text>
+  <text class="subtitle" x="52" y="96">Scroll or trackpad gesture zooms, drag pans, double-click or Reset fits the image again.</text>
+
+  <g transform="translate(54,142)">
+    <rect class="panel" width="348" height="430"/>
+    <text class="h" x="26" y="42">Transcript preview</text>
+    <text class="t" x="26" y="72">Same inline frame for PNG, JPEG, WebP, GIF, and SVG.</text>
+    <rect class="thumb" x="26" y="112" width="296" height="190"/>
+    <path class="green" d="M64 254 L126 190 L178 234 L216 204 L286 272 L64 272z"/>
+    <circle class="orange" cx="258" cy="154" r="22"/>
+    <rect class="control" x="26" y="328" width="132" height="42"/>
+    <text class="small" x="58" y="354">click preview</text>
+    <rect class="control" x="174" y="328" width="148" height="42"/>
+    <text class="small" x="208" y="354">load image</text>
+  </g>
+
+  <path class="flow" d="M430 358 C500 358, 510 338, 570 338"/>
+
+  <g transform="translate(570,132)">
+    <rect class="overlay" width="574" height="450"/>
+    <text class="h" x="28" y="46">Fullscreen lightbox viewport</text>
+    <text class="t" x="28" y="76">The image fills the screen surface instead of a centered card.</text>
+    <rect class="image2" x="82" y="112" width="410" height="270"/>
+    <path class="accent" d="M126 338 L236 210 L302 284 L360 234 L462 340 L126 340z"/>
+    <path class="green" d="M208 162 h196 v14 H208zM208 194 h142 v14 H208zM208 226 h226 v14 H208z"/>
+    <circle class="orange" cx="428" cy="168" r="24"/>
+
+    <g transform="translate(280,22)">
+      <rect class="control" width="72" height="34"/>
+      <text class="small" x="20" y="22">Reset</text>
+      <rect class="control" x="82" width="100" height="34"/>
+      <text class="small" x="104" y="22">Download</text>
+      <rect class="control" x="192" width="40" height="34"/>
+      <text class="small" x="207" y="22">x</text>
+    </g>
+
+    <g transform="translate(74,402)">
+      <circle class="accent" cx="13" cy="13" r="13"/>
+      <text class="small" x="34" y="18">wheel zooms around cursor</text>
+      <circle class="green" cx="242" cy="13" r="13"/>
+      <text class="small" x="263" y="18">drag pans when zoomed</text>
+      <circle class="orange" cx="454" cy="13" r="13"/>
+      <text class="small" x="475" y="18">Escape closes</text>
+    </g>
+  </g>
+</svg>
