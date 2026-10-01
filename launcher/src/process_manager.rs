@@ -9,8 +9,9 @@ use claude_session_lib::proxy_session::{
     ClaudeConversationIdSink, CodexThreadIdSink, MediaDisplaySink,
 };
 use claude_session_lib::{
-    claude_transcript_id, claude_transcript_status, run_connection_loop, ClaudeAgent, LoopResult,
-    PortalInput, ProxySessionConfig, TranscriptStatus,
+    claude_transcript_id, claude_transcript_status, run_connection_loop,
+    should_prime_portal_reminder_on_first_input, ClaudeAgent, LoopResult, PortalInput,
+    ProxySessionConfig, TranscriptStatus,
 };
 use codex_session_lib::CodexAgent;
 use muse_session_lib::MuseAgent;
@@ -359,6 +360,7 @@ impl ProcessManager {
             auth_token: Some(params.auth_token),
             working_directory: working_directory.clone(),
             resume,
+            prime_portal_reminder_on_first_input: !resume,
             git_branch,
             claude_args: params.claude_args,
             replaces_session_id: None,
@@ -504,6 +506,11 @@ async fn run_session_task(
         } else {
             None
         };
+        config.prime_portal_reminder_on_first_input = should_prime_portal_reminder_on_first_input(
+            config.agent_type,
+            config.resume,
+            codex_thread_id.as_deref(),
+        );
 
         // The portal's established dangerous-permissions wire format is the
         // agent argument list. Consume Muse's token here and carry it as typed

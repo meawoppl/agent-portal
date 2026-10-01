@@ -27,8 +27,9 @@ pub use transcript::{
 
 // Re-export the proxy session helpers used by the proxy binary.
 pub use proxy_session::{
-    default_session_name, hostname_or_unknown, run_connection_loop, ConnectionResult, LoopResult,
-    PortalInput, ProxySessionConfig, SessionState,
+    default_session_name, hostname_or_unknown, run_connection_loop,
+    should_prime_portal_reminder_on_first_input, ConnectionResult, LoopResult, PortalInput,
+    ProxySessionConfig, SessionState,
 };
 
 // Convenience re-exports so existing consumers don't all have to add

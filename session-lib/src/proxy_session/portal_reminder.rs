@@ -1,12 +1,14 @@
-//! Portal features reminder delivered to the agent at session start and after
-//! each compaction boundary.
+//! Portal features reminder delivered to the agent at fresh-context start and
+//! after each compaction boundary.
 //!
-//! At session start the reminder is folded into the first real user input,
-//! rather than sent as a standalone turn. The transcript keeps that first
-//! injection in a collapsed notice so the user can inspect exactly what the
-//! agent received without spending scrollback on it. After a compaction
-//! boundary it is injected directly to re-prime the shortened agent context.
-//! In both cases the agent-facing copy is wrapped in
+//! At fresh-context start the reminder is folded into the first real user
+//! input, rather than sent as a standalone turn. A resumed context already has
+//! the reminder in transcript history, so process restarts must not spend it
+//! again. The transcript keeps that first injection in a collapsed notice so
+//! the user can inspect exactly what the agent received without spending
+//! scrollback on it. After a compaction boundary it is injected directly to
+//! re-prime the shortened agent context. In both cases the agent-facing copy is
+//! wrapped in
 //! `<system-reminder>…</system-reminder>` tags so the agent treats it as
 //! out-of-band context.
 //!
