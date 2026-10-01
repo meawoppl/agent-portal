@@ -57,7 +57,7 @@ pub fn performance_panel() -> Html {
             <div class="section-header">
                 <h2>{ "Performance" }</h2>
                 <p class="section-description">
-                    { "Per-turn latency, throughput, cache usage, and cost trends. \
+                    { "Per-turn token consumption, latency, throughput, cache usage, and cost trends. \
                       Aggregated across all sessions you own." }
                 </p>
             </div>
@@ -79,6 +79,7 @@ pub fn performance_panel() -> Html {
                 &group_by,
                 *axis_scale,
                 *show_p95,
+                *window,
             ) }
         </section>
     }

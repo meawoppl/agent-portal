@@ -258,6 +258,30 @@ pub struct MetricBucket {
     pub stop_reason_counts: BTreeMap<String, i64>,
 }
 
+impl MetricBucket {
+    /// Total model tokens consumed by this bucket without double-counting
+    /// agent-specific usage subsets.
+    ///
+    /// Claude reports input, cache-read, and cache-creation tokens as disjoint
+    /// buckets. Codex reports cached/cache-write input as subsets of its input
+    /// total, so those fields must not be added again. Thinking tokens are an
+    /// output-token subset for both agents. Subagent tokens are separate work
+    /// and are therefore included for every agent.
+    pub fn consumed_tokens(&self) -> i64 {
+        let input = match self.agent_type {
+            AgentType::Claude => self
+                .input_tokens_sum
+                .saturating_add(self.cache_read_tokens_sum)
+                .saturating_add(self.cache_creation_tokens_sum),
+            AgentType::Codex | AgentType::Muse => self.input_tokens_sum,
+        };
+        input
+            .saturating_add(self.output_tokens_sum)
+            .saturating_add(self.subagent_tokens_sum)
+            .max(0)
+    }
+}
+
 /// Response shape for `GET /api/metrics/turns?bucket=…&window=…`.
 ///
 /// Buckets are ordered `(bucket_start ASC, agent_type ASC, model ASC, tier ASC)`
@@ -273,6 +297,36 @@ pub struct MetricBucketsResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn token_bucket(agent_type: AgentType) -> MetricBucket {
+        MetricBucket {
+            bucket_start: Utc::now(),
+            agent_type,
+            model: Some("test-model".to_string()),
+            service_tier: None,
+            turn_count: 1,
+            error_count: 0,
+            ttft_p50_ms: None,
+            ttft_p95_ms: None,
+            throughput_p50_tps: None,
+            throughput_p95_tps: None,
+            input_tokens_sum: 100,
+            output_tokens_sum: 20,
+            cache_read_tokens_sum: 300,
+            cache_creation_tokens_sum: 40,
+            thinking_tokens_sum: 7,
+            subagent_tokens_sum: 5,
+            total_cost_usd_sum: None,
+            stop_reason_counts: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn consumed_tokens_respects_agent_usage_semantics() {
+        assert_eq!(token_bucket(AgentType::Claude).consumed_tokens(), 465);
+        assert_eq!(token_bucket(AgentType::Codex).consumed_tokens(), 125);
+        assert_eq!(token_bucket(AgentType::Muse).consumed_tokens(), 125);
+    }
 
     /// Build a minimal turn with the token fields that drive the gauge.
     ///
