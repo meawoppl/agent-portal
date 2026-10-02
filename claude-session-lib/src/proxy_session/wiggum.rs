@@ -534,6 +534,10 @@ mod tests {
             frame_enqueued_wall_ms: None,
             frame_intake_phases_ms: None,
             turn_started_wall_ms: None,
+            // Queue timing and resume kind are absent in this synthetic result.
+            first_text_post_queue_wait_ms: None,
+            first_text_post_queued_behind: None,
+            turn_start_resume_kind: None,
             first_text_post_ms: None,
             first_text_post_wall_ms: None,
             time_to_request_ms: None,
