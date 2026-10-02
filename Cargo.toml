@@ -81,7 +81,7 @@ claude-codes = { version = "2.1.287", default-features = false, features = ["typ
 
 # Muse CLI integration
 muse-codes = { version = "1.4.3", default-features = false, features = ["types"] }
-codex-codes = { version = "0.159.3", default-features = false, features = ["types"] }
+codex-codes = { version = "0.160.0", default-features = false, features = ["types"] }
 antigravity-codes = { version = "0.1.20", default-features = false, features = ["types"] }
 
 # Web Push (VAPID + RFC8291 encryption). `default-features = false` drops the
