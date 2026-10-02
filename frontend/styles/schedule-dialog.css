@@ -1,5 +1,5 @@
 /* =============================================================================
-   Schedule Dialog — modal for managing scheduled tasks per session
+   Schedule Dialog — task manager plus dedicated create/edit modal
    ============================================================================= */
 
 .sched-overlay {
@@ -22,6 +22,16 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+}
+
+/* Creation/editing is deliberately a separate, wider modal rather than an
+   accordion below the task list. The target picker needs the same usable
+   directory surface as the session launcher, and the schedule fields no
+   longer compete with the management rows for one 600px scroll column. */
+.sched-editor-dialog {
+    width: min(92vw, 900px);
+    max-width: 900px;
+    max-height: min(92vh, 980px);
 }
 
 .sched-header {
@@ -235,6 +245,40 @@
     gap: 0.75rem;
 }
 
+.sched-editor-body {
+    padding: 1rem 1.25rem 0;
+}
+
+.sched-form-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 1rem;
+    background: var(--bg-dark);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+.sched-form-section h3 {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 0.95rem;
+}
+
+.sched-form-section .launch-note {
+    margin: 0;
+}
+
+.sched-version-warning-inline {
+    padding: 0.55rem 0.75rem;
+    border: 1px solid rgba(224, 175, 104, 0.3);
+    border-radius: 6px;
+}
+
+.sched-dir-browser {
+    max-height: 190px;
+}
+
 .sched-field {
     display: flex;
     flex-direction: column;
@@ -297,6 +341,12 @@
     flex: 1;
 }
 
+.sched-field-row > .launch-field {
+    flex: 1;
+    min-width: 0;
+    margin-bottom: 0;
+}
+
 .sched-field-sm {
     max-width: 120px;
 }
@@ -319,11 +369,38 @@
     justify-content: flex-end;
 }
 
+.sched-editor-actions {
+    position: sticky;
+    bottom: 0;
+    margin: 0 -1.25rem;
+    padding: 0.85rem 1.25rem 1rem;
+    background: var(--bg-darker);
+    border-top: 1px solid var(--border);
+}
+
+.sched-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 /* Responsive */
 @media (max-width: 640px) {
     .sched-dialog {
         width: 95vw;
         max-height: 90vh;
+    }
+
+    .sched-editor-dialog {
+        width: 96vw;
+        max-height: 94dvh;
+    }
+
+    .sched-editor-body {
+        padding: 0.75rem 0.75rem 0;
+    }
+
+    .sched-form-section {
+        padding: 0.75rem;
     }
 
     .sched-field-row {
@@ -332,5 +409,15 @@
 
     .sched-field-sm {
         max-width: none;
+    }
+
+    .sched-editor-actions {
+        margin-inline: -0.75rem;
+        padding-inline: 0.75rem;
+    }
+
+    .sched-editor-actions .sched-btn {
+        flex: 1;
+        min-height: 42px;
     }
 }

@@ -4,14 +4,16 @@ use crate::components::skip_permissions::{
 };
 use crate::components::{FloatingPane, ModelSelect};
 use crate::utils::{self, On401};
+use gloo::timers::callback::Timeout;
 use gloo_net::http::Request;
 use shared::api::{
     CreateScheduledTaskRequest, ScheduledTaskInfo, ScheduledTaskListResponse,
     UpdateScheduledTaskRequest,
 };
-use shared::SessionInfo;
+use shared::{AgentInstall, DirectoryEntry, LauncherInfo, SessionInfo};
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
+use web_sys::HtmlInputElement;
 use yew::prelude::*;
 
 /// Minimum launcher version that supports scheduled tasks.
@@ -85,6 +87,11 @@ enum FormMode {
 }
 
 use super::cron_describe;
+use super::launch_dialog::{
+    clamp_to_home, dir_entry, ensure_trailing_slash, is_path_home_scoped, load_last_launch_dir_for,
+    load_last_launcher, parent_path, probe_agents_for, DirBrowser,
+};
+use super::launch_target_picker::{AgentTargetSelect, DirectoryTargetSelect, LauncherTargetSelect};
 
 #[function_component(ScheduleDialog)]
 pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
@@ -94,7 +101,18 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
     let form = use_state(TaskForm::default);
     let error_msg = use_state(|| None::<String>);
     let confirm_delete = use_state(|| None::<Uuid>);
-    let launcher_version = use_state(String::new);
+    let launchers = use_state(Vec::<LauncherInfo>::new);
+    let selected_launcher = use_state(|| None::<Uuid>);
+    let agent_installs = use_state(Vec::<AgentInstall>::new);
+    let probing_agents = use_state(|| false);
+    let dir = DirBrowser {
+        path: use_state(|| "~".to_string()),
+        home_root: use_state(|| None::<String>),
+        entries: use_state(Vec::<DirectoryEntry>::new),
+        loading: use_state(|| false),
+        error: use_state(|| None::<String>),
+    };
+    let debounce_handle = use_mut_ref(|| None::<Timeout>);
 
     let working_directory = props
         .session
@@ -114,25 +132,69 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
 
     let folder = utils::extract_folder(&working_directory).to_string();
 
-    // Close on Escape
-
-    // Fetch launcher version for this session's hostname
+    // Use the same live launcher inventory as the session launcher. A schedule
+    // targets a hostname on the wire, while directory browsing needs the live
+    // launcher's UUID, so the form keeps both in sync.
     {
-        let launcher_version = launcher_version.clone();
+        let launchers = launchers.clone();
+        let selected_launcher = selected_launcher.clone();
+        let dir = dir.clone();
+        let agent_installs = agent_installs.clone();
+        let probing_agents = probing_agents.clone();
         let hostname = hostname.clone();
-        use_effect_with(hostname.clone(), move |_| {
+        let working_directory = working_directory.clone();
+        use_effect_with((), move |_| {
             spawn_local(async move {
-                if let Ok(launchers) = utils::fetch_launchers().await {
-                    if let Some(l) = launchers.iter().find(|l| l.hostname == hostname) {
-                        launcher_version.set(l.version.clone());
+                if let Ok(data) = utils::fetch_launchers().await {
+                    let chosen = data
+                        .iter()
+                        .find(|launcher| !hostname.is_empty() && launcher.hostname == hostname)
+                        .map(|launcher| launcher.launcher_id)
+                        .or_else(|| {
+                            load_last_launcher().filter(|id| {
+                                data.iter().any(|launcher| launcher.launcher_id == *id)
+                            })
+                        })
+                        .or_else(|| data.first().map(|launcher| launcher.launcher_id));
+                    if let Some(launcher_id) = chosen {
+                        selected_launcher.set(Some(launcher_id));
+                        let initial_dir = utils::owned_non_blank(&working_directory)
+                            .or_else(|| load_last_launch_dir_for(launcher_id));
+                        dir.fetch_initial(launcher_id, initial_dir);
+                        probe_agents_for(
+                            launcher_id,
+                            agent_installs.clone(),
+                            probing_agents.clone(),
+                        );
                     }
+                    launchers.set(data);
                 }
             });
             || ()
         });
     }
 
-    let can_schedule = props.session.is_none() || version_sufficient(&launcher_version);
+    let selected_launcher_info = (*selected_launcher)
+        .and_then(|id| launchers.iter().find(|launcher| launcher.launcher_id == id));
+    let can_schedule =
+        selected_launcher_info.is_some_and(|launcher| version_sufficient(&launcher.version));
+
+    // The browser owns path resolution/listing state; mirror only its current
+    // resolved path into the task draft. This is the same split used by the
+    // launch dialog and keeps typed paths stable while an async listing loads.
+    {
+        let form = form.clone();
+        let form_mode = form_mode.clone();
+        let path = (*dir.path).clone();
+        use_effect_with(path.clone(), move |_| {
+            if form_mode.is_some() {
+                let mut next = (*form).clone();
+                next.working_directory = path;
+                form.set(next);
+            }
+            || ()
+        });
+    }
 
     let reload_tasks = {
         let tasks = tasks.clone();
@@ -175,10 +237,37 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
         let error_msg = error_msg.clone();
         let working_directory = working_directory.clone();
         let hostname = hostname.clone();
+        let launchers = launchers.clone();
+        let selected_launcher = selected_launcher.clone();
+        let dir = dir.clone();
+        let agent_installs = agent_installs.clone();
+        let probing_agents = probing_agents.clone();
         Callback::from(move |_| {
+            let launcher = (*selected_launcher)
+                .and_then(|id| launchers.iter().find(|item| item.launcher_id == id));
+            let selected_hostname = launcher
+                .map(|item| item.hostname.clone())
+                .unwrap_or_else(|| hostname.clone());
+            let selected_directory = if working_directory.is_empty() {
+                (*dir.path).clone()
+            } else {
+                working_directory.clone()
+            };
+            if let Some(launcher) = launcher {
+                dir.fetch_initial(
+                    launcher.launcher_id,
+                    utils::owned_non_blank(&selected_directory)
+                        .or_else(|| load_last_launch_dir_for(launcher.launcher_id)),
+                );
+                probe_agents_for(
+                    launcher.launcher_id,
+                    agent_installs.clone(),
+                    probing_agents.clone(),
+                );
+            }
             form.set(TaskForm {
-                working_directory: working_directory.clone(),
-                hostname: hostname.clone(),
+                working_directory: selected_directory,
+                hostname: selected_hostname,
                 agent_type: session_agent_type,
                 timezone: detected_timezone(),
                 max_runtime_minutes: 30,
@@ -202,6 +291,11 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
         let form = form.clone();
         let tasks = tasks.clone();
         let error_msg = error_msg.clone();
+        let launchers = launchers.clone();
+        let selected_launcher = selected_launcher.clone();
+        let dir = dir.clone();
+        let agent_installs = agent_installs.clone();
+        let probing_agents = probing_agents.clone();
         Callback::from(move |task_id: Uuid| {
             if let Some(task) = tasks.iter().find(|t| t.id == task_id) {
                 let (has_skip, other_args) = strip_skip_permissions_args(
@@ -214,6 +308,24 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                 // model value stays in `extra_args` untouched.
                 let (model_arg, extra_args) =
                     extract_model_arg(&other_args, task.fields.launch.agent_type);
+                let live_launcher = launchers
+                    .iter()
+                    .find(|launcher| launcher.hostname == task.hostname);
+                selected_launcher.set(live_launcher.map(|launcher| launcher.launcher_id));
+                dir.path.set(task.fields.launch.working_directory.clone());
+                dir.entries.set(Vec::new());
+                dir.error.set(None);
+                if let Some(launcher) = live_launcher {
+                    dir.fetch_initial(
+                        launcher.launcher_id,
+                        Some(task.fields.launch.working_directory.clone()),
+                    );
+                    probe_agents_for(
+                        launcher.launcher_id,
+                        agent_installs.clone(),
+                        probing_agents.clone(),
+                    );
+                }
                 form.set(TaskForm {
                     name: task.fields.name.clone(),
                     cron_expression: task.fields.cron_expression.clone(),
@@ -253,6 +365,8 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
         let form_mode = form_mode.clone();
         let reload_tasks = reload_tasks.clone();
         let error_msg = error_msg.clone();
+        let selected_launcher = selected_launcher.clone();
+        let home_root = dir.home_root.clone();
         Callback::from(move |e: SubmitEvent| {
             e.prevent_default();
             let data = (*form).clone();
@@ -270,6 +384,12 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                 || !utils::is_non_blank(&data.working_directory)
                 || !utils::is_non_blank(&data.prompt)
             {
+                return;
+            }
+            if selected_launcher.is_some() && !is_path_home_scoped(&wd, (*home_root).as_deref()) {
+                error_msg.set(Some(
+                    "Choose a directory under the selected host's home folder".to_string(),
+                ));
                 return;
             }
 
@@ -495,7 +615,84 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
             let mut f = (*form).clone();
             f.agent_type = shared::AgentType::parse_or_default(&input.value());
             f.model_arg.clear();
+            f.skip_permissions = !matches!(
+                f.agent_type,
+                shared::AgentType::Muse | shared::AgentType::Antigravity
+            );
             form.set(f);
+        })
+    };
+
+    let on_launcher_change = {
+        let launchers = launchers.clone();
+        let selected_launcher = selected_launcher.clone();
+        let form = form.clone();
+        let dir = dir.clone();
+        let agent_installs = agent_installs.clone();
+        let probing_agents = probing_agents.clone();
+        Callback::from(move |e: Event| {
+            let select: web_sys::HtmlSelectElement = e.target_unchecked_into();
+            let Ok(launcher_id) = select.value().parse::<Uuid>() else {
+                return;
+            };
+            let Some(launcher) = launchers
+                .iter()
+                .find(|item| item.launcher_id == launcher_id)
+            else {
+                return;
+            };
+            selected_launcher.set(Some(launcher_id));
+            let mut next = (*form).clone();
+            next.hostname = launcher.hostname.clone();
+            form.set(next);
+            dir.fetch_initial(launcher_id, load_last_launch_dir_for(launcher_id));
+            probe_agents_for(launcher_id, agent_installs.clone(), probing_agents.clone());
+        })
+    };
+
+    let on_path_input = {
+        let selected_launcher = selected_launcher.clone();
+        let dir = dir.clone();
+        let debounce_handle = debounce_handle.clone();
+        Callback::from(move |e: InputEvent| {
+            let input: HtmlInputElement = e.target_unchecked_into();
+            let path = input.value();
+            dir.path.set(path.clone());
+            if let Some(launcher_id) = *selected_launcher {
+                let dir = dir.clone();
+                *debounce_handle.borrow_mut() = Some(Timeout::new(300, move || {
+                    dir.fetch(launcher_id, path, false);
+                }));
+            }
+        })
+    };
+
+    let navigate_to: Callback<String> = {
+        let selected_launcher = selected_launcher.clone();
+        let dir = dir.clone();
+        Callback::from(move |path: String| {
+            let path = clamp_to_home(path, (*dir.home_root).as_deref());
+            dir.navigate(*selected_launcher, path);
+        })
+    };
+
+    let on_path_keydown = {
+        let dir = dir.clone();
+        let navigate_to = navigate_to.clone();
+        Callback::from(move |e: KeyboardEvent| {
+            if e.key() == "Tab" {
+                let directories: Vec<&DirectoryEntry> =
+                    dir.entries.iter().filter(|entry| entry.is_dir).collect();
+                if directories.len() == 1 {
+                    e.prevent_default();
+                    let base = if dir.path.ends_with('/') {
+                        (*dir.path).clone()
+                    } else {
+                        parent_path(&dir.path)
+                    };
+                    navigate_to.emit(format!("{}{}/", base, directories[0].name));
+                }
+            }
         })
     };
     let on_worktree_mode = {
@@ -512,12 +709,220 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
         })
     };
 
+    let path = (*dir.path).clone();
+    let breadcrumbs: Vec<(String, String)> = if let Some(home_root) = (*dir.home_root).as_deref() {
+        let root = ensure_trailing_slash(home_root);
+        let mut segments = vec![(root.clone(), "~".to_string())];
+        let relative = path
+            .strip_prefix(&root)
+            .unwrap_or("")
+            .trim_start_matches('/');
+        if !relative.is_empty() {
+            let mut built = root;
+            for part in relative.split('/').filter(|part| !part.is_empty()) {
+                built.push_str(part);
+                built.push('/');
+                segments.push((built.clone(), part.to_string()));
+            }
+        }
+        segments
+    } else {
+        vec![("~".to_string(), "~".to_string())]
+    };
+
+    let directory_listing = if *dir.loading {
+        html! { <div class="dir-loading">{ "Loading..." }</div> }
+    } else if let Some(error) = &*dir.error {
+        html! { <div class="dir-error-msg">{ error }</div> }
+    } else if dir.entries.is_empty() {
+        html! { <div class="dir-empty">{ "Choose a connected host to browse directories" }</div> }
+    } else {
+        let parent = clamp_to_home(parent_path(&dir.path), (*dir.home_root).as_deref());
+        let on_up = {
+            let navigate_to = navigate_to.clone();
+            Callback::from(move |_: MouseEvent| navigate_to.emit(parent.clone()))
+        };
+        html! {
+            <>
+                { dir_entry(true, "..", Some(on_up)) }
+                { for dir.entries.iter().map(|entry| {
+                    let onclick = entry.is_dir.then(|| {
+                        let base = if dir.path.ends_with('/') {
+                            (*dir.path).clone()
+                        } else {
+                            parent_path(&dir.path)
+                        };
+                        let child = format!("{}{}/", base, entry.name);
+                        let navigate_to = navigate_to.clone();
+                        Callback::from(move |_: MouseEvent| navigate_to.emit(child.clone()))
+                    });
+                    dir_entry(entry.is_dir, &entry.name, onclick)
+                }) }
+            </>
+        }
+    };
+
+    let can_save = !matches!(*form_mode, Some(FormMode::Create)) || can_schedule;
+    let modal_close = if form_mode.is_some() {
+        close_form.reform(|_| ())
+    } else {
+        props.on_close.clone()
+    };
+    let pane_class = if form_mode.is_some() {
+        "sched-dialog sched-editor-dialog"
+    } else {
+        "sched-dialog"
+    };
+
     html! {
         <FloatingPane
             overlay_class="sched-overlay"
-            pane_class="sched-dialog"
-            on_close={props.on_close.clone()}
+            pane_class={pane_class}
+            on_close={modal_close}
         >
+            if let Some(mode) = &*form_mode {
+                <div class="sched-header">
+                    <div>
+                        <h2 class="sched-title">
+                            { if matches!(mode, FormMode::Create) { "New scheduled task" } else { "Edit scheduled task" } }
+                        </h2>
+                        <div class="sched-context">
+                            <span class="sched-host">{ "Choose where and how this task runs." }</span>
+                        </div>
+                    </div>
+                    <button class="sched-close" onclick={close_form.reform(|_: MouseEvent| ())}>{ "X" }</button>
+                </div>
+                <div class="sched-body sched-editor-body">
+                    if let Some(err) = &*error_msg {
+                        <div class="sched-error">{ err }</div>
+                    }
+                    <form class="sched-form" onsubmit={on_submit}>
+                        <section class="sched-form-section">
+                            <h3>{ "Run target" }</h3>
+                            <div class="sched-field-row">
+                                <LauncherTargetSelect
+                                    launchers={(*launchers).clone()}
+                                    selected={*selected_launcher}
+                                    on_change={on_launcher_change}
+                                    show_hostname={true}
+                                    show_version={true}
+                                    offline_hostname={utils::owned_non_blank(&form.hostname)}
+                                />
+                                <AgentTargetSelect
+                                    selected={form.agent_type}
+                                    installs={(*agent_installs).clone()}
+                                    probing={*probing_agents}
+                                    on_change={on_agent_type}
+                                />
+                            </div>
+                            if !can_schedule && matches!(mode, FormMode::Create) {
+                                <div class="sched-version-warning sched-version-warning-inline">
+                                    { format!("Choose a connected host running launcher v{} or newer.", MIN_LAUNCHER_VERSION) }
+                                </div>
+                            }
+                            <DirectoryTargetSelect
+                                path={(*dir.path).clone()}
+                                {breadcrumbs}
+                                listing={directory_listing}
+                                on_path_input={on_path_input}
+                                {on_path_keydown}
+                                on_navigate={navigate_to.clone()}
+                                browser_class={classes!("sched-dir-browser")}
+                            />
+                        </section>
+
+                        <section class="sched-form-section">
+                            <h3>{ "Task" }</h3>
+                            <div class="sched-field-row">
+                                <div class="sched-field">
+                                    <label>{ "Name" }</label>
+                                    <input type="text" placeholder="Nightly code review" value={form.name.clone()} oninput={set_field(|f, v| f.name = v)} required=true />
+                                </div>
+                                <div class="sched-field">
+                                    <label>{ "Session name (optional)" }</label>
+                                    <input type="text" placeholder="Defaults to the task name" value={form.session_name.clone()} oninput={set_field(|f, v| f.session_name = v)} />
+                                </div>
+                            </div>
+                            <div class="sched-field-row">
+                                <div class="sched-field">
+                                    <label>{ "Cron schedule" }</label>
+                                    <input type="text" placeholder="0 3 * * *" value={form.cron_expression.clone()} oninput={set_field(|f, v| f.cron_expression = v)} required=true />
+                                    <span class="sched-hint">{ "minute hour day-of-month month day-of-week" }</span>
+                                    if let Some(description) = cron_describe::describe(&form.cron_expression) {
+                                        <span class="sched-cron-desc">{ description }</span>
+                                    }
+                                </div>
+                                <div class="sched-field sched-field-sm">
+                                    <label>{ "Timezone" }</label>
+                                    <input type="text" list="sched-tz-list" placeholder="America/Los_Angeles" value={form.timezone.clone()} oninput={set_field(|f, v| f.timezone = v)} />
+                                    <datalist id="sched-tz-list">
+                                        { for shared::timezone::COMMON_IANA_ZONES.iter().map(|timezone| html! { <option value={*timezone} /> }) }
+                                    </datalist>
+                                </div>
+                                <div class="sched-field sched-field-sm">
+                                    <label>{ "Timeout (min)" }</label>
+                                    <input type="number" min="1" max="1440" value={form.max_runtime_minutes.to_string()} oninput={set_field(|f, v| f.max_runtime_minutes = v.parse().unwrap_or(30))} />
+                                </div>
+                            </div>
+                            <div class="sched-field">
+                                <label>{ "Prompt" }</label>
+                                <textarea rows="5" placeholder="What should the agent do?" value={form.prompt.clone()} oninput={on_prompt_input} required=true />
+                            </div>
+                        </section>
+
+                        <section class="sched-form-section sched-form-section-compact">
+                            <h3>{ "Session options" }</h3>
+                            <div class="sched-field-row">
+                                <div class="sched-field">
+                                    <label>{ "Model" }</label>
+                                    <ModelSelect agent_type={form.agent_type} value={form.model_arg.clone()} on_change={on_model_change} class="launcher-select" />
+                                </div>
+                                <div class="sched-field">
+                                    <label>{ "Worktree" }</label>
+                                    <select class="launcher-select" onchange={on_worktree_mode} value={match &form.worktree { shared::WorktreeMode::None => "none", shared::WorktreeMode::Repo { .. } => "repo", shared::WorktreeMode::Scratch { .. } => "scratch" }}>
+                                        <option value="none">{ "Use working directory" }</option>
+                                        <option value="repo">{ "Repository worktree" }</option>
+                                        <option value="scratch">{ "Automatic scratch worktree" }</option>
+                                    </select>
+                                </div>
+                                if !form.worktree.is_none() {
+                                    <div class="sched-field">
+                                        <label>{ "Branch (optional)" }</label>
+                                        <input type="text" placeholder="sched-task-id" value={form.worktree_branch.clone()} oninput={set_field(|f, v| f.worktree_branch = v)} />
+                                    </div>
+                                }
+                            </div>
+                            <div class="sched-field">
+                                <label>{ "Each run" }</label>
+                                <div class="sched-mode-toggle">
+                                    <button type="button" class={classes!("sched-btn", (form.session_mode == shared::SessionMode::Fresh).then_some("sched-btn-primary"))} onclick={set_session_mode(shared::SessionMode::Fresh)}>{ "Fresh session" }</button>
+                                    <button type="button" class={classes!("sched-btn", (form.session_mode == shared::SessionMode::Continue).then_some("sched-btn-primary"))} onclick={set_session_mode(shared::SessionMode::Continue)}>{ "Continue previous" }</button>
+                                </div>
+                                <span class="sched-hint">{ "Continue resumes the same conversation and accumulates context across runs." }</span>
+                            </div>
+                            <div class="sched-field">
+                                <label>{ "Extra CLI arguments (optional)" }</label>
+                                <input type="text" placeholder="--verbose" value={form.extra_args.clone()} oninput={set_field(|f, v| f.extra_args = v)} />
+                            </div>
+                            if !skip_permissions_args(form.agent_type).is_empty() {
+                                <div class="sched-field sched-checkbox">
+                                    <label>
+                                        <input type="checkbox" checked={form.skip_permissions} onchange={on_skip_permissions} />
+                                        { format!(" {}", skip_permissions_label(form.agent_type)) }
+                                    </label>
+                                </div>
+                            }
+                        </section>
+
+                        <div class="sched-form-actions sched-editor-actions">
+                            <button type="button" class="sched-btn" onclick={close_form.reform(|_: MouseEvent| ())}>{ "Back" }</button>
+                            <button type="submit" class="sched-btn sched-btn-primary" disabled={!can_save}>
+                                { if matches!(mode, FormMode::Create) { "Create scheduled task" } else { "Save changes" } }
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            } else {
                 <div class="sched-header">
                     <div>
                         <h2 class="sched-title">{ if folder.is_empty() { "Scheduled Tasks".to_string() } else { format!("Schedule — {folder}") } }</h2>
@@ -526,270 +931,60 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
                             if !working_directory.is_empty() { <code class="sched-dir">{ &working_directory }</code> }
                         </div>
                     </div>
-                    <button class="sched-close" onclick={props.on_close.reform(|_| ())}>
-                        { "X" }
-                    </button>
+                    <button class="sched-close" onclick={props.on_close.reform(|_| ())}>{ "X" }</button>
                 </div>
-
-                if !can_schedule {
-                    <div class="sched-version-warning">
-                        { format!("Requires launcher v{}+. ", MIN_LAUNCHER_VERSION) }
-                        if launcher_version.is_empty() {
-                            { "No launcher version detected." }
-                        } else {
-                            { format!("Current: v{}.", *launcher_version) }
-                        }
-                        { " Update your launcher to enable scheduled tasks." }
-                    </div>
-                }
-
                 if *loading {
-                    <div class="sched-loading">
-                        <div class="spinner"></div>
-                    </div>
+                    <div class="sched-loading"><div class="spinner"></div></div>
                 } else {
                     <div class="sched-body">
-                        // Existing tasks list
-                        if tasks.is_empty() && form_mode.is_none() {
-                            <p class="sched-empty">{ "No scheduled tasks." }</p>
-                        }
+                        if tasks.is_empty() { <p class="sched-empty">{ "No scheduled tasks." }</p> }
                         { for tasks.iter().map(|task| {
                             let task_id = task.id;
                             let on_edit = open_edit.clone();
                             let on_toggle = on_toggle_enabled.clone();
-                            let on_del = on_delete.clone();
+                            let on_delete = on_delete.clone();
                             let is_confirming = *confirm_delete == Some(task_id);
                             html! {
                                 <div class={classes!("sched-task-row", (!task.enabled).then_some("disabled"))}>
                                     <div class="sched-task-info">
                                         <span class="sched-task-name">{ &task.fields.name }</span>
                                         <code class="sched-task-cron">{ &task.fields.cron_expression }</code>
-                                        if task.fields.timezone != "UTC" {
-                                            <span class="sched-task-tz">{ &task.fields.timezone }</span>
-                                        }
-                                        if task.fields.session_mode == shared::SessionMode::Continue {
-                                            <span class="sched-task-tz">{ "continue" }</span>
-                                        }
+                                        if task.fields.timezone != "UTC" { <span class="sched-task-tz">{ &task.fields.timezone }</span> }
+                                        if task.fields.session_mode == shared::SessionMode::Continue { <span class="sched-task-tz">{ "continue" }</span> }
                                     </div>
                                     <div class="sched-task-prompt-preview">{ &task.fields.prompt }</div>
                                     <div class="sched-task-actions">
-                                        <button class="sched-btn" onclick={Callback::from(move |_| on_edit.emit(task_id))}>
-                                            { "Edit" }
-                                        </button>
-                                        <button class="sched-btn" onclick={Callback::from(move |_| on_toggle.emit(task_id))}>
-                                            { if task.enabled { "Disable" } else { "Enable" } }
-                                        </button>
-                                        <button
-                                            class={classes!("sched-btn", "sched-btn-danger", is_confirming.then_some("confirming"))}
-                                            onclick={Callback::from(move |_| on_del.emit(task_id))}
-                                        >
+                                        <button class="sched-btn" onclick={Callback::from(move |_| on_edit.emit(task_id))}>{ "Edit" }</button>
+                                        <button class="sched-btn" onclick={Callback::from(move |_| on_toggle.emit(task_id))}>{ if task.enabled { "Disable" } else { "Enable" } }</button>
+                                        <button class={classes!("sched-btn", "sched-btn-danger", is_confirming.then_some("confirming"))} onclick={Callback::from(move |_| on_delete.emit(task_id))}>
                                             { if is_confirming { "Confirm?" } else { "Delete" } }
                                         </button>
                                     </div>
                                 </div>
                             }
                         }) }
-
-                        // Form
-                        if let Some(mode) = &*form_mode {
-                            <div class="sched-form-container">
-                                <h3 class="sched-form-title">
-                                    { if matches!(mode, FormMode::Create) { "New Task" } else { "Edit Task" } }
-                                </h3>
-                                if let Some(err) = &*error_msg {
-                                    <div class="sched-error">{ err }</div>
-                                }
-                                <form class="sched-form" onsubmit={on_submit}>
-                                    <div class="sched-field-row">
-                                        <div class="sched-field">
-                                            <label>{ "Host" }</label>
-                                            <input type="text" value={form.hostname.clone()} oninput={set_field(|f, v| f.hostname = v)} required=true />
-                                        </div>
-                                        <div class="sched-field">
-                                            <label>{ "Agent" }</label>
-                                            <select value={form.agent_type.as_str()} onchange={on_agent_type}>
-                                                <option value="claude">{ "Claude" }</option>
-                                                <option value="codex">{ "Codex" }</option>
-                                                <option value="muse">{ "Muse" }</option>
-                                            </select>
-                                        </div>
-                                    </div>
-                                    <div class="sched-field">
-                                        <label>{ "Working directory" }</label>
-                                        <input type="text" value={form.working_directory.clone()} oninput={set_field(|f, v| f.working_directory = v)} required=true />
-                                    </div>
-                                    <div class="sched-field">
-                                        <label>{ "Session name (optional)" }</label>
-                                        <input type="text" placeholder="Defaults to the task name" value={form.session_name.clone()} oninput={set_field(|f, v| f.session_name = v)} />
-                                    </div>
-                                    <div class="sched-field-row">
-                                        <div class="sched-field">
-                                            <label>{ "Worktree" }</label>
-                                            <select onchange={on_worktree_mode} value={match &form.worktree { shared::WorktreeMode::None => "none", shared::WorktreeMode::Repo { .. } => "repo", shared::WorktreeMode::Scratch { .. } => "scratch" }}>
-                                                <option value="none">{ "Use working directory" }</option>
-                                                <option value="repo">{ "Repository worktree" }</option>
-                                                <option value="scratch">{ "Automatic scratch worktree" }</option>
-                                            </select>
-                                        </div>
-                                        if !form.worktree.is_none() {
-                                            <div class="sched-field">
-                                                <label>{ "Branch (optional)" }</label>
-                                                <input type="text" placeholder="sched-task-id" value={form.worktree_branch.clone()} oninput={set_field(|f, v| f.worktree_branch = v)} />
-                                            </div>
-                                        }
-                                    </div>
-                                    <div class="sched-field">
-                                        <label>{ "Name" }</label>
-                                        <input
-                                            type="text"
-                                            placeholder="Nightly Code Review"
-                                            value={form.name.clone()}
-                                            oninput={set_field(|f, v| f.name = v)}
-                                            required=true
-                                        />
-                                    </div>
-                                    <div class="sched-field-row">
-                                        <div class="sched-field">
-                                            <label>{ "Cron" }</label>
-                                            <input
-                                                type="text"
-                                                placeholder="0 3 * * *"
-                                                value={form.cron_expression.clone()}
-                                                oninput={set_field(|f, v| f.cron_expression = v)}
-                                                required=true
-                                            />
-                                            <span class="sched-hint">{ "min hour dom month dow" }</span>
-                                            {
-                                                if let Some(desc) = cron_describe::describe(&form.cron_expression) {
-                                                    html! { <span class="sched-cron-desc">{ desc }</span> }
-                                                } else {
-                                                    html! {}
-                                                }
-                                            }
-                                        </div>
-                                        <div class="sched-field sched-field-sm">
-                                            <label>{ "Timezone" }</label>
-                                            <input
-                                                type="text"
-                                                list="sched-tz-list"
-                                                placeholder="America/Los_Angeles"
-                                                value={form.timezone.clone()}
-                                                oninput={set_field(|f, v| f.timezone = v)}
-                                            />
-                                            <datalist id="sched-tz-list">
-                                                {
-                                                    shared::timezone::COMMON_IANA_ZONES.iter().map(|tz| {
-                                                        html! { <option value={*tz} /> }
-                                                    }).collect::<Html>()
-                                                }
-                                            </datalist>
-                                        </div>
-                                        <div class="sched-field sched-field-sm">
-                                            <label>{ "Timeout (min)" }</label>
-                                            <input
-                                                type="number"
-                                                min="1"
-                                                max="1440"
-                                                value={form.max_runtime_minutes.to_string()}
-                                                oninput={set_field(|f, v| f.max_runtime_minutes = v.parse().unwrap_or(30))}
-                                            />
-                                        </div>
-                                    </div>
-                                    <div class="sched-field">
-                                        <label>{ "Prompt" }</label>
-                                        <textarea
-                                            rows="4"
-                                            placeholder="What should the agent do?"
-                                            value={form.prompt.clone()}
-                                            oninput={on_prompt_input}
-                                            required=true
-                                        />
-                                    </div>
-                                    // Model picker — catalogs from the
-                                    // claude-codes / codex-codes crates; ""
-                                    // means the agent's own default. The agent
-                                    // is fixed to this session's agent, so
-                                    // there's no agent switch to reset against.
-                                    <div class="sched-field">
-                                        <label>{ "Model" }</label>
-                                        <ModelSelect
-                                            agent_type={form.agent_type}
-                                            value={form.model_arg.clone()}
-                                            on_change={on_model_change}
-                                            class=""
-                                        />
-                                    </div>
-                                    // Session mode — fresh session each run vs.
-                                    // continue the same conversation (native
-                                    // resume). Works for both claude and codex.
-                                    <div class="sched-field">
-                                        <label>{ "Each run" }</label>
-                                        <div class="sched-mode-toggle">
-                                            <button
-                                                type="button"
-                                                class={classes!(
-                                                    "sched-btn",
-                                                    (form.session_mode == shared::SessionMode::Fresh)
-                                                        .then_some("sched-btn-primary")
-                                                )}
-                                                onclick={set_session_mode(shared::SessionMode::Fresh)}
-                                            >
-                                                { "Fresh session" }
-                                            </button>
-                                            <button
-                                                type="button"
-                                                class={classes!(
-                                                    "sched-btn",
-                                                    (form.session_mode == shared::SessionMode::Continue)
-                                                        .then_some("sched-btn-primary")
-                                                )}
-                                                onclick={set_session_mode(shared::SessionMode::Continue)}
-                                            >
-                                                { "Continue previous" }
-                                            </button>
-                                        </div>
-                                        <span class="sched-hint">
-                                            { "Continue resumes the same conversation each run, accumulating context across firings." }
-                                        </span>
-                                    </div>
-                                    <div class="sched-field">
-                                        <label>{ "Extra CLI Arguments (optional)" }</label>
-                                        <input
-                                            type="text"
-                                            placeholder="--verbose"
-                                            value={form.extra_args.clone()}
-                                            oninput={set_field(|f, v| f.extra_args = v)}
-                                        />
-                                    </div>
-                                    if !skip_permissions_args(form.agent_type).is_empty() {
-                                        <div class="sched-field sched-checkbox">
-                                            <label>
-                                                <input
-                                                    type="checkbox"
-                                                    checked={form.skip_permissions}
-                                                    onchange={on_skip_permissions}
-                                                />
-                                                { format!(" {}", skip_permissions_label(form.agent_type)) }
-                                            </label>
-                                        </div>
-                                    }
-                                    <div class="sched-form-actions">
-                                        <button type="button" class="sched-btn" onclick={close_form}>
-                                            { "Cancel" }
-                                        </button>
-                                        <button type="submit" class="sched-btn sched-btn-primary">
-                                            { if matches!(mode, FormMode::Create) { "Create" } else { "Save" } }
-                                        </button>
-                                    </div>
-                                </form>
-                            </div>
-                        } else if can_schedule {
-                            <button class="sched-btn sched-btn-primary sched-new-btn" onclick={open_create}>
-                                { "+ New Task" }
-                            </button>
+                        <button class="sched-btn sched-btn-primary sched-new-btn" onclick={open_create} disabled={launchers.is_empty()}>
+                            { "+ New scheduled task" }
+                        </button>
+                        if launchers.is_empty() {
+                            <p class="sched-hint">{ "Connect a launcher before creating a scheduled task." }</p>
                         }
                     </div>
                 }
+            }
         </FloatingPane>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::version_sufficient;
+
+    #[test]
+    fn schedule_host_version_gate_matches_launcher_capability_floor() {
+        assert!(!version_sufficient("2.1.1"));
+        assert!(version_sufficient("2.1.2"));
+        assert!(version_sufficient("2.15.16"));
+        assert!(!version_sufficient("unknown"));
     }
 }
