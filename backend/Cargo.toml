@@ -27,6 +27,7 @@ diesel_migrations = "2.2"
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
+toml = "0.8"
 
 # OAuth for Google authentication
 oauth2 = { workspace = true }

@@ -20,6 +20,7 @@ pub const MAX_SPLIT_PERCENT: f64 = 70.0;
 pub enum SessionSurfaceKind {
     Forward(ForwardInfo),
     WorkQueue,
+    Plugins,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -73,7 +74,7 @@ impl SessionSurface {
     pub fn forward(&self) -> Option<&ForwardInfo> {
         match &self.kind {
             SessionSurfaceKind::Forward(forward) => Some(forward),
-            SessionSurfaceKind::WorkQueue => None,
+            SessionSurfaceKind::WorkQueue | SessionSurfaceKind::Plugins => None,
         }
     }
 
@@ -89,8 +90,24 @@ impl SessionSurface {
         }
     }
 
+    pub fn from_plugins(session_id: Uuid, mode: SessionSurfaceMode) -> Self {
+        Self {
+            id: "plugins".to_string(),
+            session_id,
+            title: "Plugins".to_string(),
+            subtitle: "Installed plugin discovery and injected skill context".to_string(),
+            mode,
+            collapsed: false,
+            kind: SessionSurfaceKind::Plugins,
+        }
+    }
+
     pub fn is_work_queue(&self) -> bool {
         matches!(self.kind, SessionSurfaceKind::WorkQueue)
+    }
+
+    pub fn is_plugins(&self) -> bool {
+        matches!(self.kind, SessionSurfaceKind::Plugins)
     }
 
     pub fn update_forward(&mut self, next: ForwardInfo) {
@@ -107,7 +124,7 @@ impl SessionSurface {
                 mode: self.mode,
                 collapsed: self.collapsed,
             }),
-            SessionSurfaceKind::WorkQueue => None,
+            SessionSurfaceKind::WorkQueue | SessionSurfaceKind::Plugins => None,
         }
     }
 }

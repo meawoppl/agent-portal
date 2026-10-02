@@ -9,6 +9,9 @@
 //! `tasks_panel.rs`.
 
 use crate::components::message_renderer::{MessageRenderer, RenderedMessage};
+use crate::components::plugin_discovery::{
+    plugin_context_label, plugin_inventory_api_path, suggested_plugins,
+};
 use crate::components::{
     group_is_turn_terminator, group_messages, thinking_chip_starts, ForkDialog,
     MessageGroupRenderer,
@@ -18,7 +21,8 @@ use gloo::events::EventListener;
 use gloo::timers::callback::Timeout;
 use gloo_net::http::Request;
 use shared::api::{
-    EditStackItem, EditStackResponse, ForwardInfo, TurnMetricsResponse, UpdateEditStackItemRequest,
+    EditStackItem, EditStackResponse, ForwardInfo, PluginInventoryResponse, PortalPluginInfo,
+    TurnMetricsResponse, UpdateEditStackItemRequest,
 };
 use shared::strings::truncate_with_ellipsis;
 use shared::{
@@ -62,6 +66,7 @@ use crate::utils::calculate_backoff;
 
 const EDIT_STACK_BODY_PREVIEW_CHARS: usize = 260;
 const EDIT_STACK_CONTEXT_PREVIEW_CHARS: usize = 700;
+const PLUGIN_NOTICE_STORAGE_PREFIX: &str = "agent_portal.plugin_notice.expanded.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum EditStackView {
@@ -275,6 +280,33 @@ fn edit_stack_fetch(link: yew::html::Scope<SessionView>, session_id: Uuid) {
     });
 }
 
+fn plugin_inventory_fetch(link: yew::html::Scope<SessionView>, session_id: Uuid) {
+    spawn_local(async move {
+        let path = plugin_inventory_api_path(Some(session_id), None);
+        match utils::fetch_json::<PluginInventoryResponse>(&path, On401::Ignore).await {
+            Ok(data) => link.send_message(SessionViewMsg::PluginInventoryLoaded(data.plugins)),
+            Err(err) => link.send_message(SessionViewMsg::PluginInventoryFailed(format!(
+                "Could not load plugins: {err}"
+            ))),
+        }
+    });
+}
+
+fn plugin_notice_storage_key(session_id: Uuid) -> String {
+    format!("{PLUGIN_NOTICE_STORAGE_PREFIX}{session_id}")
+}
+
+fn load_plugin_notice_expanded(session_id: Uuid) -> bool {
+    utils::storage_get(&plugin_notice_storage_key(session_id)).as_deref() == Some("true")
+}
+
+fn save_plugin_notice_expanded(session_id: Uuid, expanded: bool) {
+    utils::storage_set(
+        &plugin_notice_storage_key(session_id),
+        if expanded { "true" } else { "false" },
+    );
+}
+
 /// Messages for the SessionView component
 pub enum SessionViewMsg {
     LoadHistory(Vec<MessageData>, Option<String>),
@@ -337,6 +369,11 @@ pub enum SessionViewMsg {
     OpenForwardSurface(ForwardInfo),
     /// The forward chip strip fetched the current forward set.
     ForwardsLoaded(Vec<ForwardInfo>),
+    PluginInventoryLoaded(Vec<PortalPluginInfo>),
+    PluginInventoryFailed(String),
+    TogglePluginsPanel,
+    HidePluginsPanel,
+    TogglePluginNotice,
     EditStackLoaded(Vec<EditStackItem>),
     EditStackRequestFailed(String),
     ToggleEditStackPanel,
@@ -491,6 +528,9 @@ pub struct SessionView {
     /// its port and provide a fresh URL.
     pending_surface_restore: Option<ForwardSurfaceMemory>,
     active_surface: Option<SessionSurface>,
+    plugins: Vec<PortalPluginInfo>,
+    plugin_error: Option<String>,
+    plugin_notice_expanded: bool,
     edit_stack_items: Vec<EditStackItem>,
     edit_stack_active: Option<(Uuid, Uuid)>,
     edit_stack_send_all: bool,
@@ -530,6 +570,7 @@ impl Component for SessionView {
         });
 
         edit_stack_fetch(ctx.link().clone(), session_id);
+        plugin_inventory_fetch(ctx.link().clone(), session_id);
 
         // Hydrate the per-turn metrics buffer in its own task, off the
         // history→WebSocket critical path (#1915): metrics only feed the
@@ -618,6 +659,9 @@ impl Component for SessionView {
             open_forward_on_load: false,
             pending_surface_restore: load_open_surface(session_id),
             active_surface: None,
+            plugins: Vec::new(),
+            plugin_error: None,
+            plugin_notice_expanded: load_plugin_notice_expanded(session_id),
             edit_stack_items: Vec::new(),
             edit_stack_active: None,
             edit_stack_send_all: false,
@@ -636,6 +680,9 @@ impl Component for SessionView {
     fn changed(&mut self, ctx: &Context<Self>, old_props: &Self::Properties) -> bool {
         if ctx.props().session.id != old_props.session.id {
             self.active_surface = None;
+            self.plugins.clear();
+            self.plugin_error = None;
+            self.plugin_notice_expanded = load_plugin_notice_expanded(ctx.props().session.id);
             self.edit_stack_items.clear();
             self.edit_stack_active = None;
             self.edit_stack_send_all = false;
@@ -646,6 +693,7 @@ impl Component for SessionView {
             self.pending_surface_restore = load_open_surface(ctx.props().session.id);
             self.surface_split_percent = load_split_percent(ctx.props().session.id);
             edit_stack_fetch(ctx.link().clone(), ctx.props().session.id);
+            plugin_inventory_fetch(ctx.link().clone(), ctx.props().session.id);
         }
 
         // Detect interrupt signal change on the focused session. Textarea
@@ -876,6 +924,54 @@ impl Component for SessionView {
                 self.edit_stack_error = Some(err);
                 true
             }
+            SessionViewMsg::PluginInventoryLoaded(plugins) => {
+                self.plugins = plugins;
+                self.plugin_error = None;
+                true
+            }
+            SessionViewMsg::PluginInventoryFailed(err) => {
+                self.plugins.clear();
+                self.plugin_error = Some(err);
+                true
+            }
+            SessionViewMsg::TogglePluginsPanel => {
+                let plugins_open = self
+                    .active_surface
+                    .as_ref()
+                    .is_some_and(SessionSurface::is_plugins);
+                if plugins_open {
+                    self.active_surface = None;
+                    self.resize_listeners.clear();
+                } else {
+                    let mode = if is_mobile_surface_viewport() {
+                        SessionSurfaceMode::Fullscreen
+                    } else {
+                        SessionSurfaceMode::Split
+                    };
+                    self.active_surface =
+                        Some(SessionSurface::from_plugins(ctx.props().session.id, mode));
+                    self.edit_stack_panel_open = false;
+                    plugin_inventory_fetch(ctx.link().clone(), ctx.props().session.id);
+                }
+                true
+            }
+            SessionViewMsg::HidePluginsPanel => {
+                if self
+                    .active_surface
+                    .as_ref()
+                    .is_some_and(SessionSurface::is_plugins)
+                {
+                    self.active_surface = None;
+                    self.resize_listeners.clear();
+                    return true;
+                }
+                false
+            }
+            SessionViewMsg::TogglePluginNotice => {
+                self.plugin_notice_expanded = !self.plugin_notice_expanded;
+                save_plugin_notice_expanded(ctx.props().session.id, self.plugin_notice_expanded);
+                true
+            }
             SessionViewMsg::ToggleEditStackPanel => {
                 let queue_open = self
                     .active_surface
@@ -992,13 +1088,13 @@ impl Component for SessionView {
                 true
             }
             SessionViewMsg::CloseSurface => {
-                let was_queue = self
+                let was_transient = self
                     .active_surface
                     .as_ref()
-                    .is_some_and(SessionSurface::is_work_queue);
+                    .is_some_and(|surface| surface.is_work_queue() || surface.is_plugins());
                 self.active_surface = None;
                 self.pending_surface_restore = None;
-                if was_queue {
+                if was_transient {
                     self.edit_stack_panel_open = false;
                 } else {
                     clear_open_surface(ctx.props().session.id);
@@ -1087,9 +1183,9 @@ impl Component for SessionView {
                     surface.mode = SessionSurfaceMode::Split;
                     save_open_surface(surface);
                 } else {
-                    let was_queue = surface.is_work_queue();
+                    let was_transient = surface.is_work_queue() || surface.is_plugins();
                     self.active_surface = None;
-                    if was_queue {
+                    if was_transient {
                         self.edit_stack_panel_open = false;
                     } else {
                         clear_open_surface(ctx.props().session.id);
@@ -1264,6 +1360,18 @@ impl Component for SessionView {
             .is_some_and(SessionSurface::is_work_queue);
         let work_queue_needs_attention = pending_work_count > 0 || self.edit_stack_error.is_some();
         let work_queue_active = queue_open || work_queue_needs_attention;
+        let suggested_plugin_count = suggested_plugins(&self.plugins).len();
+        let plugin_count_label = if suggested_plugin_count > 0 {
+            suggested_plugin_count
+        } else {
+            self.plugins.len()
+        };
+        let plugins_open = self
+            .active_surface
+            .as_ref()
+            .is_some_and(SessionSurface::is_plugins);
+        let plugins_active =
+            plugins_open || suggested_plugin_count > 0 || self.plugin_error.is_some();
 
         html! {
             <div class={classes!("session-view", ctx.props().focused.then_some("focused"))}>
@@ -1290,6 +1398,26 @@ impl Component for SessionView {
                             { format!("launcher v{}", version) }
                         </span>
                     }
+                    <button
+                        type="button"
+                        class={classes!(
+                            "session-header-action",
+                            "plugin-action",
+                            plugins_active.then_some("active"),
+                        )}
+                        title={if plugins_open { "Hide plugins" } else { "View plugin discovery" }}
+                        aria-controls="session-plugins"
+                        aria-expanded={plugins_open.to_string()}
+                        onclick={ctx.link().callback(|_| SessionViewMsg::TogglePluginsPanel)}
+                    >
+                        {
+                            if plugin_count_label > 0 {
+                                format!("Plugins {plugin_count_label}")
+                            } else {
+                                "Plugins".to_string()
+                            }
+                        }
+                    </button>
                     <ForwardChips
                         session_id={ctx.props().session.id}
                         is_owner={is_forward_owner}
@@ -1362,6 +1490,7 @@ impl Component for SessionView {
                                         <span>{ " · shared agent history remains on the source launcher" }</span>
                                     </div>
                                 }
+                                { self.render_plugin_notice(ctx) }
                                 {
                                     groups.into_iter().enumerate().map(|(i, group)| {
                                         let key = group.key(i);
@@ -1425,6 +1554,8 @@ impl Component for SessionView {
                             />
                         } else if surface.is_work_queue() {
                             { self.render_edit_stack_surface(ctx, surface) }
+                        } else if surface.is_plugins() {
+                            { self.render_plugin_surface(ctx, surface) }
                         }
                     }
                 </div>
@@ -2311,6 +2442,218 @@ impl SessionView {
             link.send_message(SessionViewMsg::WsEvent(event));
         });
         connect_websocket(session_id, replay_after, true, on_event);
+    }
+
+    fn render_plugin_notice(&self, ctx: &Context<Self>) -> Html {
+        let suggested = suggested_plugins(&self.plugins);
+        if suggested.is_empty() {
+            return html! {};
+        }
+        let context_bytes = suggested
+            .iter()
+            .map(|plugin| plugin.context_bytes)
+            .sum::<u64>();
+        let estimated_tokens = suggested
+            .iter()
+            .map(|plugin| plugin.estimated_tokens)
+            .sum::<u64>();
+        let label = suggested
+            .iter()
+            .map(|plugin| plugin.display_name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let expanded = self.plugin_notice_expanded;
+        let toggle = ctx.link().callback(|_| SessionViewMsg::TogglePluginNotice);
+
+        html! {
+            <section class={classes!("plugin-context-card", expanded.then_some("expanded"))}>
+                <button
+                    type="button"
+                    class="plugin-context-summary"
+                    onclick={toggle}
+                    aria-expanded={expanded.to_string()}
+                >
+                    <span class="plugin-context-caret">{ if expanded { "▾" } else { "▸" } }</span>
+                    <span class="plugin-context-title">{ "Plugin context" }</span>
+                    <span class="plugin-context-names">{ label }</span>
+                    <span class="plugin-context-size">
+                        { plugin_context_label(context_bytes, estimated_tokens) }
+                    </span>
+                </button>
+                if expanded {
+                    <div class="plugin-context-body">
+                        { for suggested.into_iter().map(|plugin| {
+                            html! {
+                                <article class="plugin-context-plugin" key={plugin.name.clone()}>
+                                    <div class="plugin-context-plugin-title">
+                                        <span>{ &plugin.display_name }</span>
+                                        <span>{ plugin_context_label(plugin.context_bytes, plugin.estimated_tokens) }</span>
+                                    </div>
+                                    if let Some(reason) = plugin.reason.as_deref() {
+                                        <div class="plugin-context-detail">{ reason }</div>
+                                    }
+                                    if let Some(source) = plugin.source.as_deref() {
+                                        <code class="plugin-context-source">{ source }</code>
+                                    }
+                                </article>
+                            }
+                        }) }
+                    </div>
+                }
+            </section>
+        }
+    }
+
+    fn render_plugin_surface(&self, ctx: &Context<Self>, surface: SessionSurface) -> Html {
+        let suggested_count = suggested_plugins(&self.plugins).len();
+        let collapsed = surface.collapsed;
+        let fullscreen = surface.mode == SessionSurfaceMode::Fullscreen;
+        let title = if suggested_count > 0 {
+            format!(
+                "Plugins · {suggested_count} suggested · {} installed",
+                self.plugins.len()
+            )
+        } else {
+            format!("Plugins · {} installed", self.plugins.len())
+        };
+        let status_class = (suggested_count > 0).then_some("is-up");
+        let status_title = if suggested_count > 0 {
+            "Plugins match this session directory"
+        } else {
+            "No plugin matched this session directory"
+        };
+        let toggle_collapsed = ctx
+            .link()
+            .callback(|_| SessionViewMsg::ToggleSurfaceCollapsed);
+        let toggle_mode = ctx.link().callback(|_| SessionViewMsg::ToggleSurfaceMode);
+        let close = ctx.link().callback(|_| SessionViewMsg::HidePluginsPanel);
+
+        html! {
+            <aside
+                id="session-plugins"
+                class={classes!(
+                    "session-forward-surface",
+                    "session-plugins-surface",
+                    collapsed.then_some("collapsed"),
+                    fullscreen.then_some("fullscreen"),
+                )}
+                aria-label="Plugins"
+            >
+                <div class="session-forward-toolbar session-plugins-toolbar">
+                    <button
+                        type="button"
+                        class="surface-icon-button"
+                        title={ if collapsed { "Expand plugins" } else { "Collapse plugins" } }
+                        onclick={toggle_collapsed}
+                    >
+                        { if collapsed { "▸" } else { "▾" } }
+                    </button>
+                    <span class={classes!("surface-status", status_class)} title={status_title}></span>
+                    <span class="session-forward-title" title={title.clone()}>{ title }</span>
+                    <button
+                        type="button"
+                        class="surface-icon-button surface-mode-button"
+                        title={ if fullscreen { "Return to split view" } else { "Full screen" } }
+                        onclick={toggle_mode}
+                    >
+                        { if fullscreen { "⇲" } else { "⛶" } }
+                    </button>
+                    <button
+                        type="button"
+                        class="surface-icon-button surface-close-button"
+                        title="Close plugins"
+                        onclick={close}
+                    >
+                        { "×" }
+                    </button>
+                </div>
+                if !collapsed {
+                    <section class="plugin-panel">
+                        <div class="plugin-panel-header">
+                            <div class="edit-stack-title">
+                                <span class="edit-stack-kicker">{ "Plugin discovery" }</span>
+                                <span class="edit-stack-count">
+                                    { format!("{suggested_count} suggested · {} installed", self.plugins.len()) }
+                                </span>
+                            </div>
+                        </div>
+                        if let Some(error) = self.plugin_error.as_deref() {
+                            <div class="edit-stack-error">{ error }</div>
+                        }
+                        <div class="plugin-list">
+                            if self.plugins.is_empty() {
+                                <div class="edit-stack-empty">{ "No installed Portal plugins were discovered on this host." }</div>
+                            }
+                            { for self.plugins.iter().map(|plugin| self.render_plugin_card(plugin)) }
+                        </div>
+                    </section>
+                }
+            </aside>
+        }
+    }
+
+    fn render_plugin_card(&self, plugin: &PortalPluginInfo) -> Html {
+        let is_suggested = plugin.active || plugin.suggested;
+        html! {
+            <article class={classes!("plugin-card", is_suggested.then_some("suggested"))} key={plugin.name.clone()}>
+                <div class="plugin-card-topline">
+                    <div class="plugin-card-title">
+                        <span>{ &plugin.display_name }</span>
+                        if is_suggested {
+                            <span class="plugin-card-badge">{ "suggested" }</span>
+                        }
+                    </div>
+                    <span class="plugin-card-context">
+                        { plugin_context_label(plugin.context_bytes, plugin.estimated_tokens) }
+                    </span>
+                </div>
+                if let Some(description) = plugin.description.as_deref() {
+                    <p class="plugin-card-description">{ description }</p>
+                }
+                if let Some(reason) = plugin.reason.as_deref() {
+                    <div class="plugin-card-reason">{ reason }</div>
+                }
+                if let Some(source) = plugin.source.as_deref() {
+                    <code class="plugin-card-source">{ source }</code>
+                }
+                if !plugin.skills.is_empty() {
+                    <div class="plugin-card-section">
+                        <span class="plugin-card-section-title">{ "Skills" }</span>
+                        <div class="plugin-skill-list">
+                            { for plugin.skills.iter().map(|skill| {
+                                let title = skill
+                                    .description
+                                    .clone()
+                                    .unwrap_or_else(|| skill.path.clone());
+                                html! {
+                                    <span class="plugin-skill-pill" title={title} key={skill.name.clone()}>
+                                        { &skill.name }
+                                    </span>
+                                }
+                            }) }
+                        </div>
+                    </div>
+                }
+                if !plugin.commands.is_empty() {
+                    <div class="plugin-card-section">
+                        <span class="plugin-card-section-title">{ "Commands" }</span>
+                        <div class="plugin-skill-list">
+                            { for plugin.commands.iter().map(|command| {
+                                let title = command
+                                    .description
+                                    .clone()
+                                    .unwrap_or_else(|| "Plugin command".to_string());
+                                html! {
+                                    <span class="plugin-command-pill" title={title} key={command.name.clone()}>
+                                        { &command.name }
+                                    </span>
+                                }
+                            }) }
+                        </div>
+                    </div>
+                }
+            </article>
+        }
     }
 
     fn render_edit_stack_surface(&self, ctx: &Context<Self>, surface: SessionSurface) -> Html {
