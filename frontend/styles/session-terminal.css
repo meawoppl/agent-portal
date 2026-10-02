@@ -451,6 +451,14 @@
     pointer-events: none;
 }
 
+.session-work-queue-surface {
+    background: var(--bg-darker);
+}
+
+.session-work-queue-surface.collapsed .edit-stack-panel {
+    display: none;
+}
+
 .session-view-header .status {
     font-size: 0.8rem;
     padding: 0.25rem 0.75rem;
@@ -548,16 +556,16 @@
 }
 
 .edit-stack-panel {
-    flex: 0 0 auto;
-    margin: 0.5rem 0.75rem 0;
-    border: 1px solid rgba(122, 162, 247, 0.32);
-    border-radius: 8px;
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
     background: rgba(26, 27, 38, 0.96);
-    box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.18);
     overflow: hidden;
 }
 
 .edit-stack-header {
+    flex: 0 0 auto;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -626,7 +634,40 @@
     padding: 0.35rem 0.45rem;
 }
 
+.edit-stack-tabs {
+    flex: 0 0 auto;
+    display: flex;
+    gap: 0.35rem;
+    padding: 0.45rem 0.65rem 0;
+}
+
+.edit-stack-tab {
+    appearance: none;
+    flex: 1 1 0;
+    border: 1px solid rgba(86, 95, 137, 0.42);
+    border-radius: 5px;
+    background: rgba(36, 40, 59, 0.58);
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.74rem;
+    line-height: 1;
+    padding: 0.42rem 0.5rem;
+}
+
+.edit-stack-tab:hover {
+    color: var(--text-primary);
+    border-color: rgba(122, 162, 247, 0.48);
+    background: rgba(122, 162, 247, 0.12);
+}
+
+.edit-stack-tab.active {
+    color: var(--text-primary);
+    border-color: rgba(122, 162, 247, 0.72);
+    background: rgba(122, 162, 247, 0.2);
+}
+
 .edit-stack-error {
+    flex: 0 0 auto;
     margin: 0.55rem 0.65rem 0;
     padding: 0.45rem 0.55rem;
     border: 1px solid rgba(247, 118, 142, 0.42);
@@ -637,10 +678,11 @@
 }
 
 .edit-stack-list {
+    flex: 1 1 auto;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
-    max-height: min(20rem, 36vh);
     overflow: auto;
     padding: 0.6rem 0.65rem;
 }
@@ -656,7 +698,7 @@
 
 .edit-stack-item {
     display: grid;
-    grid-template-columns: 5rem minmax(0, 1fr) auto;
+    grid-template-columns: 4.7rem minmax(0, 1fr);
     gap: 0.65rem;
     align-items: start;
     min-width: 0;
@@ -672,8 +714,8 @@
 }
 
 .edit-stack-thumb {
-    width: 5rem;
-    height: 3.2rem;
+    width: 4.7rem;
+    height: 3.1rem;
     object-fit: cover;
     border: 1px solid rgba(86, 95, 137, 0.62);
     border-radius: 5px;
@@ -715,6 +757,55 @@
     font-size: 0.72rem;
 }
 
+.edit-stack-item-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-top: 0.25rem;
+}
+
+.edit-stack-status {
+    display: inline-flex;
+    align-items: center;
+    min-height: 1rem;
+    padding: 0.12rem 0.38rem;
+    border: 1px solid rgba(86, 95, 137, 0.45);
+    border-radius: 999px;
+    color: var(--text-secondary);
+    font-size: 0.66rem;
+    line-height: 1;
+}
+
+.edit-stack-status.pending {
+    border-color: rgba(224, 175, 104, 0.52);
+    background: rgba(224, 175, 104, 0.1);
+    color: var(--warning, #e0af68);
+}
+
+.edit-stack-status.sent {
+    border-color: rgba(122, 162, 247, 0.52);
+    background: rgba(122, 162, 247, 0.1);
+    color: var(--text-blue, #7aa2f7);
+}
+
+.edit-stack-status.completed {
+    border-color: rgba(158, 206, 106, 0.5);
+    background: rgba(158, 206, 106, 0.1);
+    color: var(--success, #9ece6a);
+}
+
+.edit-stack-status.failed {
+    border-color: rgba(247, 118, 142, 0.5);
+    background: rgba(247, 118, 142, 0.1);
+    color: var(--error, #f7768e);
+}
+
+.edit-stack-elapsed {
+    color: var(--text-muted);
+    font-size: 0.68rem;
+}
+
 .edit-stack-note {
     margin-top: 0.22rem;
     color: var(--text-secondary);
@@ -736,6 +827,11 @@
     font-size: 0.7rem;
     line-height: 1.3;
     white-space: pre-wrap;
+}
+
+.edit-stack-item-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
 }
 
 @media (max-width: 720px) {
