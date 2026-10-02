@@ -63,6 +63,12 @@ use crate::utils::calculate_backoff;
 const EDIT_STACK_BODY_PREVIEW_CHARS: usize = 260;
 const EDIT_STACK_CONTEXT_PREVIEW_CHARS: usize = 700;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EditStackView {
+    Pending,
+    Past,
+}
+
 /// Props for the SessionView component
 #[derive(Properties, PartialEq)]
 pub struct SessionViewProps {
@@ -133,6 +139,93 @@ fn edit_stack_api_path(session_id: Uuid) -> String {
 
 fn edit_stack_item_api_path(session_id: Uuid, item_id: Uuid) -> String {
     format!("/api/sessions/{session_id}/edit-stack/{item_id}")
+}
+
+fn browser_now_iso() -> String {
+    js_sys::Date::new_0()
+        .to_iso_string()
+        .as_string()
+        .unwrap_or_else(|| "1970-01-01T00:00:00.000Z".to_string())
+}
+
+fn elapsed_ms_between(start: &str, end: &str) -> Option<u64> {
+    let start = parse_iso_ms_utc(start);
+    let end = parse_iso_ms_utc(end);
+    if !start.is_finite() || !end.is_finite() {
+        return None;
+    }
+    Some((end - start).max(0.0).round() as u64)
+}
+
+fn elapsed_ms_since(start: &str, now_ms: f64) -> Option<u64> {
+    let start = parse_iso_ms_utc(start);
+    if !start.is_finite() || !now_ms.is_finite() {
+        return None;
+    }
+    Some((now_ms - start).max(0.0).round() as u64)
+}
+
+fn format_edit_stack_elapsed(ms: u64) -> String {
+    if ms < 1000 {
+        "now".to_string()
+    } else {
+        shared::fmt::format_duration(ms)
+    }
+}
+
+fn edit_stack_status_label(status: &str) -> &'static str {
+    match status {
+        "pending" => "Pending",
+        "sent" => "Sent",
+        "completed" => "Done",
+        "failed" => "Failed",
+        "dismissed" => "Dismissed",
+        _ => "Past",
+    }
+}
+
+fn next_sent_at_after<'a>(items: &'a [EditStackItem], item: &EditStackItem) -> Option<&'a str> {
+    let sent_at = item.sent_at.as_deref()?;
+    items
+        .iter()
+        .filter_map(|candidate| {
+            let candidate_sent_at = candidate.sent_at.as_deref()?;
+            (candidate_sent_at > sent_at).then_some(candidate_sent_at)
+        })
+        .min()
+}
+
+fn edit_stack_elapsed_label(
+    item: &EditStackItem,
+    items: &[EditStackItem],
+    now_ms: f64,
+) -> Option<String> {
+    match item.status.as_str() {
+        "pending" => elapsed_ms_since(&item.created_at, now_ms)
+            .map(|ms| format!("queued {}", format_edit_stack_elapsed(ms))),
+        "completed" => item
+            .sent_at
+            .as_deref()
+            .and_then(|sent_at| elapsed_ms_between(sent_at, &item.updated_at))
+            .map(|ms| format!("took {}", format_edit_stack_elapsed(ms))),
+        "failed" => item
+            .sent_at
+            .as_deref()
+            .and_then(|sent_at| elapsed_ms_between(sent_at, &item.updated_at))
+            .map(|ms| format!("failed after {}", format_edit_stack_elapsed(ms))),
+        "sent" => {
+            let sent_at = item.sent_at.as_deref()?;
+            next_sent_at_after(items, item)
+                .and_then(|next| elapsed_ms_between(sent_at, next))
+                .map(|ms| format!("took {}", format_edit_stack_elapsed(ms)))
+                .or_else(|| {
+                    elapsed_ms_since(sent_at, now_ms)
+                        .map(|ms| format!("sent {}", format_edit_stack_elapsed(ms)))
+                })
+        }
+        _ => elapsed_ms_between(&item.created_at, &item.updated_at)
+            .map(|ms| format!("open {}", format_edit_stack_elapsed(ms))),
+    }
 }
 
 fn edit_stack_prompt_content(item: &EditStackItem) -> String {
@@ -248,6 +341,8 @@ pub enum SessionViewMsg {
     EditStackRequestFailed(String),
     ToggleEditStackPanel,
     HideEditStackPanel,
+    ShowPendingEditStack,
+    ShowPastEditStack,
     SendNextEditStackItem,
     SendEditStackItem(Uuid),
     SendAllEditStack,
@@ -401,6 +496,7 @@ pub struct SessionView {
     edit_stack_send_all: bool,
     edit_stack_error: Option<String>,
     edit_stack_panel_open: bool,
+    edit_stack_view: EditStackView,
     surface_split_percent: f64,
     body_ref: NodeRef,
     resize_listeners: Vec<EventListener>,
@@ -527,6 +623,7 @@ impl Component for SessionView {
             edit_stack_send_all: false,
             edit_stack_error: None,
             edit_stack_panel_open: false,
+            edit_stack_view: EditStackView::Pending,
             surface_split_percent: load_split_percent(session_id),
             body_ref: NodeRef::default(),
             resize_listeners: Vec::new(),
@@ -544,6 +641,7 @@ impl Component for SessionView {
             self.edit_stack_send_all = false;
             self.edit_stack_error = None;
             self.edit_stack_panel_open = false;
+            self.edit_stack_view = EditStackView::Pending;
             self.open_forward_on_load = false;
             self.pending_surface_restore = load_open_surface(ctx.props().session.id);
             self.surface_split_percent = load_split_percent(ctx.props().session.id);
@@ -764,6 +862,7 @@ impl Component for SessionView {
                 };
                 let surface = SessionSurface::from_forward(ctx.props().session.id, forward, mode);
                 save_open_surface(&surface);
+                self.edit_stack_panel_open = false;
                 self.active_surface = Some(surface);
                 true
             }
@@ -778,14 +877,47 @@ impl Component for SessionView {
                 true
             }
             SessionViewMsg::ToggleEditStackPanel => {
-                self.edit_stack_panel_open = !self.edit_stack_panel_open;
-                if self.edit_stack_panel_open {
+                let queue_open = self
+                    .active_surface
+                    .as_ref()
+                    .is_some_and(SessionSurface::is_work_queue);
+                if queue_open {
+                    self.active_surface = None;
+                    self.edit_stack_panel_open = false;
+                    self.resize_listeners.clear();
+                } else {
+                    let mode = if is_mobile_surface_viewport() {
+                        SessionSurfaceMode::Fullscreen
+                    } else {
+                        SessionSurfaceMode::Split
+                    };
+                    self.active_surface = Some(SessionSurface::from_work_queue(
+                        ctx.props().session.id,
+                        mode,
+                    ));
+                    self.edit_stack_panel_open = true;
                     edit_stack_fetch(ctx.link().clone(), ctx.props().session.id);
                 }
                 true
             }
             SessionViewMsg::HideEditStackPanel => {
                 self.edit_stack_panel_open = false;
+                if self
+                    .active_surface
+                    .as_ref()
+                    .is_some_and(SessionSurface::is_work_queue)
+                {
+                    self.active_surface = None;
+                    self.resize_listeners.clear();
+                }
+                true
+            }
+            SessionViewMsg::ShowPendingEditStack => {
+                self.edit_stack_view = EditStackView::Pending;
+                true
+            }
+            SessionViewMsg::ShowPastEditStack => {
+                self.edit_stack_view = EditStackView::Past;
                 true
             }
             SessionViewMsg::SendNextEditStackItem => {
@@ -826,6 +958,7 @@ impl Component for SessionView {
                             mode,
                         );
                         save_open_surface(&surface);
+                        self.edit_stack_panel_open = false;
                         self.pending_surface_restore = None;
                         self.active_surface = Some(surface);
                         return true;
@@ -834,6 +967,7 @@ impl Component for SessionView {
                 if self.active_surface.is_none() {
                     if let Some(memory) = self.pending_surface_restore.take() {
                         if let Some(surface) = memory.restore(ctx.props().session.id, &forwards) {
+                            self.edit_stack_panel_open = false;
                             self.active_surface = Some(surface);
                             return true;
                         }
@@ -858,9 +992,17 @@ impl Component for SessionView {
                 true
             }
             SessionViewMsg::CloseSurface => {
+                let was_queue = self
+                    .active_surface
+                    .as_ref()
+                    .is_some_and(SessionSurface::is_work_queue);
                 self.active_surface = None;
                 self.pending_surface_restore = None;
-                clear_open_surface(ctx.props().session.id);
+                if was_queue {
+                    self.edit_stack_panel_open = false;
+                } else {
+                    clear_open_surface(ctx.props().session.id);
+                }
                 self.resize_listeners.clear();
                 true
             }
@@ -945,8 +1087,13 @@ impl Component for SessionView {
                     surface.mode = SessionSurfaceMode::Split;
                     save_open_surface(surface);
                 } else {
+                    let was_queue = surface.is_work_queue();
                     self.active_surface = None;
-                    clear_open_surface(ctx.props().session.id);
+                    if was_queue {
+                        self.edit_stack_panel_open = false;
+                    } else {
+                        clear_open_surface(ctx.props().session.id);
+                    }
                 }
                 true
             }
@@ -1106,8 +1253,17 @@ impl Component for SessionView {
             .iter()
             .filter(|item| item.status == "pending")
             .count();
+        let past_work_count = self
+            .edit_stack_items
+            .iter()
+            .filter(|item| item.status != "pending")
+            .count();
+        let queue_open = self
+            .active_surface
+            .as_ref()
+            .is_some_and(SessionSurface::is_work_queue);
         let work_queue_needs_attention = pending_work_count > 0 || self.edit_stack_error.is_some();
-        let work_queue_active = self.edit_stack_panel_open || work_queue_needs_attention;
+        let work_queue_active = queue_open || work_queue_needs_attention;
 
         html! {
             <div class={classes!("session-view", ctx.props().focused.then_some("focused"))}>
@@ -1148,14 +1304,16 @@ impl Component for SessionView {
                             "work-queue-action",
                             work_queue_active.then_some("active"),
                         )}
-                        title={if self.edit_stack_panel_open { "Hide work queue" } else { "View work queue" }}
+                        title={if queue_open { "Hide work queue" } else { "View work queue" }}
                         aria-controls="session-work-queue"
-                        aria-expanded={self.edit_stack_panel_open.to_string()}
+                        aria-expanded={queue_open.to_string()}
                         onclick={ctx.link().callback(|_| SessionViewMsg::ToggleEditStackPanel)}
                     >
                         {
                             if pending_work_count > 0 {
                                 format!("Queue {pending_work_count}")
+                            } else if past_work_count > 0 {
+                                format!("Queue · {past_work_count}")
                             } else {
                                 "Queue".to_string()
                             }
@@ -1242,7 +1400,6 @@ impl Component for SessionView {
                             { self.render_tasks_panel(ctx) }
                         </div>
 
-                        { self.render_edit_stack_panel(ctx) }
                         { self.render_permission_handler(ctx) }
                         { self.render_agent_progress() }
                         { self.render_input_bar(ctx) }
@@ -1266,6 +1423,8 @@ impl Component for SessionView {
                                 on_toggle_collapsed={ctx.link().callback(|_| SessionViewMsg::ToggleSurfaceCollapsed)}
                                 on_toggle_mode={ctx.link().callback(|_| SessionViewMsg::ToggleSurfaceMode)}
                             />
+                        } else if surface.is_work_queue() {
+                            { self.render_edit_stack_surface(ctx, surface) }
                         }
                     }
                 </div>
@@ -1734,14 +1893,65 @@ impl SessionView {
             .iter_mut()
             .find(|item| item.id == item_id)
         {
+            let now = browser_now_iso();
             item.status = "sent".to_string();
             item.sent_client_msg_id = Some(client_msg_id);
+            item.sent_at = Some(now.clone());
+            item.updated_at = now;
         }
         let session_id = ctx.props().session.id;
         let link = ctx.link().clone();
         let body = UpdateEditStackItemRequest {
             status: Some("sent".to_string()),
             sent_client_msg_id: Some(client_msg_id),
+        };
+        spawn_local(async move {
+            let result = utils::send_json(
+                Request::patch(&utils::api_url(&edit_stack_item_api_path(
+                    session_id, item_id,
+                ))),
+                &body,
+            )
+            .await;
+            match result {
+                Ok(response) if response.ok() => match response.json::<EditStackResponse>().await {
+                    Ok(data) => link.send_message(SessionViewMsg::EditStackLoaded(data.items)),
+                    Err(err) => link.send_message(SessionViewMsg::EditStackRequestFailed(format!(
+                        "Edit-stack response was malformed: {err}"
+                    ))),
+                },
+                Ok(response) => {
+                    let message = utils::error_body(response).await;
+                    link.send_message(SessionViewMsg::EditStackRequestFailed(format!(
+                        "Could not update edit-stack item: {message}"
+                    )));
+                }
+                Err(err) => link.send_message(SessionViewMsg::EditStackRequestFailed(format!(
+                    "Could not update edit-stack item: {err}"
+                ))),
+            }
+        });
+    }
+
+    fn complete_edit_stack_item(
+        &mut self,
+        ctx: &Context<Self>,
+        item_id: Uuid,
+        status: &'static str,
+    ) {
+        if let Some(item) = self
+            .edit_stack_items
+            .iter_mut()
+            .find(|item| item.id == item_id)
+        {
+            item.status = status.to_string();
+            item.updated_at = browser_now_iso();
+        }
+        let session_id = ctx.props().session.id;
+        let link = ctx.link().clone();
+        let body = UpdateEditStackItemRequest {
+            status: Some(status.to_string()),
+            sent_client_msg_id: None,
         };
         spawn_local(async move {
             let result = utils::send_json(
@@ -1918,10 +2128,19 @@ impl SessionView {
                 .emit((ctx.props().session.id, tag, activity_ts));
         }
         reconcile_pending_sends(&mut self.pending_sends, tag, &output.content);
-        if self.edit_stack_active.is_some()
-            && matches!(tag, ActivityTag::Result | ActivityTag::Error)
-        {
-            self.edit_stack_active = None;
+        if let Some((item_id, _)) = self.edit_stack_active {
+            match tag {
+                ActivityTag::Result => {
+                    self.complete_edit_stack_item(ctx, item_id, "completed");
+                    self.edit_stack_active = None;
+                }
+                ActivityTag::Error => {
+                    self.complete_edit_stack_item(ctx, item_id, "failed");
+                    self.edit_stack_active = None;
+                    self.edit_stack_send_all = false;
+                }
+                _ => {}
+            }
         }
 
         // Retire any active-tool strip entries this message completes: a
@@ -2094,16 +2313,94 @@ impl SessionView {
         connect_websocket(session_id, replay_after, true, on_event);
     }
 
+    fn render_edit_stack_surface(&self, ctx: &Context<Self>, surface: SessionSurface) -> Html {
+        let pending_count = self
+            .edit_stack_items
+            .iter()
+            .filter(|item| item.status == "pending")
+            .count();
+        let past_count = self
+            .edit_stack_items
+            .iter()
+            .filter(|item| item.status != "pending")
+            .count();
+        let collapsed = surface.collapsed;
+        let fullscreen = surface.mode == SessionSurfaceMode::Fullscreen;
+        let title = format!("Work queue · {pending_count} pending · {past_count} past");
+        let status_class = (pending_count > 0).then_some("is-up");
+        let status_title = if pending_count > 0 {
+            "Queued work is waiting"
+        } else {
+            "No pending queued work"
+        };
+        let toggle_collapsed = ctx
+            .link()
+            .callback(|_| SessionViewMsg::ToggleSurfaceCollapsed);
+        let toggle_mode = ctx.link().callback(|_| SessionViewMsg::ToggleSurfaceMode);
+        let close = ctx.link().callback(|_| SessionViewMsg::HideEditStackPanel);
+
+        html! {
+            <aside
+                id="session-work-queue"
+                class={classes!(
+                    "session-forward-surface",
+                    "session-work-queue-surface",
+                    collapsed.then_some("collapsed"),
+                    fullscreen.then_some("fullscreen"),
+                )}
+                aria-label="Work queue"
+            >
+                <div class="session-forward-toolbar session-work-queue-toolbar">
+                    <button
+                        type="button"
+                        class="surface-icon-button"
+                        title={ if collapsed { "Expand work queue" } else { "Collapse work queue" } }
+                        onclick={toggle_collapsed}
+                    >
+                        { if collapsed { "▸" } else { "▾" } }
+                    </button>
+                    <span class={classes!("surface-status", status_class)} title={status_title}></span>
+                    <span class="session-forward-title" title={title.clone()}>{ title }</span>
+                    <button
+                        type="button"
+                        class="surface-icon-button surface-mode-button"
+                        title={ if fullscreen { "Return to split view" } else { "Full screen" } }
+                        onclick={toggle_mode}
+                    >
+                        { if fullscreen { "⇲" } else { "⛶" } }
+                    </button>
+                    <button
+                        type="button"
+                        class="surface-icon-button surface-close-button"
+                        title="Close work queue"
+                        onclick={close}
+                    >
+                        { "×" }
+                    </button>
+                </div>
+                if !collapsed {
+                    { self.render_edit_stack_panel(ctx) }
+                }
+            </aside>
+        }
+    }
+
     fn render_edit_stack_panel(&self, ctx: &Context<Self>) -> Html {
         let pending = self
             .edit_stack_items
             .iter()
             .filter(|item| item.status == "pending")
             .collect::<Vec<_>>();
-        if !self.edit_stack_panel_open && self.edit_stack_error.is_none() {
-            return html! {};
-        }
-        let creator_count = pending
+        let past = self
+            .edit_stack_items
+            .iter()
+            .filter(|item| item.status != "pending")
+            .collect::<Vec<_>>();
+        let visible_items = match self.edit_stack_view {
+            EditStackView::Pending => pending.clone(),
+            EditStackView::Past => past.clone(),
+        };
+        let creator_count = visible_items
             .iter()
             .map(|item| item.created_by)
             .collect::<HashSet<_>>()
@@ -2121,14 +2418,22 @@ impl SessionView {
             .link()
             .callback(|_| SessionViewMsg::SendNextEditStackItem);
         let send_all = ctx.link().callback(|_| SessionViewMsg::SendAllEditStack);
-        let close = ctx.link().callback(|_| SessionViewMsg::HideEditStackPanel);
+        let show_pending = ctx
+            .link()
+            .callback(|_| SessionViewMsg::ShowPendingEditStack);
+        let show_past = ctx.link().callback(|_| SessionViewMsg::ShowPastEditStack);
+        let now_ms = js_sys::Date::now();
+        let empty_text = match self.edit_stack_view {
+            EditStackView::Pending => "No pending work items.",
+            EditStackView::Past => "No past work items.",
+        };
         html! {
-            <section id="session-work-queue" class="edit-stack-panel" aria-label="Work queue">
+            <section class="edit-stack-panel">
                 <div class="edit-stack-header">
                     <div class="edit-stack-title">
                         <span class="edit-stack-kicker">{ "Work queue" }</span>
                         <span class="edit-stack-count">
-                            { format!("{} pending", pending.len()) }
+                            { format!("{} pending · {} past", pending.len(), past.len()) }
                         </span>
                     </div>
                     <div class="edit-stack-actions">
@@ -2148,24 +2453,32 @@ impl SessionView {
                         >
                             { if self.edit_stack_send_all { "Sending…" } else { "Send all" } }
                         </button>
-                        <button
-                            type="button"
-                            class="edit-stack-action"
-                            onclick={close}
-                            title="Collapse work queue"
-                        >
-                            { "Collapse" }
-                        </button>
                     </div>
+                </div>
+                <div class="edit-stack-tabs" role="tablist" aria-label="Work queue filters">
+                    <button
+                        type="button"
+                        class={classes!("edit-stack-tab", (self.edit_stack_view == EditStackView::Pending).then_some("active"))}
+                        onclick={show_pending}
+                    >
+                        { format!("Pending {}", pending.len()) }
+                    </button>
+                    <button
+                        type="button"
+                        class={classes!("edit-stack-tab", (self.edit_stack_view == EditStackView::Past).then_some("active"))}
+                        onclick={show_past}
+                    >
+                        { format!("Past {}", past.len()) }
+                    </button>
                 </div>
                 if let Some(error) = self.edit_stack_error.as_deref() {
                     <div class="edit-stack-error">{ error }</div>
                 }
                 <div class="edit-stack-list">
-                    if pending.is_empty() {
-                        <div class="edit-stack-empty">{ "No pending work items." }</div>
+                    if visible_items.is_empty() {
+                        <div class="edit-stack-empty">{ empty_text }</div>
                     }
-                    { pending.into_iter().map(|item| {
+                    { visible_items.into_iter().map(|item| {
                         let item_id = item.id;
                         let is_active = active_item == Some(item_id);
                         let image = item.image_data_url.clone();
@@ -2182,6 +2495,16 @@ impl SessionView {
                         let creator = item.created_by_name.clone();
                         let send_one = ctx.link().callback(move |_| SessionViewMsg::SendEditStackItem(item_id));
                         let dismiss = ctx.link().callback(move |_| SessionViewMsg::DismissEditStackItem(item_id));
+                        let status_label = edit_stack_status_label(&item.status);
+                        let status_class = match item.status.as_str() {
+                            "pending" => "pending",
+                            "sent" => "sent",
+                            "completed" => "completed",
+                            "failed" => "failed",
+                            "dismissed" => "dismissed",
+                            _ => "other",
+                        };
+                        let elapsed = edit_stack_elapsed_label(item, &self.edit_stack_items, now_ms);
                         html! {
                             <article class={classes!("edit-stack-item", is_active.then_some("active"))} key={item.id.to_string()}>
                                 if let Some(src) = image {
@@ -2198,28 +2521,38 @@ impl SessionView {
                                             }
                                         }
                                     </div>
+                                    <div class="edit-stack-item-meta">
+                                        <span class={classes!("edit-stack-status", status_class)}>
+                                            { status_label }
+                                        </span>
+                                        if let Some(elapsed) = elapsed {
+                                            <span class="edit-stack-elapsed">{ elapsed }</span>
+                                        }
+                                    </div>
                                     <div class="edit-stack-note">{ body }</div>
                                     if let Some(context) = context {
                                         <pre class="edit-stack-context">{ context }</pre>
                                     }
                                 </div>
                                 <div class="edit-stack-item-actions">
-                                    <button
-                                        type="button"
-                                        class="edit-stack-icon-action"
-                                        disabled={busy || is_active}
-                                        onclick={send_one}
-                                        title="Send this item"
-                                    >
-                                        { "Send" }
-                                    </button>
+                                    if item.status == "pending" {
+                                        <button
+                                            type="button"
+                                            class="edit-stack-icon-action"
+                                            disabled={busy || is_active}
+                                            onclick={send_one}
+                                            title="Send this item"
+                                        >
+                                            { "Send" }
+                                        </button>
+                                    }
                                     <button
                                         type="button"
                                         class="edit-stack-icon-action"
                                         onclick={dismiss}
-                                        title="Dismiss this item"
+                                        title={ if item.status == "pending" { "Dismiss this item" } else { "Remove this item" } }
                                     >
-                                        { "Dismiss" }
+                                        { if item.status == "pending" { "Dismiss" } else { "Remove" } }
                                     </button>
                                 </div>
                             </article>

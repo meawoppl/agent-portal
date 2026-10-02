@@ -19,6 +19,7 @@ pub const MAX_SPLIT_PERCENT: f64 = 70.0;
 #[derive(Clone, PartialEq)]
 pub enum SessionSurfaceKind {
     Forward(ForwardInfo),
+    WorkQueue,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -72,7 +73,24 @@ impl SessionSurface {
     pub fn forward(&self) -> Option<&ForwardInfo> {
         match &self.kind {
             SessionSurfaceKind::Forward(forward) => Some(forward),
+            SessionSurfaceKind::WorkQueue => None,
         }
+    }
+
+    pub fn from_work_queue(session_id: Uuid, mode: SessionSurfaceMode) -> Self {
+        Self {
+            id: "work-queue".to_string(),
+            session_id,
+            title: "Work queue".to_string(),
+            subtitle: "Pending and past queued tasks".to_string(),
+            mode,
+            collapsed: false,
+            kind: SessionSurfaceKind::WorkQueue,
+        }
+    }
+
+    pub fn is_work_queue(&self) -> bool {
+        matches!(self.kind, SessionSurfaceKind::WorkQueue)
     }
 
     pub fn update_forward(&mut self, next: ForwardInfo) {
@@ -82,14 +100,14 @@ impl SessionSurface {
         self.collapsed = collapsed;
     }
 
-    pub fn memory(&self) -> ForwardSurfaceMemory {
-        let port = match &self.kind {
-            SessionSurfaceKind::Forward(forward) => forward.port,
-        };
-        ForwardSurfaceMemory {
-            port,
-            mode: self.mode,
-            collapsed: self.collapsed,
+    pub fn memory(&self) -> Option<ForwardSurfaceMemory> {
+        match &self.kind {
+            SessionSurfaceKind::Forward(forward) => Some(ForwardSurfaceMemory {
+                port: forward.port,
+                mode: self.mode,
+                collapsed: self.collapsed,
+            }),
+            SessionSurfaceKind::WorkQueue => None,
         }
     }
 }
@@ -111,7 +129,10 @@ pub fn load_open_surface(session_id: Uuid) -> Option<ForwardSurfaceMemory> {
 }
 
 pub fn save_open_surface(surface: &SessionSurface) {
-    if let Ok(raw) = serde_json::to_string(&surface.memory()) {
+    let Some(memory) = surface.memory() else {
+        return;
+    };
+    if let Ok(raw) = serde_json::to_string(&memory) {
         utils::storage_set(&open_storage_key(surface.session_id), &raw);
     }
 }

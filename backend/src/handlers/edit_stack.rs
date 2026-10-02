@@ -304,15 +304,21 @@ pub async fn update_edit_stack_item(
     let mut conn = app_state.conn()?;
     let _session = verify_session_mutator(&mut conn, session_id, current_user_id)?;
     let status = req.status.as_deref().unwrap_or("pending");
-    if !matches!(status, "pending" | "sent" | "dismissed") {
+    if !matches!(
+        status,
+        "pending" | "sent" | "completed" | "failed" | "dismissed"
+    ) {
         return Err(AppError::BadRequest("unsupported edit stack status"));
     }
 
-    let target = session_edit_stack_items::table
-        .filter(session_edit_stack_items::session_id.eq(session_id))
-        .filter(session_edit_stack_items::id.eq(item_id));
-    let row: Option<SessionEditStackItem> = if status == "sent" {
-        diesel::update(target)
+    let row: Option<SessionEditStackItem> = match status {
+        "sent" => {
+            let updated = diesel::update(
+                session_edit_stack_items::table
+                    .filter(session_edit_stack_items::session_id.eq(session_id))
+                    .filter(session_edit_stack_items::id.eq(item_id))
+                    .filter(session_edit_stack_items::status.eq_any(["pending", "sent"])),
+            )
             .set((
                 session_edit_stack_items::status.eq(status),
                 session_edit_stack_items::sent_client_msg_id.eq(req.sent_client_msg_id),
@@ -321,18 +327,43 @@ pub async fn update_edit_stack_item(
             ))
             .returning(SessionEditStackItem::as_returning())
             .get_result(&mut conn)
-            .optional()?
-    } else {
-        diesel::update(target)
-            .set((
-                session_edit_stack_items::status.eq(status),
-                session_edit_stack_items::sent_client_msg_id.eq(None::<Uuid>),
-                session_edit_stack_items::sent_at.eq(None::<chrono::NaiveDateTime>),
-                session_edit_stack_items::updated_at.eq(diesel::dsl::now),
-            ))
-            .returning(SessionEditStackItem::as_returning())
-            .get_result(&mut conn)
-            .optional()?
+            .optional()?;
+            match updated {
+                Some(row) => Some(row),
+                None => session_edit_stack_items::table
+                    .filter(session_edit_stack_items::session_id.eq(session_id))
+                    .filter(session_edit_stack_items::id.eq(item_id))
+                    .select(SessionEditStackItem::as_select())
+                    .first(&mut conn)
+                    .optional()?,
+            }
+        }
+        "completed" | "failed" => diesel::update(
+            session_edit_stack_items::table
+                .filter(session_edit_stack_items::session_id.eq(session_id))
+                .filter(session_edit_stack_items::id.eq(item_id)),
+        )
+        .set((
+            session_edit_stack_items::status.eq(status),
+            session_edit_stack_items::updated_at.eq(diesel::dsl::now),
+        ))
+        .returning(SessionEditStackItem::as_returning())
+        .get_result(&mut conn)
+        .optional()?,
+        _ => diesel::update(
+            session_edit_stack_items::table
+                .filter(session_edit_stack_items::session_id.eq(session_id))
+                .filter(session_edit_stack_items::id.eq(item_id)),
+        )
+        .set((
+            session_edit_stack_items::status.eq(status),
+            session_edit_stack_items::sent_client_msg_id.eq(None::<Uuid>),
+            session_edit_stack_items::sent_at.eq(None::<chrono::NaiveDateTime>),
+            session_edit_stack_items::updated_at.eq(diesel::dsl::now),
+        ))
+        .returning(SessionEditStackItem::as_returning())
+        .get_result(&mut conn)
+        .optional()?,
     };
     if row.is_none() {
         return Err(AppError::NotFound("edit stack item not found"));
