@@ -1,11 +1,14 @@
 use crate::components::model_select::model_cli_args;
+use crate::components::plugin_discovery::{plugin_inventory_api_path, PluginSuggestionStrip};
 use crate::components::skip_permissions::{skip_permissions_args, skip_permissions_label};
 use crate::components::{DismissibleBackdrop, ModelSelect, ProxyTokenSetup};
 use crate::hooks::{use_escape_capture, use_focus_trap};
 use crate::utils::{self, FetchError, On401};
 use gloo::timers::callback::Timeout;
 use gloo_net::http::Request;
-use shared::api::{DirectoryListingResponse, LaunchRequest, ProbeAgentsResponse};
+use shared::api::{
+    DirectoryListingResponse, LaunchRequest, PluginInventoryResponse, ProbeAgentsResponse,
+};
 use shared::{AgentInstall, DirectoryEntry, LauncherInfo};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -326,6 +329,8 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     let debounce_handle = use_mut_ref(|| None::<Timeout>);
     let agent_installs = use_state(Vec::<AgentInstall>::new);
     let probing_agents = use_state(|| false);
+    let plugin_suggestions = use_state(Vec::<shared::api::PortalPluginInfo>::new);
+    let plugin_suggestion_error = use_state(|| None::<String>);
 
     // Fetch launchers on mount and on every LaunchersChanged tick (#710);
     // auto-select install mode when none are connected.
@@ -364,6 +369,30 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                         }
                     }
                     launchers.set(data);
+                }
+            });
+            || ()
+        });
+    }
+
+    {
+        let path = (*dir.path).clone();
+        let plugin_suggestions = plugin_suggestions.clone();
+        let plugin_suggestion_error = plugin_suggestion_error.clone();
+        use_effect_with(path, move |path| {
+            let path = path.clone();
+            spawn_local(async move {
+                let api_path = plugin_inventory_api_path(None, Some(&path));
+                match utils::fetch_json::<PluginInventoryResponse>(&api_path, On401::Ignore).await {
+                    Ok(data) => {
+                        plugin_suggestions.set(data.plugins);
+                        plugin_suggestion_error.set(None);
+                    }
+                    Err(err) => {
+                        plugin_suggestions.set(Vec::new());
+                        plugin_suggestion_error
+                            .set(Some(format!("Could not load plugin suggestions: {err}")));
+                    }
                 }
             });
             || ()
@@ -766,6 +795,11 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                         on_path_input={on_path_input}
                         on_path_keydown={on_path_keydown.clone()}
                         on_navigate={navigate_to.clone()}
+                    />
+
+                    <PluginSuggestionStrip
+                        plugins={(*plugin_suggestions).clone()}
+                        error={(*plugin_suggestion_error).clone()}
                     />
 
                     // Session name — shown in the dashboard/nav. Also names the

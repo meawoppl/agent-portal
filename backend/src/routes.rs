@@ -196,6 +196,7 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
         .route("/privacy", get(handlers::privacy::privacy_policy))
         // App configuration (public, no auth required)
         .route("/api/config", get(handlers::config::get_config))
+        .route("/api/plugins", get(handlers::plugins::list_plugins))
         // Session API routes
         .route("/api/sessions", get(handlers::sessions::list_sessions))
         .route(
