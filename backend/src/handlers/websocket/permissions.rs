@@ -115,7 +115,7 @@ fn permission_input_snippet(input: &serde_json::Value) -> Option<String> {
         .find_map(|k| input.get(k).and_then(|v| v.as_str()))
         .map(str::to_string)
         .or_else(|| serde_json::to_string(input).ok())?;
-    let one_line = primary.split_whitespace().collect::<Vec<_>>().join(" ");
+    let one_line = shared::strings::collapse_whitespace(&primary);
     if one_line.is_empty() {
         return None;
     }

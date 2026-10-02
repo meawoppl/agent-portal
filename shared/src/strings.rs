@@ -63,6 +63,19 @@ pub fn trimmed_non_blank(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|s| !s.is_empty())
 }
 
+/// Collapse every run of whitespace (including newlines and tabs) into a
+/// single space, trimming the ends.
+///
+/// Single home for the repeated
+/// `split_whitespace().collect::<Vec<_>>().join(" ")` shape in one-line
+/// preview and snippet surfaces so the call sites cannot drift (e.g. one
+/// joining with two spaces while another forgets the trim that
+/// `split_whitespace` provides for free).
+#[must_use]
+pub fn collapse_whitespace(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// Truncate to `max_chars` on a char boundary, appending `…` when cut.
 ///
 /// Short input returns as-is; otherwise the first `max_chars - 1` chars plus
@@ -133,6 +146,18 @@ mod tests {
         assert_eq!(trimmed_non_blank(Some("   ")), None);
         assert_eq!(trimmed_non_blank(Some("")), None);
         assert_eq!(trimmed_non_blank(None), None);
+    }
+
+    #[test]
+    fn collapse_whitespace_joins_runs_with_single_spaces() {
+        assert_eq!(collapse_whitespace("  hello   world  "), "hello world");
+        assert_eq!(
+            collapse_whitespace("line one\n\tline two\r\nline three"),
+            "line one line two line three"
+        );
+        assert_eq!(collapse_whitespace(""), "");
+        assert_eq!(collapse_whitespace("   "), "");
+        assert_eq!(collapse_whitespace("already single"), "already single");
     }
 
     #[test]

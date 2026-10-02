@@ -275,7 +275,7 @@ fn default_title(body: &str) -> String {
 }
 
 fn one_line_preview(value: &str, max_chars: usize) -> String {
-    let collapsed = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    let collapsed = shared::strings::collapse_whitespace(value);
     let mut output = collapsed.chars().take(max_chars).collect::<String>();
     if collapsed.chars().count() > max_chars {
         output.push_str("...");
