@@ -6,20 +6,21 @@ use crate::utils::{self, FetchError, On401};
 use gloo::timers::callback::Timeout;
 use gloo_net::http::Request;
 use shared::api::{DirectoryListingResponse, LaunchRequest, ProbeAgentsResponse};
-use shared::{AgentInstall, AgentType, DirectoryEntry, LauncherInfo};
+use shared::{AgentInstall, DirectoryEntry, LauncherInfo};
 use std::collections::HashMap;
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
 
+use super::launch_target_picker::{
+    AgentTargetSelect, DirectoryTargetSelect, LauncherTargetSelect, CONNECT_NEW,
+};
+
 #[derive(serde::Deserialize)]
 struct LaunchResponse {
     session_id: Uuid,
 }
-
-/// Sentinel value used in the launcher <select> to represent the "connect new host" option.
-const CONNECT_NEW: &str = "__install__";
 
 /// Storage key for the last-used launcher (machine) in localStorage (#1326).
 const LAST_LAUNCHER_STORAGE_KEY: &str = "claude-portal-last-launcher";
@@ -33,7 +34,7 @@ const LAST_LAUNCH_DIRS_STORAGE_KEY: &str = "claude-portal-last-launch-dirs";
 
 /// Load the last-used launcher (machine) id. Returns `None` when nothing is
 /// remembered so callers can fall back to the first connected launcher.
-fn load_last_launcher() -> Option<Uuid> {
+pub(super) fn load_last_launcher() -> Option<Uuid> {
     crate::utils::storage_get(LAST_LAUNCHER_STORAGE_KEY).and_then(|v| Uuid::parse_str(&v).ok())
 }
 
@@ -52,7 +53,7 @@ fn load_last_launch_dirs() -> HashMap<String, String> {
 /// Load the last-used launch directory for a specific launcher (machine).
 /// Returns `None` when nothing is remembered for that machine so callers can
 /// fall back to the launcher's home (`~`).
-fn load_last_launch_dir_for(launcher_id: Uuid) -> Option<String> {
+pub(super) fn load_last_launch_dir_for(launcher_id: Uuid) -> Option<String> {
     load_last_launch_dirs()
         .remove(&launcher_id.to_string())
         .filter(|v| shared::strings::is_non_empty(v))
@@ -71,7 +72,7 @@ fn save_last_launch_dir_for(launcher_id: Uuid, dir: &str) {
 
 /// Fetch the current install state for both agent CLIs from the given launcher.
 /// Stores the result in `agents` and clears `probing` when done.
-fn probe_agents_for(
+pub(super) fn probe_agents_for(
     launcher_id: Uuid,
     agents: UseStateHandle<Vec<AgentInstall>>,
     probing: UseStateHandle<bool>,
@@ -94,13 +95,6 @@ fn probe_agents_for(
     });
 }
 
-fn agent_installed(installs: &[AgentInstall], agent_type: AgentType) -> Option<bool> {
-    installs
-        .iter()
-        .find(|a| a.agent_type == agent_type)
-        .map(|a| a.installed)
-}
-
 fn args_placeholder(agent_type: shared::AgentType) -> &'static str {
     match agent_type {
         shared::AgentType::Claude => "ex: --model sonnet --allowedTools \"Bash Edit\"",
@@ -112,7 +106,7 @@ fn args_placeholder(agent_type: shared::AgentType) -> &'static str {
 
 /// One row in the directory browser: folder/file icon plus name, with an
 /// optional click handler (folders navigate; files are inert).
-fn dir_entry(is_dir: bool, name: &str, onclick: Option<Callback<MouseEvent>>) -> Html {
+pub(super) fn dir_entry(is_dir: bool, name: &str, onclick: Option<Callback<MouseEvent>>) -> Html {
     let (class, icon) = if is_dir {
         ("dir-entry dir-entry-folder", "\u{1F4C1}")
     } else {
@@ -128,18 +122,18 @@ fn dir_entry(is_dir: bool, name: &str, onclick: Option<Callback<MouseEvent>>) ->
 
 /// Bundles the four directory-browser state handles so they travel together.
 #[derive(Clone)]
-struct DirBrowser {
-    path: UseStateHandle<String>,
-    home_root: UseStateHandle<Option<String>>,
-    entries: UseStateHandle<Vec<DirectoryEntry>>,
-    loading: UseStateHandle<bool>,
-    error: UseStateHandle<Option<String>>,
+pub(super) struct DirBrowser {
+    pub(super) path: UseStateHandle<String>,
+    pub(super) home_root: UseStateHandle<Option<String>>,
+    pub(super) entries: UseStateHandle<Vec<DirectoryEntry>>,
+    pub(super) loading: UseStateHandle<bool>,
+    pub(super) error: UseStateHandle<Option<String>>,
 }
 
 impl DirBrowser {
     /// Navigate to `path`: update the path bar and fetch the listing.
     /// Use this for breadcrumb clicks, directory clicks, and launcher changes.
-    fn navigate(&self, launcher_id: Option<Uuid>, path: String) {
+    pub(super) fn navigate(&self, launcher_id: Option<Uuid>, path: String) {
         self.path.set(path.clone());
         if let Some(lid) = launcher_id {
             self.fetch(lid, path, true);
@@ -150,7 +144,7 @@ impl DirBrowser {
     /// Pass `update_path = true` when navigating so the path bar is updated to
     /// the server-resolved path (e.g. `~` → `/home/user/`).
     /// Pass `false` when the user is mid-typing so their input isn't overwritten.
-    fn fetch(&self, launcher_id: Uuid, path: String, update_path: bool) {
+    pub(super) fn fetch(&self, launcher_id: Uuid, path: String, update_path: bool) {
         let browser = self.clone();
         browser.loading.set(true);
         browser.error.set(None);
@@ -181,7 +175,7 @@ impl DirBrowser {
     /// launch (#1326) and it still exists under home, navigate into it.
     /// Falls back to home when nothing is remembered or the remembered
     /// directory is gone / unreadable / outside home.
-    fn fetch_initial(&self, launcher_id: Uuid, remembered: Option<String>) {
+    pub(super) fn fetch_initial(&self, launcher_id: Uuid, remembered: Option<String>) {
         let browser = self.clone();
         browser.loading.set(true);
         browser.error.set(None);
@@ -248,7 +242,7 @@ fn listing_error_message(err: &FetchError) -> String {
     }
 }
 
-fn parent_path(path: &str) -> String {
+pub(super) fn parent_path(path: &str) -> String {
     let trimmed = path.trim_end_matches('/');
     match trimmed.rfind('/') {
         Some(0) | None => "/".to_string(),
@@ -256,7 +250,7 @@ fn parent_path(path: &str) -> String {
     }
 }
 
-fn clamp_to_home(path: String, home_root: Option<&str>) -> String {
+pub(super) fn clamp_to_home(path: String, home_root: Option<&str>) -> String {
     let Some(home_root) = home_root else {
         return path;
     };
@@ -268,7 +262,7 @@ fn clamp_to_home(path: String, home_root: Option<&str>) -> String {
     }
 }
 
-fn ensure_trailing_slash(path: &str) -> String {
+pub(super) fn ensure_trailing_slash(path: &str) -> String {
     if path.ends_with('/') {
         path.to_string()
     } else {
@@ -276,7 +270,7 @@ fn ensure_trailing_slash(path: &str) -> String {
     }
 }
 
-fn is_path_home_scoped(path: &str, home_root: Option<&str>) -> bool {
+pub(super) fn is_path_home_scoped(path: &str, home_root: Option<&str>) -> bool {
     if path == "~" || path.starts_with("~/") {
         return true;
     }
@@ -671,23 +665,6 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         vec![("~".to_string(), "~".to_string())]
     };
 
-    // Find selected launcher info for subtitle
-    let selected_info: Option<LauncherInfo> = (*selected_launcher)
-        .and_then(|lid| launchers.iter().find(|l| l.launcher_id == lid).cloned());
-
-    // Per-agent install hints for the dropdown labels and the inline warning.
-    let install_label = |agent: AgentType| match agent_installed(&agent_installs, agent) {
-        Some(false) => format!("{} (not installed)", agent.display_name()),
-        _ => agent.display_name().to_string(),
-    };
-    let claude_label = install_label(AgentType::Claude);
-    let codex_label = install_label(AgentType::Codex);
-    let muse_label = install_label(AgentType::Muse);
-    let antigravity_label = install_label(AgentType::Antigravity);
-    let selected_agent_missing = agent_installed(&agent_installs, *agent_type) == Some(false);
-    let still_probing = *probing_agents && agent_installs.is_empty();
-    let selected_agent_label = agent_type.display_name();
-
     // Pre-compute directory listing HTML
     let dir_listing_html = if *dir.loading {
         html! { <div class="dir-loading">{ "Loading..." }</div> }
@@ -726,34 +703,14 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         }
     };
 
-    // Launcher dropdown — always visible regardless of mode.
-    // Real launchers are listed first; a disabled divider and "+ Connect New Host"
-    // sentinel option follow so the user can switch to the install flow.
     let launcher_select_html = html! {
-        <div class="launch-field">
-            <label>{ "Launcher" }</label>
-            <select class="launcher-select" onchange={on_launcher_change}>
-                { launchers.iter().map(|l| {
-                    let selected = !*show_install && *selected_launcher == Some(l.launcher_id);
-                    html! {
-                        <option value={l.launcher_id.to_string()} {selected}>
-                            { &l.launcher_name }
-                        </option>
-                    }
-                }).collect::<Html>() }
-                if !launchers.is_empty() {
-                    <option disabled=true value="">{ "──────────────" }</option>
-                }
-                <option value={CONNECT_NEW} selected={*show_install}>
-                    { "+ Connect New Host" }
-                </option>
-            </select>
-            if let Some(ref info) = selected_info {
-                <span class="launcher-subtitle">
-                    { format!("{} running", info.running_sessions) }
-                </span>
-            }
-        </div>
+        <LauncherTargetSelect
+            launchers={(*launchers).clone()}
+            selected={*selected_launcher}
+            on_change={on_launcher_change}
+            include_connect_new={true}
+            connect_new_selected={*show_install}
+        />
     };
 
     html! {
@@ -783,47 +740,12 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                     </div>
                 } else {
                     // Launch mode: agent selector, directory browser, args, actions
-                    <div class="launch-field">
-                        <label>{ "Agent" }</label>
-                        <select class="launcher-select" onchange={on_agent_type_change}>
-                            <option value="claude" selected={*agent_type == AgentType::Claude}>
-                                { &claude_label }
-                            </option>
-                            <option value="codex" selected={*agent_type == AgentType::Codex}>
-                                { &codex_label }
-                            </option>
-                            <option value="muse" selected={*agent_type == AgentType::Muse}>
-                                { &muse_label }
-                            </option>
-                            <option value="antigravity" selected={*agent_type == AgentType::Antigravity}>
-                                { &antigravity_label }
-                            </option>
-                        </select>
-                    </div>
-
-                    if selected_agent_missing {
-                        <div class="launch-note launch-note-warn">
-                            { format!(
-                                "{} isn't installed on this launcher — sessions will fail to start. Install it on the host and retry.",
-                                selected_agent_label,
-                            ) }
-                        </div>
-                    } else if still_probing {
-                        <div class="launch-note">
-                            { "Checking installed agents..." }
-                        </div>
-                    }
-
-                    if *agent_type == AgentType::Muse {
-                        <div class="launch-note launch-note-warn">
-                            { "Muse support is highly experimental." }
-                        </div>
-                    }
-                    if *agent_type == AgentType::Antigravity {
-                        <div class="launch-note launch-note-warn">
-                            { "Antigravity support is a read-only preview. It requires GEMINI_API_KEY or Vertex ADC on the launcher host." }
-                        </div>
-                    }
+                    <AgentTargetSelect
+                        selected={*agent_type}
+                        installs={(*agent_installs).clone()}
+                        probing={*probing_agents}
+                        on_change={on_agent_type_change}
+                    />
 
                     // Model picker — catalogs from the claude-codes /
                     // codex-codes crates; "" means the agent's own default.
@@ -837,47 +759,14 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                     </div>
 
                     // Directory browser
-                    <div class="launch-field">
-                        <label>{ "Directory (home folder only)" }</label>
-                        <input
-                            type="text"
-                            class="dir-path-input"
-                            placeholder="~/project"
-                            value={(*dir.path).clone()}
-                            oninput={on_path_input}
-                            onkeydown={on_path_keydown.clone()}
-                        />
-                        <div class="dir-breadcrumb">
-                            { breadcrumbs.iter().enumerate().map(|(i, (full_path, label))| {
-                                let p = full_path.clone();
-                                let is_last = i == breadcrumbs.len() - 1;
-                                let onclick = {
-                                    let navigate_to = navigate_to.clone();
-                                    Callback::from(move |e: MouseEvent| {
-                                        e.prevent_default();
-                                        navigate_to.emit(p.clone());
-                                    })
-                                };
-                                html! {
-                                    <>
-                                        if i > 0 {
-                                            <span class="dir-breadcrumb-sep">{ "/" }</span>
-                                        }
-                                        <a
-                                            class={classes!("dir-breadcrumb-seg", is_last.then_some("active"))}
-                                            href="#"
-                                            {onclick}
-                                        >
-                                            { label }
-                                        </a>
-                                    </>
-                                }
-                            }).collect::<Html>() }
-                        </div>
-                        <div class="dir-browser">
-                            { dir_listing_html }
-                        </div>
-                    </div>
+                    <DirectoryTargetSelect
+                        path={(*dir.path).clone()}
+                        {breadcrumbs}
+                        listing={dir_listing_html}
+                        on_path_input={on_path_input}
+                        on_path_keydown={on_path_keydown.clone()}
+                        on_navigate={navigate_to.clone()}
+                    />
 
                     // Session name — shown in the dashboard/nav. Also names the
                     // worktree branch when one is created.

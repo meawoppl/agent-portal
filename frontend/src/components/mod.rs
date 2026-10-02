@@ -13,6 +13,7 @@ mod floating_pane;
 mod fork_dialog;
 mod help_overlay;
 mod launch_dialog;
+mod launch_target_picker;
 pub(crate) mod markdown;
 pub mod message_renderer;
 mod model_select;
