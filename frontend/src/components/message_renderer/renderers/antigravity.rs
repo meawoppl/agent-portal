@@ -52,12 +52,12 @@ pub fn render_antigravity_frame_content(value: &Value) -> Option<Html> {
 
 fn render_step_update(value: &Value) -> Html {
     let frame_text = text(value, "text")
-        .filter(|s| !s.is_empty())
-        .or_else(|| text(value, "text_delta").filter(|s| !s.is_empty()));
-    let thinking = text(value, "thinking").filter(|s| !s.is_empty());
+        .filter(|s| shared::strings::is_non_empty(s))
+        .or_else(|| text(value, "text_delta").filter(|s| shared::strings::is_non_empty(s)));
+    let thinking = text(value, "thinking").filter(|s| shared::strings::is_non_empty(s));
     let step_kind = text(value, "step_kind").unwrap_or("Message");
     let target = text(value, "target").unwrap_or("");
-    let error = text(value, "error_message").filter(|s| !s.is_empty());
+    let error = text(value, "error_message").filter(|s| shared::strings::is_non_empty(s));
     let action = action_summary(value);
 
     html! {
@@ -92,7 +92,7 @@ fn render_step_update(value: &Value) -> Html {
 
 fn render_trajectory_update(value: &Value) -> Html {
     let state = text(value, "state").unwrap_or("STATE_UNSPECIFIED");
-    let err = text(value, "error").filter(|s| !s.is_empty());
+    let err = text(value, "error").filter(|s| shared::strings::is_non_empty(s));
     html! {
         <div class="antigravity-trajectory">
             <span>{ state }</span>
@@ -150,7 +150,7 @@ fn action_summary(value: &Value) -> Option<String> {
             .get(field)
             .and_then(|v| v.get(key))
             .and_then(Value::as_str)
-            .filter(|s| !s.is_empty())
+            .filter(|s| shared::strings::is_non_empty(s))
         {
             return Some(format!("{label}: {arg}"));
         }
