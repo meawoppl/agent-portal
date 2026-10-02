@@ -37,7 +37,7 @@ pub fn summarize_message(
 
 /// One line, whitespace-collapsed, capped, with an ellipsis when truncated.
 fn cap(text: &str) -> String {
-    let one_line = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let one_line = shared::strings::collapse_whitespace(text);
     shared::strings::truncate_with_ellipsis(&one_line, MAX_SUMMARY_CHARS)
 }
 
