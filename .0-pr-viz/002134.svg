@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+  <rect width="2000" height="1200" fill="#1a1b26"/>
+  <text x="70" y="85" fill="#c0caf5" font-family="sans-serif" font-size="42" font-weight="700">Scheduled task creation</text>
+  <text x="70" y="135" fill="#a9b1d6" font-family="sans-serif" font-size="25">PR #2134 - one launch target vocabulary for interactive and scheduled sessions</text>
+
+  <text x="70" y="225" fill="#f7768e" font-family="sans-serif" font-size="30" font-weight="700">BEFORE</text>
+  <text x="1070" y="225" fill="#9ece6a" font-family="sans-serif" font-size="30" font-weight="700">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1140" stroke="#565f89" stroke-width="3"/>
+
+  <g>
+    <rect x="70" y="270" width="850" height="755" rx="18" fill="#16161e" stroke="#3d4666" stroke-width="3"/>
+    <text x="110" y="325" fill="#c0caf5" font-family="sans-serif" font-size="28" font-weight="700">Scheduled Tasks</text>
+    <text x="110" y="370" fill="#a9b1d6" font-family="sans-serif" font-size="22">Task list and editor compete inside one narrow modal</text>
+
+    <text x="110" y="445" fill="#a9b1d6" font-family="sans-serif" font-size="20">Host</text>
+    <rect x="110" y="465" width="360" height="58" rx="7" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+    <text x="130" y="503" fill="#c0caf5" font-family="monospace" font-size="21">dev-laptop</text>
+    <text x="500" y="445" fill="#a9b1d6" font-family="sans-serif" font-size="20">Agent</text>
+    <rect x="500" y="465" width="360" height="58" rx="7" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+    <text x="520" y="503" fill="#c0caf5" font-family="monospace" font-size="21">claude</text>
+
+    <text x="110" y="580" fill="#a9b1d6" font-family="sans-serif" font-size="20">Working directory</text>
+    <rect x="110" y="600" width="750" height="58" rx="7" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+    <text x="130" y="638" fill="#c0caf5" font-family="monospace" font-size="21">/home/me/project</text>
+
+    <rect x="110" y="715" width="750" height="220" rx="10" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+    <text x="145" y="770" fill="#f7768e" font-family="sans-serif" font-size="24" font-weight="700">Three free-form controls drift from LaunchDialog</text>
+    <text x="145" y="820" fill="#a9b1d6" font-family="sans-serif" font-size="21">No connected-host metadata or compatibility signal</text>
+    <text x="145" y="862" fill="#a9b1d6" font-family="sans-serif" font-size="21">No installed-agent status</text>
+    <text x="145" y="904" fill="#a9b1d6" font-family="sans-serif" font-size="21">No home-scoped directory browser</text>
+  </g>
+
+  <g>
+    <rect x="1070" y="270" width="860" height="755" rx="18" fill="#16161e" stroke="#7aa2f7" stroke-width="3"/>
+    <text x="1110" y="325" fill="#c0caf5" font-family="sans-serif" font-size="28" font-weight="700">New scheduled task</text>
+    <text x="1110" y="370" fill="#a9b1d6" font-family="sans-serif" font-size="22">Dedicated editor modal from scheduled-task management</text>
+
+    <rect x="1110" y="410" width="780" height="430" rx="12" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+    <text x="1145" y="458" fill="#7aa2f7" font-family="sans-serif" font-size="24" font-weight="700">Run target</text>
+    <text x="1145" y="510" fill="#a9b1d6" font-family="sans-serif" font-size="19">Host</text>
+    <rect x="1145" y="528" width="340" height="58" rx="7" fill="#16161e" stroke="#565f89" stroke-width="2"/>
+    <text x="1165" y="566" fill="#c0caf5" font-family="monospace" font-size="19">Workstation - dev.local</text>
+    <text x="1520" y="510" fill="#a9b1d6" font-family="sans-serif" font-size="19">Agent</text>
+    <rect x="1520" y="528" width="335" height="58" rx="7" fill="#16161e" stroke="#565f89" stroke-width="2"/>
+    <text x="1540" y="566" fill="#c0caf5" font-family="monospace" font-size="19">Claude</text>
+    <text x="1145" y="625" fill="#565f89" font-family="sans-serif" font-size="18">2 sessions running - v2.15.16</text>
+
+    <text x="1145" y="680" fill="#a9b1d6" font-family="sans-serif" font-size="19">Directory (home folder only)</text>
+    <rect x="1145" y="698" width="710" height="58" rx="7" fill="#16161e" stroke="#7aa2f7" stroke-width="2"/>
+    <text x="1165" y="736" fill="#c0caf5" font-family="monospace" font-size="19">~/repos/agent-portal</text>
+    <text x="1145" y="800" fill="#7dcfff" font-family="monospace" font-size="18">~ / repos / agent-portal</text>
+
+    <rect x="1110" y="875" width="780" height="105" rx="10" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+    <text x="1145" y="920" fill="#9ece6a" font-family="sans-serif" font-size="22" font-weight="700">Shared Yew components</text>
+    <text x="1145" y="958" fill="#c0caf5" font-family="monospace" font-size="18">LauncherTargetSelect  AgentTargetSelect  DirectoryTargetSelect</text>
+  </g>
+
+  <text x="70" y="1095" fill="#565f89" font-family="monospace" font-size="19">ScheduleDialog uses live LauncherInfo and AgentInstall data; offline tasks remain editable.</text>
+  <text x="1070" y="1095" fill="#565f89" font-family="monospace" font-size="19">LaunchDialog and ScheduleDialog now render the same target controls.</text>
+</svg>
