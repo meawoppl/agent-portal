@@ -408,7 +408,7 @@ fn normalize_item(
     source: &Option<serde_json::Value>,
 ) -> Result<NewSessionEditStackItem, AppError> {
     let title = clean_text(item.title.as_deref(), MAX_EDIT_STACK_TITLE_CHARS)
-        .filter(|value| !value.is_empty())
+        .filter(|value| shared::strings::is_non_empty(value))
         .unwrap_or_else(|| format!("Edit annotation {}", index + 1));
     let body = clean_text(item.body.as_deref(), MAX_EDIT_STACK_TEXT_CHARS).unwrap_or_default();
     let image_data_url = validate_image_data_url(image_data_url(&item))?;

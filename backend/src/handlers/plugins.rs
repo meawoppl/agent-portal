@@ -229,9 +229,9 @@ fn skill_description(contents: &str) -> Option<String> {
     contents
         .lines()
         .map(str::trim)
-        .find(|line| !line.is_empty())
+        .find(|line| shared::strings::is_non_empty(line))
         .map(|line| line.trim_start_matches('#').trim().to_string())
-        .filter(|line| !line.is_empty())
+        .filter(|line| shared::strings::is_non_empty(line))
 }
 
 fn estimate_tokens(bytes: u64) -> u64 {

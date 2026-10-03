@@ -49,7 +49,7 @@ fn excerpt(text: &str) -> String {
     stripped
         .lines()
         .map(str::trim)
-        .find(|line| !line.is_empty())
+        .find(|line| shared::strings::is_non_empty(line))
         .unwrap_or("")
         .to_string()
 }
@@ -304,7 +304,7 @@ fn summarize_antigravity(content: &str) -> (&'static str, String) {
             if let Some(summary) = value
                 .get("error_message")
                 .and_then(|value| value.as_str())
-                .filter(|message| !message.is_empty())
+                .filter(|message| shared::strings::is_non_empty(message))
             {
                 return ("error", format!("error: {}", excerpt(summary)));
             }

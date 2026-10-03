@@ -40,7 +40,7 @@ pub fn preferred_name(nickname: Option<&str>, name: Option<&str>) -> Option<Stri
         .into_iter()
         .flatten()
         .map(str::trim)
-        .find(|s| !s.is_empty())
+        .find(|s| shared::strings::is_non_empty(s))
         .map(str::to_string)
 }
 
