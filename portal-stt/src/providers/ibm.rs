@@ -105,7 +105,7 @@ fn joined_transcript(body: &RecognizeBody) -> String {
         .iter()
         .filter_map(|r| r.alternatives.first())
         .map(|a| a.transcript.trim())
-        .filter(|t| !t.is_empty())
+        .filter(|t| shared::strings::is_non_empty(t))
         .collect::<Vec<_>>()
         .join(" ")
 }
