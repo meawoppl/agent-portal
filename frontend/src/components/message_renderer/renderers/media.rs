@@ -94,9 +94,14 @@ impl ImageLightboxView {
         }
     }
 
-    fn transform(self) -> String {
+    /// The `style` attribute value for the lightbox `<img>`. Yew writes a
+    /// `style` string verbatim as the whole attribute, so this must be a full
+    /// `property: value` declaration; a bare transform list is an invalid
+    /// declaration the browser silently drops, which leaves zoom and pan
+    /// updating state but never reaching the pixels.
+    fn style(self) -> String {
         format!(
-            "translate({:.1}px, {:.1}px) scale({:.4})",
+            "transform: translate({:.1}px, {:.1}px) scale({:.4})",
             self.x, self.y, self.scale
         )
     }
@@ -300,7 +305,7 @@ fn image_viewer(props: &ImageViewerProps) -> Html {
                     >
                         <img
                             class={classes!(size_fallback)}
-                            style={lightbox_view.transform()}
+                            style={lightbox_view.style()}
                             src={props.src.clone()}
                             alt="Full size image"
                             draggable="false"
@@ -456,6 +461,22 @@ mod tests {
         for raster in ["image/png", "image/jpeg", "image/gif", "image/webp"] {
             assert!(!needs_size_fallback(raster), "{raster} needs no fallback");
         }
+    }
+
+    #[test]
+    fn lightbox_style_is_a_complete_transform_declaration() {
+        let view = ImageLightboxView {
+            scale: 2.0,
+            x: 10.0,
+            y: -4.5,
+        };
+        assert_eq!(
+            view.style(),
+            "transform: translate(10.0px, -4.5px) scale(2.0000)"
+        );
+        assert!(ImageLightboxView::default()
+            .style()
+            .starts_with("transform: "));
     }
 
     #[test]
