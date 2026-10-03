@@ -10,7 +10,7 @@ pub fn plugin_inventory_api_path(
     if let Some(session_id) = session_id {
         query.push(format!("sessionId={session_id}"));
     }
-    if let Some(path) = working_directory.filter(|path| !path.trim().is_empty()) {
+    if let Some(path) = working_directory.filter(|path| shared::strings::is_non_blank(path)) {
         query.push(format!(
             "workingDirectory={}",
             js_sys::encode_uri_component(path)
