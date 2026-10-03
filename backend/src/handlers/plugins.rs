@@ -150,7 +150,7 @@ fn read_plugin(plugin_dir: &Path, scan_root: Option<&Path>) -> Option<PortalPlug
             return None;
         }
     };
-    if manifest.name.trim().is_empty() {
+    if !shared::strings::is_non_blank(&manifest.name) {
         return None;
     }
 
@@ -171,7 +171,7 @@ fn read_plugin(plugin_dir: &Path, scan_root: Option<&Path>) -> Option<PortalPlug
     let surface = manifest.surface.unwrap_or_default();
     let display_name = manifest
         .display_name
-        .filter(|value| !value.trim().is_empty())
+        .filter(|value| shared::strings::is_non_blank(value))
         .unwrap_or_else(|| manifest.name.clone());
 
     Some(PortalPluginInfo {
@@ -190,7 +190,7 @@ fn read_plugin(plugin_dir: &Path, scan_root: Option<&Path>) -> Option<PortalPlug
         commands: manifest
             .commands
             .into_iter()
-            .filter(|command| !command.name.trim().is_empty())
+            .filter(|command| shared::strings::is_non_blank(&command.name))
             .map(|command| PortalPluginCommandInfo {
                 name: command.name,
                 description: command.description,
