@@ -543,6 +543,9 @@ mod tests {
             time_to_request_ms: None,
             // 2.1.286 remote/startup timing and terminal API error are optional.
             time_to_request_phases_ms: None,
+            // Attachment diagnostics and feature-flag timing are absent in this fixture.
+            input_attachments_detail: None,
+            flag_fetch_kick: None,
             process_turn_index: None,
             time_to_request_cpu_ms: None,
             time_to_request_loop_lag_ms: None,

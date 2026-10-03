@@ -52,9 +52,11 @@ impl RenderedMessage {
 #[derive(Debug, Clone, Serialize)]
 pub enum ClaudeMessage {
     System(shared::SystemMessage),
-    Assistant(shared::AssistantMessage),
-    Result(shared::ResultMessage),
-    User(shared::UserMessage),
+    /// Keep large SDK payloads off the stack of every rendered message.
+    Assistant(Box<shared::AssistantMessage>),
+    /// Keep growing SDK result diagnostics off the stack of every rendered message.
+    Result(Box<shared::ResultMessage>),
+    User(Box<shared::UserMessage>),
     Error(shared::AnthropicError),
     Portal(shared::PortalMessage),
     RateLimitEvent(shared::RateLimitEvent),
@@ -103,9 +105,9 @@ impl ClaudeMessage {
     fn from_output(output: shared::ClaudeOutput) -> Option<Self> {
         match output {
             shared::ClaudeOutput::System(msg) => Some(Self::System(msg)),
-            shared::ClaudeOutput::User(msg) => Some(Self::User(msg)),
-            shared::ClaudeOutput::Assistant(msg) => Some(Self::Assistant(msg)),
-            shared::ClaudeOutput::Result(msg) => Some(Self::Result(msg)),
+            shared::ClaudeOutput::User(msg) => Some(Self::User(Box::new(msg))),
+            shared::ClaudeOutput::Assistant(msg) => Some(Self::Assistant(Box::new(msg))),
+            shared::ClaudeOutput::Result(msg) => Some(Self::Result(Box::new(msg))),
             shared::ClaudeOutput::Error(msg) => Some(Self::Error(msg)),
             shared::ClaudeOutput::RateLimitEvent(msg) => Some(Self::RateLimitEvent(msg)),
             shared::ClaudeOutput::CommandLifecycle(msg) => Some(Self::CommandLifecycle(msg)),
