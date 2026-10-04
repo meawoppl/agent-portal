@@ -296,7 +296,11 @@ fn format_session_row(
 }
 
 pub(crate) fn full_agent_name(session: &shared::api::AgentSessionInfo) -> String {
-    let Some(model) = session.model.as_deref().filter(|model| !model.is_empty()) else {
+    let Some(model) = session
+        .model
+        .as_deref()
+        .filter(|model| shared::strings::is_non_empty(model))
+    else {
         return session.agent_type.clone();
     };
     if model.starts_with(&session.agent_type) {
