@@ -506,7 +506,7 @@ fn visible_models(models: &[String]) -> String {
 fn owner_label(s: &HistorySessionSummary) -> String {
     s.owner_name
         .clone()
-        .filter(|n| !n.is_empty())
+        .filter(|n| shared::strings::is_non_empty(n))
         .unwrap_or_else(|| {
             if s.owner_email.is_empty() {
                 s.user_id.clone()

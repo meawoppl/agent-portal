@@ -1059,7 +1059,7 @@ fn transcribe_path(session_id: Option<Uuid>, language: Option<&str>) -> String {
     if let Some(session_id) = session_id {
         params.push(format!("session_id={session_id}"));
     }
-    if let Some(language) = language.filter(|l| !l.is_empty()) {
+    if let Some(language) = language.filter(|l| shared::strings::is_non_empty(l)) {
         params.push(format!("language={language}"));
     }
     if params.is_empty() {
@@ -1090,7 +1090,7 @@ fn document_language() -> Option<String> {
         .and_then(|w| w.document())
         .and_then(|d| d.document_element())
         .and_then(|el| el.get_attribute("lang"))
-        .filter(|lang| !lang.is_empty())
+        .filter(|lang| shared::strings::is_non_empty(lang))
 }
 
 /// Async start path: prime mic permission via `getUserMedia`, then construct

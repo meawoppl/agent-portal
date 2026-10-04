@@ -48,7 +48,7 @@ fn detected_timezone() -> String {
     )
     .ok()
     .and_then(|v| v.as_string())
-    .filter(|s| !s.is_empty())
+    .filter(|s| shared::strings::is_non_empty(s))
     .unwrap_or_else(|| "UTC".to_string())
 }
 
@@ -719,7 +719,10 @@ pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
             .trim_start_matches('/');
         if !relative.is_empty() {
             let mut built = root;
-            for part in relative.split('/').filter(|part| !part.is_empty()) {
+            for part in relative
+                .split('/')
+                .filter(|part| shared::strings::is_non_empty(part))
+            {
                 built.push_str(part);
                 built.push('/');
                 segments.push((built.clone(), part.to_string()));

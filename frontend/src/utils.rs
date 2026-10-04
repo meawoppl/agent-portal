@@ -173,7 +173,7 @@ pub fn extract_folder(path: &str) -> &str {
     trimmed
         .rsplit('/')
         .next()
-        .filter(|s| !s.is_empty())
+        .filter(|s| shared::strings::is_non_empty(s))
         .unwrap_or(trimmed)
 }
 

@@ -362,7 +362,7 @@ fn repo_label_from_url(repo_url: &str) -> String {
 
     let parts = path
         .split('/')
-        .filter(|part| !part.is_empty())
+        .filter(|part| shared::strings::is_non_empty(part))
         .collect::<Vec<_>>();
     match parts.as_slice() {
         [.., owner, repo] => format!("{owner}/{repo}"),

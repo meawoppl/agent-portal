@@ -102,7 +102,7 @@ fn reconnect_notice_from_text(text: &str) -> Option<ReconnectNotice> {
                     |(before_context, _)| before_context.trim().to_string(),
                 )
         })
-        .filter(|duration| !duration.is_empty());
+        .filter(|duration| shared::strings::is_non_empty(duration));
     let reason = if first_line.contains("(server restart)") {
         ReconnectReason::ServerRestart
     } else if first_line.contains("(unexpected disconnect)") {
@@ -135,7 +135,7 @@ fn duration_range(durations: &[&str]) -> Option<String> {
     let mut seen = durations
         .iter()
         .copied()
-        .filter(|d| !d.is_empty())
+        .filter(|d| shared::strings::is_non_empty(d))
         .collect::<Vec<_>>();
     if seen.is_empty() {
         return None;

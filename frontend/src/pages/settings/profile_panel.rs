@@ -88,7 +88,7 @@ pub fn profile_panel() -> Html {
 
     let fallback = (*name)
         .clone()
-        .filter(|s| !s.is_empty())
+        .filter(|s| shared::strings::is_non_empty(s))
         .unwrap_or_else(|| (*email).clone());
 
     html! {

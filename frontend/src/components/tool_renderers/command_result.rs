@@ -48,7 +48,7 @@ pub fn command_result_card(props: &CommandResultCardProps) -> Html {
                     <span class="command-result-exit">{ format!("exit {exit}") }</span>
                 }
             </div>
-            if let Some(out) = props.output.as_ref().filter(|o| !o.is_empty()) {
+            if let Some(out) = props.output.as_ref().filter(|o| shared::strings::is_non_empty(o)) {
                 <ExpandableText
                     full_text={out.clone()}
                     max_len={OUTPUT_PREVIEW_CHARS}
