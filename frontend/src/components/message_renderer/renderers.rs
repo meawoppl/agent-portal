@@ -3,6 +3,7 @@
 mod antigravity;
 mod assistant;
 mod errors;
+mod lightbox_gesture;
 mod media;
 mod portal;
 mod result;
