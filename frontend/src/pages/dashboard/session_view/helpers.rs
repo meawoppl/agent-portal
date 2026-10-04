@@ -698,7 +698,7 @@ pub(crate) struct ActiveToolProgress {
 /// strip the `-heartbeat-N` suffix from `tool_use_id` (older/edge wire shapes
 /// where the parent is absent); fall back to `tool_use_id` verbatim.
 pub(crate) fn running_tool_key(tool_use_id: &str, parent_tool_use_id: Option<&str>) -> String {
-    if let Some(parent) = parent_tool_use_id.filter(|p| !p.is_empty()) {
+    if let Some(parent) = parent_tool_use_id.filter(|p| shared::strings::is_non_empty(p)) {
         return parent.to_string();
     }
     match tool_use_id.rsplit_once("-heartbeat-") {

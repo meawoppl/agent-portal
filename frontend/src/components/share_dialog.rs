@@ -128,7 +128,7 @@ impl Component for ShareDialog {
                                 .text()
                                 .await
                                 .ok()
-                                .filter(|t| !t.is_empty())
+                                .filter(|t| shared::strings::is_non_empty(t))
                                 .unwrap_or_else(|| "Failed to add member".to_string());
                             link.send_message(ShareDialogMsg::SetError(msg));
                         }

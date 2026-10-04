@@ -1331,7 +1331,7 @@ impl Component for SessionView {
             .session
             .launcher_version
             .as_deref()
-            .filter(|version| !version.is_empty());
+            .filter(|version| shared::strings::is_non_empty(version));
         let status_class = if ctx.props().session.status.as_str() == "active" {
             "status connected"
         } else {

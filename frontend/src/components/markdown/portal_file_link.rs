@@ -90,7 +90,7 @@ fn filename_from_href(href: &str) -> String {
         .and_then(|q| q.split('&').next())
         .map(|encoded| encoded.replace("%2F", "/").replace('+', " "))
         .and_then(|p| p.rsplit('/').next().map(str::to_string))
-        .filter(|s| !s.is_empty())
+        .filter(|s| shared::strings::is_non_empty(s))
         .unwrap_or_else(|| "download".to_string())
 }
 
