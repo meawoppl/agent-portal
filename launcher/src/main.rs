@@ -378,13 +378,15 @@ fn resolve_backend_url(args_url: Option<String>, config_url: Option<String>) -> 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn path_has_executable(path: &str, name: &str) -> bool {
     use std::os::unix::fs::PermissionsExt;
-    path.split(':').filter(|dir| !dir.is_empty()).any(|dir| {
-        std::path::Path::new(dir)
-            .join(name)
-            .metadata()
-            .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-            .unwrap_or(false)
-    })
+    path.split(':')
+        .filter(|dir| shared::strings::is_non_empty(dir))
+        .any(|dir| {
+            std::path::Path::new(dir)
+                .join(name)
+                .metadata()
+                .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+                .unwrap_or(false)
+        })
 }
 
 /// Make sure `agent-portal` resolves on this process's PATH, prepending the

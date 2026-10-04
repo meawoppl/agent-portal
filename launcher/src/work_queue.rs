@@ -212,7 +212,7 @@ fn print_items(items: &[EditStackItem], all: bool) {
         let creator = item
             .created_by_name
             .as_deref()
-            .filter(|name| !name.is_empty())
+            .filter(|name| shared::strings::is_non_empty(name))
             .unwrap_or("portal");
         println!(
             "  {}  [{}] {}  by {}  {}",
