@@ -20,9 +20,11 @@ const WHEEL_RATE: f64 = 0.0017;
 /// Rate for ctrl+wheel. Browsers deliver a trackpad pinch as small ctrl+wheel
 /// deltas (a few pixels each), so it needs a much larger gain to feel direct.
 const PINCH_WHEEL_RATE: f64 = 0.01;
-/// One wheel event never zooms by more than `exp(0.17 * 4)`, so a high-velocity
-/// flick or an unusually large line-mode delta can't jump the image away.
-const MAX_WHEEL_DELTA: f64 = 400.0;
+/// One wheel event never zooms by more than a factor of `exp(0.7)` (about 2x),
+/// at either rate, so a high-velocity flick or an unusually large delta can't
+/// jump the image away. Bounding the exponent rather than the raw delta keeps
+/// that true for the plain and the ctrl+wheel gains alike.
+const MAX_WHEEL_EXPONENT: f64 = 0.7;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(super) struct LightboxView {
@@ -225,8 +227,8 @@ impl LightboxGesture {
     /// (negative zooms in); `ctrl` marks the ctrl+wheel a trackpad pinch emits.
     pub fn wheel(&mut self, at: Point, delta: f64, ctrl: bool, center: Point) {
         let rate = if ctrl { PINCH_WHEEL_RATE } else { WHEEL_RATE };
-        let delta = delta.clamp(-MAX_WHEEL_DELTA, MAX_WHEEL_DELTA);
-        let scale = (self.view.scale * (-delta * rate).exp()).clamp(MIN_SCALE, MAX_SCALE);
+        let exponent = (-delta * rate).clamp(-MAX_WHEEL_EXPONENT, MAX_WHEEL_EXPONENT);
+        let scale = (self.view.scale * exponent.exp()).clamp(MIN_SCALE, MAX_SCALE);
         self.view = self.view.zoomed_about(at.minus(center), scale);
         self.rebaseline();
     }
@@ -319,11 +321,18 @@ mod tests {
         fast.wheel(CENTER, -20.0, true, CENTER);
         assert!(fast.view().scale > slow.view().scale);
 
-        let mut flick = LightboxGesture::default();
-        flick.wheel(CENTER, -1_000_000.0, false, CENTER);
-        let mut max_step = LightboxGesture::default();
-        max_step.wheel(CENTER, -MAX_WHEEL_DELTA, false, CENTER);
-        assert_eq!(flick.view(), max_step.view(), "one event is bounded");
+        // One event is bounded to ~2x whichever gain it arrives with.
+        let bound = MAX_WHEEL_EXPONENT.exp();
+        for ctrl in [false, true] {
+            let mut flick = LightboxGesture::default();
+            flick.wheel(CENTER, -1_000_000.0, ctrl, CENTER);
+            assert!((flick.view().scale - bound).abs() < 1e-9, "ctrl={ctrl}");
+
+            let mut out = LightboxGesture::default();
+            out.wheel(CENTER, -1_000_000.0, ctrl, CENTER);
+            out.wheel(CENTER, 1_000_000.0, ctrl, CENTER);
+            assert_eq!(out.view(), LightboxView::default(), "ctrl={ctrl}");
+        }
     }
 
     #[test]

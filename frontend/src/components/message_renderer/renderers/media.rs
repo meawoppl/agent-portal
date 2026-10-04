@@ -89,6 +89,7 @@ fn image_viewer(props: &ImageViewerProps) -> Html {
     let gesture = use_mut_ref(LightboxGesture::default);
     let lightbox_view = use_state(LightboxView::default);
     let dragging = use_state(|| false);
+    let lightbox_ref = use_node_ref();
     let sync_gesture = {
         let gesture = gesture.clone();
         let lightbox_view = lightbox_view.clone();
@@ -174,6 +175,7 @@ fn image_viewer(props: &ImageViewerProps) -> Html {
     };
 
     let on_lightbox_pointer_down = {
+        let lightbox_ref = lightbox_ref.clone();
         let gesture = gesture.clone();
         let sync_gesture = sync_gesture.clone();
         Callback::from(move |event: PointerEvent| {
@@ -184,6 +186,18 @@ fn image_viewer(props: &ImageViewerProps) -> Html {
             }
             event.prevent_default();
             event.stop_propagation();
+            // Keep this pointer's events coming even if a mouse or pen drag
+            // leaves the window; without capture the pointerup can be lost and
+            // the gesture would stay stuck "down". Touch is captured implicitly.
+            //
+            // Capture on the lightbox element itself, via its NodeRef: Yew
+            // delegates events from the app root, so `current_target()` inside
+            // a handler is the root, and capturing there would route this
+            // pointer's later events to an element that none of these handlers
+            // are reachable from.
+            if let Some(content) = lightbox_ref.cast::<web_sys::Element>() {
+                let _ = content.set_pointer_capture(event.pointer_id());
+            }
             gesture
                 .borrow_mut()
                 .pointer_down(event.pointer_id(), client_point(&event));
@@ -243,13 +257,15 @@ fn image_viewer(props: &ImageViewerProps) -> Html {
             if *expanded {
                 <DismissibleBackdrop class="image-lightbox" on_close={close_lightbox.clone()}>
                     <div
+                        ref={lightbox_ref}
                         class={classes!("image-lightbox-content", dragging.then_some("dragging"))}
                         onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}
                         onwheel={on_lightbox_wheel}
                         onpointerdown={on_lightbox_pointer_down}
                         onpointermove={on_lightbox_pointer_move}
                         onpointerup={on_lightbox_pointer_end.clone()}
-                        onpointercancel={on_lightbox_pointer_end}
+                        onpointercancel={on_lightbox_pointer_end.clone()}
+                        onlostpointercapture={on_lightbox_pointer_end}
                         ondblclick={reset_lightbox.clone()}
                     >
                         <img
