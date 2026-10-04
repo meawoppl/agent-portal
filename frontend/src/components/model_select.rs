@@ -225,6 +225,18 @@ mod tests {
     }
 
     #[test]
+    fn gpt61_sol_is_selectable_and_round_trips_schedule_args() {
+        let model = "gpt-6.1-sol";
+        assert!(model_catalog(AgentType::Codex).contains(&(model, "GPT-6.1-Sol", false)));
+        let mut input = model_cli_args(AgentType::Codex, model);
+        assert_eq!(input, args(&["-c", "model=gpt-6.1-sol"]));
+        input.extend(args(&["-c", "model_reasoning_effort=high"]));
+        let (found, rest) = extract_model_arg(&input, AgentType::Codex);
+        assert_eq!(found.as_deref(), Some(model));
+        assert_eq!(rest, args(&["-c", "model_reasoning_effort=high"]));
+    }
+
+    #[test]
     fn extract_codex_model_and_strips_it() {
         let model = a_known_codex_model();
         let (found, rest) = extract_model_arg(
