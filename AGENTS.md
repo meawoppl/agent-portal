@@ -767,6 +767,19 @@ fn custom_answer_input(props: &CustomAnswerInputProps) -> Html {
 See `frontend/src/pages/dashboard/permission_dialog.rs` (`CustomAnswerInput`) for
 the live example.
 
+### Yew events are delegated: `current_target()` is the app root
+
+Yew attaches listeners at the app root, not on the element a handler is written
+on, so inside a handler `event.current_target()` is the **root** (`<body>`), not
+that element. Anything that needs the element itself — `set_pointer_capture`,
+focus, measuring — must go through a `NodeRef` on it. Capturing on
+`current_target()` routes the pointer's later events to the body, from which
+none of the component's handlers are reachable, so a drag stops tracking and a
+release is never seen. Likewise a `style` string is written verbatim as the
+whole attribute, so it must be a full `property: value` declaration; a bare
+value is silently dropped. See the image lightbox
+(`renderers/media.rs`, `renderers/lightbox_gesture.rs`) for both done right.
+
 ### Diagram / SVG backgrounds
 
 Every SVG an agent produces — transcript-only or checked into the repo — gets
