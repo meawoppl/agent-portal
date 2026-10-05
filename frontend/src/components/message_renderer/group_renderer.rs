@@ -28,6 +28,10 @@ pub struct MessageGroupRendererProps {
     pub on_schedule_continuation: Callback<Uuid>,
     #[prop_or_default]
     pub on_claude_login: Option<Callback<()>>,
+    /// The session's latest model id. Codex frames carry no model of their own,
+    /// so this is what turns the plain `Codex` name tag into `Codex - Sol 5.6`.
+    #[prop_or_default]
+    pub model: Option<String>,
     /// Odometer seed for `Thinking` groups: the running thinking-token max
     /// across earlier bursts in the same turn (see
     /// `grouping::thinking_chip_starts`). Keeps the count continuous when a
@@ -385,10 +389,17 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
                 return html! {};
             }
             let visible_count = parts.len();
+            // Codex output reaches here under either the `Codex` or the
+            // `Assistant` category, both carrying the plain `Codex` identity label.
+            let header_label = if props.agent_type == shared::AgentType::Codex && label == "Codex" {
+                super::codex_label(props.model.as_deref())
+            } else {
+                label.clone()
+            };
             html! {
                 <div class={classes!("claude-message", wrapper_class)}>
                     <div class="message-header" title={ts.unwrap_or_default()}>
-                        <span class={classes!("message-type-badge", badge_class.clone())}>{ label }</span>
+                        <span class={classes!("message-type-badge", badge_class.clone())}>{ header_label }</span>
                         if visible_count > 1 {
                             <span class="message-count" title={format!("{} consecutive messages", visible_count)}>
                                 { format!("× {}", visible_count) }

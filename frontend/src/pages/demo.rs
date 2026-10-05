@@ -174,6 +174,7 @@ pub fn demo_page() -> Html {
                                                 group={group}
                                                 session_id={scenario.session.id}
                                                 agent_type={scenario.session.agent_type}
+                                                model={scenario.session.last_model.clone()}
                                                 current_user_id={Some(current_user_id.clone())}
                                                 continuation_statuses={HashMap::<Uuid, String>::new()}
                                                 on_schedule_continuation={Callback::from(|_: Uuid| {})}
