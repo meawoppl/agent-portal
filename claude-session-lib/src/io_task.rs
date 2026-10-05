@@ -780,7 +780,7 @@ pub(crate) async fn claude_io_task(
                                 service_tier: current_service_tier.clone().or_else(|| {
                                     usage
                                         .map(|u| u.service_tier.clone())
-                                        .filter(|s| !s.is_empty())
+                                        .filter(|s| shared::strings::is_non_empty(s))
                                 }),
                                 input_tokens: usage
                                     .map(|u| u.input_tokens as i64)
