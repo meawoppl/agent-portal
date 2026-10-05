@@ -358,6 +358,7 @@
     }
 
     /* ---- Input area ---- */
+
     /* Two rows: the textarea gets the full width on top, and the controls
        (effort, voice, send) share a row beneath it. Squeezing everything into
        one row left the textarea about 40% wide, so its placeholder wrapped to
