@@ -55,6 +55,8 @@ web-sys = { workspace = true, features = [
     "Location",
     "Storage",
     "Navigator",
+    # (pointer: coarse) check for the touch-first composer placeholder.
+    "MediaQueryList",
     "ServiceWorkerContainer",
     "ServiceWorkerRegistration",
     # Web Push subscribe flow (mobile-apps plan D2)
