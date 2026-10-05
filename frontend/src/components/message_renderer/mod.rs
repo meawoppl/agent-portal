@@ -79,6 +79,46 @@ pub fn message_renderer(props: &MessageRendererProps) -> Html {
 
 // --- Utility functions (used by renderers and tool_renderers) ---
 
+/// Short display name for a Codex model id, the counterpart of
+/// [`shorten_model_name`]: `gpt-<version>[-<family>...]` becomes
+/// `"<Family> <version>"` (`gpt-5.6-sol` -> `Sol 5.6`, `gpt-6-astra` ->
+/// `Astra 6`). The generic `codex` family word and date stamps are dropped, so
+/// `gpt-5.5-codex` is just `5.5`. `None` when the id isn't `gpt-<number>...`.
+pub(crate) fn shorten_codex_model_name(model: &str) -> Option<String> {
+    let mut parts = model.strip_prefix("gpt-")?.split('-');
+    let version = parts
+        .next()
+        .filter(|v| !v.is_empty() && v.chars().all(|c| c.is_ascii_digit() || c == '.'))?;
+    let family: Vec<String> = parts
+        .filter(|p| {
+            !p.is_empty()
+                && !p.eq_ignore_ascii_case("codex")
+                && !p.chars().all(|c| c.is_ascii_digit())
+        })
+        .map(|p| {
+            let mut chars = p.chars();
+            chars
+                .next()
+                .map(|first| first.to_uppercase().chain(chars).collect())
+                .unwrap_or_default()
+        })
+        .collect();
+    Some(if family.is_empty() {
+        version.to_string()
+    } else {
+        format!("{} {version}", family.join(" "))
+    })
+}
+
+/// The Codex name tag: `"Codex - Sol 5.6"` once the session's model is known,
+/// plain `"Codex"` before then (or for a model id this can't shorten).
+pub(crate) fn codex_label(model: Option<&str>) -> String {
+    match model.and_then(shorten_codex_model_name) {
+        Some(name) => format!("Codex - {name}"),
+        None => "Codex".to_string(),
+    }
+}
+
 pub(crate) fn shorten_model_name(model: &str) -> Option<String> {
     if model.is_empty() || model.starts_with('<') {
         return None;

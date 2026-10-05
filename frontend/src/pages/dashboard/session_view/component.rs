@@ -1498,7 +1498,7 @@ impl Component for SessionView {
                                         let thinking_start = thinking_starts.get(i).copied().unwrap_or(0);
                                         let muse_live_events = if live_muse_group == Some(i) { self.muse_live_turn.events.clone() } else { Vec::new() };
                                         let on_claude_login = self.claude_login_callback(ctx);
-                                        html! { <MessageGroupRenderer {key} group={group} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} turn_metrics={metrics} {thinking_start} {muse_live_events} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} {on_claude_login} /> }
+                                        html! { <MessageGroupRenderer {key} group={group} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} model={ctx.props().session.last_model.clone()} current_user_id={ctx.props().current_user_id.clone()} turn_metrics={metrics} {thinking_start} {muse_live_events} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} {on_claude_login} /> }
                                     }).collect::<Html>()
                                 }
                                 { for self.pending_sends.iter().enumerate().map(|(i, message)| {
