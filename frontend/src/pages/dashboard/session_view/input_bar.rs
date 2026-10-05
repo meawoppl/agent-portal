@@ -88,6 +88,20 @@ fn dashboard_in_nav_mode() -> bool {
         .is_some()
 }
 
+/// The empty-composer hint. Touch-first devices have no Shift key to hold, so
+/// the new-line hint is dropped there; it also kept the placeholder wrapping
+/// across several lines in a narrow textarea.
+fn composer_placeholder() -> &'static str {
+    let touch_first = web_sys::window()
+        .and_then(|window| window.match_media("(pointer: coarse)").ok().flatten())
+        .is_some_and(|query| query.matches());
+    if touch_first {
+        "Type your message..."
+    } else {
+        "Type your message... (Shift+Enter for new line)"
+    }
+}
+
 const REASONING_EFFORT_KEY_PREFIX: &str = "agent-portal-reasoning-effort";
 
 fn reasoning_effort_key(session_id: Uuid) -> String {
@@ -722,7 +736,7 @@ impl Component for InputBar {
                                     .then_some("vim-normal")
                             )}
                             placeholder={self.pending_suggestion.clone().unwrap_or_else(|| if ctx.props().ws_connected {
-                                "Type your message... (Shift+Enter for new line)".into()
+                                composer_placeholder().into()
                             } else {
                                 // The composer stays usable through a server
                                 // restart: sends queue in the outbox and flush on
