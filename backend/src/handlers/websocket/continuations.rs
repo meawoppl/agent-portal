@@ -427,12 +427,11 @@ pub fn load_scheduled_continuations(
 /// those aren't safely auto-retryable. We require both an overload token AND a
 /// 529 signal, except for the unambiguous raw `overloaded_error` string.
 pub(crate) fn is_transient_overload(result_text: &str, api_error_status: Option<u16>) -> bool {
-    let lower = result_text.to_ascii_lowercase();
-    if lower.contains("overloaded_error") {
+    if shared::strings::contains_case_insensitive(result_text, "overloaded_error") {
         return true;
     }
     let has_529 = api_error_status == Some(529) || result_text.contains("529");
-    has_529 && lower.contains("overloaded")
+    has_529 && shared::strings::contains_case_insensitive(result_text, "overloaded")
 }
 
 /// Count `overloaded` continuations created for `session_id` within the rolling
@@ -670,6 +669,8 @@ mod tests {
         ));
         // Positive: the raw provider form on its own.
         assert!(is_transient_overload("overloaded_error", None));
+        // Positive: the raw provider form matches regardless of case.
+        assert!(is_transient_overload("OVERLOADED_ERROR", None));
         // Positive: typed 529 status paired with an overload token.
         assert!(is_transient_overload("Overloaded", Some(529)));
 
