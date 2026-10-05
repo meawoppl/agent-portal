@@ -358,15 +358,27 @@
     }
 
     /* ---- Input area ---- */
+    /* Two rows: the textarea gets the full width on top, and the controls
+       (effort, voice, send) share a row beneath it. Squeezing everything into
+       one row left the textarea about 40% wide, so its placeholder wrapped to
+       several lines and the controls sat at different heights. */
     .session-view-input {
         padding: 0.75rem;
         gap: 0.5rem;
         flex-shrink: 0;
-        align-items: flex-end;
+        flex-wrap: wrap;
+        align-items: center;
     }
 
-    .session-view-input .input-prompt {
-        font-size: 1rem;
+    /* The `>` prompt is a keyboard-terminal affordance; it would claim its own
+       slot on the first row and narrow the textarea. */
+    .session-view-input .input-prompt,
+    .session-view-input .vim-mode-indicator {
+        display: none;
+    }
+
+    .session-view-input .message-input-stack {
+        flex: 1 1 100%;
     }
 
     .session-view-input .message-input {
@@ -378,8 +390,14 @@
 
     .reasoning-effort-select {
         width: 5.4rem;
-        height: 36px;
+        height: 40px;
         font-size: 0.75rem;
+    }
+
+    /* Match the 40px effort select and voice button so the row is even. */
+    .send-button-container {
+        margin-left: auto;
+        height: 40px;
     }
 
     .session-view-input .send-button {
@@ -392,8 +410,8 @@
     }
 
     .voice-button {
-        width: 36px;
-        height: 36px;
+        width: 40px;
+        height: 40px;
     }
 
     .voice-button svg {
