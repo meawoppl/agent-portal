@@ -5,11 +5,67 @@ use gloo::timers::callback::Interval;
 use serde_json::json as fixture_json;
 use shared::{AgentType, MessageSource, PortalMeta, SessionInfo, SessionRole, SessionStatus};
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 use uuid::Uuid;
 use web_sys::HtmlElement;
 use yew::prelude::*;
 
 const PLAYBACK_MS: u32 = 1_400;
+
+/// How many fixture events each scenario has revealed so far.
+///
+/// A reducer rather than `use_state`, and that is load-bearing: the playback
+/// `Interval` is created once and lives across renders, and a `UseStateHandle`
+/// moved into it derefs to the value from the render that created it. Reading
+/// `*revealed_counts` there always saw the initial `[1, ..]`, so playback
+/// advanced to 2 events and stuck. `dispatch` applies the tick to live state.
+#[derive(Clone, PartialEq)]
+struct Playback {
+    counts: Vec<usize>,
+    lengths: Vec<usize>,
+}
+
+struct PlaybackTick;
+
+impl Playback {
+    fn start(lengths: Vec<usize>) -> Self {
+        Self {
+            counts: vec![1; lengths.len()],
+            lengths,
+        }
+    }
+
+    fn shown(&self, scenario: usize) -> usize {
+        self.counts.get(scenario).copied().unwrap_or(0)
+    }
+}
+
+impl Reducible for Playback {
+    type Action = PlaybackTick;
+
+    /// Reveal one more event in every scenario, and start over once all of
+    /// them have shown everything.
+    fn reduce(self: Rc<Self>, _: PlaybackTick) -> Rc<Self> {
+        let all_done = self
+            .counts
+            .iter()
+            .zip(&self.lengths)
+            .all(|(shown, total)| shown >= total);
+        let counts = if all_done {
+            vec![1; self.lengths.len()]
+        } else {
+            self.counts
+                .iter()
+                .zip(&self.lengths)
+                .map(|(shown, total)| (*shown + 1).min(*total))
+                .collect()
+        };
+        Rc::new(Self {
+            counts,
+            lengths: self.lengths.clone(),
+        })
+    }
+}
 
 #[derive(Clone, PartialEq)]
 struct DemoMessage {
@@ -38,32 +94,17 @@ struct DemoSessionSpec {
 pub fn demo_page() -> Html {
     let scenarios = use_memo((), |_| demo_scenarios());
     let focused_index = use_state(|| 0usize);
-    let revealed_counts = use_state(|| vec![1usize; scenarios.len()]);
+    let playback = use_reducer({
+        let lengths: Vec<usize> = scenarios.iter().map(|s| s.messages.len()).collect();
+        move || Playback::start(lengths)
+    });
     let messages_ref = use_node_ref();
     let current_user_id = current_user_uuid().to_string();
 
     {
-        let revealed_counts = revealed_counts.clone();
-        let lengths: Vec<usize> = scenarios.iter().map(|s| s.messages.len()).collect();
-        use_effect_with(lengths, move |lengths| {
-            let lengths = lengths.clone();
-            let interval = Interval::new(PLAYBACK_MS, move || {
-                let current = (*revealed_counts).clone();
-                let all_done = current
-                    .iter()
-                    .zip(lengths.iter())
-                    .all(|(shown, total)| shown >= total);
-                let next = if all_done {
-                    vec![1; lengths.len()]
-                } else {
-                    current
-                        .iter()
-                        .zip(lengths.iter())
-                        .map(|(shown, total)| (*shown + 1).min(*total))
-                        .collect()
-                };
-                revealed_counts.set(next);
-            });
+        let playback = playback.clone();
+        use_effect_with((), move |_| {
+            let interval = Interval::new(PLAYBACK_MS, move || playback.dispatch(PlaybackTick));
             move || drop(interval)
         });
     }
@@ -71,7 +112,7 @@ pub fn demo_page() -> Html {
     {
         let messages_ref = messages_ref.clone();
         let focused = *focused_index;
-        let revealed = revealed_counts.get(focused).copied().unwrap_or(0);
+        let revealed = playback.shown(focused);
         use_effect_with((focused, revealed), move |_| {
             if let Some(el) = messages_ref.cast::<HtmlElement>() {
                 el.set_scroll_top(el.scroll_height());
@@ -95,10 +136,8 @@ pub fn demo_page() -> Html {
 
     let focused_index_value = (*focused_index).min(scenarios.len().saturating_sub(1));
     let scenario = &scenarios[focused_index_value];
-    let shown = revealed_counts
-        .get(focused_index_value)
-        .copied()
-        .unwrap_or(0)
+    let shown = playback
+        .shown(focused_index_value)
         .min(scenario.messages.len());
     let rendered_messages = scenario
         .messages
@@ -1199,6 +1238,23 @@ fn demo_png_base64() -> &'static str {
 mod tests {
     use super::*;
     use crate::components::codex_renderer::CodexEvent;
+
+    /// Regression: the timer used to read a stale snapshot of the counts, so
+    /// playback reached two events and stopped. Every tick must build on the
+    /// previous one, run to completion, and then loop.
+    #[test]
+    fn playback_advances_every_tick_then_loops() {
+        let mut state = Rc::new(Playback::start(vec![4, 2]));
+        let mut seen = Vec::new();
+        for _ in 0..5 {
+            state = state.reduce(PlaybackTick);
+            seen.push(state.counts.clone());
+        }
+        assert_eq!(
+            seen,
+            vec![vec![2, 2], vec![3, 2], vec![4, 2], vec![1, 1], vec![2, 2]]
+        );
+    }
 
     #[test]
     fn demo_fixtures_parse_through_real_renderer_shapes() {
