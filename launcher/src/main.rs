@@ -11,6 +11,9 @@ mod message;
 mod pastebin;
 mod path_policy;
 mod plugin;
+mod plugin_detect;
+mod plugin_preview;
+mod plugin_validate;
 mod process_manager;
 mod progress;
 mod scheduler;
@@ -180,6 +183,25 @@ enum PluginAction {
         /// Replace an existing install (or a non-plugin directory) of the same name.
         #[arg(long)]
         force: bool,
+    },
+    /// Check a plugin directory's manifest without installing or running it
+    Validate {
+        /// Plugin directory containing agent-portal-plugin.toml
+        path: PathBuf,
+        /// Print a JSON report
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show what Portal will display for a plugin directory
+    Preview {
+        /// Plugin directory containing agent-portal-plugin.toml
+        path: PathBuf,
+        /// Report whether the plugin's detect rules match this directory
+        #[arg(long)]
+        cwd: Option<PathBuf>,
+        /// Print JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Re-fetch an installed plugin from its source and re-run setup
     Update {
@@ -595,6 +617,10 @@ async fn main() -> anyhow::Result<()> {
                     reference,
                     force,
                 } => plugin::install(&source, name.as_deref(), reference.as_deref(), force),
+                PluginAction::Validate { path, json } => plugin_validate::validate(&path, json),
+                PluginAction::Preview { path, cwd, json } => {
+                    plugin_preview::preview(&path, cwd.as_deref(), json)
+                }
                 PluginAction::Update { name, check } => plugin::update(&name, check),
                 PluginAction::Info { name } => plugin::info(&name),
                 PluginAction::Runtime { name, json } => plugin::runtime(&name, json),
