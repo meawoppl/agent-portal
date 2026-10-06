@@ -573,25 +573,22 @@ pub fn install(
         std::fs::remove_dir_all(&dest)
             .with_context(|| format!("failed to remove {}", dest.display()))?;
     }
+    let record = InstalledPlugin {
+        path: dest.display().to_string(),
+        source: spec.original,
+        source_subdir: Some(path_display(&spec.subdir)),
+        reference: reference.map(str::to_string),
+        enabled: true,
+        installed_at: chrono::Utc::now(),
+        revision,
+    };
     replace_checkout(
         install_name,
         &source_root,
         &dest,
         manifest.install.setup.as_deref(),
         false,
-    )?;
-
-    config::save_installed_plugin(
-        install_name,
-        InstalledPlugin {
-            path: dest.display().to_string(),
-            source: spec.original,
-            source_subdir: Some(path_display(&spec.subdir)),
-            reference: reference.map(str::to_string),
-            enabled: true,
-            installed_at: chrono::Utc::now(),
-            revision,
-        },
+        || config::save_installed_plugin(install_name, record),
     )?;
     println!("Installed {install_name} to {}", dest.display());
     Ok(())
@@ -628,21 +625,19 @@ pub fn update(name: &str, check: bool) -> Result<()> {
     if let Ok(runtime) = load_runtime(name) {
         halt_surface_quietly(&runtime);
     }
+    let unchanged = revision.is_some() && revision == installed.revision;
+    let record = InstalledPlugin {
+        installed_at: chrono::Utc::now(),
+        revision,
+        ..installed
+    };
     replace_checkout(
         name,
         &source_root,
         &dest,
         manifest.install.setup.as_deref(),
         true,
-    )?;
-    let unchanged = revision.is_some() && revision == installed.revision;
-    config::save_installed_plugin(
-        name,
-        InstalledPlugin {
-            installed_at: chrono::Utc::now(),
-            revision,
-            ..installed
-        },
+        || config::save_installed_plugin(name, record),
     )?;
     if unchanged {
         println!("{name} was already up to date; setup re-ran.");
@@ -664,6 +659,19 @@ fn recover_interrupted_replace(name: &str, dest: &Path) -> Result<()> {
     if !backup.exists() {
         return Ok(());
     }
+    // The interrupted run may already have moved the plugin-local state into
+    // the partial checkout; put it back before discarding that checkout.
+    let partial_state = dest.join(".portal");
+    let backup_state = backup.join(".portal");
+    if partial_state.exists() && !backup_state.exists() {
+        std::fs::rename(&partial_state, &backup_state).with_context(|| {
+            format!(
+                "failed to move {} back into {}",
+                partial_state.display(),
+                backup.display()
+            )
+        })?;
+    }
     if dest.exists() {
         std::fs::remove_dir_all(dest)
             .with_context(|| format!("failed to clear partial {}", dest.display()))?;
@@ -682,18 +690,20 @@ fn recover_interrupted_replace(name: &str, dest: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Put the plugin at `source_root` in place at `dest` and run its setup, as
-/// one transaction: an existing checkout is moved aside first and restored
-/// if the copy or setup fails, and a failed fresh install leaves nothing
-/// behind. Either way no unregistered, half-built directory survives to
-/// block a retry. `carry_state` moves the old checkout's `.portal` (managed
-/// toolchains, caches, data) into the new one.
+/// Put the plugin at `source_root` in place at `dest`, run its setup, and
+/// `register` it, as one transaction: an existing checkout is moved aside
+/// first and restored if the copy, setup, or registration fails, and a failed
+/// fresh install leaves nothing behind. Either way no unregistered,
+/// half-built directory survives to block a retry. `carry_state` moves the
+/// old checkout's `.portal` (managed toolchains, caches, data) into the new
+/// one, and back again on rollback.
 fn replace_checkout(
     name: &str,
     source_root: &Path,
     dest: &Path,
     setup: Option<&str>,
     carry_state: bool,
+    register: impl FnOnce() -> Result<()>,
 ) -> Result<()> {
     let backup = replace_backup_path(name, dest);
     let had_previous = dest.exists();
@@ -721,7 +731,7 @@ fn replace_checkout(
             println!("Running setup: {setup}");
             run_manifest_command(dest, setup)?;
         }
-        Ok(())
+        register()
     })();
     let Err(err) = result else {
         if had_previous {
@@ -730,7 +740,13 @@ fn replace_checkout(
         return Ok(());
     };
     if carry_state && had_previous && new_state.exists() && !old_state.exists() {
-        let _ = std::fs::rename(&new_state, &old_state);
+        std::fs::rename(&new_state, &old_state).with_context(|| {
+            format!(
+                "{err:#}; moving {} back into {} also failed",
+                new_state.display(),
+                backup.display()
+            )
+        })?;
     }
     if dest.exists() {
         std::fs::remove_dir_all(dest).with_context(|| {
@@ -1812,5 +1828,51 @@ mod tests {
         std::fs::write(&path, "a\nb\nc\nd\n").unwrap();
         assert_eq!(log_tail(&path, 2), vec!["c".to_string(), "d".to_string()]);
         assert_eq!(log_tail(&path, 10).len(), 4);
+    }
+
+    #[test]
+    fn recovery_after_an_interrupted_update_keeps_the_moved_plugin_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("demo");
+        let backup = replace_backup_path("demo", &dest);
+        // Interrupted after the old `.portal` moved into the new checkout but
+        // before setup finished: the backup lacks state, the partial has it.
+        std::fs::create_dir_all(backup.join("bin")).unwrap();
+        std::fs::write(backup.join("VERSION"), "old").unwrap();
+        std::fs::create_dir_all(dest.join(".portal/toolchains/kicad")).unwrap();
+        std::fs::write(dest.join("VERSION"), "partial").unwrap();
+
+        recover_interrupted_replace("demo", &dest).unwrap();
+
+        assert!(!backup.exists());
+        assert_eq!(
+            std::fs::read_to_string(dest.join("VERSION")).unwrap(),
+            "old"
+        );
+        assert!(dest.join(".portal/toolchains/kicad").is_dir());
+    }
+
+    #[test]
+    fn a_failed_registration_rolls_the_checkout_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("src");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("VERSION"), "new").unwrap();
+        let dest = dir.path().join("demo");
+        std::fs::create_dir_all(dest.join(".portal/data")).unwrap();
+        std::fs::write(dest.join("VERSION"), "old").unwrap();
+
+        let err = replace_checkout("demo", &source, &dest, None, true, || {
+            bail!("config write failed")
+        })
+        .unwrap_err();
+
+        assert!(format!("{err:#}").contains("previous version was restored"));
+        assert_eq!(
+            std::fs::read_to_string(dest.join("VERSION")).unwrap(),
+            "old"
+        );
+        assert!(dest.join(".portal/data").is_dir());
+        assert!(!replace_backup_path("demo", &dest).exists());
     }
 }
