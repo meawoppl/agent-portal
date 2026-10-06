@@ -14,6 +14,10 @@ use std::{
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
+#[cfg(test)]
+use shared::plugin_manifest::InstallSection;
+use shared::plugin_manifest::{RuntimeManifest, ToolchainSection};
+
 use crate::config::{self, InstalledPlugin};
 
 const MANIFEST: &str = "agent-portal-plugin.toml";
@@ -22,89 +26,7 @@ const SURFACE_LOG_FILE: &str = "surface.log";
 const SURFACE_LOG_TAIL_LINES: usize = 40;
 const SURFACE_HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
 
-#[derive(Debug, Deserialize)]
-struct PluginManifest {
-    name: String,
-    #[serde(default)]
-    display_name: Option<String>,
-    #[serde(default)]
-    description: Option<String>,
-    #[serde(default)]
-    homepage: Option<String>,
-    #[serde(default)]
-    install: InstallSection,
-    #[serde(default)]
-    surface: Option<SurfaceSection>,
-    #[serde(default)]
-    skills: Vec<SkillSection>,
-    #[serde(default)]
-    prompts: Vec<PromptSection>,
-    #[serde(default)]
-    commands: Vec<CommandSection>,
-    #[serde(default)]
-    toolchains: Vec<ToolchainSection>,
-    #[serde(default)]
-    capabilities: std::collections::BTreeMap<String, toml::Value>,
-}
-
-#[derive(Debug, Deserialize, Default)]
-struct InstallSection {
-    #[serde(default)]
-    setup: Option<String>,
-    #[serde(default)]
-    doctor: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct SurfaceSection {
-    #[serde(default)]
-    default_title: Option<String>,
-    #[serde(default)]
-    start: Option<String>,
-    #[serde(default)]
-    stop: Option<String>,
-    #[serde(default)]
-    health_path: Option<String>,
-    #[serde(default)]
-    default_width_percent: Option<u8>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct SkillSection {
-    name: String,
-    path: PathBuf,
-    #[serde(default)]
-    agents: Vec<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct PromptSection {
-    name: String,
-    path: PathBuf,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct CommandSection {
-    name: String,
-    #[serde(default)]
-    description: Option<String>,
-    run: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct ToolchainSection {
-    name: String,
-    #[serde(default)]
-    description: Option<String>,
-    #[serde(default)]
-    home: Option<PathBuf>,
-    #[serde(default)]
-    install: Option<String>,
-    #[serde(default)]
-    doctor: Option<String>,
-    #[serde(default)]
-    env: std::collections::BTreeMap<String, String>,
-}
+type PluginManifest = RuntimeManifest<toml::Value>;
 
 struct PluginRuntime {
     name: String,
