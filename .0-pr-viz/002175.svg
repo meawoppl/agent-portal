@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="sans-serif">
+<text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2175 · Isolate plugin subprocess mechanics</text>
+<text x="55" y="105" font-size="34" fill="#e6e9f5">Plugin lifecycle code also owned shell, environment and process-tree mechanics.</text>
+<text x="55" y="149" font-size="34" fill="#e6e9f5">PluginProcess now gives synchronous and surface commands one preparation path.</text>
+<path d="M55 176 H1945 M1000 190 V1140" stroke="#565f89" stroke-width="2" stroke-dasharray="8 8"/>
+<text x="55" y="226" font-size="22" fill="#a9b1d6">BEFORE</text>
+<rect x="55" y="270" width="890" height="195" rx="14" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+<text x="79" y="312" font-size="26" fill="#7aa2f7">plugin.rs lifecycle and process helpers</text>
+<text x="79" y="360" font-size="23" fill="#c0caf5">setup / doctor / start_surface / halt_surface</text>
+<text x="79" y="396" font-size="23" fill="#c0caf5">Policy and process details live in one module.</text>
+<path d="M500 465 v55 m-9 -12 l9 12 9 -12" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="55" y="535" width="890" height="195" rx="14" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+<text x="79" y="577" font-size="26" fill="#7aa2f7">run_runtime_command / spawn_surface</text>
+<text x="79" y="625" font-size="23" fill="#c0caf5">Both prepare private directories and shell state.</text>
+<text x="79" y="661" font-size="23" fill="#c0caf5">Helpers own PATH, HOME and placeholder quoting.</text>
+<path d="M500 730 v55 m-9 -12 l9 12 9 -12" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="55" y="800" width="890" height="195" rx="14" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+<text x="79" y="842" font-size="26" fill="#7aa2f7">Surface cleanup helpers</text>
+<text x="79" y="890" font-size="23" fill="#c0caf5">Log reading and process-group probing live nearby.</text>
+<text x="79" y="926" font-size="23" fill="#c0caf5">TERM then KILL escalation is lifecycle-adjacent.</text>
+<text x="1055" y="226" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="1055" y="270" width="890" height="195" rx="14" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+<text x="1079" y="312" font-size="26" fill="#9ece6a">plugin.rs keeps lifecycle policy</text>
+<text x="1079" y="360" font-size="23" fill="#c0caf5">Selection, state files and health checks stay here.</text>
+<text x="1079" y="396" font-size="23" fill="#c0caf5">Call sites delegate to PluginProcess.</text>
+<path d="M1500 465 v55 m-9 -12 l9 12 9 -12" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="535" width="890" height="195" rx="14" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+<text x="1079" y="577" font-size="26" fill="#9ece6a">PluginProcess in plugin/process.rs</text>
+<text x="1079" y="625" font-size="23" fill="#c0caf5">Shared command builder prepares cwd and environment.</text>
+<text x="1079" y="661" font-size="23" fill="#c0caf5">run inherits output; spawn_surface captures a log.</text>
+<path d="M1500 730 v55 m-9 -12 l9 12 9 -12" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="800" width="890" height="195" rx="14" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+<text x="1079" y="842" font-size="26" fill="#9ece6a">Focused process mechanics</text>
+<text x="1079" y="890" font-size="23" fill="#c0caf5">Log tail and whole-tree termination move together.</text>
+<text x="1079" y="926" font-size="23" fill="#c0caf5">Tests compare cwd / HOME and quoted-path execution.</text>
+<text x="55" y="1172" font-size="22" fill="#a9b1d6">Command text, output destinations, health policy and process-group escalation retain their existing behavior.</text>
+</g></svg>
