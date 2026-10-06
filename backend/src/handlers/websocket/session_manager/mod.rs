@@ -15,10 +15,7 @@
 
 use dashmap::{DashMap, DashSet};
 use shared::api::ForwardError;
-use shared::{
-    FileDownloadResponseFields, ForwardStatusFields, LauncherToServer, ServerToClient,
-    ServerToProxy,
-};
+use shared::{FileDownloadResponseFields, ForwardStatusFields, ServerToClient, ServerToProxy};
 use std::collections::VecDeque;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
@@ -32,6 +29,7 @@ mod data_plane;
 mod input_dedup;
 mod input_queue;
 mod launcher_registry;
+mod launcher_rpc;
 mod liveness;
 mod pending_queue;
 mod proxy_lifecycle;
@@ -44,6 +42,8 @@ pub use data_plane::{DataPlaneConnection, DataPlaneSender, DATA_PLANE_CHANNEL_CA
 pub(crate) use input_dedup::{DedupVerdict, InputDeliveryState};
 pub(crate) use input_queue::EnqueueInput;
 pub use launcher_registry::LauncherConnection;
+use launcher_rpc::LauncherRequests;
+pub(crate) use launcher_rpc::{LauncherRpcError, LauncherRpcKind};
 pub use liveness::{
     LAUNCHER_LIVENESS_DEADLINE_SECS, LIVENESS_SWEEP_INTERVAL_SECS, PROXY_LIVENESS_DEADLINE_SECS,
 };
@@ -212,8 +212,7 @@ pub struct SessionManager {
     /// user. Entries here are kept in lockstep with `launchers`: inserted by
     /// `try_register_launcher`, removed by `unregister_launcher`.
     launcher_dedup: Arc<DashMap<(Uuid, String), Uuid>>,
-    pending_dir_requests: Arc<DashMap<Uuid, oneshot::Sender<LauncherToServer>>>,
-    pending_probe_requests: Arc<DashMap<Uuid, oneshot::Sender<LauncherToServer>>>,
+    pending_launcher_requests: Arc<LauncherRequests>,
     pending_file_downloads: Arc<DashMap<Uuid, oneshot::Sender<FileDownloadResponseFields>>>,
     /// Pending `ForwardOpen` → `ForwardStatus` round-trips, keyed by
     /// `(session_id, port)` — the reply frame carries no request id.
@@ -277,8 +276,7 @@ impl Default for SessionManager {
             pending_truncations: Arc::new(DashSet::new()),
             launchers: Arc::new(DashMap::new()),
             launcher_dedup: Arc::new(DashMap::new()),
-            pending_dir_requests: Arc::new(DashMap::new()),
-            pending_probe_requests: Arc::new(DashMap::new()),
+            pending_launcher_requests: Arc::new(DashMap::new()),
             pending_file_downloads: Arc::new(DashMap::new()),
             pending_forward_status: Arc::new(DashMap::new()),
             forward_health: Arc::new(DashMap::new()),

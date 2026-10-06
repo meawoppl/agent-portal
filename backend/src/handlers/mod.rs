@@ -14,6 +14,7 @@ pub mod helpers;
 pub mod history;
 pub mod identities;
 pub mod images;
+mod launcher_rpc;
 pub mod launchers;
 pub mod media_archive;
 pub mod media_security;
