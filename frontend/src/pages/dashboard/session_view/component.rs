@@ -9,9 +9,7 @@
 //! `tasks_panel.rs`.
 
 use crate::components::message_renderer::{MessageRenderer, RenderedMessage};
-use crate::components::plugin_discovery::{
-    plugin_context_label, plugin_inventory_api_path, suggested_plugins,
-};
+use crate::components::plugin_discovery::{plugin_inventory_api_path, suggested_plugins};
 use crate::components::{
     group_is_turn_terminator, group_messages, thinking_chip_starts, ForkDialog,
     MessageGroupRenderer,
@@ -48,6 +46,7 @@ use super::outbox::Outbox;
 use super::permission_handler::{
     build_permission_response, PermissionHandler, PermissionResponseKind,
 };
+use super::plugin_views::{PluginContextNotice, PluginDiscoverySurface};
 use super::session_surface::{
     clamp_split_percent, clear_open_surface, load_open_surface, load_split_percent,
     save_open_surface, save_split_percent, ForwardSurfaceMemory, SessionSurface,
@@ -1490,7 +1489,11 @@ impl Component for SessionView {
                                         <span>{ " · shared agent history remains on the source launcher" }</span>
                                     </div>
                                 }
-                                { self.render_plugin_notice(ctx) }
+                                <PluginContextNotice
+                                    plugins={self.plugins.clone()}
+                                    expanded={self.plugin_notice_expanded}
+                                    on_toggle={ctx.link().callback(|_| SessionViewMsg::TogglePluginNotice)}
+                                />
                                 {
                                     groups.into_iter().enumerate().map(|(i, group)| {
                                         let key = group.key(i);
@@ -1555,7 +1558,15 @@ impl Component for SessionView {
                         } else if surface.is_work_queue() {
                             { self.render_edit_stack_surface(ctx, surface) }
                         } else if surface.is_plugins() {
-                            { self.render_plugin_surface(ctx, surface) }
+                            <PluginDiscoverySurface
+                                plugins={self.plugins.clone()}
+                                error={self.plugin_error.clone()}
+                                collapsed={surface.collapsed}
+                                fullscreen={surface.mode == SessionSurfaceMode::Fullscreen}
+                                on_toggle_collapsed={ctx.link().callback(|_| SessionViewMsg::ToggleSurfaceCollapsed)}
+                                on_toggle_mode={ctx.link().callback(|_| SessionViewMsg::ToggleSurfaceMode)}
+                                on_close={ctx.link().callback(|_| SessionViewMsg::HidePluginsPanel)}
+                            />
                         }
                     }
                 </div>
@@ -2442,218 +2453,6 @@ impl SessionView {
             link.send_message(SessionViewMsg::WsEvent(event));
         });
         connect_websocket(session_id, replay_after, true, on_event);
-    }
-
-    fn render_plugin_notice(&self, ctx: &Context<Self>) -> Html {
-        let suggested = suggested_plugins(&self.plugins);
-        if suggested.is_empty() {
-            return html! {};
-        }
-        let context_bytes = suggested
-            .iter()
-            .map(|plugin| plugin.context_bytes)
-            .sum::<u64>();
-        let estimated_tokens = suggested
-            .iter()
-            .map(|plugin| plugin.estimated_tokens)
-            .sum::<u64>();
-        let label = suggested
-            .iter()
-            .map(|plugin| plugin.display_name.as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
-        let expanded = self.plugin_notice_expanded;
-        let toggle = ctx.link().callback(|_| SessionViewMsg::TogglePluginNotice);
-
-        html! {
-            <section class={classes!("plugin-context-card", expanded.then_some("expanded"))}>
-                <button
-                    type="button"
-                    class="plugin-context-summary"
-                    onclick={toggle}
-                    aria-expanded={expanded.to_string()}
-                >
-                    <span class="plugin-context-caret">{ if expanded { "▾" } else { "▸" } }</span>
-                    <span class="plugin-context-title">{ "Plugin context" }</span>
-                    <span class="plugin-context-names">{ label }</span>
-                    <span class="plugin-context-size">
-                        { plugin_context_label(context_bytes, estimated_tokens) }
-                    </span>
-                </button>
-                if expanded {
-                    <div class="plugin-context-body">
-                        { for suggested.into_iter().map(|plugin| {
-                            html! {
-                                <article class="plugin-context-plugin" key={plugin.name.clone()}>
-                                    <div class="plugin-context-plugin-title">
-                                        <span>{ &plugin.display_name }</span>
-                                        <span>{ plugin_context_label(plugin.context_bytes, plugin.estimated_tokens) }</span>
-                                    </div>
-                                    if let Some(reason) = plugin.reason.as_deref() {
-                                        <div class="plugin-context-detail">{ reason }</div>
-                                    }
-                                    if let Some(source) = plugin.source.as_deref() {
-                                        <code class="plugin-context-source">{ source }</code>
-                                    }
-                                </article>
-                            }
-                        }) }
-                    </div>
-                }
-            </section>
-        }
-    }
-
-    fn render_plugin_surface(&self, ctx: &Context<Self>, surface: SessionSurface) -> Html {
-        let suggested_count = suggested_plugins(&self.plugins).len();
-        let collapsed = surface.collapsed;
-        let fullscreen = surface.mode == SessionSurfaceMode::Fullscreen;
-        let title = if suggested_count > 0 {
-            format!(
-                "Plugins · {suggested_count} suggested · {} installed",
-                self.plugins.len()
-            )
-        } else {
-            format!("Plugins · {} installed", self.plugins.len())
-        };
-        let status_class = (suggested_count > 0).then_some("is-up");
-        let status_title = if suggested_count > 0 {
-            "Plugins match this session directory"
-        } else {
-            "No plugin matched this session directory"
-        };
-        let toggle_collapsed = ctx
-            .link()
-            .callback(|_| SessionViewMsg::ToggleSurfaceCollapsed);
-        let toggle_mode = ctx.link().callback(|_| SessionViewMsg::ToggleSurfaceMode);
-        let close = ctx.link().callback(|_| SessionViewMsg::HidePluginsPanel);
-
-        html! {
-            <aside
-                id="session-plugins"
-                class={classes!(
-                    "session-forward-surface",
-                    "session-plugins-surface",
-                    collapsed.then_some("collapsed"),
-                    fullscreen.then_some("fullscreen"),
-                )}
-                aria-label="Plugins"
-            >
-                <div class="session-forward-toolbar session-plugins-toolbar">
-                    <button
-                        type="button"
-                        class="surface-icon-button"
-                        title={ if collapsed { "Expand plugins" } else { "Collapse plugins" } }
-                        onclick={toggle_collapsed}
-                    >
-                        { if collapsed { "▸" } else { "▾" } }
-                    </button>
-                    <span class={classes!("surface-status", status_class)} title={status_title}></span>
-                    <span class="session-forward-title" title={title.clone()}>{ title }</span>
-                    <button
-                        type="button"
-                        class="surface-icon-button surface-mode-button"
-                        title={ if fullscreen { "Return to split view" } else { "Full screen" } }
-                        onclick={toggle_mode}
-                    >
-                        { if fullscreen { "⇲" } else { "⛶" } }
-                    </button>
-                    <button
-                        type="button"
-                        class="surface-icon-button surface-close-button"
-                        title="Close plugins"
-                        onclick={close}
-                    >
-                        { "×" }
-                    </button>
-                </div>
-                if !collapsed {
-                    <section class="plugin-panel">
-                        <div class="plugin-panel-header">
-                            <div class="edit-stack-title">
-                                <span class="edit-stack-kicker">{ "Plugin discovery" }</span>
-                                <span class="edit-stack-count">
-                                    { format!("{suggested_count} suggested · {} installed", self.plugins.len()) }
-                                </span>
-                            </div>
-                        </div>
-                        if let Some(error) = self.plugin_error.as_deref() {
-                            <div class="edit-stack-error">{ error }</div>
-                        }
-                        <div class="plugin-list">
-                            if self.plugins.is_empty() {
-                                <div class="edit-stack-empty">{ "No installed Portal plugins were discovered on this host." }</div>
-                            }
-                            { for self.plugins.iter().map(|plugin| self.render_plugin_card(plugin)) }
-                        </div>
-                    </section>
-                }
-            </aside>
-        }
-    }
-
-    fn render_plugin_card(&self, plugin: &PortalPluginInfo) -> Html {
-        let is_suggested = plugin.active || plugin.suggested;
-        html! {
-            <article class={classes!("plugin-card", is_suggested.then_some("suggested"))} key={plugin.name.clone()}>
-                <div class="plugin-card-topline">
-                    <div class="plugin-card-title">
-                        <span>{ &plugin.display_name }</span>
-                        if is_suggested {
-                            <span class="plugin-card-badge">{ "suggested" }</span>
-                        }
-                    </div>
-                    <span class="plugin-card-context">
-                        { plugin_context_label(plugin.context_bytes, plugin.estimated_tokens) }
-                    </span>
-                </div>
-                if let Some(description) = plugin.description.as_deref() {
-                    <p class="plugin-card-description">{ description }</p>
-                }
-                if let Some(reason) = plugin.reason.as_deref() {
-                    <div class="plugin-card-reason">{ reason }</div>
-                }
-                if let Some(source) = plugin.source.as_deref() {
-                    <code class="plugin-card-source">{ source }</code>
-                }
-                if !plugin.skills.is_empty() {
-                    <div class="plugin-card-section">
-                        <span class="plugin-card-section-title">{ "Skills" }</span>
-                        <div class="plugin-skill-list">
-                            { for plugin.skills.iter().map(|skill| {
-                                let title = skill
-                                    .description
-                                    .clone()
-                                    .unwrap_or_else(|| skill.path.clone());
-                                html! {
-                                    <span class="plugin-skill-pill" title={title} key={skill.name.clone()}>
-                                        { &skill.name }
-                                    </span>
-                                }
-                            }) }
-                        </div>
-                    </div>
-                }
-                if !plugin.commands.is_empty() {
-                    <div class="plugin-card-section">
-                        <span class="plugin-card-section-title">{ "Commands" }</span>
-                        <div class="plugin-skill-list">
-                            { for plugin.commands.iter().map(|command| {
-                                let title = command
-                                    .description
-                                    .clone()
-                                    .unwrap_or_else(|| "Plugin command".to_string());
-                                html! {
-                                    <span class="plugin-command-pill" title={title} key={command.name.clone()}>
-                                        { &command.name }
-                                    </span>
-                                }
-                            }) }
-                        </div>
-                    </div>
-                }
-            </article>
-        }
     }
 
     fn render_edit_stack_surface(&self, ctx: &Context<Self>, surface: SessionSurface) -> Html {

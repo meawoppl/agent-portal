@@ -7,6 +7,7 @@
 //!   pending-send reconciliation, autoscroll-transition gate)
 //! - `input_bar.rs` - Textarea, send-mode dropdown, file upload, voice, history
 //! - `permission_handler.rs` - Permission-request UI lifecycle
+//! - `plugin_views.rs` - Controlled plugin context notice and discovery surface
 //! - `tasks_panel.rs` - Sub-agent / background-task drawer + `derive_task_events`
 //! - `types.rs` - Types specific to SessionView (re-exports from parent)
 //! - `vim.rs` - Opt-in modal (vim-like) editing engine for the textarea
@@ -21,6 +22,7 @@ mod history;
 mod input_bar;
 mod outbox;
 mod permission_handler;
+mod plugin_views;
 mod session_surface;
 mod state;
 mod tasks_panel;
