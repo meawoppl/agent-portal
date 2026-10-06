@@ -30,10 +30,11 @@ fn classify_fatal(reason: Option<LauncherRejectReason>, error_msg: &str) -> Laun
     if let Some(reason) = reason {
         return reason;
     }
-    let msg = error_msg.to_ascii_lowercase();
-    if msg.contains("auth") || msg.contains("token") {
+    if shared::strings::contains_case_insensitive(error_msg, "auth")
+        || shared::strings::contains_case_insensitive(error_msg, "token")
+    {
         LauncherRejectReason::AuthFailed
-    } else if msg.contains("already have") {
+    } else if shared::strings::contains_case_insensitive(error_msg, "already have") {
         LauncherRejectReason::TooManyLaunchers
     } else {
         LauncherRejectReason::DuplicateLauncher
@@ -939,6 +940,11 @@ mod tests {
         );
         assert_eq!(
             classify_fatal(None, "You already have 10 launchers connected (max 10)."),
+            LauncherRejectReason::TooManyLaunchers
+        );
+        // Case-insensitive on every arm, not just the auth sniff.
+        assert_eq!(
+            classify_fatal(None, "YOU ALREADY HAVE 10 LAUNCHERS CONNECTED."),
             LauncherRejectReason::TooManyLaunchers
         );
         assert_eq!(
