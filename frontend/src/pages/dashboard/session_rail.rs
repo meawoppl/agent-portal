@@ -3,7 +3,7 @@
 //! Dropdown pattern matches the send button: always in DOM, toggled by .open class,
 //! parent page onclick closes it, toggle button uses stop_propagation.
 
-use crate::components::{ForkDialog, ScheduleDialog, ShareDialog};
+use crate::components::{ForkDialog, RenameDialog, ScheduleDialog, ShareDialog};
 use gloo::events::EventListener;
 use gloo::timers::callback::Interval;
 use shared::{PrRef, SessionInfo};
@@ -271,6 +271,9 @@ pub struct SessionRailProps {
     pub on_toggle_inactive_hidden: Callback<MouseEvent>,
     pub on_stop: Callback<Uuid>,
     pub on_toggle_pause: Callback<(Uuid, bool)>,
+    /// A session was renamed from the pill menu: `(session id, new name)`.
+    #[prop_or_default]
+    pub on_session_renamed: Callback<(Uuid, String)>,
 }
 
 /// SessionRail - Horizontal carousel of session pills
@@ -285,6 +288,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
     let share_session_id = use_state(|| None::<Uuid>);
     let schedule_session = use_state(|| None::<SessionInfo>);
     let fork_session = use_state(|| None::<SessionInfo>);
+    let rename_session = use_state(|| None::<SessionInfo>);
 
     // Independent 100 ms tick that drives sparkline redraws.
     // Accumulation happens externally via ActivityRef mutations; this timer
@@ -437,6 +441,10 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
     let on_fork = {
         let fork_session = fork_session.clone();
         Callback::from(move |session| fork_session.set(Some(session)))
+    };
+    let on_rename = {
+        let rename_session = rename_session.clone();
+        Callback::from(move |session| rename_session.set(Some(session)))
     };
 
     let on_toggle_pill_menu = {
@@ -606,6 +614,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                 on_share={on_share}
                 on_schedule={on_schedule}
                 on_fork={on_fork}
+                on_rename={on_rename}
             />
             {
                 if let Some(session_id) = *share_session_id {
@@ -621,6 +630,21 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                     let schedule_session = schedule_session.clone();
                     let on_close = Callback::from(move |_| schedule_session.set(None));
                     html! { <ScheduleDialog session={Some(session.clone())} {on_close} /> }
+                } else {
+                    html! {}
+                }
+            }
+            {
+                if let Some(ref session) = *rename_session {
+                    let rename_session = rename_session.clone();
+                    let on_close = Callback::from(move |_| rename_session.set(None));
+                    html! {
+                        <RenameDialog
+                            session={session.clone()}
+                            {on_close}
+                            on_renamed={props.on_session_renamed.clone()}
+                        />
+                    }
                 } else {
                     html! {}
                 }

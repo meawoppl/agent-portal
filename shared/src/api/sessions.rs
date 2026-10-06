@@ -311,6 +311,15 @@ pub struct SendAgentMessageResponse {
     pub pending_inputs: usize,
 }
 
+/// Longest accepted session name, in characters.
+pub const MAX_SESSION_NAME_CHARS: usize = 100;
+
+/// Request body for `PATCH /api/sessions/{id}/name`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RenameSessionRequest {
+    pub name: String,
+}
+
 /// Response for `POST /api/agent/sessions/{id}/media` — the `agent-portal show`
 /// CLI displays media in a session's transcript.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

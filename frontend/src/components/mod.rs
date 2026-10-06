@@ -21,6 +21,7 @@ pub mod muse_renderer;
 mod onboarding_tutorial;
 pub mod plugin_discovery;
 mod proxy_token_setup;
+mod rename_dialog;
 mod schedule_dialog;
 mod share_dialog;
 pub mod skip_permissions;
@@ -46,6 +47,7 @@ pub use message_renderer::{
 pub use model_select::ModelSelect;
 pub use onboarding_tutorial::OnboardingTutorial;
 pub use proxy_token_setup::ProxyTokenSetup;
+pub use rename_dialog::RenameDialog;
 pub use schedule_dialog::ScheduleDialog;
 pub use share_dialog::ShareDialog;
 pub use turn_metrics_pill::TurnMetricsHeaderPill;

@@ -208,6 +208,10 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
             post(handlers::sessions::stop_session),
         )
         .route(
+            "/api/sessions/{id}/name",
+            axum::routing::patch(handlers::sessions::rename_session),
+        )
+        .route(
             "/api/sessions/{id}/pause",
             post(handlers::sessions::pause_session),
         )

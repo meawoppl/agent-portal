@@ -636,6 +636,23 @@ pub fn dashboard_page() -> Html {
         )
     };
 
+    // The pill-menu rename dialog reports the saved name. Apply it locally so
+    // the pill and header change at once; other open tabs pick it up on the
+    // steady session poll.
+    let on_session_renamed = {
+        let set_sessions = sessions_hook.set_sessions.clone();
+        let refresh = sessions_hook.refresh.clone();
+        let sessions = sessions.clone();
+        Callback::from(move |(session_id, name): (Uuid, String)| {
+            let mut updated = sessions.clone();
+            if let Some(session) = updated.iter_mut().find(|s| s.id == session_id) {
+                session.session_name = name;
+            }
+            set_sessions.emit(updated);
+            refresh.emit(());
+        })
+    };
+
     // Computed values.
     // The rail's red "needs response" outline and the tab-title count show sessions
     // still awaiting a reply that the user hasn't looked at yet — awaiting minus the
@@ -909,6 +926,7 @@ pub fn dashboard_page() -> Html {
                         on_toggle_inactive_hidden={on_toggle_inactive_hidden.clone()}
                         on_stop={on_stop.clone()}
                         on_toggle_pause={on_toggle_pause.clone()}
+                        on_session_renamed={on_session_renamed.clone()}
                     />
                     }
 

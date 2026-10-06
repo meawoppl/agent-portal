@@ -5,8 +5,9 @@ use axum::{
 use diesel::prelude::*;
 use serde::Serialize;
 use shared::api::{
-    AddMemberRequest, ResolveProxySessionRequest, ResolveProxySessionResponse, SessionMemberInfo,
-    SessionMembersResponse, UpdateMemberRoleRequest,
+    AddMemberRequest, RenameSessionRequest, ResolveProxySessionRequest,
+    ResolveProxySessionResponse, SessionMemberInfo, SessionMembersResponse,
+    UpdateMemberRoleRequest, MAX_SESSION_NAME_CHARS,
 };
 use shared::{SessionRole, SessionStatus};
 use std::sync::Arc;
@@ -301,6 +302,46 @@ pub async fn stop_session(
     );
 
     Ok(EmptyResponse::ACCEPTED)
+}
+
+/// A rename request's name, trimmed, or why it is unusable.
+fn validated_session_name(name: &str) -> Result<String, AppError> {
+    let name = shared::strings::trimmed_non_blank(Some(name))
+        .ok_or(AppError::BadRequest("Session name must not be blank"))?;
+    if name.chars().count() > MAX_SESSION_NAME_CHARS {
+        return Err(AppError::BadRequest("Session name is too long"));
+    }
+    Ok(name.to_string())
+}
+
+/// `PATCH /api/sessions/{id}/name` — rename a session. Owners and editors,
+/// like the other session mutations. Only the display name changes: the
+/// session key, launcher config and archive identity are untouched, and a
+/// resumed session relaunches under the stored name.
+pub async fn rename_session(
+    State(app_state): State<Arc<AppState>>,
+    CurrentUserId(current_user_id): CurrentUserId,
+    Path(session_id): Path<Uuid>,
+    Json(request): Json<RenameSessionRequest>,
+) -> Result<EmptyResponse, AppError> {
+    let name = validated_session_name(&request.name)?;
+
+    let mut conn = app_state.conn()?;
+    crate::handlers::session_access::verify_session_mutator(
+        &mut conn,
+        session_id,
+        current_user_id,
+    )?;
+
+    use crate::schema::sessions;
+    diesel::update(sessions::table.find(session_id))
+        .set((
+            sessions::session_name.eq(name),
+            sessions::updated_at.eq(diesel::dsl::now),
+        ))
+        .execute(&mut conn)?;
+
+    Ok(EmptyResponse::NO_CONTENT)
 }
 
 pub async fn pause_session(
@@ -636,6 +677,30 @@ pub async fn update_session_member_role(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn session_names_are_trimmed_and_bounded() {
+        assert_eq!(
+            validated_session_name("  review pass  ").unwrap(),
+            "review pass"
+        );
+        assert!(matches!(
+            validated_session_name("   "),
+            Err(AppError::BadRequest("Session name must not be blank"))
+        ));
+        assert!(matches!(
+            validated_session_name(""),
+            Err(AppError::BadRequest("Session name must not be blank"))
+        ));
+
+        let at_limit = "é".repeat(MAX_SESSION_NAME_CHARS);
+        assert_eq!(validated_session_name(&at_limit).unwrap(), at_limit);
+        let over = "é".repeat(MAX_SESSION_NAME_CHARS + 1);
+        assert!(matches!(
+            validated_session_name(&over),
+            Err(AppError::BadRequest("Session name is too long"))
+        ));
+    }
 
     #[test]
     fn invalid_member_role_validation_is_bad_request() {
