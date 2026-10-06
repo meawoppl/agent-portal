@@ -1049,8 +1049,6 @@ pub(crate) fn load_desired_sessions(
 
 fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: Uuid) {
     use crate::models::Session;
-    use crate::schema::sessions;
-    use diesel::prelude::*;
 
     let running_sessions = app_state
         .session_manager

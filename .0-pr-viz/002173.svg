@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="Arial, sans-serif">
+<text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2173 · Isolate desired-session persistence</text>
+<text x="55" y="108" font-size="34" fill="#e6e9f5">Session creation writes now commit together;</text>
+<text x="55" y="151" font-size="34" fill="#e6e9f5">a failed owner membership cannot leave a partially initialized session.</text>
+<path d="M55 177 H1945" stroke="#3d4666"/>
+<path d="M1000 200 V1130" stroke="#565f89" stroke-dasharray="9 9"/>
+<text x="55" y="232" font-size="22" font-weight="bold" letter-spacing="4" fill="#f7768e">BEFORE</text>
+<text x="1055" y="232" font-size="22" font-weight="bold" letter-spacing="4" fill="#9ece6a">AFTER</text>
+<rect x="55" y="270" width="880" height="190" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="80" y="310" font-size="26" fill="#7aa2f7">handlers::launchers::create_desired_session</text>
+<text x="80" y="355" font-size="23" fill="#c0caf5">INSERT sessions</text>
+<text x="80" y="393" font-size="23" fill="#c0caf5">UPDATE fork metadata</text>
+<text x="80" y="431" font-size="23" fill="#c0caf5">INSERT session_members</text>
+<path d="M495 460 V515" stroke="#f7768e" stroke-width="3"/>
+<rect x="55" y="515" width="880" height="150" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="80" y="558" font-size="26" fill="#f7768e">A late failure leaves earlier writes committed</text>
+<text x="80" y="604" font-size="23" fill="#c0caf5">Fork worktree intent is another handler UPDATE.</text>
+<rect x="1055" y="270" width="890" height="280" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="310" font-size="26" fill="#7aa2f7">db::session_lifecycle::create_desired_session</text>
+<text x="1080" y="355" font-size="23" fill="#9ece6a">conn.transaction: one commit or rollback</text>
+<text x="1080" y="400" font-size="23" fill="#c0caf5">INSERT sessions</text>
+<text x="1080" y="444" font-size="23" fill="#c0caf5">UPDATE fork metadata + fork_create_worktree</text>
+<text x="1080" y="488" font-size="23" fill="#c0caf5">INSERT owner membership</text>
+<path d="M1500 550 V600" stroke="#9ece6a" stroke-width="3"/>
+<rect x="1055" y="600" width="890" height="130" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="645" font-size="26" fill="#9ece6a">Regression: final membership failure rolls back</text>
+<text x="1080" y="689" font-size="23" fill="#c0caf5">No child session or fork metadata survives.</text>
+<rect x="55" y="800" width="880" height="235" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="80" y="845" font-size="26" fill="#c0caf5">Desired-state SQL lives with callers</text>
+<text x="80" y="896" font-size="23" fill="#c0caf5">sessions.rs: pause / resume / failed dispatch</text>
+<text x="80" y="942" font-size="23" fill="#c0caf5">launcher_socket.rs: conditional lease UPDATE</text>
+<rect x="1055" y="800" width="890" height="235" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="1080" y="845" font-size="26" fill="#7aa2f7">Shared persistence interface, same SQL semantics</text>
+<text x="1080" y="896" font-size="23" fill="#c0caf5">pause / resume / cancel_resume</text>
+<text x="1080" y="942" font-size="23" fill="#c0caf5">claim_launch_lease: NULL or strictly expired</text>
+<text x="1080" y="990" font-size="23" fill="#c0caf5">IDs, metadata, memberships and lease rules retained.</text>
+<text x="55" y="1172" font-size="22" fill="#a9b1d6">Boundary: token minting, websocket dispatch and queued input remain outside the database transaction.</text>
+</g>
+</svg>
