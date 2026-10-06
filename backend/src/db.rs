@@ -1,3 +1,5 @@
+pub(crate) mod session_lifecycle;
+
 use anyhow::Result;
 use diesel::pg::PgConnection;
 use diesel::prelude::*;

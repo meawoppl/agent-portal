@@ -1111,16 +1111,12 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
         // mid-launch doesn't wedge the session out of reconcile — unlike the old
         // no-TTL pending set. Registration and launch-failure both clear it.
         let lease_until = now + chrono::Duration::seconds(LAUNCH_LEASE_SECS);
-        match diesel::update(
-            sessions::table.find(session.id).filter(
-                sessions::launch_lease_until
-                    .is_null()
-                    .or(sessions::launch_lease_until.lt(now)),
-            ),
-        )
-        .set(sessions::launch_lease_until.eq(Some(lease_until)))
-        .execute(&mut conn)
-        {
+        match crate::db::session_lifecycle::claim_launch_lease(
+            &mut conn,
+            session.id,
+            now,
+            lease_until,
+        ) {
             Ok(1) => {}
             Ok(_) => {
                 debug!(
