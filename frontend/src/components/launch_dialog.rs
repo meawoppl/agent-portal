@@ -379,34 +379,43 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     {
         let path = (*dir.path).clone();
         let launcher = *selected_launcher;
+        let plugin_agent = *agent_type;
         let plugin_suggestions = plugin_suggestions.clone();
         let plugin_suggestion_error = plugin_suggestion_error.clone();
         let plugin_overrides = plugin_overrides.clone();
-        use_effect_with((launcher, path), move |(launcher, path)| {
-            let cancelled = std::rc::Rc::new(std::cell::Cell::new(false));
-            let obsolete = cancelled.clone();
-            plugin_overrides.set(Vec::new());
-            plugin_suggestions.set(Vec::new());
-            plugin_suggestion_error.set(None);
-            if let Some(launcher) = *launcher {
-                let path = path.clone();
-                spawn_local(async move {
-                    let api_path = plugin_inventory_api_path(Some(launcher), None, Some(&path));
-                    let result =
-                        utils::fetch_json::<PluginInventoryResponse>(&api_path, On401::Ignore)
-                            .await;
-                    if obsolete.get() {
-                        return;
-                    }
-                    match result {
-                        Ok(data) => plugin_suggestions.set(data.plugins),
-                        Err(err) => plugin_suggestion_error
-                            .set(Some(format!("Could not load plugin suggestions: {err}"))),
-                    }
-                });
-            }
-            move || cancelled.set(true)
-        });
+        use_effect_with(
+            (launcher, path, plugin_agent),
+            move |(launcher, path, agent)| {
+                let cancelled = std::rc::Rc::new(std::cell::Cell::new(false));
+                let obsolete = cancelled.clone();
+                plugin_overrides.set(Vec::new());
+                plugin_suggestions.set(Vec::new());
+                plugin_suggestion_error.set(None);
+                if let Some(launcher) = *launcher {
+                    let path = path.clone();
+                    let agent = *agent;
+                    spawn_local(async move {
+                        let api_path = format!(
+                            "{}&agentType={}",
+                            plugin_inventory_api_path(Some(launcher), None, Some(&path)),
+                            agent.as_str()
+                        );
+                        let result =
+                            utils::fetch_json::<PluginInventoryResponse>(&api_path, On401::Ignore)
+                                .await;
+                        if obsolete.get() {
+                            return;
+                        }
+                        match result {
+                            Ok(data) => plugin_suggestions.set(data.plugins),
+                            Err(err) => plugin_suggestion_error
+                                .set(Some(format!("Could not load plugin suggestions: {err}"))),
+                        }
+                    });
+                }
+                move || cancelled.set(true)
+            },
+        );
     }
     let on_plugin_override = {
         let plugin_overrides = plugin_overrides.clone();

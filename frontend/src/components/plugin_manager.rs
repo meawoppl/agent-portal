@@ -110,6 +110,7 @@ pub fn plugin_manager(props: &PluginManagerProps) -> Html {
             let error = error.clone();
             let revision = revision.clone();
             let request = PluginRequest {
+                agent_type: None,
                 working_directory: Some(cwd.clone()),
                 session_id,
                 action,

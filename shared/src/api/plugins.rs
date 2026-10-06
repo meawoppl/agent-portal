@@ -121,6 +121,8 @@ pub enum PluginPolicy {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginRequest {
+    #[serde(default)]
+    pub agent_type: Option<crate::AgentType>,
     pub working_directory: Option<String>,
     pub session_id: Option<uuid::Uuid>,
     pub action: PluginAction,
@@ -253,6 +255,7 @@ mod tests {
     #[test]
     fn command_approval_is_explicit_and_arguments_round_trip() {
         let request = PluginRequest {
+            agent_type: None,
             working_directory: Some("/project".into()),
             session_id: None,
             action: PluginAction::RunCommand {

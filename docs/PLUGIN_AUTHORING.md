@@ -496,7 +496,7 @@ data as JSON.
 ## Runtime JSON Expectations
 
 `agent-portal plugin runtime <name> --json` is the stable machine-readable view
-for agents and future UI. It should include enough information for an agent to
+for agents and local inspection. It should include enough information for an agent to
 decide:
 
 - where the plugin is installed;

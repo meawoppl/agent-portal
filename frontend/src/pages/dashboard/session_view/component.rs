@@ -1016,6 +1016,7 @@ impl Component for SessionView {
             SessionViewMsg::DisablePlugin(name) => {
                 if let Some(launcher_id) = ctx.props().session.launcher_id {
                     let body = PluginRequest {
+                        agent_type: None,
                         session_id: Some(ctx.props().session.id),
                         working_directory: Some(ctx.props().session.working_directory.clone()),
                         action: PluginAction::SetPolicy {

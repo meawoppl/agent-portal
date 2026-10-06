@@ -134,23 +134,23 @@ plugins. The installed plugin directory stores plugin-owned support files.
 
 ## CLI Surface
 
-Add a top-level launcher command group:
+The launcher provides these plugin commands:
 
 ```console
 agent-portal plugin list
-agent-portal plugin search <query>
-agent-portal plugin install <source> [--name <name>] [--ref <git-ref>]
-agent-portal plugin update [<name>]
+agent-portal plugin install <source> [--name <name>] [--ref <git-ref>] [--force]
+agent-portal plugin update <name> [--check]
 agent-portal plugin remove <name>
 agent-portal plugin info <name>
 agent-portal plugin runtime <name> [--json]
 agent-portal plugin toolchains <name> [--json]
 agent-portal plugin setup <name> [toolchain-name]
-agent-portal plugin doctor [<name>]
+agent-portal plugin doctor <name>
 agent-portal plugin enable <name>
 agent-portal plugin disable <name>
 agent-portal plugin start <name>
 agent-portal plugin stop <name>
+agent-portal plugin restart <name>
 agent-portal plugin status <name> [--json]
 agent-portal plugin open <name>
 ```
@@ -165,9 +165,10 @@ agent-portal plugin install ./agent-portal-plugins/kicad-pcb
 ```
 
 `install` clones or copies into `agent-portal-plugins/<name>`, validates the
-manifest, records the install in the launcher config, and runs the plugin's
-declared setup command after explicit confirmation when setup requires network,
-credential, or package-manager access.
+manifest, runs the plugin's declared setup command, and registers the successful
+installation. The browser asks for confirmation before setup runs. Updates and
+forced replacement retain the previous checkout until setup and registration
+succeed; failures restore it along with plugin-local state.
 
 Git and local sources may point either at a plugin root or at a plugin
 subdirectory using `//sub/path`. The subdirectory form is the smooth path for a
@@ -191,7 +192,7 @@ monorepo.
 forwarding path, and asks the focused session to open that surface.
 
 `runtime --json` is the stable machine-readable entry point for agents and
-future UI: it reports the install path, plugin-local directories, surface
+Portal inspection: it reports the install path, plugin-local directories, surface
 metadata, skills, commands, managed toolchains, and declared capabilities.
 
 `setup <name>` runs the plugin's `[install].setup`; `setup <name> <toolchain>`
@@ -316,7 +317,7 @@ agent-portal plugin skills kicad-pcb
 Claude has native skill loading. When the launcher spawns a Claude session, it
 materializes a per-session, skills-only Claude plugin view under the Portal
 config directory and adds `--plugin-dir <generated-plugin-root>` once for each
-enabled plugin with Claude-applicable skills. Each generated root contains only
+activated plugin with Claude-applicable skills. Each generated root contains only
 `skills/<skill-name>/...` entries from the plugin manifest, preserving the
 source skill directory by symlink where possible so relative references still
 work. The generated directory is removed when that session task exits. This
@@ -460,9 +461,10 @@ forward shape blocks real workflows.
 
 ## Agent Contract
 
-Plugins provide agent guidance, not just UI. The launcher should collect enabled
-plugin instructions for the active session and expose them through the same
-system-reminder path used for local portal affordances.
+The launcher collects activated plugin instructions at session launch. Skills
+use native Claude skill roots or compact reminders for other agents; session
+prompts enter the Portal reminder. Each injected entry is recorded with its
+activation reason for transcript inspection.
 
 Plugin guidance should tell the agent:
 
@@ -486,22 +488,16 @@ For the KiCad PCB plugin, the guidance should say things like:
 
 ## Discovery and Activation
 
-Installed plugins can activate in three ways:
+Installed plugin context activates through matching manifest detection rules,
+project policy (Always), or an explicit launch selection. Never suppresses
+automatic activation; an explicit per-launch selection takes precedence.
+Policies are scoped to the launcher and canonical project directory. The launch
+dialog shows detected-but-disabled plugins and lets the user override that
+launch without changing the persistent policy.
 
-1. **Manual**: user or agent runs `agent-portal plugin open kicad-pcb`.
-2. **Repo-suggested**: launcher finds `.portal/plugins.toml` in the session cwd
-   or an ancestor and exposes install/open suggestions for listed plugins.
-3. **Detected**: launcher sees manifest `detect` rules matching the session cwd
-   and exposes a suggested surface chip.
-4. **Requested by agent**: the agent follows plugin instructions and asks the
-   launcher to start the plugin.
-
-Suggestion priority:
-
-1. `.portal/plugins.toml` entry for the plugin;
-2. installed plugin manifest `detect` rule;
-3. agent request based on plugin guidance;
-4. manual command.
+Opening a plugin surface is a separate lifecycle action; it does not retroactively
+inject context into a running agent. Future-project policy controls in the dock
+and context card apply to subsequent launches.
 
 Detection should be cheap and local. It should not run expensive setup, network
 calls, package-manager installs, or heavyweight scans. Deep analysis belongs to
