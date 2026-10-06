@@ -1888,3 +1888,6 @@ mod agent_type_parse_roundtrip {
         }
     }
 }
+
+/// Launcher supports typed, host-local plugin management.
+pub const LAUNCHER_CAPABILITY_PLUGINS: &str = "plugins.manage.v1";

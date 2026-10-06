@@ -11,7 +11,11 @@ pub struct PluginInventoryResponse {
     #[serde(default)]
     pub scanned: bool,
     #[serde(default)]
+    pub injected_context: Vec<PluginContextEntry>,
+    #[serde(default)]
     pub plugins: Vec<PortalPluginInfo>,
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 
 /// A locally installed Portal plugin plus session/path-specific discovery
@@ -25,6 +29,32 @@ pub struct PortalPluginInfo {
     pub description: Option<String>,
     #[serde(default)]
     pub installed: bool,
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub activation: Option<PluginActivation>,
+    #[serde(default)]
+    pub disabled_by_policy: bool,
+    #[serde(default)]
+    pub license: Option<String>,
+    #[serde(default)]
+    pub has_doctor: bool,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default)]
+    pub update_available: Option<bool>,
+    #[serde(default)]
+    pub homepage: Option<String>,
+    #[serde(default)]
+    pub compatibility: Vec<String>,
+    #[serde(default)]
+    pub policy: PluginPolicy,
+    #[serde(default)]
+    pub prompts: Vec<PortalPluginSkillInfo>,
+    #[serde(default)]
+    pub surface: Option<PluginSurfaceStatus>,
     #[serde(default)]
     pub suggested: bool,
     #[serde(default)]
@@ -72,4 +102,143 @@ pub struct PortalPluginCommandInfo {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[serde(default)]
+    pub run: String,
+    #[serde(default)]
+    pub accepts_args: bool,
+}
+
+/// Host-local policy, keyed by canonical project directory and plugin name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginPolicy {
+    #[default]
+    Ask,
+    Always,
+    Never,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginRequest {
+    pub working_directory: Option<String>,
+    pub session_id: Option<uuid::Uuid>,
+    pub action: PluginAction,
+}
+
+/// Versioned, named actions. Callers cannot supply a shell command to execute.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PluginAction {
+    Inventory,
+    Install {
+        source: String,
+    },
+    Update {
+        name: String,
+    },
+    Remove {
+        name: String,
+    },
+    Doctor {
+        name: String,
+    },
+    SetPolicy {
+        name: String,
+        policy: PluginPolicy,
+    },
+    Surface {
+        name: String,
+        action: PluginSurfaceAction,
+    },
+    RunCommand {
+        name: String,
+        command: String,
+        args: Vec<String>,
+        approved: bool,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginSurfaceAction {
+    Start,
+    Stop,
+    Restart,
+    Status,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginResponse {
+    pub success: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub output: String,
+    #[serde(default)]
+    pub exit_code: Option<i32>,
+    #[serde(default)]
+    pub inventory: Option<PluginInventoryResponse>,
+    #[serde(default)]
+    pub surface: Option<PluginSurfaceStatus>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginSurfaceState {
+    #[default]
+    Stopped,
+    Starting,
+    Healthy,
+    Unhealthy,
+    Exited,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginSurfaceStatus {
+    pub state: PluginSurfaceState,
+    pub port: Option<u16>,
+    pub health_path: Option<String>,
+    pub last_error: Option<String>,
+    #[serde(default)]
+    pub log_tail: Vec<String>,
+    pub pid: Option<u32>,
+    pub started_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginActivation {
+    Detected,
+    Policy,
+    Explicit,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginOverride {
+    pub name: String,
+    pub enabled: bool,
+}
+
+/// The launch-time snapshot, never inferred from a later discovery scan.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginContextEntry {
+    pub plugin: String,
+    pub name: String,
+    pub path: String,
+    pub kind: PluginContextKind,
+    pub activation: PluginActivation,
+    pub reason: String,
+    pub context_bytes: u64,
+    pub estimated_tokens: u64,
+    pub text: String,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginContextKind {
+    Skill,
+    Prompt,
 }
