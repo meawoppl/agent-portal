@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="sans-serif">
+<text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2178 · Route plugin blank checks via shared helper</text>
+<text x="55" y="105" font-size="34" fill="#e6e9f5">Two validator guards spelled the blank check inline; both now share one helper.</text>
+<text x="55" y="149" font-size="34" fill="#e6e9f5">A new test pins the whitespace-only start arm the suite never covered.</text>
+<path d="M55 176 H1945 M1000 190 V1140" stroke="#565f89" stroke-width="2" stroke-dasharray="8 8"/>
+<text x="55" y="226" font-size="22" fill="#a9b1d6">BEFORE</text>
+<rect x="55" y="270" width="890" height="195" rx="14" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+<text x="79" y="312" font-size="26" fill="#7aa2f7" font-family="monospace">check_surface</text>
+<text x="79" y="360" font-size="23" fill="#c0caf5" font-family="monospace">start.trim().is_empty()</text>
+<text x="79" y="396" font-size="23" fill="#c0caf5">Blank check spelled inline at the call site.</text>
+<path d="M500 465 v55 m-9 -12 l9 12 9 -12" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="55" y="535" width="890" height="195" rx="14" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+<text x="79" y="577" font-size="26" fill="#7aa2f7" font-family="monospace">check_commands</text>
+<text x="79" y="625" font-size="23" fill="#c0caf5" font-family="monospace">run.trim().is_empty()</text>
+<text x="79" y="661" font-size="23" fill="#c0caf5">Same shape, spelled out a second time.</text>
+<path d="M500 730 v55 m-9 -12 l9 12 9 -12" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="55" y="800" width="890" height="195" rx="14" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+<text x="79" y="842" font-size="26" fill="#7aa2f7">Untested trim path</text>
+<text x="79" y="890" font-size="23" fill="#c0caf5">Only a missing start is covered by tests.</text>
+<text x="79" y="926" font-size="23" fill="#c0caf5">Whitespace-only start has no test.</text>
+<text x="1055" y="226" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="1055" y="270" width="890" height="195" rx="14" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+<text x="1079" y="312" font-size="26" fill="#9ece6a" font-family="monospace">check_surface</text>
+<text x="1079" y="360" font-size="23" fill="#c0caf5" font-family="monospace">!is_non_blank(start)</text>
+<text x="1079" y="396" font-size="23" fill="#c0caf5">Same predicate from shared::strings.</text>
+<path d="M1500 465 v55 m-9 -12 l9 12 9 -12" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="535" width="890" height="195" rx="14" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+<text x="1079" y="577" font-size="26" fill="#9ece6a" font-family="monospace">check_commands</text>
+<text x="1079" y="625" font-size="23" fill="#c0caf5" font-family="monospace">!is_non_blank(run)</text>
+<text x="1079" y="661" font-size="23" fill="#c0caf5">Both sites share one implementation.</text>
+<path d="M1500 730 v55 m-9 -12 l9 12 9 -12" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="800" width="890" height="195" rx="14" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+<text x="1079" y="842" font-size="26" fill="#9ece6a" font-family="monospace">whitespace_only_surface_start_is_empty</text>
+<text x="1079" y="890" font-size="23" fill="#c0caf5">New test pins the blank-start arm.</text>
+<text x="1079" y="926" font-size="23" fill="#c0caf5">Whitespace-only start now asserts its error.</text>
+<text x="55" y="1172" font-size="22" fill="#a9b1d6">Negated predicate with identical trim semantics - no behavior change.</text>
+</g></svg>
