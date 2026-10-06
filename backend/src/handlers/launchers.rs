@@ -17,8 +17,9 @@ use uuid::Uuid;
 use crate::auth::CurrentUserId;
 use crate::db::session_lifecycle::{create_desired_session, DesiredSessionDraft};
 use crate::errors::AppError;
+use crate::handlers::launcher_rpc::{launcher_rpc, require_launcher_owner};
 use crate::handlers::responses::EmptyResponse;
-use crate::handlers::websocket::SessionManager;
+use crate::handlers::websocket::{LauncherRpcError, LauncherRpcKind, SessionManager};
 use crate::models::jsonb_string_vec;
 use crate::AppState;
 
@@ -417,31 +418,26 @@ pub async fn list_directories(
     require_launcher_owner(&app_state, launcher_id, user_id)?;
 
     let request_id = Uuid::new_v4();
-    let rx = app_state.session_manager.register_dir_request(request_id);
-
-    let sent = app_state.session_manager.send_to_launcher(
-        &launcher_id,
-        ServerToLauncher::ListDirectories {
+    let reply = app_state
+        .session_manager
+        .request_launcher(
+            launcher_id,
+            LauncherRpcKind::Directory,
             request_id,
-            path: query.path.clone(),
-        },
-    );
-
-    if !sent {
-        app_state.session_manager.cancel_dir_request(request_id);
-        error!("Failed to send ListDirectories to launcher {}", launcher_id);
-        return Err(AppError::BadGateway(
-            "Failed to send directory listing request",
-        ));
-    }
-
-    match tokio::time::timeout(std::time::Duration::from_secs(5), rx).await {
-        Ok(Ok(LauncherToServer::ListDirectoriesResult {
+            ServerToLauncher::ListDirectories {
+                request_id,
+                path: query.path.clone(),
+            },
+            std::time::Duration::from_secs(5),
+        )
+        .await;
+    match reply {
+        Ok(LauncherToServer::ListDirectoriesResult {
             entries,
             error,
             resolved_path,
             ..
-        })) => {
+        }) => {
             if let Some(err) = error {
                 warn!("Directory listing error: {}", err);
                 return Err(AppError::BadRequest("Directory listing failed"));
@@ -451,14 +447,19 @@ pub async fn list_directories(
                 resolved_path,
             }))
         }
-        Ok(Ok(_)) => Err(AppError::Internal(
-            "Unexpected launcher directory response".to_string(),
+        Ok(_) => Err(AppError::Internal(
+            "Unexpected launcher directory response".into(),
         )),
-        Ok(Err(_)) => Err(AppError::Internal(
-            "Directory listing response channel closed".to_string(),
+        Err(LauncherRpcError::Closed) => Err(AppError::Internal(
+            "Directory listing response channel closed".into(),
         )),
-        Err(_) => {
-            app_state.session_manager.cancel_dir_request(request_id);
+        Err(LauncherRpcError::Disconnected) => {
+            error!("Failed to send ListDirectories to launcher {}", launcher_id);
+            Err(AppError::BadGateway(
+                "Failed to send directory listing request",
+            ))
+        }
+        Err(LauncherRpcError::Timeout) => {
             warn!("Directory listing timed out for launcher {}", launcher_id);
             Err(AppError::GatewayTimeout("Directory listing timed out"))
         }
@@ -558,79 +559,33 @@ pub async fn probe_agents(
     require_launcher_owner(&app_state, launcher_id, user_id)?;
 
     let request_id = Uuid::new_v4();
-    let rx = app_state.session_manager.register_probe_request(request_id);
-
-    // Evicting send (not a cloned raw sender): a dead channel tears the
-    // stale connection down instead of lingering.
-    if !app_state
+    let reply = app_state
         .session_manager
-        .send_to_launcher(&launcher_id, ServerToLauncher::ProbeAgents { request_id })
-    {
-        app_state.session_manager.cancel_probe_request(request_id);
-        warn!("Launcher {} disconnected while probing agents", launcher_id);
-        return Err(AppError::BadGateway("Failed to send agent probe request"));
-    }
-
-    match tokio::time::timeout(std::time::Duration::from_secs(5), rx).await {
-        Ok(Ok(LauncherToServer::ProbeAgentsResult { agents, .. })) => {
+        .request_launcher(
+            launcher_id,
+            LauncherRpcKind::Agent,
+            request_id,
+            ServerToLauncher::ProbeAgents { request_id },
+            std::time::Duration::from_secs(5),
+        )
+        .await;
+    match reply {
+        Ok(LauncherToServer::ProbeAgentsResult { agents, .. }) => {
             Ok(Json(ProbeAgentsResponse { agents }))
         }
-        Ok(Ok(_)) => Err(AppError::Internal(
-            "Unexpected launcher probe response".to_string(),
+        Ok(_) => Err(AppError::Internal(
+            "Unexpected launcher probe response".into(),
         )),
-        Ok(Err(_)) => Err(AppError::Internal(
-            "Agent probe response channel closed".to_string(),
+        Err(LauncherRpcError::Closed) => Err(AppError::Internal(
+            "Agent probe response channel closed".into(),
         )),
-        Err(_) => {
-            app_state.session_manager.cancel_probe_request(request_id);
+        Err(LauncherRpcError::Disconnected) => {
+            warn!("Launcher {} disconnected while probing agents", launcher_id);
+            Err(AppError::BadGateway("Failed to send agent probe request"))
+        }
+        Err(LauncherRpcError::Timeout) => {
             warn!("Probe agents timed out for launcher {}", launcher_id);
             Err(AppError::GatewayTimeout("Agent probe timed out"))
-        }
-    }
-}
-
-/// Confirm the caller owns `launcher_id` (agent logins run credentials on that
-/// host, so only its owner may drive them). 404 on unknown so we don't leak
-/// launcher existence to non-owners.
-fn require_launcher_owner(
-    app_state: &AppState,
-    launcher_id: Uuid,
-    user_id: Uuid,
-) -> Result<(), AppError> {
-    let owner = app_state
-        .session_manager
-        .launcher_owner(launcher_id)
-        .ok_or(AppError::NotFound("Launcher not found"))?;
-    if owner != user_id {
-        return Err(AppError::Forbidden);
-    }
-    Ok(())
-}
-
-/// Relay one request/response RPC to a launcher, reusing the probe correlation.
-async fn launcher_rpc(
-    app_state: &AppState,
-    launcher_id: Uuid,
-    request_id: Uuid,
-    message: ServerToLauncher,
-    timeout_secs: u64,
-) -> Result<LauncherToServer, AppError> {
-    let rx = app_state.session_manager.register_probe_request(request_id);
-    if !app_state
-        .session_manager
-        .send_to_launcher(&launcher_id, message)
-    {
-        app_state.session_manager.cancel_probe_request(request_id);
-        return Err(AppError::BadGateway("Launcher is not connected"));
-    }
-    match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), rx).await {
-        Ok(Ok(reply)) => Ok(reply),
-        Ok(Err(_)) => Err(AppError::Internal(
-            "Launcher response channel closed".into(),
-        )),
-        Err(_) => {
-            app_state.session_manager.cancel_probe_request(request_id);
-            Err(AppError::GatewayTimeout("Launcher did not respond in time"))
         }
     }
 }

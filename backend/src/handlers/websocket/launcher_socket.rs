@@ -707,22 +707,28 @@ fn handle_launcher_message(
             );
         }
         LauncherToServer::ListDirectoriesResult { request_id, .. } => {
-            app_state
-                .session_manager
-                .complete_dir_request(request_id, msg);
+            app_state.session_manager.complete_launcher_request(
+                super::LauncherRpcKind::Directory,
+                request_id,
+                msg,
+            );
         }
         LauncherToServer::ProbeAgentsResult { request_id, .. } => {
-            app_state
-                .session_manager
-                .complete_probe_request(request_id, msg);
+            app_state.session_manager.complete_launcher_request(
+                super::LauncherRpcKind::Agent,
+                request_id,
+                msg,
+            );
         }
         LauncherToServer::AgentLoginStartResult { request_id, .. }
         | LauncherToServer::AgentLoginOutcomeResult { request_id, .. }
         | LauncherToServer::InstallAgentResult { request_id, .. } => {
             // Same request/response correlation as the probe path.
-            app_state
-                .session_manager
-                .complete_probe_request(request_id, msg);
+            app_state.session_manager.complete_launcher_request(
+                super::LauncherRpcKind::Agent,
+                request_id,
+                msg,
+            );
         }
         LauncherToServer::RequestLaunch {
             request_id,

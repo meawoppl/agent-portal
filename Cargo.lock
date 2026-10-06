@@ -6741,6 +6741,8 @@ dependencies = [
  "codex-codes",
  "serde",
  "serde_json",
+ "toml 0.8.23",
+ "toml 0.9.12+spec-1.1.0",
  "uuid",
  "ws-bridge",
 ]

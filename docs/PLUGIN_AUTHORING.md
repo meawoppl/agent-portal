@@ -172,11 +172,11 @@ path = "prompts/bringup.md"
 
 [[detect]]
 name = "esp-idf"
-any = ["sdkconfig", "CMakeLists.txt", "main/*.c", "main/*.cpp"]
+any = ["sdkconfig", "sdkconfig.defaults", "idf_component.yml"]
 
 [[detect]]
 name = "fpga"
-any = ["*.sv", "*.v", "*.xdc", "*.pcf", "*.json"]
+any = ["*.sv", "*.v", "*.xdc", "*.pcf"]
 
 [capabilities]
 domain = "embedded-development"
@@ -369,6 +369,19 @@ Good command behavior:
 The manifest should expose common, discoverable verbs. The plugin binary can
 still support richer pass-through subcommands.
 
+Set `accepts_args = true` on a command to let the user pass extra arguments
+when Portal runs it. Each argument is shell-quoted and appended to `run`, so a
+thin pass-through entry can expose the whole plugin CLI. It defaults to
+`false`, which runs `run` exactly as written.
+
+```toml
+[[commands]]
+name = "esp32-fpga"
+description = "Run any esp32-fpga subcommand."
+run = "bin/esp32-fpga"
+accepts_args = true
+```
+
 Useful inspection commands:
 
 ```console
@@ -450,6 +463,36 @@ is "this repo works best with these Portal abilities."
 9. Test with the agents that should use it. Confirm Claude receives native
    skills and Codex/Muse receive the Plugin Skills reminder.
 
+### Validating and previewing
+
+Check a plugin directory before installing it. Neither command installs the
+plugin or runs any of its commands.
+
+```console
+agent-portal plugin validate ./agent-portal-plugins/esp32-fpga
+agent-portal plugin preview ./agent-portal-plugins/esp32-fpga --cwd ~/src/my-board
+```
+
+`validate` reports `error:` and `warning:` lines and exits non-zero only on
+errors: a missing or unparsable manifest, an invalid `name`, missing skill or
+prompt files, duplicate command or skill names, an empty command `run`, a
+`[surface]` without `start`, a `default_width_percent` outside 10-90, a
+`[[detect]]` with an empty `any`, or an unknown `{placeholder}`. Warnings cover
+unknown keys, missing `homepage`/`license`/`[compat]`/`install.doctor`, a
+surface without `health_path`, unknown skill `agents`, skills without
+frontmatter `name`/`description`, and detect patterns that are too broad
+(`*.json`, `README*`, ...) or can never match (detection compares file names
+only, so a pattern containing `/` never fires). Add `--json` for
+`{ ok, errors: [...], warnings: [...] }`, each item `{ field, message }`.
+
+`preview` renders what Portal will show: the plugin card, skills with their
+frontmatter descriptions and byte/estimated-token sizes, prompts, commands
+(and whether they accept arguments), surface dock metadata, and the total
+context estimate. With `--cwd` it reports whether the `[[detect]]` rules would
+suggest the plugin in that directory and why, using the same matching as the
+Portal backend. It ends with the `validate` findings. `--json` prints the same
+data as JSON.
+
 ## Runtime JSON Expectations
 
 `agent-portal plugin runtime <name> --json` is the stable machine-readable view
@@ -484,7 +527,7 @@ step deserves review.
 
 Before publishing a plugin:
 
-- `agent-portal-plugin.toml` validates.
+- `agent-portal plugin validate <path>` reports no errors.
 - `agent-portal plugin runtime <name> --json` is useful to an agent.
 - `agent-portal plugin doctor <name>` reports actionable diagnostics.
 - Skills are declared and have frontmatter descriptions.
