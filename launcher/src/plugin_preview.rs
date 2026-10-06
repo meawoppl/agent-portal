@@ -289,7 +289,7 @@ fn print_preview(p: &Preview) {
 
     println!();
     println!(
-        "Context estimate: {} bytes, ~{} tokens (skills + prompts)",
+        "Context upper bound: {} bytes, ~{} tokens (full skill + prompt files; agents load a skill body only when they use it)",
         p.context_bytes, p.context_tokens
     );
 

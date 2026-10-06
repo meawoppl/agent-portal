@@ -1,13 +1,11 @@
-//! Plugin `[[detect]]` matching.
-//!
-//! This mirrors the backend's plugin inventory detection
-//! (`backend/src/handlers/plugins.rs`) exactly, so `agent-portal plugin
-//! preview --cwd` answers "would Portal suggest this plugin here?" the same way
-//! the dashboard does. Keep the two in lockstep: a pattern is matched against
-//! **file names only** (never paths), using `*` (any name), a leading `*`
-//! (suffix match), a trailing `*` (prefix match), or an exact name. The walk
-//! skips dot-directories, stops descending past [`MAX_SCAN_DEPTH`], and gives
-//! up (no match) after [`MAX_SCAN_ENTRIES`] entries.
+//! Plugin `[[detect]]` matching: the one implementation behind both
+//! `agent-portal plugin preview --cwd` and the launcher's plugin inventory,
+//! so the preview answers "would Portal suggest this plugin here?" exactly as
+//! the dashboard will. A pattern is matched against **file names only**
+//! (never paths), using `*` (any name), a leading `*` (suffix match), a
+//! trailing `*` (prefix match), or an exact name. The walk skips
+//! dot-directories, stops descending past [`MAX_SCAN_DEPTH`], and gives up
+//! (no match) after [`MAX_SCAN_ENTRIES`] entries.
 
 use std::{fs, path::Path};
 
