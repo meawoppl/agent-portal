@@ -79,11 +79,12 @@ impl<A: Agent> Drop for Session<A> {
     }
 }
 
-/// Signal the process group led by `pid` (the agent was spawned as a group
-/// leader, so its pgid == pid). Negative pid targets the whole group, reaping
-/// tools the agent spawned. Best-effort: a dead group yields `ESRCH`, ignored.
+/// Signal the process group led by `pid` (the process must have been spawned
+/// as a group leader, so its pgid == pid). Negative pid targets the whole
+/// group, reaping its children too. Best-effort: a dead group yields `ESRCH`,
+/// ignored. Also used by the launcher to stop plugin surfaces.
 #[cfg(unix)]
-fn signal_process_group(pid: u32, sig: libc::c_int) {
+pub fn signal_process_group(pid: u32, sig: libc::c_int) {
     // SAFETY: `kill(2)` with a group target and a fixed signal has no memory
     // safety implications; the worst case is `ESRCH` for an already-dead group.
     unsafe {
