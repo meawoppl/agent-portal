@@ -125,6 +125,7 @@ fn discover_plugins(working_directory: Option<String>) -> PluginInventoryRespons
         working_directory,
         scanned,
         plugins,
+        ..Default::default()
     }
 }
 
@@ -194,11 +195,13 @@ fn read_plugin(plugin_dir: &Path, scan_root: Option<&Path>) -> Option<PortalPlug
             .map(|command| PortalPluginCommandInfo {
                 name: command.name,
                 description: command.description,
+                ..Default::default()
             })
             .collect(),
         context_bytes,
         estimated_tokens,
         warnings,
+        ..Default::default()
     })
 }
 
