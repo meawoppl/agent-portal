@@ -20,6 +20,12 @@
 //!   `CLAUDE.md` ("Operational log markers"). The `markers` unit test enforces
 //!   uniqueness and naming.
 
+/// Reconcile/continuation cannot load durable plugin selections, so launch is
+/// held instead of silently enabling a deselected plugin. A recurring burst
+/// indicates database/schema failure; a one-off is transient. Check DB health
+/// and the session_plugin_overrides migration before retrying.
+pub const PLUGIN_POLICY_LOAD_FAILED: &str = "PLUGIN_POLICY_LOAD_FAILED";
+
 /// Emitted when a browser/agent input could **not be persisted** to the
 /// `pending_inputs` table — either the INSERT failed or no DB connection was
 /// available to attempt it. The message may still reach a live proxy, but the
@@ -153,6 +159,7 @@ mod tests {
     /// the tests below can enforce uniqueness, naming, and that each is wired to
     /// a real emit site.
     const ALL_MARKERS: &[&str] = &[
+        PLUGIN_POLICY_LOAD_FAILED,
         PENDING_INPUT_PERSIST_FAILED,
         INPUT_SEQ_BUMP_FAILED,
         PUSH_DISPATCH_FAILED,

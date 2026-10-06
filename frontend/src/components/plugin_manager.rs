@@ -1,5 +1,5 @@
 use crate::components::ConfirmModal;
-use crate::utils::{self, On401};
+use crate::utils;
 use gloo_net::http::Request;
 use shared::api::*;
 use uuid::Uuid;
@@ -27,6 +27,7 @@ pub fn plugin_manager(props: &PluginManagerProps) -> Html {
     let error = use_state(|| None::<String>);
     let inventory_error = use_state(|| None::<String>);
     let output = use_state(String::new);
+    let diagnostics = use_state(Vec::<PluginDiagnostic>::new);
     let busy = use_state(|| false);
     let loading = use_state(|| true);
     let revision = use_state(|| 0u32);
@@ -55,8 +56,20 @@ pub fn plugin_manager(props: &PluginManagerProps) -> Html {
                 let alive = std::rc::Rc::new(std::cell::Cell::new(true));
                 let active = alive.clone();
                 spawn_local(async move {
-                    let result =
-                        utils::fetch_json::<PluginInventoryResponse>(&path, On401::Ignore).await;
+                    let result = async {
+                        let response = Request::get(&utils::api_url(&path))
+                            .send()
+                            .await
+                            .map_err(|error| error.to_string())?;
+                        if !response.ok() {
+                            return Err(utils::error_body(response).await);
+                        }
+                        response
+                            .json::<PluginInventoryResponse>()
+                            .await
+                            .map_err(|error| error.to_string())
+                    }
+                    .await;
                     if active.get() {
                         match result {
                             Ok(value) => {
@@ -75,6 +88,7 @@ pub fn plugin_manager(props: &PluginManagerProps) -> Html {
     let execute = {
         let busy = busy.clone();
         let output = output.clone();
+        let diagnostics = diagnostics.clone();
         let error = error.clone();
         let revision = revision.clone();
         let pending = pending.clone();
@@ -87,10 +101,12 @@ pub fn plugin_manager(props: &PluginManagerProps) -> Html {
             }
             busy.set(true);
             output.set(String::new());
+            diagnostics.set(Vec::new());
             error.set(None);
             pending.set(None);
             let busy = busy.clone();
             let output = output.clone();
+            let diagnostics = diagnostics.clone();
             let error = error.clone();
             let revision = revision.clone();
             let request = PluginRequest {
@@ -117,6 +133,7 @@ pub fn plugin_manager(props: &PluginManagerProps) -> Html {
                 .await;
                 match result {
                     Ok(response) => {
+                        diagnostics.set(response.diagnostics);
                         output.set(format!(
                             "{}\n{}",
                             response
@@ -164,13 +181,20 @@ pub fn plugin_manager(props: &PluginManagerProps) -> Html {
             if let Some(message) = &*error { <p role="alert">{message}</p> }
             if let Some(message) = &*inventory_error { <p role="alert">{message}</p> }
             if !output.trim().is_empty() { <details open=true><summary>{"Operation output"}</summary><pre>{&*output}</pre></details> }
+            if !diagnostics.is_empty() {
+                <section aria-label="Doctor diagnostics"><h3>{"Diagnostics"}</h3>
+                    {for diagnostics.iter().map(|item| html! {<div role={if item.success {"status"} else {"alert"}}><strong>{format!("{} · {}", item.name, if item.success {"Passed"} else {"Failed"})}</strong><p>{&item.message}</p></div>})}
+                </section>
+            }
             {for inventory.warnings.iter().map(|warning| html!{<p role="status">{warning}</p>})}
-            if !*loading && inventory.plugins.is_empty() { <p>{"No plugins installed on this host. Install one from a repository URL or local path."}</p> }
+            if !*loading && inventory_error.is_none() && inventory.plugins.is_empty() { <p>{"No plugins installed on this host. Install one from a repository URL or local path."}</p> }
             {for inventory.plugins.iter().map(|plugin| {
                 let name = plugin.name.clone();
                 let action_button = |label: &'static str, action: PluginAction| {
                     let request_action = request_action.clone();
-                    let question = format!("{label} plugin {}?", plugin.name);
+                    let question = if label == "Reinstall" {
+                        format!("Reinstall plugin {}? This re-fetches its recorded source and re-runs setup; it may also install an available update.", plugin.name)
+                    } else { format!("{label} plugin {}?", plugin.name) };
                     html!{<button disabled={*busy} onclick={Callback::from(move |_| request_action.emit((action.clone(), question.clone())))}>{label}</button>}
                 };
                 let set_policy = { let execute = execute.clone(); let name = name.clone(); Callback::from(move |e: Event| {
@@ -189,14 +213,16 @@ pub fn plugin_manager(props: &PluginManagerProps) -> Html {
                     if plugin.update_available == Some(true) {<p>{"Update available"}</p>}
                     <label>{"Project policy "}<select disabled={*busy || props.working_directory.trim().is_empty()} value={match plugin.policy {PluginPolicy::Ask => "ask", PluginPolicy::Always => "always", PluginPolicy::Never => "never"}} onchange={set_policy}><option value="ask">{"Ask / detect"}</option><option value="always">{"Always"}</option><option value="never">{"Never"}</option></select></label>
                     <p class="muted">{"Policy changes apply to future launches in this project. Existing session context is unchanged."}</p>
-                    <div class="plugin-toolbar">{action_button("Update", PluginAction::Update {name: name.clone()})}{action_button("Uninstall", PluginAction::Remove {name: name.clone()})}
+                    <div class="plugin-toolbar">{action_button("Update", PluginAction::Update {name: name.clone()})}{action_button("Reinstall", PluginAction::Update {name: name.clone()})}{action_button("Uninstall", PluginAction::Remove {name: name.clone()})}
                     if plugin.has_doctor { {action_button("Doctor", PluginAction::Doctor {name: name.clone()})} }</div>
                     <details><summary>{format!("Skills and prompts · {} bytes · ~{} tokens", plugin.context_bytes, plugin.estimated_tokens)}</summary>
                     {for plugin.skills.iter().chain(plugin.prompts.iter()).map(|skill| html!{<p><strong>{&skill.name}</strong>{format!(" — {} ({} bytes, ~{} tokens)", skill.path, skill.context_bytes, skill.estimated_tokens)}
                     if !skill.agents.is_empty() {<span>{format!(" · Agents: {}", skill.agents.join(", "))}</span>}<br/>{skill.description.as_deref().unwrap_or_default()}</p>})}</details>
-                    {for plugin.commands.iter().map(|command| html!{<PluginCommand key={command.name.clone()} plugin={name.clone()} command={command.clone()} disabled={*busy} on_request={request_action.clone()} />})}
+                    if props.session_id.is_none() && !plugin.commands.is_empty() {<p>{"Open this plugin in a session dock to run commands and keep results in its transcript"}</p>}
+                    {for plugin.commands.iter().map(|command| html!{<PluginCommand key={command.name.clone()} plugin={name.clone()} command={command.clone()} disabled={*busy || props.session_id.is_none()} on_request={request_action.clone()} />})}
                     if plugin.surface_kind.is_some() || plugin.surface.is_some() {
                         <h3>{plugin.surface_title.as_deref().unwrap_or("Plugin surface")}</h3>
+                        if let Some(kind) = &plugin.surface_kind {<p>{format!("Surface kind: {kind}")}</p>}
                         if let Some(surface) = &plugin.surface {<p>{format!("{:?} · PID {} · port {}", surface.state, surface.pid.map(|n| n.to_string()).unwrap_or_else(|| "—".into()), surface.port.map(|n| n.to_string()).unwrap_or_else(|| "—".into()))}</p>
                         if let Some(started) = &surface.started_at {<p>{format!("Started: {started}")}</p>}
                         if let Some(path) = &surface.health_path {<p>{format!("Health check: {path}")}</p>}

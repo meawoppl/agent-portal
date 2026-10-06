@@ -172,6 +172,8 @@ pub enum PluginSurfaceAction {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginResponse {
+    #[serde(default)]
+    pub diagnostics: Vec<PluginDiagnostic>,
     pub success: bool,
     #[serde(default)]
     pub error: Option<String>,
@@ -295,4 +297,12 @@ pub struct PluginCommandRecord {
     pub status: String,
     pub exit_code: Option<i32>,
     pub output: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginDiagnostic {
+    pub name: String,
+    pub success: bool,
+    pub message: String,
 }

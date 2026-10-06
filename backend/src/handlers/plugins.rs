@@ -29,7 +29,7 @@ pub async fn list_plugins(
     Query(query): Query<PluginInventoryQuery>,
 ) -> Result<Json<PluginInventoryResponse>, AppError> {
     let (launcher_id, working_directory) = if let Some(session_id) = query.session_id {
-        let session = verify_session_owner(&mut state.conn()?, session_id, user_id)?;
+        let session = verify_session_owner(&mut *state.conn()?, session_id, user_id)?;
         (
             session
                 .launcher_id
@@ -75,7 +75,7 @@ pub async fn manage_plugins(
     Json(mut request): Json<PluginRequest>,
 ) -> Result<Json<PluginResponse>, AppError> {
     if let Some(session_id) = request.session_id {
-        let session = verify_session_owner(&mut state.conn()?, session_id, user_id)?;
+        let session = verify_session_owner(&mut *state.conn()?, session_id, user_id)?;
         if session.launcher_id != Some(launcher_id) {
             return Err(AppError::BadRequest(
                 "Session belongs to a different computer",
@@ -83,6 +83,11 @@ pub async fn manage_plugins(
         }
         // Never let a session-scoped command quietly target a different cwd.
         request.working_directory = Some(session.working_directory);
+    }
+    if matches!(request.action, PluginAction::RunCommand { .. }) && request.session_id.is_none() {
+        return Err(AppError::BadRequest(
+            "Run plugin commands from a session dock so approval and results are recorded",
+        ));
     }
     if matches!(
         request.action,
@@ -96,6 +101,20 @@ pub async fn manage_plugins(
         ));
     }
     authorize(&state, user_id, launcher_id)?;
+    // The operation owns its audit lifecycle even if the browser navigates
+    // away and drops the HTTP handler while the launcher is still executing.
+    tokio::spawn(run_operation(state, user_id, launcher_id, request))
+        .await
+        .map_err(|error| AppError::Internal(format!("Plugin operation task failed: {error}")))?
+        .map(Json)
+}
+
+async fn run_operation(
+    state: Arc<AppState>,
+    user_id: Uuid,
+    launcher_id: Uuid,
+    request: PluginRequest,
+) -> Result<PluginResponse, AppError> {
     let command = if let PluginAction::RunCommand {
         name,
         command,
@@ -148,7 +167,7 @@ pub async fn manage_plugins(
         }
         record_command(&state, session_id, user_id, record)?;
     }
-    response.map(Json)
+    response
 }
 
 fn authorize(state: &AppState, user_id: Uuid, launcher_id: Uuid) -> Result<(), AppError> {
@@ -182,6 +201,14 @@ async fn dispatch(
     let rx = state
         .session_manager
         .register_plugin_request(request_id, launcher_id);
+    struct PendingGuard<'a>(&'a crate::handlers::websocket::SessionManager, Uuid);
+    impl Drop for PendingGuard<'_> {
+        fn drop(&mut self) {
+            self.0.cancel_plugin_request(self.1);
+        }
+    }
+    let _pending = PendingGuard(&state.session_manager, request_id);
+
     if !state.session_manager.send_to_launcher(
         &launcher_id,
         ServerToLauncher::PluginRequest {

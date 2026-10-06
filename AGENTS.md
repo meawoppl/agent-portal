@@ -270,6 +270,7 @@ and a row here.**
 
 | Marker | Emitted by (when) | Recurring burst means | Action |
 |--------|-------------------|-----------------------|--------|
+| `PLUGIN_POLICY_LOAD_FAILED` | Launcher reconcile/continuation cannot load durable plugin selections; launch is held | DB or migration failure blocks launches | Check DB health and `session_plugin_overrides` migration; retry after repair |
 | `PENDING_INPUT_PERSIST_FAILED` | Input enqueue (`input_queue.rs`) when the `pending_inputs` row can't be written — INSERT failed *or* no DB connection (web + agent paths) | Schema drift after a deploy (migration recorded-but-not-applied); every INSERT fails and inputs sent while a proxy bounces can be lost | Diff live schema vs. latest migration (`\d pending_inputs`); `ALTER TABLE … ADD COLUMN IF NOT EXISTS …` the missing column |
 | `INPUT_SEQ_BUMP_FAILED` | Input enqueue when bumping `sessions.input_seq` fails (falls back to seq `1`) | Same schema-drift / DB-degradation signal, scoped to `input_seq`; replay ordering unreliable for affected sessions | Same as above — reconcile schema drift / check DB health |
 | `PUSH_DISPATCH_FAILED` | Push dispatcher (`push/dispatcher.rs`) on any swallowed delivery-path failure | Systemic push fault — VAPID/APNs/FCM misconfig or credential expiry, or DB problem resolving recipients; users stop getting pushes | Verify push credentials (`PORTAL_VAPID_*`/`PORTAL_APNS_*`/`PORTAL_FCM_*`) + DB health; a low trickle of dead endpoints is normal |

@@ -1,8 +1,8 @@
 # Agent Portal Plugin Architecture
 
-Status: implemented launcher-local plugin runtime with manifest-described
-extensions. Frontend suggestion UI and stronger sandboxing are still separate
-work.
+Status: launcher-local plugin runtime with host-scoped browser, project policy,
+named commands, and managed surfaces. Plugins execute with the launcher user's
+permissions; plugin-local HOME is a convention, not an operating-system sandbox.
 
 This document defines Portal plugins as repo-adjacent capabilities installed by
 the `agent-portal` launcher. A plugin gives a session a domain-specific work
@@ -659,3 +659,35 @@ visible in the session UI:
 That is the path that makes an ESP32/FPGA development plugin feel like a native
 Portal ability: the plugin owns domain tools and workflows, while Agent Portal
 owns lifecycle, permissioning, panes, and agent context.
+
+
+## Portal management and provenance
+
+The dashboard **Plugins** entry opens a browser scoped to a selected computer
+and project directory. Inventory and lifecycle operations travel over the
+launcher WebSocket; the backend never scans its own filesystem for a remote
+computer's plugins. The launcher advertises `plugins.manage.v1`; older computers
+show an update-required error instead of silently dropping actions.
+
+Only the launcher owner may inspect or manage its plugins. Session-scoped
+operations additionally verify session ownership, the session's launcher, and
+its recorded working directory. Sharing a session does not grant plugin install
+or command authority on its computer. Replies are correlated to both request id
+and launcher id.
+
+Project policies are Ask, Always, and Never. The launch dialog offers explicit
+per-launch selections. The transcript's context card displays the persisted
+launch snapshot, including each skill or prompt's activation source, path,
+size, and full text behind an expander. Disabling a plugin for future launches
+does not claim to remove instructions already injected into a running agent.
+
+Named command actions carry literal arguments and the exact manifest command
+shown in the confirmation. The launcher rejects changed commands after approval.
+Session invocations persist separate Portal approval and result cards, including
+computer, directory, requesting user, command, exit status, and bounded output.
+A transport timeout is an unknown outcome, not proof that execution stopped.
+
+Surface controls report health and startup logs. Opening a surface registers the
+session's ordinary port forward and preserves its owner checks and private-by-
+default semantics. Replacing an existing forward requires confirmation; a
+session still has one active forwarded port.

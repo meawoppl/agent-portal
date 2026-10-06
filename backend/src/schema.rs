@@ -169,16 +169,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    session_forwards (id) {
-        id -> Uuid,
-        session_id -> Uuid,
-        port -> Int4,
-        created_at -> Timestamp,
-        public -> Bool,
-    }
-}
-
-diesel::table! {
     session_edit_stack_items (id) {
         id -> Uuid,
         session_id -> Uuid,
@@ -198,6 +188,16 @@ diesel::table! {
 }
 
 diesel::table! {
+    session_forwards (id) {
+        id -> Uuid,
+        session_id -> Uuid,
+        port -> Int4,
+        created_at -> Timestamp,
+        public -> Bool,
+    }
+}
+
+diesel::table! {
     session_members (id) {
         id -> Uuid,
         session_id -> Uuid,
@@ -205,6 +205,13 @@ diesel::table! {
         #[max_length = 20]
         role -> Varchar,
         created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    session_plugin_overrides (session_id) {
+        session_id -> Uuid,
+        overrides -> Jsonb,
     }
 }
 
@@ -347,6 +354,7 @@ diesel::joinable!(session_edit_stack_items -> users (created_by));
 diesel::joinable!(session_forwards -> sessions (session_id));
 diesel::joinable!(session_members -> sessions (session_id));
 diesel::joinable!(session_members -> users (user_id));
+diesel::joinable!(session_plugin_overrides -> sessions (session_id));
 diesel::joinable!(sessions -> users (user_id));
 diesel::joinable!(turn_metrics -> messages (user_message_id));
 diesel::joinable!(turn_metrics -> sessions (session_id));
@@ -367,6 +375,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     session_edit_stack_items,
     session_forwards,
     session_members,
+    session_plugin_overrides,
     sessions,
     turn_metrics,
     user_identities,

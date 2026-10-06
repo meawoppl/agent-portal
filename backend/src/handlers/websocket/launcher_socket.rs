@@ -798,10 +798,27 @@ fn handle_launcher_message(
                     }
                 }
             }
+            let plugin_overrides = match last_session_id {
+                Some(session_id) => match app_state.conn().and_then(|mut conn| {
+                    crate::handlers::launchers::load_plugin_overrides(&mut conn, session_id)
+                }) {
+                    Ok(overrides) => overrides,
+                    Err(error) => {
+                        warn!(
+                            "{}: session {}: {:?}",
+                            crate::markers::PLUGIN_POLICY_LOAD_FAILED,
+                            session_id,
+                            error
+                        );
+                        return;
+                    }
+                },
+                None => Vec::new(),
+            };
             match crate::handlers::launchers::mint_launch_token(app_state, user_id) {
                 Ok(auth_token) => {
                     let launch_msg = ServerToLauncher::LaunchSession {
-                        plugin_overrides: Vec::new(),
+                        plugin_overrides,
                         request_id,
                         user_id,
                         auth_token,
@@ -1147,6 +1164,19 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
             continue;
         };
 
+        let plugin_overrides =
+            match crate::handlers::launchers::load_plugin_overrides(&mut conn, session.id) {
+                Ok(overrides) => overrides,
+                Err(error) => {
+                    warn!(
+                        "{}: session {}: {:?}",
+                        crate::markers::PLUGIN_POLICY_LOAD_FAILED,
+                        session.id,
+                        error
+                    );
+                    continue;
+                }
+            };
         let request_id = Uuid::new_v4();
         app_state
             .session_manager
@@ -1174,7 +1204,7 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
         );
 
         let launch_msg = ServerToLauncher::LaunchSession {
-            plugin_overrides: Vec::new(),
+            plugin_overrides,
             request_id,
             user_id,
             auth_token,

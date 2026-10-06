@@ -335,13 +335,15 @@ pub async fn resume_session(
 
     let auth_token = crate::handlers::launchers::mint_launch_token(&app_state, session.user_id)?;
     let request_id = Uuid::new_v4();
+    let plugin_overrides =
+        crate::handlers::launchers::load_plugin_overrides(&mut conn, session_id)?;
     let claude_args = jsonb_string_vec(&session.claude_args);
     let agent_type = shared::AgentType::parse_or_default(&session.agent_type);
 
     crate::db::session_lifecycle::resume(&mut conn, session_id)?;
 
     let launch_msg = shared::ServerToLauncher::LaunchSession {
-        plugin_overrides: Vec::new(),
+        plugin_overrides,
         request_id,
         user_id: session.user_id,
         auth_token,

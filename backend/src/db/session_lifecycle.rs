@@ -19,6 +19,7 @@ pub(crate) struct DesiredSessionDraft {
     pub launcher_version: Option<String>,
     pub agent_type: shared::AgentType,
     pub claude_args: Vec<String>,
+    pub plugin_overrides: Vec<shared::api::PluginOverride>,
     pub forked_from_session_id: Option<Uuid>,
     pub fork_point_turn_id: Option<String>,
     pub fork_create_worktree: bool,
@@ -76,6 +77,17 @@ pub(crate) fn create_desired_session(
                 user_id: draft.user_id,
                 role: SessionRole::Owner.as_str().to_string(),
             })
+            .execute(conn)?;
+
+        use crate::schema::session_plugin_overrides;
+        diesel::insert_into(session_plugin_overrides::table)
+            .values((
+                session_plugin_overrides::session_id.eq(draft.session_id),
+                session_plugin_overrides::overrides.eq(
+                    serde_json::to_value(&draft.plugin_overrides).map_err(|error|
+                        diesel::result::Error::SerializationError(Box::new(error)))?
+                ),
+            ))
             .execute(conn)?;
 
         Ok(())
@@ -152,6 +164,7 @@ mod tests {
             launcher_version: Some("launcher-test".into()),
             agent_type: shared::AgentType::Codex,
             claude_args: vec!["-c".into(), "model=test".into()],
+            plugin_overrides: vec![],
             forked_from_session_id: None,
             fork_point_turn_id: None,
             fork_create_worktree: false,

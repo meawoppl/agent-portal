@@ -49,6 +49,15 @@ pub async fn launch_session(
         .session_manager
         .launcher_host_version(launcher_id)
         .ok_or(AppError::NotFound("Launcher not found"))?;
+    if !req.plugin_overrides.is_empty()
+        && !app_state
+            .session_manager
+            .launcher_supports_capability(launcher_id, shared::LAUNCHER_CAPABILITY_PLUGINS)
+    {
+        return Err(AppError::BadRequest(
+            "Selected launcher cannot honor plugin selections. Update agent-portal on that machine and try again.",
+        ));
+    }
     let worktree =
         if req.create_worktree && matches!(&req.launch.worktree, shared::WorktreeMode::None) {
             shared::WorktreeMode::Repo { branch: None }
@@ -104,6 +113,7 @@ pub async fn launch_session(
                 .launcher_version(Some(launcher_id)),
             agent_type: req.launch.agent_type,
             claude_args: req.launch.claude_args.clone(),
+            plugin_overrides: req.plugin_overrides.clone(),
             forked_from_session_id: None,
             fork_point_turn_id: None,
             fork_create_worktree: false,
@@ -187,6 +197,25 @@ fn default_session_name(working_directory: &str) -> String {
         .to_string()
 }
 
+/// Replay the exact explicit launch choices. Invalid persisted data fails closed:
+/// falling back to an empty list could reactivate an explicitly disabled plugin.
+pub(crate) fn load_plugin_overrides(
+    conn: &mut diesel::PgConnection,
+    session_id: Uuid,
+) -> Result<Vec<shared::api::PluginOverride>, AppError> {
+    use crate::schema::session_plugin_overrides;
+    let value = session_plugin_overrides::table
+        .find(session_id)
+        .select(session_plugin_overrides::overrides)
+        .first::<serde_json::Value>(conn)
+        .optional()?;
+    value
+        .map(serde_json::from_value)
+        .transpose()
+        .map(|overrides| overrides.unwrap_or_default())
+        .map_err(|error| AppError::Internal(format!("Invalid stored plugin overrides: {error}")))
+}
+
 /// POST /api/sessions/:session_id/fork — create a divergent session on the
 /// source session's launcher, where the agent-native conversation state lives.
 pub async fn fork_session(
@@ -228,6 +257,7 @@ pub async fn fork_session(
         ));
     }
 
+    let plugin_overrides = load_plugin_overrides(&mut conn, source_id)?;
     let create_worktree = req.directory_mode == ForkDirectoryMode::Worktree;
     if create_worktree
         && !app_state
@@ -281,6 +311,7 @@ pub async fn fork_session(
                 .launcher_version(Some(launcher_id)),
             agent_type,
             claude_args: claude_args.clone(),
+            plugin_overrides: plugin_overrides.clone(),
             forked_from_session_id: Some(source_id),
             fork_point_turn_id: req.fork_point_turn_id.clone(),
             fork_create_worktree: create_worktree,
@@ -309,7 +340,7 @@ pub async fn fork_session(
         .session_manager
         .register_launch_session(request_id, session_id);
     let launch = ServerToLauncher::LaunchSession {
-        plugin_overrides: Vec::new(),
+        plugin_overrides,
         request_id,
         user_id,
         auth_token,
@@ -745,6 +776,70 @@ pub async fn install_agent(
 mod tests {
     use super::*;
     use crate::handlers::websocket::LauncherConnection;
+
+    #[tokio::test]
+    async fn desired_session_plugin_overrides_survive_replay_and_cascade() {
+        let Some(pool) = crate::test_support::shared_pool() else {
+            return;
+        };
+        let mut conn = pool.get().unwrap();
+        let user = crate::test_support::insert_user(&mut conn, "plugin-overrides");
+        let session_id = Uuid::new_v4();
+        let overrides = vec![
+            shared::api::PluginOverride {
+                name: "detected-but-disabled".into(),
+                enabled: false,
+            },
+            shared::api::PluginOverride {
+                name: "explicitly-enabled".into(),
+                enabled: true,
+            },
+        ];
+        create_desired_session(
+            &mut conn,
+            DesiredSessionDraft {
+                session_id,
+                user_id: user.id,
+                working_directory: "/tmp/plugin-overrides".into(),
+                session_name: "plugin replay".into(),
+                hostname: "test".into(),
+                launcher_id: None,
+                client_version: None,
+                launcher_version: None,
+                agent_type: AgentType::Claude,
+                claude_args: vec![],
+                plugin_overrides: overrides.clone(),
+                forked_from_session_id: None,
+                fork_point_turn_id: None,
+                fork_create_worktree: false,
+            },
+        )
+        .unwrap();
+        // The initial launch may never reach the launcher: a fresh DB read
+        // must still retain both the positive and negative explicit choices.
+        assert_eq!(
+            load_plugin_overrides(&mut conn, session_id).unwrap(),
+            overrides
+        );
+        assert!(load_plugin_overrides(&mut conn, Uuid::new_v4())
+            .unwrap()
+            .is_empty());
+        use crate::schema::{session_plugin_overrides, sessions, users};
+        diesel::update(session_plugin_overrides::table.find(session_id))
+            .set(session_plugin_overrides::overrides.eq(serde_json::json!([{"name":"broken"}])))
+            .execute(&mut conn)
+            .unwrap();
+        assert!(load_plugin_overrides(&mut conn, session_id).is_err());
+        diesel::delete(sessions::table.find(session_id))
+            .execute(&mut conn)
+            .unwrap();
+        assert!(load_plugin_overrides(&mut conn, session_id)
+            .unwrap()
+            .is_empty());
+        diesel::delete(users::table.find(user.id))
+            .execute(&mut conn)
+            .unwrap();
+    }
 
     fn launcher_for(user_id: Uuid, hostname: &str) -> LauncherConnection {
         let (sender, _rx) = crate::handlers::websocket::conn_channel(64);

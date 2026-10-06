@@ -151,6 +151,8 @@ impl SessionManager {
         match removed {
             Some(connection) => {
                 info!("Unregistering launcher: {}", launcher_id);
+                self.pending_plugin_requests
+                    .retain(|_, (host, _)| host != launcher_id);
                 // Only release the dedup slot if it still points at us — a
                 // different launcher_id may have claimed (user_id, hostname)
                 // since, and must not be evicted.
