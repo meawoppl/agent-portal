@@ -9,20 +9,18 @@ use shared::api::{
     InstallAgentResponse, LaunchRequest, ProbeAgentsResponse, StartAgentLoginRequest,
     StartAgentLoginResponse, SubmitAgentLoginCodeRequest,
 };
-use shared::{
-    AgentLoginOutcome, AgentType, LauncherInfo, LauncherToServer, ServerToLauncher, SessionRole,
-    SessionStatus,
-};
+use shared::{AgentLoginOutcome, AgentType, LauncherInfo, LauncherToServer, ServerToLauncher};
 use std::sync::Arc;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::auth::CurrentUserId;
+use crate::db::session_lifecycle::{create_desired_session, DesiredSessionDraft};
 use crate::errors::AppError;
 use crate::handlers::launcher_rpc::{launcher_rpc, require_launcher_owner};
 use crate::handlers::responses::EmptyResponse;
 use crate::handlers::websocket::{LauncherRpcError, LauncherRpcKind, SessionManager};
-use crate::models::{jsonb_string_vec, NewSessionMember, NewSessionWithId};
+use crate::models::jsonb_string_vec;
 use crate::AppState;
 
 /// GET /api/launchers - List connected launchers for the current user
@@ -92,7 +90,7 @@ pub async fn launch_session(
     let request_id = Uuid::new_v4();
     let session_id = Uuid::new_v4();
     create_desired_session(
-        &app_state,
+        &mut *app_state.conn()?,
         DesiredSessionDraft {
             session_id,
             user_id,
@@ -101,10 +99,14 @@ pub async fn launch_session(
             hostname,
             launcher_id: Some(launcher_id),
             client_version: Some(version),
+            launcher_version: app_state
+                .session_manager
+                .launcher_version(Some(launcher_id)),
             agent_type: req.launch.agent_type,
             claude_args: req.launch.claude_args.clone(),
             forked_from_session_id: None,
             fork_point_turn_id: None,
+            fork_create_worktree: false,
         },
     )?;
     app_state
@@ -182,80 +184,6 @@ fn default_session_name(working_directory: &str) -> String {
         .filter(|name| shared::strings::is_non_empty(name))
         .unwrap_or(working_directory)
         .to_string()
-}
-
-pub(crate) struct DesiredSessionDraft {
-    session_id: Uuid,
-    user_id: Uuid,
-    working_directory: String,
-    session_name: String,
-    hostname: String,
-    launcher_id: Option<Uuid>,
-    client_version: Option<String>,
-    agent_type: shared::AgentType,
-    claude_args: Vec<String>,
-    forked_from_session_id: Option<Uuid>,
-    fork_point_turn_id: Option<String>,
-}
-
-pub(crate) fn create_desired_session(
-    app_state: &AppState,
-    draft: DesiredSessionDraft,
-) -> Result<(), AppError> {
-    let mut conn = app_state.conn()?;
-
-    use crate::schema::{session_members, sessions};
-    use diesel::prelude::*;
-
-    let new_session = NewSessionWithId {
-        id: draft.session_id,
-        user_id: draft.user_id,
-        session_name: draft.session_name,
-        session_key: draft.session_id.to_string(),
-        working_directory: draft.working_directory,
-        status: SessionStatus::Disconnected.as_str().to_string(),
-        git_branch: None,
-        client_version: draft.client_version,
-        hostname: draft.hostname,
-        launcher_id: draft.launcher_id,
-        agent_type: draft.agent_type.as_str().to_string(),
-        repo_url: None,
-        scheduled_task_id: None,
-        paused: false,
-        claude_args: serde_json::to_value(&draft.claude_args)
-            .unwrap_or_else(|_| serde_json::Value::Array(Vec::new())),
-        // Stamp the launcher's live version now — the registry entry that
-        // holds it is gone by archive time (see
-        // `NewSessionWithId::launcher_version`).
-        launcher_version: app_state
-            .session_manager
-            .launcher_version(draft.launcher_id),
-    };
-
-    diesel::insert_into(sessions::table)
-        .values(&new_session)
-        .execute(&mut conn)?;
-
-    if draft.forked_from_session_id.is_some() || draft.fork_point_turn_id.is_some() {
-        diesel::update(sessions::table.find(draft.session_id))
-            .set((
-                sessions::forked_from_session_id.eq(draft.forked_from_session_id),
-                sessions::fork_point_turn_id.eq(draft.fork_point_turn_id),
-                sessions::fork_launch_pending.eq(true),
-                sessions::fork_create_worktree.eq(false),
-            ))
-            .execute(&mut conn)?;
-    }
-
-    diesel::insert_into(session_members::table)
-        .values(NewSessionMember {
-            session_id: draft.session_id,
-            user_id: draft.user_id,
-            role: SessionRole::Owner.as_str().to_string(),
-        })
-        .execute(&mut conn)?;
-
-    Ok(())
 }
 
 /// POST /api/sessions/:session_id/fork — create a divergent session on the
@@ -338,7 +266,7 @@ pub async fn fork_session(
     let request_id = Uuid::new_v4();
     let session_id = Uuid::new_v4();
     create_desired_session(
-        &app_state,
+        &mut conn,
         DesiredSessionDraft {
             session_id,
             user_id,
@@ -347,17 +275,16 @@ pub async fn fork_session(
             hostname,
             launcher_id: Some(launcher_id),
             client_version: Some(version),
+            launcher_version: app_state
+                .session_manager
+                .launcher_version(Some(launcher_id)),
             agent_type,
             claude_args: claude_args.clone(),
             forked_from_session_id: Some(source_id),
             fork_point_turn_id: req.fork_point_turn_id.clone(),
+            fork_create_worktree: create_worktree,
         },
     )?;
-    if create_worktree {
-        diesel::update(sessions::table.find(session_id))
-            .set(sessions::fork_create_worktree.eq(true))
-            .execute(&mut conn)?;
-    }
     let fork_notice = fork_child_notice(
         &source.session_name,
         source_id,

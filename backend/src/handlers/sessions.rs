@@ -282,14 +282,7 @@ pub async fn stop_session(
     // next heartbeat. Writing first also closes the race where reconciliation
     // could run between killing the process and recording that it must stay
     // down.
-    use crate::schema::sessions;
-    diesel::update(sessions::table.find(session_id))
-        .set((
-            sessions::paused.eq(true),
-            sessions::status.eq(SessionStatus::Disconnected.as_str()),
-            sessions::updated_at.eq(diesel::dsl::now),
-        ))
-        .execute(&mut conn)?;
+    crate::db::session_lifecycle::pause(&mut conn, session_id)?;
 
     // Stopping is idempotent: the durable do-not-relaunch state is the result.
     // A missing live proxy/launcher process already satisfies that result.
@@ -315,14 +308,7 @@ pub async fn pause_session(
         current_user_id,
     )?;
 
-    use crate::schema::sessions;
-    diesel::update(sessions::table.find(session_id))
-        .set((
-            sessions::paused.eq(true),
-            sessions::status.eq(SessionStatus::Disconnected.as_str()),
-            sessions::updated_at.eq(diesel::dsl::now),
-        ))
-        .execute(&mut conn)?;
+    crate::db::session_lifecycle::pause(&mut conn, session_id)?;
 
     app_state.session_manager.disconnect_session(session_id);
     app_state
@@ -352,13 +338,7 @@ pub async fn resume_session(
     let claude_args = jsonb_string_vec(&session.claude_args);
     let agent_type = shared::AgentType::parse_or_default(&session.agent_type);
 
-    use crate::schema::sessions;
-    diesel::update(sessions::table.find(session_id))
-        .set((
-            sessions::paused.eq(false),
-            sessions::updated_at.eq(diesel::dsl::now),
-        ))
-        .execute(&mut conn)?;
+    crate::db::session_lifecycle::resume(&mut conn, session_id)?;
 
     let launch_msg = shared::ServerToLauncher::LaunchSession {
         request_id,
@@ -384,9 +364,7 @@ pub async fn resume_session(
         .session_manager
         .send_to_launcher(&launcher_id, launch_msg)
     {
-        let _ = diesel::update(sessions::table.find(session_id))
-            .set(sessions::paused.eq(true))
-            .execute(&mut conn);
+        let _ = crate::db::session_lifecycle::cancel_resume(&mut conn, session_id);
         return Err(AppError::Internal(
             "Failed to send resume request to launcher".to_string(),
         ));
