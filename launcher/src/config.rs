@@ -25,6 +25,10 @@ pub struct InstalledPlugin {
     #[serde(default = "default_true")]
     pub enabled: bool,
     pub installed_at: chrono::DateTime<chrono::Utc>,
+    /// Full git commit of the installed checkout, when the source was a git
+    /// repository. Compared against the remote to report available updates.
+    #[serde(default)]
+    pub revision: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -652,6 +656,7 @@ description: Route KiCad PCB layouts.
                 reference: None,
                 enabled: true,
                 installed_at: chrono::Utc::now(),
+                revision: None,
             },
         );
         let config = LauncherConfig {

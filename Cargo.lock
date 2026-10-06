@@ -103,6 +103,7 @@ dependencies = [
  "croner",
  "directories",
  "dirs",
+ "libc",
  "muse-session-lib",
  "portal-auth",
  "portal-update",

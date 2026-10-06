@@ -177,6 +177,17 @@ enum PluginAction {
         /// Git ref to fetch/checkout.
         #[arg(long = "ref")]
         reference: Option<String>,
+        /// Replace an existing install (or a non-plugin directory) of the same name.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Re-fetch an installed plugin from its source and re-run setup
+    Update {
+        /// Plugin name
+        name: String,
+        /// Only report whether the source has a newer revision
+        #[arg(long)]
+        check: bool,
     },
     /// Show plugin metadata
     Info {
@@ -223,6 +234,11 @@ enum PluginAction {
     },
     /// Stop a running plugin surface
     Stop {
+        /// Plugin name
+        name: String,
+    },
+    /// Stop the plugin surface (if running) and start it again
+    Restart {
         /// Plugin name
         name: String,
     },
@@ -571,13 +587,15 @@ async fn main() -> anyhow::Result<()> {
             };
         }
         Some(Command::Plugin { action }) => {
-            return match action {
+            let result = match action {
                 PluginAction::List => plugin::list(),
                 PluginAction::Install {
                     source,
                     name,
                     reference,
-                } => plugin::install(&source, name.as_deref(), reference.as_deref()),
+                    force,
+                } => plugin::install(&source, name.as_deref(), reference.as_deref(), force),
+                PluginAction::Update { name, check } => plugin::update(&name, check),
                 PluginAction::Info { name } => plugin::info(&name),
                 PluginAction::Runtime { name, json } => plugin::runtime(&name, json),
                 PluginAction::Skills { name } => plugin::skills(name.as_deref()),
@@ -588,12 +606,21 @@ async fn main() -> anyhow::Result<()> {
                 PluginAction::Doctor { name } => plugin::doctor(&name),
                 PluginAction::Start { name } => plugin::start(&name).await.map(|_| ()),
                 PluginAction::Stop { name } => plugin::stop(&name),
+                PluginAction::Restart { name } => plugin::restart(&name).await.map(|_| ()),
                 PluginAction::Status { name, json } => plugin::status(&name, json).await,
                 PluginAction::Open { name } => plugin::open(&name).await,
                 PluginAction::Remove { name } => plugin::remove(&name),
                 PluginAction::Enable { name } => plugin::set_enabled(&name, true),
                 PluginAction::Disable { name } => plugin::set_enabled(&name, false),
             };
+            // Plugin failures are user-facing (bad source, failed setup), so
+            // print the error chain without the backtrace that returning it
+            // from main would add under RUST_BACKTRACE=1.
+            if let Err(err) = result {
+                eprintln!("Error: {err:#}");
+                std::process::exit(1);
+            }
+            return Ok(());
         }
         Some(Command::Seppuku) => return seppuku::run().await,
         None => {}

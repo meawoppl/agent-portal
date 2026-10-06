@@ -25,16 +25,21 @@ fn path_with_local_bin(existing: &str, home: Option<&str>) -> String {
 }
 
 /// The PATH the installed service should run with: the current environment's
-/// PATH, guaranteed to include `$HOME/.local/bin` (for `claude`) and the
+/// PATH, guaranteed to include `$HOME/.local/bin` (for `claude`), an existing
+/// `$HOME/.cargo/bin` (plugin setup commands build with `cargo`), and the
 /// launcher binary's own directory — agents spawned by the service shell out
 /// to `agent-portal` (messaging, port forwarding), and the binary often lives
 /// somewhere systemd/launchd's minimal PATH doesn't cover.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn service_path(binary_path: &str) -> String {
-    let base = path_with_local_bin(
-        &std::env::var("PATH").unwrap_or_default(),
-        std::env::var("HOME").ok().as_deref(),
-    );
+    let home = std::env::var("HOME").ok();
+    let mut base = path_with_local_bin(&std::env::var("PATH").unwrap_or_default(), home.as_deref());
+    if let Some(home) = home.filter(|h| !h.is_empty()) {
+        let cargo_bin = format!("{home}/.cargo/bin");
+        if std::path::Path::new(&cargo_bin).is_dir() {
+            base = path_with_dir(&base, &cargo_bin);
+        }
+    }
     match std::path::Path::new(binary_path).parent() {
         Some(dir) => path_with_dir(&base, &dir.to_string_lossy()),
         None => base,

@@ -8,6 +8,7 @@ use std::{
     ffi::OsStr,
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    time::Duration,
 };
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -17,6 +18,9 @@ use crate::config::{self, InstalledPlugin};
 
 const MANIFEST: &str = "agent-portal-plugin.toml";
 const SURFACE_STATE_FILE: &str = "surface.json";
+const SURFACE_LOG_FILE: &str = "surface.log";
+const SURFACE_LOG_TAIL_LINES: usize = 40;
+const SURFACE_HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Deserialize)]
 struct PluginManifest {
@@ -126,6 +130,10 @@ pub(crate) struct SurfaceState {
     plugin: String,
     port: u16,
     pid: Option<u32>,
+    /// `pid` leads its own process group, so stopping signals the whole
+    /// group. Records written before surfaces got their own group lack this.
+    #[serde(default)]
+    process_group: bool,
     command: String,
     cwd: String,
     session_id: String,
@@ -182,11 +190,33 @@ struct RuntimeToolchainJson {
     env: std::collections::BTreeMap<String, String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum SurfaceHealth {
+    Stopped,
+    Healthy,
+    Unhealthy,
+    Exited,
+}
+
+impl SurfaceHealth {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Stopped => "stopped",
+            Self::Healthy => "healthy",
+            Self::Unhealthy => "unhealthy",
+            Self::Exited => "exited",
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 struct SurfaceStatusJson {
     plugin: String,
+    state: SurfaceHealth,
     surface: Option<SurfaceState>,
     healthy: bool,
+    log_tail: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -488,10 +518,15 @@ pub fn setup(name: &str, toolchain_name: Option<&str>) -> Result<()> {
     }
 }
 
-pub fn install(source: &str, name: Option<&str>, reference: Option<&str>) -> Result<()> {
+pub fn install(
+    source: &str,
+    name: Option<&str>,
+    reference: Option<&str>,
+    force: bool,
+) -> Result<()> {
     let spec = parse_source(source)?;
     let staging = materialize_source(&spec, reference)?;
-    let source_root = staging.join(&spec.subdir);
+    let source_root = staging.path().join(&spec.subdir);
     let manifest = load_manifest(&source_root)?;
     let install_name = name.unwrap_or(&manifest.name);
     validate_plugin_name(install_name)?;
@@ -501,53 +536,270 @@ pub fn install(source: &str, name: Option<&str>, reference: Option<&str>) -> Res
             manifest.name
         );
     }
+    let revision = git_revision(staging.path());
 
-    let dest = config::plugin_root().join(install_name);
-    if dest.exists() {
-        bail!(
-            "plugin `{install_name}` already exists at {}; remove it first",
+    let registered = config::load_config().plugins.get(install_name).cloned();
+    let dest = registered
+        .as_ref()
+        .map(|installed| PathBuf::from(&installed.path))
+        .unwrap_or_else(|| config::plugin_root().join(install_name));
+    recover_interrupted_replace(install_name, &dest)?;
+    if registered.is_some() {
+        if !force {
+            bail!(
+                "plugin `{install_name}` is already installed; use `agent-portal plugin update {install_name}` or `install --force`"
+            );
+        }
+        if let Ok(runtime) = load_runtime(install_name) {
+            halt_surface_quietly(&runtime);
+        }
+    } else if dest.exists() {
+        // An unregistered directory under the plugin root is the debris of an
+        // install that failed before registering. Clear it so the retry can
+        // proceed, but only when it is recognisably that plugin (or forced).
+        let leftover = load_manifest(&dest)
+            .map(|m| m.name == install_name)
+            .unwrap_or(false);
+        if !leftover && !force {
+            bail!(
+                "{} exists but is not an install of `{install_name}`; move it aside or pass --force",
+                dest.display()
+            );
+        }
+        println!(
+            "Removing unregistered leftover directory {}",
             dest.display()
         );
+        std::fs::remove_dir_all(&dest)
+            .with_context(|| format!("failed to remove {}", dest.display()))?;
     }
-    copy_dir(&source_root, &dest).with_context(|| {
-        format!(
-            "failed to copy plugin from {} to {}",
-            source_root.display(),
-            dest.display()
-        )
-    })?;
-
-    if let Some(setup) = &manifest.install.setup {
-        println!("Running setup: {setup}");
-        run_manifest_command(&dest, setup)?;
-    }
-
-    config::save_installed_plugin(
+    let record = InstalledPlugin {
+        path: dest.display().to_string(),
+        source: spec.original,
+        source_subdir: Some(path_display(&spec.subdir)),
+        reference: reference.map(str::to_string),
+        enabled: true,
+        installed_at: chrono::Utc::now(),
+        revision,
+    };
+    replace_checkout(
         install_name,
-        InstalledPlugin {
-            path: dest.display().to_string(),
-            source: spec.original,
-            source_subdir: Some(path_display(&spec.subdir)),
-            reference: reference.map(str::to_string),
-            enabled: true,
-            installed_at: chrono::Utc::now(),
-        },
+        &source_root,
+        &dest,
+        manifest.install.setup.as_deref(),
+        false,
+        || config::save_installed_plugin(install_name, record),
     )?;
     println!("Installed {install_name} to {}", dest.display());
     Ok(())
 }
 
-pub fn remove(name: &str) -> Result<()> {
-    let Some(installed) = config::remove_installed_plugin(name)? else {
-        bail!("plugin `{name}` is not installed");
+/// Re-fetch an installed plugin from its recorded source and re-run setup.
+/// The plugin-local `.portal` state (toolchains, caches, data) is carried
+/// across, and the previous checkout is restored if anything fails.
+pub fn update(name: &str, check: bool) -> Result<()> {
+    let installed = installed_plugin(name)?;
+    if check {
+        match update_available(&installed) {
+            Some(true) => println!("{name}: update available"),
+            Some(false) => println!("{name}: up to date"),
+            None => println!("{name}: unknown (source is not a git repository)"),
+        }
+        return Ok(());
+    }
+    let spec = parse_source(&installed.source)?;
+    let staging = materialize_source(&spec, installed.reference.as_deref())?;
+    let source_root = staging.path().join(&spec.subdir);
+    let manifest = load_manifest(&source_root)?;
+    if manifest.name != name {
+        bail!(
+            "source {} now provides plugin `{}`, not `{name}`",
+            installed.source,
+            manifest.name
+        );
+    }
+    let revision = git_revision(staging.path());
+
+    let dest = PathBuf::from(&installed.path);
+    recover_interrupted_replace(name, &dest)?;
+    if let Ok(runtime) = load_runtime(name) {
+        halt_surface_quietly(&runtime);
+    }
+    let unchanged = revision.is_some() && revision == installed.revision;
+    let record = InstalledPlugin {
+        installed_at: chrono::Utc::now(),
+        revision,
+        ..installed
     };
-    let path = PathBuf::from(installed.path);
-    if path.exists() {
-        std::fs::remove_dir_all(&path)
-            .with_context(|| format!("failed to remove {}", path.display()))?;
+    replace_checkout(
+        name,
+        &source_root,
+        &dest,
+        manifest.install.setup.as_deref(),
+        true,
+        || config::save_installed_plugin(name, record),
+    )?;
+    if unchanged {
+        println!("{name} was already up to date; setup re-ran.");
+    } else {
+        println!("Updated {name}.");
+    }
+    Ok(())
+}
+
+fn replace_backup_path(name: &str, dest: &Path) -> PathBuf {
+    dest.with_file_name(format!(".{name}.replace-backup"))
+}
+
+/// A backup only outlives a replacement that was interrupted mid-flight (the
+/// launcher was killed). It is the last known-good checkout, so restore it
+/// before anything else touches the directory; never delete it blindly.
+fn recover_interrupted_replace(name: &str, dest: &Path) -> Result<()> {
+    let backup = replace_backup_path(name, dest);
+    if !backup.exists() {
+        return Ok(());
+    }
+    // The interrupted run may already have moved the plugin-local state into
+    // the partial checkout; put it back before discarding that checkout.
+    let partial_state = dest.join(".portal");
+    let backup_state = backup.join(".portal");
+    if partial_state.exists() && !backup_state.exists() {
+        std::fs::rename(&partial_state, &backup_state).with_context(|| {
+            format!(
+                "failed to move {} back into {}",
+                partial_state.display(),
+                backup.display()
+            )
+        })?;
+    }
+    if dest.exists() {
+        std::fs::remove_dir_all(dest)
+            .with_context(|| format!("failed to clear partial {}", dest.display()))?;
+    }
+    std::fs::rename(&backup, dest).with_context(|| {
+        format!(
+            "failed to restore {} from {}",
+            dest.display(),
+            backup.display()
+        )
+    })?;
+    eprintln!(
+        "Restored {} from an interrupted install/update",
+        dest.display()
+    );
+    Ok(())
+}
+
+/// Put the plugin at `source_root` in place at `dest`, run its setup, and
+/// `register` it, as one transaction: an existing checkout is moved aside
+/// first and restored if the copy, setup, or registration fails, and a failed
+/// fresh install leaves nothing behind. Either way no unregistered,
+/// half-built directory survives to block a retry. `carry_state` moves the
+/// old checkout's `.portal` (managed toolchains, caches, data) into the new
+/// one, and back again on rollback.
+fn replace_checkout(
+    name: &str,
+    source_root: &Path,
+    dest: &Path,
+    setup: Option<&str>,
+    carry_state: bool,
+    register: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    let backup = replace_backup_path(name, dest);
+    let had_previous = dest.exists();
+    if had_previous {
+        std::fs::rename(dest, &backup)
+            .with_context(|| format!("failed to move {} aside", dest.display()))?;
+    }
+    let old_state = backup.join(".portal");
+    let new_state = dest.join(".portal");
+    let result = (|| -> Result<()> {
+        copy_dir(source_root, dest).with_context(|| {
+            format!(
+                "failed to copy plugin from {} to {}",
+                source_root.display(),
+                dest.display()
+            )
+        })?;
+        if carry_state && old_state.exists() {
+            if new_state.exists() {
+                std::fs::remove_dir_all(&new_state)?;
+            }
+            std::fs::rename(&old_state, &new_state)?;
+        }
+        if let Some(setup) = setup {
+            println!("Running setup: {setup}");
+            run_manifest_command(dest, setup)?;
+        }
+        register()
+    })();
+    let Err(err) = result else {
+        if had_previous {
+            let _ = std::fs::remove_dir_all(&backup);
+        }
+        return Ok(());
+    };
+    if carry_state && had_previous && new_state.exists() && !old_state.exists() {
+        std::fs::rename(&new_state, &old_state).with_context(|| {
+            format!(
+                "{err:#}; moving {} back into {} also failed",
+                new_state.display(),
+                backup.display()
+            )
+        })?;
+    }
+    if dest.exists() {
+        std::fs::remove_dir_all(dest).with_context(|| {
+            format!(
+                "{err:#}; removing the partial {} also failed",
+                dest.display()
+            )
+        })?;
+    }
+    if had_previous {
+        std::fs::rename(&backup, dest).with_context(|| {
+            format!(
+                "{err:#}; restoring {} from {} also failed",
+                dest.display(),
+                backup.display()
+            )
+        })?;
+        return Err(err.context(format!(
+            "`{name}` failed to install; the previous version was restored"
+        )));
+    }
+    Err(err.context(format!(
+        "`{name}` failed to install; the partial install was removed, so it is safe to retry"
+    )))
+}
+
+pub fn remove(name: &str) -> Result<()> {
+    validate_plugin_name(name)?;
+    if !remove_installed(name)? {
+        bail!("plugin `{name}` is not installed");
     }
     println!("Removed {name}.");
     Ok(())
+}
+
+/// Stop the plugin's surface, unregister it, and delete its directory. Also
+/// clears an unregistered directory left by a failed install. Returns whether
+/// there was anything to remove.
+fn remove_installed(name: &str) -> Result<bool> {
+    if let Ok(runtime) = load_runtime(name) {
+        halt_surface_quietly(&runtime);
+    }
+    let removed = config::remove_installed_plugin(name)?;
+    let path = match &removed {
+        Some(installed) => PathBuf::from(&installed.path),
+        None => config::plugin_root().join(name),
+    };
+    let existed = path.exists();
+    if existed {
+        std::fs::remove_dir_all(&path)
+            .with_context(|| format!("failed to remove {}", path.display()))?;
+    }
+    Ok(removed.is_some() || existed)
 }
 
 pub fn set_enabled(name: &str, enabled: bool) -> Result<()> {
@@ -574,12 +826,43 @@ pub async fn open(name: &str) -> Result<()> {
 pub async fn start(name: &str) -> Result<SurfaceState> {
     let runtime = load_runtime(name)?;
     ensure_enabled(name, &runtime.installed)?;
+    let cwd = std::env::current_dir().context("could not determine current directory")?;
+    let (state, reused) = start_surface(&runtime, &cwd, &current_session_id()).await?;
+    if reused {
+        println!("plugin `{name}` surface already running on {}", state.port);
+    } else {
+        println!("started `{name}` surface on 127.0.0.1:{}", state.port);
+    }
+    Ok(state)
+}
+
+pub async fn restart(name: &str) -> Result<SurfaceState> {
+    let runtime = load_runtime(name)?;
+    ensure_enabled(name, &runtime.installed)?;
     if let Some(state) = surface_state(&runtime)? {
+        halt_surface(&runtime, &state)?;
+    }
+    start(name).await
+}
+
+/// Start the plugin's surface for `cwd`/`session_id`, or reuse a healthy one.
+/// Returns the surface record and whether it was reused.
+async fn start_surface(
+    runtime: &PluginRuntime,
+    cwd: &Path,
+    session_id: &str,
+) -> Result<(SurfaceState, bool)> {
+    let name = &runtime.name;
+    if cfg!(not(unix)) {
+        bail!("plugin surfaces are only supported on Linux and macOS");
+    }
+    if let Some(state) = surface_state(runtime)? {
         if surface_healthy(&state).await {
-            println!("plugin `{name}` surface already running on {}", state.port);
-            return Ok(state);
+            return Ok((state, true));
         }
-        let _ = std::fs::remove_file(surface_state_path(&runtime));
+        // A stale record may still have a live but unhealthy process tree
+        // behind it; reap it before starting a replacement.
+        halt_surface(runtime, &state)?;
     }
     let surface = runtime
         .manifest
@@ -591,99 +874,159 @@ pub async fn start(name: &str) -> Result<SurfaceState> {
         .as_deref()
         .ok_or_else(|| anyhow!("plugin `{name}` surface does not declare a start command"))?;
     let port = free_port()?;
-    let session_id = current_session_id();
-    let cwd = std::env::current_dir().context("could not determine current directory")?;
     let command = expand_runtime_command(
-        &runtime,
+        runtime,
         start,
         Some(&[
             ("port", port.to_string()),
-            ("session_id", session_id.clone()),
+            ("session_id", session_id.to_string()),
             ("cwd", cwd.display().to_string()),
         ]),
     );
-    let child = spawn_runtime_command(&runtime, &command)?;
+    let log_path = surface_log_path(runtime);
+    let mut child = spawn_surface(runtime, &command, &log_path)?;
+    let pid = child.id();
+    // Reap the child as soon as it exits, whatever happens below: a zombie
+    // leader keeps its process group looking alive, and a long-lived launcher
+    // must not accumulate them.
+    let exited = std::sync::Arc::new(std::sync::OnceLock::new());
+    {
+        let exited = exited.clone();
+        std::thread::spawn(move || {
+            if let Ok(status) = child.wait() {
+                let _ = exited.set(status);
+            }
+        });
+    }
     let state = SurfaceState {
         plugin: runtime.name.clone(),
         port,
-        pid: Some(child.id()),
+        pid: Some(pid),
+        process_group: cfg!(unix),
         command,
         cwd: cwd.display().to_string(),
-        session_id,
+        session_id: session_id.to_string(),
         health_path: surface.health_path.clone(),
         started_at: chrono::Utc::now(),
     };
-    wait_for_health(port, surface.health_path.as_deref()).await?;
-    write_surface_state(&runtime, &state)?;
-    println!("started `{name}` surface on 127.0.0.1:{port}");
-    Ok(state)
+    // Record the surface before waiting on health so a stop issued during
+    // startup still finds (and reaps) it. Any failure from here on tears the
+    // spawned tree down rather than orphaning it.
+    let started = match write_surface_state(runtime, &state) {
+        Ok(()) => wait_for_health(&exited, port, surface.health_path.as_deref()).await,
+        Err(err) => Err(err),
+    };
+    if let Err(err) = started {
+        let _ = stop_surface_process(&state);
+        let _ = std::fs::remove_file(surface_state_path(runtime));
+        let tail = log_tail(&log_path, SURFACE_LOG_TAIL_LINES).join("\n");
+        if tail.is_empty() {
+            return Err(err);
+        }
+        return Err(err.context(format!("surface log tail:\n{tail}")));
+    }
+    Ok((state, false))
 }
 
 pub async fn status(name: &str, json: bool) -> Result<()> {
     let runtime = load_runtime(name)?;
     ensure_enabled(name, &runtime.installed)?;
-    let state = surface_state(&runtime)?;
-    let healthy = match &state {
-        Some(state) => surface_healthy(state).await,
-        None => false,
-    };
+    let status = surface_status(&runtime).await?;
     if json {
-        let value = SurfaceStatusJson {
-            plugin: name.to_string(),
-            surface: state,
-            healthy,
-        };
-        println!("{}", serde_json::to_string_pretty(&value)?);
-    } else if let Some(state) = state {
+        println!("{}", serde_json::to_string_pretty(&status)?);
+    } else if let Some(state) = &status.surface {
         println!(
             "{}\t{}\t127.0.0.1:{}\tpid={}",
             name,
-            if healthy { "healthy" } else { "stale" },
+            status.state.label(),
             state.port,
             state
                 .pid
                 .map(|pid| pid.to_string())
                 .unwrap_or_else(|| "unknown".to_string())
         );
+        if status.state != SurfaceHealth::Healthy && !status.log_tail.is_empty() {
+            println!("--- {} ---", surface_log_path(&runtime).display());
+            for line in &status.log_tail {
+                println!("{line}");
+            }
+        }
     } else {
         println!("{name}\tstopped");
     }
     Ok(())
 }
 
+async fn surface_status(runtime: &PluginRuntime) -> Result<SurfaceStatusJson> {
+    let surface = surface_state(runtime)?;
+    let state = match &surface {
+        None => SurfaceHealth::Stopped,
+        Some(record) if !surface_alive(record) => SurfaceHealth::Exited,
+        Some(record) if surface_healthy(record).await => SurfaceHealth::Healthy,
+        Some(_) => SurfaceHealth::Unhealthy,
+    };
+    let log_tail = if surface.is_some() || surface_log_path(runtime).exists() {
+        log_tail(&surface_log_path(runtime), SURFACE_LOG_TAIL_LINES)
+    } else {
+        Vec::new()
+    };
+    Ok(SurfaceStatusJson {
+        plugin: runtime.name.clone(),
+        healthy: state == SurfaceHealth::Healthy,
+        state,
+        surface,
+        log_tail,
+    })
+}
+
 pub fn stop(name: &str) -> Result<()> {
     let runtime = load_runtime(name)?;
-    ensure_enabled(name, &runtime.installed)?;
     let Some(state) = surface_state(&runtime)? else {
         println!("plugin `{name}` surface is not running.");
         return Ok(());
     };
+    halt_surface(&runtime, &state)?;
+    println!("stopped `{name}` surface.");
+    Ok(())
+}
+
+/// Stop a recorded surface: run the manifest `stop` command if declared, then
+/// make sure the whole process tree is gone before dropping the record.
+fn halt_surface(runtime: &PluginRuntime, state: &SurfaceState) -> Result<()> {
     if let Some(stop) = runtime
         .manifest
         .surface
         .as_ref()
         .and_then(|surface| surface.stop.as_deref())
     {
-        run_runtime_command(
-            &runtime,
+        if let Err(err) = run_runtime_command(
+            runtime,
             stop,
             Some(&[
                 ("port", state.port.to_string()),
                 ("session_id", state.session_id.clone()),
                 ("cwd", state.cwd.clone()),
             ]),
-        )?;
-    } else if state.pid.is_some() {
-        #[cfg(unix)]
-        if let Some(pid) = state.pid {
-            let _ = Command::new("kill").arg(pid.to_string()).status();
+        ) {
+            eprintln!("warning: surface stop command failed: {err:#}");
         }
-        #[cfg(not(unix))]
-        eprintln!("plugin `{name}` declares no stop command; removing stale surface state only");
     }
-    let _ = std::fs::remove_file(surface_state_path(&runtime));
-    println!("stopped `{name}` surface.");
+    stop_surface_process(state)?;
+    let _ = std::fs::remove_file(surface_state_path(runtime));
     Ok(())
+}
+
+/// Best-effort surface stop ahead of a remove/reinstall, so the binary is not
+/// deleted out from under a live server.
+fn halt_surface_quietly(runtime: &PluginRuntime) {
+    if let Ok(Some(state)) = surface_state(runtime) {
+        if let Err(err) = halt_surface(runtime, &state) {
+            eprintln!(
+                "warning: failed to stop `{}` surface: {err:#}",
+                runtime.name
+            );
+        }
+    }
 }
 
 fn installed_plugin(name: &str) -> Result<InstalledPlugin> {
@@ -790,12 +1133,27 @@ fn split_subdir(source: &str) -> (&str, Option<&str>) {
     (source, None)
 }
 
-fn materialize_source(spec: &SourceSpec, reference: Option<&str>) -> Result<PathBuf> {
-    let dir = std::env::temp_dir().join(format!(
+/// A fetched plugin source in a temp directory, deleted on drop.
+struct StagingDir(PathBuf);
+
+impl StagingDir {
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for StagingDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn materialize_source(spec: &SourceSpec, reference: Option<&str>) -> Result<StagingDir> {
+    let dir = StagingDir(std::env::temp_dir().join(format!(
         "agent-portal-plugin-{}-{}",
         std::process::id(),
         chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
-    ));
+    )));
     match &spec.fetch {
         SourceFetch::Git(url) => {
             run_cmd(
@@ -806,12 +1164,12 @@ fn materialize_source(spec: &SourceSpec, reference: Option<&str>) -> Result<Path
                     OsStr::new("--depth"),
                     OsStr::new("1"),
                     OsStr::new(url),
-                    dir.as_os_str(),
+                    dir.path().as_os_str(),
                 ],
             )?;
             if let Some(reference) = reference {
                 run_cmd(
-                    &dir,
+                    dir.path(),
                     "git",
                     &[
                         OsStr::new("fetch"),
@@ -820,7 +1178,7 @@ fn materialize_source(spec: &SourceSpec, reference: Option<&str>) -> Result<Path
                     ],
                 )?;
                 run_cmd(
-                    &dir,
+                    dir.path(),
                     "git",
                     &[OsStr::new("checkout"), OsStr::new(reference)],
                 )?;
@@ -830,10 +1188,46 @@ fn materialize_source(spec: &SourceSpec, reference: Option<&str>) -> Result<Path
             let path = path
                 .canonicalize()
                 .with_context(|| format!("failed to resolve {}", path.display()))?;
-            copy_dir(&path, &dir)?;
+            copy_dir(&path, dir.path())?;
         }
     }
     Ok(dir)
+}
+
+/// Full commit of a git checkout, if `dir` is one.
+fn git_revision(dir: &Path) -> Option<String> {
+    let output = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(dir)
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .filter(|rev| !rev.is_empty())
+}
+
+/// Whether the recorded git source has moved past the installed revision.
+/// `None` when the source is not git or the remote cannot be reached.
+pub(crate) fn update_available(installed: &InstalledPlugin) -> Option<bool> {
+    let installed_rev = installed.revision.as_deref()?;
+    let SourceFetch::Git(url) = parse_source(&installed.source).ok()?.fetch else {
+        return None;
+    };
+    let reference = installed.reference.as_deref().unwrap_or("HEAD");
+    let output = Command::new("git")
+        .args(["ls-remote", &url, reference])
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let remote = stdout.split_whitespace().next()?;
+    Some(remote != installed_rev)
 }
 
 fn copy_dir(src: &Path, dest: &Path) -> Result<()> {
@@ -875,6 +1269,7 @@ fn run_manifest_command(root: &Path, command: &str) -> Result<()> {
             reference: None,
             enabled: true,
             installed_at: chrono::Utc::now(),
+            revision: None,
         },
         manifest: load_manifest(root)?,
         dirs: PluginRuntimeDirs::new(root),
@@ -894,19 +1289,132 @@ fn run_runtime_command(
         .with_context(|| format!("failed to run `{command}`"))?;
     if status.success() {
         Ok(())
+    } else if status.code() == Some(127) {
+        bail!(
+            "command `{command}` exited with {status}: a program it runs was not found on PATH ({}). \
+             Install it, or add its directory to the launcher service's PATH",
+            plugin_path_env()
+        )
     } else {
         bail!("command `{command}` exited with {status}")
     }
 }
 
-fn spawn_runtime_command(runtime: &PluginRuntime, command: &str) -> Result<std::process::Child> {
+/// Spawn a surface server with output captured to `log_path`. On unix it
+/// leads its own process group so a stop reaps the whole tree, not just the
+/// `sh -c` wrapper.
+fn spawn_surface(
+    runtime: &PluginRuntime,
+    command: &str,
+    log_path: &Path,
+) -> Result<std::process::Child> {
     prepare_plugin_home(&runtime.root)?;
-    shell_command(runtime, command)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
+    let log = std::fs::File::create(log_path)
+        .with_context(|| format!("failed to create {}", log_path.display()))?;
+    let mut cmd = shell_command(runtime, command);
+    cmd.stdin(Stdio::null())
+        .stdout(log.try_clone()?)
+        .stderr(log);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    cmd.spawn()
         .with_context(|| format!("failed to start `{command}`"))
+}
+
+/// Whether any process from a recorded surface is still alive. A surface
+/// spawned as a group leader is probed as a group, so children that outlive
+/// the leader still count.
+#[cfg(unix)]
+fn surface_alive(state: &SurfaceState) -> bool {
+    let Some(pid) = state.pid else {
+        return false;
+    };
+    let target = if state.process_group {
+        -(pid as i32)
+    } else {
+        pid as i32
+    };
+    // SAFETY: signal 0 only probes for existence; nothing is delivered.
+    unsafe { libc::kill(target, 0) == 0 }
+}
+
+#[cfg(not(unix))]
+fn surface_alive(state: &SurfaceState) -> bool {
+    state.pid.is_some()
+}
+
+/// Terminate a surface's process tree: SIGTERM, wait, then SIGKILL. Errors
+/// if anything survives, so callers never report a surface stopped while it
+/// still holds its port.
+#[cfg(unix)]
+fn stop_surface_process(state: &SurfaceState) -> Result<()> {
+    let Some(pid) = state.pid else {
+        return Ok(());
+    };
+    let signal = |sig: libc::c_int| {
+        if state.process_group {
+            session_lib::session::signal_process_group(pid, sig);
+        } else {
+            // A record from before surfaces had their own group: the pid is
+            // the `sh -c` wrapper, so signal its children explicitly too.
+            let _ = Command::new("pkill")
+                .arg(format!("-{sig}"))
+                .args(["-P", &pid.to_string()])
+                .status();
+            // SAFETY: plain kill(2) of a single recorded pid.
+            unsafe {
+                libc::kill(pid as i32, sig);
+            }
+        }
+    };
+    for (sig, grace) in [
+        (libc::SIGTERM, Duration::from_secs(5)),
+        (libc::SIGKILL, Duration::from_secs(2)),
+    ] {
+        if !surface_alive(state) {
+            return Ok(());
+        }
+        signal(sig);
+        let deadline = std::time::Instant::now() + grace;
+        while surface_alive(state) && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+    if surface_alive(state) {
+        bail!("surface process {pid} is still running after SIGKILL");
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn stop_surface_process(state: &SurfaceState) -> Result<()> {
+    if state.pid.is_some() {
+        eprintln!(
+            "plugin `{}` declares no stop command; removing surface state only",
+            state.plugin
+        );
+    }
+    Ok(())
+}
+
+fn surface_log_path(runtime: &PluginRuntime) -> PathBuf {
+    runtime.dirs.surfaces.join(SURFACE_LOG_FILE)
+}
+
+/// Last `lines` lines of a log file (empty if missing).
+fn log_tail(path: &Path, lines: usize) -> Vec<String> {
+    let Ok(body) = std::fs::read(path) else {
+        return Vec::new();
+    };
+    let body = String::from_utf8_lossy(&body);
+    let all: Vec<&str> = body.lines().collect();
+    all[all.len().saturating_sub(lines)..]
+        .iter()
+        .map(|line| line.to_string())
+        .collect()
 }
 
 fn prepare_plugin_home(root: &Path) -> Result<()> {
@@ -940,7 +1448,7 @@ fn shell_command(runtime: &PluginRuntime, command: &str) -> Command {
 }
 
 fn plugin_command_env(runtime: &PluginRuntime) -> Vec<(&'static str, String)> {
-    vec![
+    let mut env = vec![
         (
             "AGENT_PORTAL_PLUGIN_DIR",
             runtime.root.display().to_string(),
@@ -958,7 +1466,44 @@ fn plugin_command_env(runtime: &PluginRuntime) -> Vec<(&'static str, String)> {
         ("XDG_CONFIG_HOME", runtime.dirs.config.display().to_string()),
         ("XDG_DATA_HOME", runtime.dirs.data.display().to_string()),
         ("XDG_STATE_HOME", runtime.dirs.state.display().to_string()),
-    ]
+        ("PATH", plugin_path_env()),
+    ];
+    // HOME is redirected to the plugin's private home, which would hide the
+    // user's rustup/cargo installs from the `cargo` proxy. Point it back at
+    // them explicitly so source-built plugins can set up.
+    if let Some(home) = dirs::home_dir() {
+        for (key, default) in [("CARGO_HOME", ".cargo"), ("RUSTUP_HOME", ".rustup")] {
+            let dir = std::env::var_os(key)
+                .map(PathBuf::from)
+                .unwrap_or_else(|| home.join(default));
+            if dir.is_dir() {
+                env.push((key, dir.display().to_string()));
+            }
+        }
+    }
+    env
+}
+
+/// The launcher's PATH plus the user's toolchain bin directories. Service
+/// managers start the launcher with a minimal PATH that often omits
+/// `~/.cargo/bin`, so plugin setup commands like `cargo build` would fail.
+fn plugin_path_env() -> String {
+    let current = std::env::var_os("PATH").unwrap_or_default();
+    let mut paths: Vec<PathBuf> = std::env::split_paths(&current).collect();
+    if let Some(home) = dirs::home_dir() {
+        let cargo_bin = std::env::var_os("CARGO_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join(".cargo"))
+            .join("bin");
+        for dir in [home.join(".local").join("bin"), cargo_bin] {
+            if dir.is_dir() && !paths.contains(&dir) {
+                paths.insert(0, dir);
+            }
+        }
+    }
+    std::env::join_paths(paths)
+        .map(|joined| joined.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| current.to_string_lossy().into_owned())
 }
 
 fn toolchain_home(runtime: &PluginRuntime, toolchain: &ToolchainSection) -> PathBuf {
@@ -1027,10 +1572,19 @@ fn write_surface_state(runtime: &PluginRuntime, state: &SurfaceState) -> Result<
         .with_context(|| format!("failed to write {}", path.display()))
 }
 
+/// Health probes get a per-request timeout so a server that accepts the TCP
+/// connection but never answers cannot stall startup past its deadline.
+fn health_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+        .unwrap_or_default()
+}
+
 async fn surface_healthy(state: &SurfaceState) -> bool {
     let path = state.health_path.as_deref().unwrap_or("/");
     let url = format!("http://127.0.0.1:{}{}", state.port, path);
-    reqwest::Client::new()
+    health_client()
         .get(url)
         .send()
         .await
@@ -1068,21 +1622,31 @@ fn free_port() -> Result<u16> {
     Ok(listener.local_addr()?.port())
 }
 
-async fn wait_for_health(port: u16, health_path: Option<&str>) -> Result<()> {
+async fn wait_for_health(
+    exited: &std::sync::OnceLock<std::process::ExitStatus>,
+    port: u16,
+    health_path: Option<&str>,
+) -> Result<()> {
     let path = health_path.unwrap_or("/");
     let url = format!("http://127.0.0.1:{port}{path}");
-    let client = reqwest::Client::new();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let client = health_client();
+    let deadline = std::time::Instant::now() + SURFACE_HEALTH_TIMEOUT;
     loop {
+        if let Some(status) = exited.get() {
+            bail!("plugin surface exited with {status} before becoming healthy");
+        }
         if let Ok(resp) = client.get(&url).send().await {
             if resp.status().is_success() {
                 return Ok(());
             }
         }
         if std::time::Instant::now() >= deadline {
-            bail!("plugin surface did not become healthy at {url}");
+            bail!(
+                "plugin surface did not become healthy at {url} within {}s",
+                SURFACE_HEALTH_TIMEOUT.as_secs()
+            );
         }
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
     }
 }
 
@@ -1109,6 +1673,7 @@ mod tests {
                 reference: None,
                 enabled: true,
                 installed_at: chrono::Utc::now(),
+                revision: None,
             },
             manifest: PluginManifest {
                 name: "kicad-pcb".to_string(),
@@ -1208,5 +1773,106 @@ mod tests {
                 root.join(".portal/toolchains").display()
             )
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stopping_a_surface_reaps_children_of_the_sh_wrapper() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("kicad-pcb");
+        std::fs::create_dir_all(&root).unwrap();
+        let runtime = test_runtime(root.clone());
+        let log = root.join("surface.log");
+        // The `sh -c` wrapper stays the parent of its server, which is the
+        // shape that orphaned servers when only the wrapper was killed. The
+        // child also ignores SIGTERM and outlives the leader, so the stop has
+        // to keep probing the group and escalate to SIGKILL.
+        let mut child = spawn_surface(
+            &runtime,
+            "(trap '' TERM; exec sleep 300) & echo booted; wait",
+            &log,
+        )
+        .unwrap();
+        let pid = child.id();
+        let state = SurfaceState {
+            plugin: "kicad-pcb".to_string(),
+            port: 0,
+            pid: Some(pid),
+            process_group: true,
+            command: String::new(),
+            cwd: String::new(),
+            session_id: String::new(),
+            health_path: None,
+            started_at: chrono::Utc::now(),
+        };
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while log_tail(&log, 5).is_empty() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(surface_alive(&state));
+
+        stop_surface_process(&state).unwrap();
+
+        assert!(!surface_alive(&state), "the surface process group survived");
+        assert_eq!(log_tail(&log, 5), vec!["booted".to_string()]);
+    }
+
+    #[test]
+    fn log_tail_returns_the_last_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("surface.log");
+        assert!(log_tail(&path, 3).is_empty());
+        std::fs::write(&path, "a\nb\nc\nd\n").unwrap();
+        assert_eq!(log_tail(&path, 2), vec!["c".to_string(), "d".to_string()]);
+        assert_eq!(log_tail(&path, 10).len(), 4);
+    }
+
+    #[test]
+    fn recovery_after_an_interrupted_update_keeps_the_moved_plugin_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("demo");
+        let backup = replace_backup_path("demo", &dest);
+        // Interrupted after the old `.portal` moved into the new checkout but
+        // before setup finished: the backup lacks state, the partial has it.
+        std::fs::create_dir_all(backup.join("bin")).unwrap();
+        std::fs::write(backup.join("VERSION"), "old").unwrap();
+        std::fs::create_dir_all(dest.join(".portal/toolchains/kicad")).unwrap();
+        std::fs::write(dest.join("VERSION"), "partial").unwrap();
+
+        recover_interrupted_replace("demo", &dest).unwrap();
+
+        assert!(!backup.exists());
+        assert_eq!(
+            std::fs::read_to_string(dest.join("VERSION")).unwrap(),
+            "old"
+        );
+        assert!(dest.join(".portal/toolchains/kicad").is_dir());
+    }
+
+    #[test]
+    fn a_failed_registration_rolls_the_checkout_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("src");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("VERSION"), "new").unwrap();
+        let dest = dir.path().join("demo");
+        std::fs::create_dir_all(dest.join(".portal/data")).unwrap();
+        std::fs::write(dest.join("VERSION"), "old").unwrap();
+
+        let err = replace_checkout("demo", &source, &dest, None, true, || {
+            bail!("config write failed")
+        })
+        .unwrap_err();
+
+        assert!(format!("{err:#}").contains("previous version was restored"));
+        assert_eq!(
+            std::fs::read_to_string(dest.join("VERSION")).unwrap(),
+            "old"
+        );
+        assert!(dest.join(".portal/data").is_dir());
+        assert!(!replace_backup_path("demo", &dest).exists());
     }
 }
