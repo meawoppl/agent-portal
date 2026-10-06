@@ -9,7 +9,7 @@ use crate::components::markdown::render_markdown_for_session;
 use crate::components::tool_renderers::{
     has_askuserquestion_answers, render_askuserquestion_result,
 };
-use crate::components::{split_upload_notice, UploadNotice};
+use crate::components::{split_upload_notice, uploaded_image_media_type, UploadNotice};
 use crate::utils;
 use shared::UserFrame as OptimisticUserMessage;
 use uuid::Uuid;
@@ -153,14 +153,33 @@ fn render_upload_notice(notice: &UploadNotice<'_>, session_id: Uuid) -> Html {
             }
             <div class="upload-notice">
                 { for notice.files.iter().map(|(name, size)| html! {
-                    <span class="upload-chip">
-                        <span aria-hidden="true">{ "📎" }</span>
-                        <span class="upload-chip-name">{ *name }</span>
-                        <span class="upload-chip-size">{ *size }</span>
-                    </span>
+                    <div class="upload-attachment">
+                        { render_upload_preview(name, session_id) }
+                        <span class="upload-chip">
+                            <span aria-hidden="true">{ "📎" }</span>
+                            <span class="upload-chip-name">{ *name }</span>
+                            <span class="upload-chip-size">{ *size }</span>
+                        </span>
+                    </div>
                 }) }
             </div>
         </>
+    }
+}
+
+/// Inline preview of an uploaded image, pulled back from the session's working
+/// directory (where the upload landed). Anything that isn't an image, or whose
+/// file can no longer be fetched (agent offline, file moved), shows no preview
+/// and the chip alone.
+fn render_upload_preview(name: &str, session_id: Uuid) -> Html {
+    let Some(media_type) = uploaded_image_media_type(name) else {
+        return html! {};
+    };
+    let src = crate::components::markdown::session_file_pull_url(session_id, name);
+    html! {
+        <div class="upload-preview">
+            { super::media::render_image_url(src, media_type, Some(name.to_string()), true) }
+        </div>
     }
 }
 

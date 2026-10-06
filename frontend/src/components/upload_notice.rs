@@ -33,6 +33,20 @@ pub fn build_upload_message(user_input: &str, files: &[(String, u64)]) -> String
     }
 }
 
+/// The image media type for an uploaded file's name, when the transcript can
+/// preview it inline. By extension only: the notice carries just a name and a
+/// size, and a wrong guess degrades to the plain chip when the pull fails.
+pub fn uploaded_image_media_type(name: &str) -> Option<&'static str> {
+    let (_, ext) = name.rsplit_once('.')?;
+    match ext.to_ascii_lowercase().as_str() {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "gif" => Some("image/gif"),
+        "webp" => Some("image/webp"),
+        _ => None,
+    }
+}
+
 /// A parsed upload notice: what the user actually said, and the attachments.
 pub struct UploadNotice<'a> {
     /// The user's own words, if they sent any alongside the upload.
@@ -99,6 +113,23 @@ mod tests {
             out,
             "I've uploaded the following files to your working directory:\n- a.txt (100 B)"
         );
+    }
+
+    #[test]
+    fn image_uploads_are_recognised_by_extension_case_insensitively() {
+        for (name, expected) in [
+            ("portal_pasted_image_260909_093931.png", Some("image/png")),
+            ("photo.JPG", Some("image/jpeg")),
+            ("photo.jpeg", Some("image/jpeg")),
+            ("anim.gif", Some("image/gif")),
+            ("shot.WebP", Some("image/webp")),
+            ("notes.txt", None),
+            ("archive.png.zip", None),
+            ("noextension", None),
+            ("diagram.svg", None),
+        ] {
+            assert_eq!(uploaded_image_media_type(name), expected, "{name}");
+        }
     }
 
     #[test]

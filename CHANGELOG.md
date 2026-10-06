@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- **Image previews on uploaded attachments.** A pasted, dropped, or picked image
+  now shows as a thumbnail above its attachment chip in the sent message (click
+  for the zoomable lightbox). It is pulled back from the session's working
+  directory, so it reappears after a reload; when the agent is offline or the
+  file is gone, only the chip is shown.
+
 - **Agent progress bars.** `agent-portal progress <value>` shows a live bar
   above the input box for long-running jobs (`42`, `42%`, or `3/12`; `--label`,
   `--id` for several at once, `--done` to remove). Bars are live-only, replayed
