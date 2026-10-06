@@ -127,13 +127,36 @@ pub fn fold_session_start_reminder(
 ) -> (String, Option<serde_json::Value>) {
     let body = body_with_plugin_skills(plugin_skill_reminder);
     let contents = reminder_contents(&body);
-    let display_event = display_event.or_else(|| {
-        Some(default_display(&visible_text_with_base_session_notice(
+    let display_event = match display_event {
+        Some(event) => Some(attach_base_notice_to_agent_message(event, &contents)),
+        None => Some(default_display(&visible_text_with_base_session_notice(
             &text, &contents,
-        )))
-    });
+        ))),
+    };
     let prefixed = format!("<system-reminder>\n{contents}\n</system-reminder>\n\n{text}");
     (prefixed, display_event)
+}
+
+/// Keep an inter-agent input's typed provenance card while making the
+/// session-start injection durable and inspectable in that card's body.
+///
+/// Inter-agent sends arrive with an explicit `PortalMessage::AgentMessage`
+/// display event. Merely preserving that event hides the reminder which was
+/// folded into the agent-facing prompt, so stored history cannot explain what
+/// the agent actually received. Other explicit display-event shapes remain
+/// byte-for-byte unchanged.
+fn attach_base_notice_to_agent_message(
+    event: serde_json::Value,
+    contents: &str,
+) -> serde_json::Value {
+    let Ok(mut message) = serde_json::from_value::<shared::PortalMessage>(event.clone()) else {
+        return event;
+    };
+    let [shared::PortalContent::AgentMessage { text, .. }] = message.content.as_mut_slice() else {
+        return event;
+    };
+    *text = visible_text_with_base_session_notice(text, contents);
+    message.to_json()
 }
 
 fn visible_text_with_base_session_notice(text: &str, contents: &str) -> String {
@@ -226,20 +249,50 @@ mod tests {
         );
     }
 
-    /// An input that already has a display event (an inter-agent message card)
-    /// keeps it — folding must not overwrite provenance with a plain echo.
+    /// An inter-agent display event keeps its provenance while recording the
+    /// exact base instructions folded into the agent-facing prompt.
     #[test]
-    fn fold_preserves_an_existing_display_event() {
-        let provenance = serde_json::json!({"type": "portal", "content": [{"agent": "codex"}]});
-        let (text, display) = fold_session_start_reminder(
+    fn fold_enriches_an_inter_agent_display_event() {
+        let provenance = shared::PortalMessage::agent_message(
+            "codex".to_string(),
+            "11111111-1111-1111-1111-111111111111".to_string(),
             "relayed".to_string(),
-            Some(provenance.clone()),
+        )
+        .to_json();
+        let (text, display) =
+            fold_session_start_reminder("relayed".to_string(), Some(provenance), None, |_| {
+                unreachable!("display provided")
+            });
+
+        assert!(text.ends_with("relayed"));
+        let display: shared::PortalMessage =
+            serde_json::from_value(display.expect("display event")).expect("portal message");
+        let [shared::PortalContent::AgentMessage {
+            from_agent_type,
+            from_session_id,
+            text,
+        }] = display.content.as_slice()
+        else {
+            panic!("expected one agent-message block")
+        };
+        assert_eq!(from_agent_type, "codex");
+        assert_eq!(from_session_id, "11111111-1111-1111-1111-111111111111");
+        assert!(text.starts_with("relayed"));
+        assert!(text.contains("Agent Portal version"));
+        assert!(text.contains("agent-portal show"));
+    }
+
+    #[test]
+    fn fold_preserves_other_explicit_display_events() {
+        let display_event = serde_json::json!({"type": "custom", "value": 7});
+        let (_, display) = fold_session_start_reminder(
+            "hello".to_string(),
+            Some(display_event.clone()),
             None,
             |_| unreachable!("display provided"),
         );
 
-        assert_eq!(display, Some(provenance));
-        assert!(text.ends_with("relayed"));
+        assert_eq!(display, Some(display_event));
     }
 
     #[test]

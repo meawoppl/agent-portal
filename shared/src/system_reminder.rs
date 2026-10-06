@@ -30,6 +30,17 @@ const OPEN_TAG: &str = "<system-reminder>";
 const CLOSE_TAG: &str = "</system-reminder>";
 const TASK_OPEN_TAG: &str = "<task-notification>";
 const TASK_CLOSE_TAG: &str = "</task-notification>";
+const BASE_PORTAL_INSTRUCTIONS_PREFIX: &str = "Agent Portal version ";
+
+/// Whether a reminder body is the Portal's base-instructions injection.
+///
+/// Kept in `shared` so transcript renderers can distinguish this reminder
+/// from an inter-agent reply bumper without duplicating the wire signature.
+#[must_use]
+pub fn is_base_portal_instructions(body: &str) -> bool {
+    body.trim_start()
+        .starts_with(BASE_PORTAL_INSTRUCTIONS_PREFIX)
+}
 
 #[derive(Clone, Copy)]
 enum NoticeKind {

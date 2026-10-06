@@ -24,7 +24,6 @@
 
 use yew::prelude::*;
 
-const BASE_PORTAL_INSTRUCTIONS_PREFIX: &str = "Agent Portal version ";
 const BASE_PORTAL_INSTRUCTIONS_TITLE: &str = "Base Portal Instructions Injection";
 
 #[derive(Properties, PartialEq)]
@@ -45,10 +44,7 @@ pub(super) fn system_reminder_bar(props: &SystemReminderBarProps) -> Html {
 /// the collapsed state: it contains the exact base instructions attached to
 /// the first prompt. Other machine-authored reminders keep the generic title.
 fn system_reminder_title(body: &str) -> &'static str {
-    if body
-        .trim_start()
-        .starts_with(BASE_PORTAL_INSTRUCTIONS_PREFIX)
-    {
+    if shared::system_reminder::is_base_portal_instructions(body) {
         BASE_PORTAL_INSTRUCTIONS_TITLE
     } else {
         "System reminder"
