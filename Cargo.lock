@@ -91,7 +91,7 @@ dependencies = [
 
 [[package]]
 name = "agent-portal"
-version = "2.15.16"
+version = "2.15.17"
 dependencies = [
  "antigravity-session-lib",
  "anyhow",
@@ -125,7 +125,7 @@ dependencies = [
 
 [[package]]
 name = "agent-portal-mobile"
-version = "2.15.16"
+version = "2.15.17"
 dependencies = [
  "agent-portal-mobile-status-notification",
  "plist",
@@ -260,7 +260,7 @@ dependencies = [
 
 [[package]]
 name = "antigravity-session-lib"
-version = "2.15.16"
+version = "2.15.17"
 dependencies = [
  "antigravity-codes",
  "chrono",
@@ -288,7 +288,7 @@ checksum = "d301b3b94cb4b2f23d7917810addbbaff90738e0ca2be692bd027e70d7e0330c"
 
 [[package]]
 name = "archive-format"
-version = "2.15.16"
+version = "2.15.17"
 dependencies = [
  "chrono",
  "object_store",
@@ -677,7 +677,7 @@ dependencies = [
 
 [[package]]
 name = "backend"
-version = "2.15.16"
+version = "2.15.17"
 dependencies = [
  "a2",
  "anyhow",
@@ -1214,7 +1214,7 @@ dependencies = [
 
 [[package]]
 name = "claude-portal"
-version = "2.15.16"
+version = "2.15.17"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1246,7 +1246,7 @@ dependencies = [
 
 [[package]]
 name = "claude-session-lib"
-version = "2.15.16"
+version = "2.15.17"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1311,7 +1311,7 @@ dependencies = [
 
 [[package]]
 name = "codex-session-lib"
-version = "2.15.16"
+version = "2.15.17"
 dependencies = [
  "chrono",
  "claude-codes",
@@ -2513,7 +2513,7 @@ dependencies = [
 
 [[package]]
 name = "frontend"
-version = "2.15.16"
+version = "2.15.17"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -4538,7 +4538,7 @@ dependencies = [
 
 [[package]]
 name = "muse-session-lib"
-version = "2.15.16"
+version = "2.15.17"
 dependencies = [
  "chrono",
  "claude-codes",
@@ -5468,7 +5468,7 @@ dependencies = [
 
 [[package]]
 name = "portal-auth"
-version = "2.15.16"
+version = "2.15.17"
 dependencies = [
  "anyhow",
  "colored",
@@ -5483,7 +5483,7 @@ dependencies = [
 
 [[package]]
 name = "portal-stt"
-version = "2.15.16"
+version = "2.15.17"
 dependencies = [
  "anyhow",
  "aws-credential-types",
@@ -5504,7 +5504,7 @@ dependencies = [
 
 [[package]]
 name = "portal-update"
-version = "2.15.16"
+version = "2.15.17"
 dependencies = [
  "anyhow",
  "hex",
@@ -6643,7 +6643,7 @@ dependencies = [
 
 [[package]]
 name = "session-lib"
-version = "2.15.16"
+version = "2.15.17"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -6732,7 +6732,7 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "2.15.16"
+version = "2.15.17"
 dependencies = [
  "base64 0.22.1",
  "chrono",
