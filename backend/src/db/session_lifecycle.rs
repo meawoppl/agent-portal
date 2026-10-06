@@ -83,10 +83,10 @@ pub(crate) fn create_desired_session(
         diesel::insert_into(session_plugin_overrides::table)
             .values((
                 session_plugin_overrides::session_id.eq(draft.session_id),
-                session_plugin_overrides::overrides.eq(
-                    serde_json::to_value(&draft.plugin_overrides).map_err(|error|
-                        diesel::result::Error::SerializationError(Box::new(error)))?
-                ),
+                session_plugin_overrides::overrides.eq(serde_json::to_value(
+                    &draft.plugin_overrides,
+                )
+                .map_err(|error| diesel::result::Error::SerializationError(Box::new(error)))?),
             ))
             .execute(conn)?;
 

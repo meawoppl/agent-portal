@@ -15,7 +15,10 @@
 
 use dashmap::{DashMap, DashSet};
 use shared::api::ForwardError;
-use shared::{FileDownloadResponseFields, ForwardStatusFields, LauncherToServer, ServerToClient, ServerToProxy};
+use shared::{
+    FileDownloadResponseFields, ForwardStatusFields, LauncherToServer, ServerToClient,
+    ServerToProxy,
+};
 use std::collections::VecDeque;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
