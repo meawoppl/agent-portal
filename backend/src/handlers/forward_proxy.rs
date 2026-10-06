@@ -44,6 +44,7 @@ const FWD_COOKIE: &str = "portal_fwd";
 const AUD_HANDOFF: &str = "portal-forward-auth";
 const AUD_COOKIE: &str = "portal-forward-session";
 const FORWARD_EDIT_STACK_PATH: &str = "/__portal/edit-stack";
+const FORWARD_STT_PATH: &str = "/__portal/stt/transcribe";
 const MAX_FORWARD_EDIT_STACK_BODY_BYTES: usize = 8 * 1024 * 1024;
 
 /// Hop-by-hop headers (RFC 9110 §7.6.1) — never forwarded in either
@@ -266,6 +267,7 @@ pub async fn forward_host_gate(
 /// its live port (both may 404) before auth + reverse proxy.
 async fn dispatch(app_state: Arc<AppState>, label: String, req: Request) -> Response {
     let is_edit_stack_request = req.uri().path() == FORWARD_EDIT_STACK_PATH;
+    let is_stt_request = req.uri().path() == FORWARD_STT_PATH;
     // Resolve label → session up front. An unknown label is a 404 (no leak of
     // whether the label ever existed).
     let (session_id, port, session_key, cookie_claims) = {
@@ -323,6 +325,9 @@ async fn dispatch(app_state: Arc<AppState>, label: String, req: Request) -> Resp
     if is_edit_stack_request {
         return handle_forward_edit_stack(&app_state, &session_key, session_id, cookie_claims, req)
             .await;
+    }
+    if is_stt_request {
+        return handle_forward_stt(&app_state, session_id, cookie_claims, req).await;
     }
 
     proxy_request(&app_state, &session_key, session_id, port, &label, req).await
@@ -410,6 +415,76 @@ async fn handle_forward_edit_stack(
         Ok(response) => Json(response).into_response(),
         Err(err) => err.into_response(),
     }
+}
+
+/// `POST /__portal/stt/transcribe[?language=…]` — the portal-origin
+/// `/api/stt/transcribe` for forwarded surfaces, so a plugin pane can turn a
+/// voice note into text without a portal session cookie of its own.
+///
+/// Same gate as the edit stack: the `portal_fwd` cookie names the user. The
+/// forward's own session supplies the vocabulary hints, so there is no
+/// `session_id` parameter. The body is the raw recording with an `audio/*`
+/// Content-Type and the reply is `{"text": …}`. Errors mirror the portal
+/// route: 401 stale cookie, 405, 413 over `max_audio_mb`, 400 for a bad
+/// Content-Type or empty body, 503 without a provider, 502 provider failure.
+async fn handle_forward_stt(
+    app_state: &AppState,
+    session_id: Uuid,
+    claims: Option<ForwardClaims>,
+    req: Request,
+) -> Response {
+    if req.method() != Method::POST {
+        return (StatusCode::METHOD_NOT_ALLOWED, "Method not allowed").into_response();
+    }
+    let Some(user_id) = claims.map(|claims| claims.user_id) else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            "Forward session expired; reopen this forward from Portal",
+        )
+            .into_response();
+    };
+    let language = stt_language(req.uri());
+    let (parts, body) = req.into_parts();
+    let cap = app_state.max_audio_mb as usize * 1024 * 1024;
+    let bytes = match body::to_bytes(body, cap).await {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return AppError::PayloadTooLarge(format!(
+                "recording exceeded the {} MB limit for audio",
+                app_state.max_audio_mb
+            ))
+            .into_response();
+        }
+    };
+    match crate::handlers::stt::transcribe_audio(
+        app_state,
+        user_id,
+        Some(session_id),
+        language.as_deref(),
+        &parts.headers,
+        bytes,
+    )
+    .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+/// The optional BCP-47 `language` query parameter of an STT request; other
+/// parameters are ignored rather than rejected so older and newer clients
+/// can disagree harmlessly.
+fn stt_language(uri: &Uri) -> Option<String> {
+    uri.query()?.split('&').find_map(|pair| {
+        let (key, value) = pair.split_once('=')?;
+        if key != "language" {
+            return None;
+        }
+        urlencoding::decode(value)
+            .ok()
+            .map(|v| v.into_owned())
+            .filter(|v| !v.is_empty())
+    })
 }
 
 fn create_and_send_forward_edit_stack(
@@ -940,6 +1015,24 @@ pub fn rewrite_upstream_location(location: &str, port: u16, origin: &str) -> Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stt_language_reads_only_the_language_parameter() {
+        let uri: Uri = "/__portal/stt/transcribe?language=en-US".parse().unwrap();
+        assert_eq!(stt_language(&uri).as_deref(), Some("en-US"));
+        let uri: Uri = "/__portal/stt/transcribe?session_id=abc&language=fr%2DFR"
+            .parse()
+            .unwrap();
+        assert_eq!(stt_language(&uri).as_deref(), Some("fr-FR"));
+    }
+
+    #[test]
+    fn stt_language_is_optional() {
+        for query in ["", "?", "?language=", "?session_id=abc", "?lang=en"] {
+            let uri: Uri = format!("/__portal/stt/transcribe{query}").parse().unwrap();
+            assert_eq!(stt_language(&uri), None, "{query}");
+        }
+    }
 
     // A valid 8-lowercase-hex subdomain label.
     const LABEL: &str = "a3f9c2e1";
