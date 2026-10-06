@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200" font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+<rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+<text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2174 · Add plugin validate and preview commands</text>
+<text x="55" y="100" font-size="34" fill="#e6e9f5">Manifest mistakes only surfaced after installing and launching a session;</text>
+<text x="55" y="140" font-size="34" fill="#e6e9f5">now validate and preview check a plugin directory offline, so authors and CI catch them first.</text>
+<line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+<text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+<text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+<line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+<rect x="80" y="240" width="860" height="330" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+<text x="104" y="282" font-size="26" fill="#7aa2f7">agent-portal-plugin.toml (author's view)</text>
+<text x="104" y="324" font-size="23" fill="#a9b1d6">load_manifest: toml::from_str, unknown keys ignored</text>
+<text x="104" y="362" font-size="23" fill="#f7768e">{outdir} typo -&gt; passed to sh literally</text>
+<text x="104" y="400" font-size="23" fill="#f7768e">detect any = ["main/*.c"] -&gt; file names only, never fires</text>
+<text x="104" y="438" font-size="23" fill="#f7768e">[[skills]] path missing -&gt; silently skipped at launch</text>
+<text x="104" y="476" font-size="22" fill="#565f89">found only after install + setup + launching a session</text>
+<rect x="80" y="610" width="860" height="420" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+<text x="104" y="652" font-size="26" fill="#7aa2f7">How the plugin looks in Portal</text>
+<text x="104" y="694" font-size="23" fill="#f7768e">no way to see the card, context cost, or dock size</text>
+<text x="104" y="732" font-size="23" fill="#f7768e">no way to ask "would Portal suggest this here?"</text>
+<text x="104" y="770" font-size="22" fill="#565f89">before running plugin install</text>
+<rect x="1065" y="240" width="860" height="330" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+<text x="1089" y="282" font-size="26" fill="#7aa2f7">agent-portal plugin validate PATH [--json]</text>
+<text x="1089" y="324" font-size="23" fill="#9ece6a">errors: name, missing files, empty run, unknown {placeholder}</text>
+<text x="1089" y="362" font-size="23" fill="#9ece6a">warnings: unknown keys, broad / path-shaped detect patterns</text>
+<text x="1089" y="400" font-size="23" fill="#e0af68">warnings: no homepage, license, [compat], install.doctor</text>
+<text x="1089" y="438" font-size="22" fill="#565f89">exit 1 only on errors; nothing installed or executed</text>
+<rect x="1065" y="610" width="860" height="420" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+<text x="1089" y="652" font-size="26" fill="#7aa2f7">agent-portal plugin preview PATH [--cwd DIR]</text>
+<text x="1089" y="694" font-size="23" fill="#9ece6a">card: name, description, homepage, license, source</text>
+<text x="1089" y="732" font-size="23" fill="#9ece6a">skills/prompts with sizes; commands; dock title + width</text>
+<text x="1089" y="770" font-size="23" fill="#9ece6a">--cwd: plugin_detect::detect_reason -&gt; suggested + reason</text>
+<text x="1089" y="808" font-size="22" fill="#565f89">plugin_detect.rs: the one matcher preview + inventory share</text>
+<text x="1089" y="846" font-size="22" fill="#565f89">validation findings listed at the bottom</text>
+<text x="55" y="1172" font-size="22" fill="#565f89">Static checks only: setup and doctor are never run, and {artifact_dir}/{backend_url} only warn because the launcher does not expand them yet.</text>
+</svg>

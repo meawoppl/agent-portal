@@ -20,7 +20,7 @@ use shared::plugin_manifest::{RuntimeManifest, ToolchainSection};
 
 use crate::config::{self, InstalledPlugin};
 
-const MANIFEST: &str = "agent-portal-plugin.toml";
+pub(crate) const MANIFEST: &str = "agent-portal-plugin.toml";
 const SURFACE_STATE_FILE: &str = "surface.json";
 const SURFACE_LOG_FILE: &str = "surface.log";
 const SURFACE_LOG_TAIL_LINES: usize = 40;
