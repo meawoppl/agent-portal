@@ -353,6 +353,17 @@ fn claude_catalog_messages(user_id: Uuid) -> Vec<DemoMessage> {
             }),
         ),
         user("2026-07-20T04:00:02.000000Z", user_id, "Show every Claude-side message surface: markdown, math, images, tool calls, system cards, errors, portal cards, and raw fallbacks."),
+        user(
+            "2026-07-20T04:00:03.000000Z",
+            user_id,
+            &crate::components::build_upload_message(
+                "Here is the screenshot and my notes.",
+                &[
+                    ("portal_pasted_image_260909_093931.png".to_string(), 34_406),
+                    ("notes.txt".to_string(), 42),
+                ],
+            ),
+        ),
         claude_system(
             "2026-07-20T04:00:04.000000Z",
             fixture_json!({

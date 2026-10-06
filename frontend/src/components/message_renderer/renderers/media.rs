@@ -34,12 +34,34 @@ pub(super) fn render_image_source(source: &shared::ImageSource, filename: Option
     }
 }
 
+/// An image shown from a plain URL (no `ImageSource` wrapper), for callers
+/// that already know the media type. With `quiet_when_unavailable`, an image
+/// that fails to load renders nothing instead of the "media expired" card, for
+/// previews that sit beside a chip which already names the file.
+pub(in crate::components) fn render_image_url(
+    src: String,
+    media_type: &str,
+    filename: Option<String>,
+    quiet_when_unavailable: bool,
+) -> Html {
+    html! {
+        <ImageViewer
+            {src}
+            media_type={media_type.to_string()}
+            {filename}
+            {quiet_when_unavailable}
+        />
+    }
+}
+
 #[derive(Properties, PartialEq)]
 struct ImageViewerProps {
     pub src: String,
     pub media_type: String,
     #[prop_or_default]
     pub filename: Option<String>,
+    #[prop_or_default]
+    pub quiet_when_unavailable: bool,
 }
 
 /// Does this media type need a CSS width fallback to be visible?
@@ -112,6 +134,9 @@ fn image_viewer(props: &ImageViewerProps) -> Html {
     }
 
     if *failed {
+        if props.quiet_when_unavailable {
+            return html! {};
+        }
         return render_media_expired(props.filename.as_deref(), "image");
     }
 
@@ -252,7 +277,9 @@ fn image_viewer(props: &ImageViewerProps) -> Html {
     html! {
         <>
             <div class={classes!("tool-result-image", size_fallback)} onclick={on_thumb_click}>
-                <img src={props.src.clone()} alt="Tool result image" onerror={on_error} />
+                // Lazy so a long transcript doesn't fetch every image at once;
+                // `data:` sources are unaffected.
+                <img src={props.src.clone()} alt="Tool result image" loading="lazy" onerror={on_error} />
             </div>
             if *expanded {
                 <DismissibleBackdrop class="image-lightbox" on_close={close_lightbox.clone()}>

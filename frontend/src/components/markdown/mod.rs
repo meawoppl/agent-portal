@@ -19,6 +19,7 @@ mod system_reminder;
 pub use links::linkify_urls;
 use parser::parse_markdown_events;
 use renderer::render_events;
+pub use sanitizer::session_file_pull_url;
 use shared::system_reminder::{has_collapsible_notice, split_collapsible_notices, Segment};
 use system_reminder::{SystemReminderBar, TaskNotificationBar};
 

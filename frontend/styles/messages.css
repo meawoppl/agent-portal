@@ -190,6 +190,23 @@
     white-space: nowrap;
 }
 
+/* An attachment: an inline preview (images only) stacked over its chip. */
+.upload-attachment {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.3rem;
+    max-width: 100%;
+}
+
+.upload-preview .tool-result-image {
+    margin: 0;
+}
+
+.upload-preview .tool-result-image img {
+    max-height: 200px;
+}
+
 /* Secret-drop receipt: the transcript's only record of a Ctrl+Shift+Enter
    secret send — a lock, the generated drop filename, and the byte count.
    Without the gap the spans run together ("…548a19 bytes"). The filename can

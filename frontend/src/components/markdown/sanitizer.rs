@@ -40,11 +40,17 @@ fn portal_file_download_href(href: &str, session_id: Uuid) -> Option<String> {
     if path.is_empty() {
         return None;
     }
-    let encoded = encode_uri_component(path);
-    Some(format!(
+    Some(session_file_pull_url(session_id, path))
+}
+
+/// URL that pulls a file, by path relative to the session's working
+/// directory, from the session's host (`GET /api/sessions/{id}/files/pull`).
+pub fn session_file_pull_url(session_id: Uuid, path: &str) -> String {
+    format!(
         "/api/sessions/{}/files/pull?path={}",
-        session_id, encoded
-    ))
+        session_id,
+        encode_uri_component(path)
+    )
 }
 
 fn encode_uri_component(input: &str) -> String {
