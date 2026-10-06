@@ -27,3 +27,8 @@ base64 = "0.22"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+# Exercise both parser versions used by the backend and launcher.
+toml_backend = { package = "toml", version = "0.8" }
+toml_launcher = { package = "toml", version = "0.9" }

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use shared::plugin_manifest::{SkillSection as ManifestSkill, SkillsManifest as PluginManifest};
 use shared::AgentType;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
@@ -31,19 +32,7 @@ pub struct InstalledPlugin {
     pub revision: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Default)]
-struct PluginManifest {
-    #[serde(default)]
-    skills: Vec<SkillSection>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct SkillSection {
-    name: String,
-    path: PathBuf,
-    #[serde(default)]
-    agents: Vec<String>,
-}
+type SkillSection = ManifestSkill<PathBuf>;
 
 #[derive(Debug, Default)]
 pub struct PluginSkillContext {

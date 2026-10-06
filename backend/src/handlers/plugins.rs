@@ -14,6 +14,7 @@ use serde::Deserialize;
 use shared::api::{
     PluginInventoryResponse, PortalPluginCommandInfo, PortalPluginInfo, PortalPluginSkillInfo,
 };
+use shared::plugin_manifest::{InventoryManifest as PluginManifest, ManifestDetect, SkillSection};
 use uuid::Uuid;
 
 use crate::auth::CurrentUserId;
@@ -34,54 +35,7 @@ pub struct PluginInventoryQuery {
     pub working_directory: Option<String>,
 }
 
-#[derive(Debug, Default, Deserialize)]
-struct PluginManifest {
-    name: String,
-    #[serde(default)]
-    display_name: Option<String>,
-    #[serde(default)]
-    description: Option<String>,
-    #[serde(default)]
-    surface: Option<PluginSurface>,
-    #[serde(default)]
-    commands: Vec<ManifestCommand>,
-    #[serde(default)]
-    skills: Vec<ManifestSkill>,
-    #[serde(default)]
-    detect: Vec<ManifestDetect>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct PluginSurface {
-    #[serde(default)]
-    kind: Option<String>,
-    #[serde(default)]
-    default_title: Option<String>,
-    #[serde(default)]
-    default_width_percent: Option<u16>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct ManifestCommand {
-    name: String,
-    #[serde(default)]
-    description: Option<String>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct ManifestSkill {
-    name: String,
-    path: String,
-    #[serde(default)]
-    agents: Vec<String>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct ManifestDetect {
-    name: String,
-    #[serde(default)]
-    any: Vec<String>,
-}
+type ManifestSkill = SkillSection<String>;
 
 /// GET /api/plugins
 pub async fn list_plugins(
