@@ -538,18 +538,25 @@ pub fn install(
     }
     let revision = git_revision(staging.path());
 
-    let dest = config::plugin_root().join(install_name);
-    if config::load_config().plugins.contains_key(install_name) {
+    let registered = config::load_config().plugins.get(install_name).cloned();
+    let dest = registered
+        .as_ref()
+        .map(|installed| PathBuf::from(&installed.path))
+        .unwrap_or_else(|| config::plugin_root().join(install_name));
+    recover_interrupted_replace(install_name, &dest)?;
+    if registered.is_some() {
         if !force {
             bail!(
                 "plugin `{install_name}` is already installed; use `agent-portal plugin update {install_name}` or `install --force`"
             );
         }
-        remove_installed(install_name)?;
+        if let Ok(runtime) = load_runtime(install_name) {
+            halt_surface_quietly(&runtime);
+        }
     } else if dest.exists() {
         // An unregistered directory under the plugin root is the debris of an
-        // install whose setup failed. Clear it so the retry can proceed, but
-        // only when it is recognisably that plugin (or the user forced it).
+        // install that failed before registering. Clear it so the retry can
+        // proceed, but only when it is recognisably that plugin (or forced).
         let leftover = load_manifest(&dest)
             .map(|m| m.name == install_name)
             .unwrap_or(false);
@@ -566,25 +573,13 @@ pub fn install(
         std::fs::remove_dir_all(&dest)
             .with_context(|| format!("failed to remove {}", dest.display()))?;
     }
-    copy_dir(&source_root, &dest).with_context(|| {
-        format!(
-            "failed to copy plugin from {} to {}",
-            source_root.display(),
-            dest.display()
-        )
-    })?;
-
-    if let Some(setup) = &manifest.install.setup {
-        println!("Running setup: {setup}");
-        if let Err(err) = run_manifest_command(&dest, setup) {
-            // Never leave a half-installed, unregistered directory behind:
-            // it would block every retry.
-            let _ = std::fs::remove_dir_all(&dest);
-            return Err(err.context(format!(
-                "setup for `{install_name}` failed; the partial install was removed, so it is safe to retry"
-            )));
-        }
-    }
+    replace_checkout(
+        install_name,
+        &source_root,
+        &dest,
+        manifest.install.setup.as_deref(),
+        false,
+    )?;
 
     config::save_installed_plugin(
         install_name,
@@ -628,52 +623,18 @@ pub fn update(name: &str, check: bool) -> Result<()> {
     }
     let revision = git_revision(staging.path());
 
+    let dest = PathBuf::from(&installed.path);
+    recover_interrupted_replace(name, &dest)?;
     if let Ok(runtime) = load_runtime(name) {
         halt_surface_quietly(&runtime);
     }
-    let dest = PathBuf::from(&installed.path);
-    let backup = dest.with_file_name(format!(".{name}.update-backup"));
-    if backup.exists() {
-        std::fs::remove_dir_all(&backup)
-            .with_context(|| format!("failed to clear {}", backup.display()))?;
-    }
-    std::fs::rename(&dest, &backup)
-        .with_context(|| format!("failed to move {} aside", dest.display()))?;
-
-    let result = (|| -> Result<()> {
-        copy_dir(&source_root, &dest)?;
-        let old_state = backup.join(".portal");
-        if old_state.exists() {
-            let new_state = dest.join(".portal");
-            if new_state.exists() {
-                std::fs::remove_dir_all(&new_state)?;
-            }
-            std::fs::rename(&old_state, &new_state)?;
-        }
-        if let Some(setup) = &manifest.install.setup {
-            println!("Running setup: {setup}");
-            run_manifest_command(&dest, setup)?;
-        }
-        Ok(())
-    })();
-
-    if let Err(err) = result {
-        let new_state = dest.join(".portal");
-        if new_state.exists() {
-            let _ = std::fs::rename(&new_state, backup.join(".portal"));
-        }
-        let _ = std::fs::remove_dir_all(&dest);
-        std::fs::rename(&backup, &dest).with_context(|| {
-            format!(
-                "update failed ({err:#}) and restoring {} also failed",
-                dest.display()
-            )
-        })?;
-        return Err(err.context(format!(
-            "update of `{name}` failed; the previous version was restored"
-        )));
-    }
-    let _ = std::fs::remove_dir_all(&backup);
+    replace_checkout(
+        name,
+        &source_root,
+        &dest,
+        manifest.install.setup.as_deref(),
+        true,
+    )?;
     let unchanged = revision.is_some() && revision == installed.revision;
     config::save_installed_plugin(
         name,
@@ -689,6 +650,111 @@ pub fn update(name: &str, check: bool) -> Result<()> {
         println!("Updated {name}.");
     }
     Ok(())
+}
+
+fn replace_backup_path(name: &str, dest: &Path) -> PathBuf {
+    dest.with_file_name(format!(".{name}.replace-backup"))
+}
+
+/// A backup only outlives a replacement that was interrupted mid-flight (the
+/// launcher was killed). It is the last known-good checkout, so restore it
+/// before anything else touches the directory; never delete it blindly.
+fn recover_interrupted_replace(name: &str, dest: &Path) -> Result<()> {
+    let backup = replace_backup_path(name, dest);
+    if !backup.exists() {
+        return Ok(());
+    }
+    if dest.exists() {
+        std::fs::remove_dir_all(dest)
+            .with_context(|| format!("failed to clear partial {}", dest.display()))?;
+    }
+    std::fs::rename(&backup, dest).with_context(|| {
+        format!(
+            "failed to restore {} from {}",
+            dest.display(),
+            backup.display()
+        )
+    })?;
+    eprintln!(
+        "Restored {} from an interrupted install/update",
+        dest.display()
+    );
+    Ok(())
+}
+
+/// Put the plugin at `source_root` in place at `dest` and run its setup, as
+/// one transaction: an existing checkout is moved aside first and restored
+/// if the copy or setup fails, and a failed fresh install leaves nothing
+/// behind. Either way no unregistered, half-built directory survives to
+/// block a retry. `carry_state` moves the old checkout's `.portal` (managed
+/// toolchains, caches, data) into the new one.
+fn replace_checkout(
+    name: &str,
+    source_root: &Path,
+    dest: &Path,
+    setup: Option<&str>,
+    carry_state: bool,
+) -> Result<()> {
+    let backup = replace_backup_path(name, dest);
+    let had_previous = dest.exists();
+    if had_previous {
+        std::fs::rename(dest, &backup)
+            .with_context(|| format!("failed to move {} aside", dest.display()))?;
+    }
+    let old_state = backup.join(".portal");
+    let new_state = dest.join(".portal");
+    let result = (|| -> Result<()> {
+        copy_dir(source_root, dest).with_context(|| {
+            format!(
+                "failed to copy plugin from {} to {}",
+                source_root.display(),
+                dest.display()
+            )
+        })?;
+        if carry_state && old_state.exists() {
+            if new_state.exists() {
+                std::fs::remove_dir_all(&new_state)?;
+            }
+            std::fs::rename(&old_state, &new_state)?;
+        }
+        if let Some(setup) = setup {
+            println!("Running setup: {setup}");
+            run_manifest_command(dest, setup)?;
+        }
+        Ok(())
+    })();
+    let Err(err) = result else {
+        if had_previous {
+            let _ = std::fs::remove_dir_all(&backup);
+        }
+        return Ok(());
+    };
+    if carry_state && had_previous && new_state.exists() && !old_state.exists() {
+        let _ = std::fs::rename(&new_state, &old_state);
+    }
+    if dest.exists() {
+        std::fs::remove_dir_all(dest).with_context(|| {
+            format!(
+                "{err:#}; removing the partial {} also failed",
+                dest.display()
+            )
+        })?;
+    }
+    if had_previous {
+        std::fs::rename(&backup, dest).with_context(|| {
+            format!(
+                "{err:#}; restoring {} from {} also failed",
+                dest.display(),
+                backup.display()
+            )
+        })?;
+        return Err(err.context(format!(
+            "`{name}` failed to install; the previous version was restored"
+        )));
+    }
+    Err(err.context(format!(
+        "`{name}` failed to install; the partial install was removed, so it is safe to retry"
+    )))
 }
 
 pub fn remove(name: &str) -> Result<()> {
@@ -771,6 +837,9 @@ async fn start_surface(
     session_id: &str,
 ) -> Result<(SurfaceState, bool)> {
     let name = &runtime.name;
+    if cfg!(not(unix)) {
+        bail!("plugin surfaces are only supported on Linux and macOS");
+    }
     if let Some(state) = surface_state(runtime)? {
         if surface_healthy(&state).await {
             return Ok((state, true));
@@ -800,10 +869,23 @@ async fn start_surface(
     );
     let log_path = surface_log_path(runtime);
     let mut child = spawn_surface(runtime, &command, &log_path)?;
+    let pid = child.id();
+    // Reap the child as soon as it exits, whatever happens below: a zombie
+    // leader keeps its process group looking alive, and a long-lived launcher
+    // must not accumulate them.
+    let exited = std::sync::Arc::new(std::sync::OnceLock::new());
+    {
+        let exited = exited.clone();
+        std::thread::spawn(move || {
+            if let Ok(status) = child.wait() {
+                let _ = exited.set(status);
+            }
+        });
+    }
     let state = SurfaceState {
         plugin: runtime.name.clone(),
         port,
-        pid: Some(child.id()),
+        pid: Some(pid),
         process_group: cfg!(unix),
         command,
         cwd: cwd.display().to_string(),
@@ -812,11 +894,14 @@ async fn start_surface(
         started_at: chrono::Utc::now(),
     };
     // Record the surface before waiting on health so a stop issued during
-    // startup still finds (and reaps) it.
-    write_surface_state(runtime, &state)?;
-    if let Err(err) = wait_for_health(&mut child, port, surface.health_path.as_deref()).await {
+    // startup still finds (and reaps) it. Any failure from here on tears the
+    // spawned tree down rather than orphaning it.
+    let started = match write_surface_state(runtime, &state) {
+        Ok(()) => wait_for_health(&exited, port, surface.health_path.as_deref()).await,
+        Err(err) => Err(err),
+    };
+    if let Err(err) = started {
         let _ = stop_surface_process(&state);
-        let _ = child.wait();
         let _ = std::fs::remove_file(surface_state_path(runtime));
         let tail = log_tail(&log_path, SURFACE_LOG_TAIL_LINES).join("\n");
         if tail.is_empty() {
@@ -824,11 +909,6 @@ async fn start_surface(
         }
         return Err(err.context(format!("surface log tail:\n{tail}")));
     }
-    // Reap the child when it eventually exits so a long-lived launcher does
-    // not accumulate zombies (which would also read as still alive).
-    std::thread::spawn(move || {
-        let _ = child.wait();
-    });
     Ok((state, false))
 }
 
@@ -1228,13 +1308,15 @@ fn spawn_surface(
         .with_context(|| format!("failed to start `{command}`"))
 }
 
-/// Whether any process from a recorded surface is still alive.
+/// Whether any process from a recorded surface is still alive. A surface
+/// spawned as a group leader is probed as a group, so children that outlive
+/// the leader still count.
 #[cfg(unix)]
 fn surface_alive(state: &SurfaceState) -> bool {
     let Some(pid) = state.pid else {
         return false;
     };
-    let target = if owns_process_group(state) {
+    let target = if state.process_group {
         -(pid as i32)
     } else {
         pid as i32
@@ -1248,17 +1330,6 @@ fn surface_alive(state: &SurfaceState) -> bool {
     state.pid.is_some()
 }
 
-/// Group-signalling is only safe when the recorded pid really leads its own
-/// group; otherwise `-pid` could hit an unrelated group (or ours).
-#[cfg(unix)]
-fn owns_process_group(state: &SurfaceState) -> bool {
-    let Some(pid) = state.pid else {
-        return false;
-    };
-    // SAFETY: getpgid has no memory-safety implications.
-    state.process_group && unsafe { libc::getpgid(pid as i32) } == pid as i32
-}
-
 /// Terminate a surface's process tree: SIGTERM, wait, then SIGKILL. Errors
 /// if anything survives, so callers never report a surface stopped while it
 /// still holds its port.
@@ -1267,9 +1338,8 @@ fn stop_surface_process(state: &SurfaceState) -> Result<()> {
     let Some(pid) = state.pid else {
         return Ok(());
     };
-    let group = owns_process_group(state);
     let signal = |sig: libc::c_int| {
-        if group {
+        if state.process_group {
             session_lib::session::signal_process_group(pid, sig);
         } else {
             // A record from before surfaces had their own group: the pid is
@@ -1486,10 +1556,19 @@ fn write_surface_state(runtime: &PluginRuntime, state: &SurfaceState) -> Result<
         .with_context(|| format!("failed to write {}", path.display()))
 }
 
+/// Health probes get a per-request timeout so a server that accepts the TCP
+/// connection but never answers cannot stall startup past its deadline.
+fn health_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+        .unwrap_or_default()
+}
+
 async fn surface_healthy(state: &SurfaceState) -> bool {
     let path = state.health_path.as_deref().unwrap_or("/");
     let url = format!("http://127.0.0.1:{}{}", state.port, path);
-    reqwest::Client::new()
+    health_client()
         .get(url)
         .send()
         .await
@@ -1528,16 +1607,16 @@ fn free_port() -> Result<u16> {
 }
 
 async fn wait_for_health(
-    child: &mut std::process::Child,
+    exited: &std::sync::OnceLock<std::process::ExitStatus>,
     port: u16,
     health_path: Option<&str>,
 ) -> Result<()> {
     let path = health_path.unwrap_or("/");
     let url = format!("http://127.0.0.1:{port}{path}");
-    let client = reqwest::Client::new();
+    let client = health_client();
     let deadline = std::time::Instant::now() + SURFACE_HEALTH_TIMEOUT;
     loop {
-        if let Some(status) = child.try_wait()? {
+        if let Some(status) = exited.get() {
             bail!("plugin surface exited with {status} before becoming healthy");
         }
         if let Ok(resp) = client.get(&url).send().await {
@@ -1688,10 +1767,16 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let runtime = test_runtime(root.clone());
         let log = root.join("surface.log");
-        // `sh -c` stays the parent of a non-final command, which is exactly
-        // the shape that orphaned servers when only the wrapper was killed.
-        let mut child =
-            spawn_surface(&runtime, "echo booted; sleep 300; echo never", &log).unwrap();
+        // The `sh -c` wrapper stays the parent of its server, which is the
+        // shape that orphaned servers when only the wrapper was killed. The
+        // child also ignores SIGTERM and outlives the leader, so the stop has
+        // to keep probing the group and escalate to SIGKILL.
+        let mut child = spawn_surface(
+            &runtime,
+            "(trap '' TERM; exec sleep 300) & echo booted; wait",
+            &log,
+        )
+        .unwrap();
         let pid = child.id();
         let state = SurfaceState {
             plugin: "kicad-pcb".to_string(),
