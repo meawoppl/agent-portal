@@ -19,7 +19,8 @@ use gloo::events::EventListener;
 use gloo::timers::callback::Timeout;
 use gloo_net::http::Request;
 use shared::api::{
-    EditStackItem, EditStackResponse, ForwardInfo, PluginInventoryResponse, PortalPluginInfo,
+    EditStackItem, EditStackResponse, ForwardInfo, PluginAction, PluginContextEntry,
+    PluginInventoryResponse, PluginPolicy, PluginRequest, PluginResponse, PortalPluginInfo,
     TurnMetricsResponse, UpdateEditStackItemRequest,
 };
 use shared::strings::truncate_with_ellipsis;
@@ -281,9 +282,9 @@ fn edit_stack_fetch(link: yew::html::Scope<SessionView>, session_id: Uuid) {
 
 fn plugin_inventory_fetch(link: yew::html::Scope<SessionView>, session_id: Uuid) {
     spawn_local(async move {
-        let path = plugin_inventory_api_path(Some(session_id), None);
+        let path = plugin_inventory_api_path(None, Some(session_id), None);
         match utils::fetch_json::<PluginInventoryResponse>(&path, On401::Ignore).await {
-            Ok(data) => link.send_message(SessionViewMsg::PluginInventoryLoaded(data.plugins)),
+            Ok(data) => link.send_message(SessionViewMsg::PluginInventoryLoaded(data)),
             Err(err) => link.send_message(SessionViewMsg::PluginInventoryFailed(format!(
                 "Could not load plugins: {err}"
             ))),
@@ -368,7 +369,13 @@ pub enum SessionViewMsg {
     OpenForwardSurface(ForwardInfo),
     /// The forward chip strip fetched the current forward set.
     ForwardsLoaded(Vec<ForwardInfo>),
-    PluginInventoryLoaded(Vec<PortalPluginInfo>),
+    PluginInventoryLoaded(PluginInventoryResponse),
+    DisablePlugin(String),
+    RequestPluginPort(u16, bool),
+    OpenPluginPort(u16, bool),
+    CancelPluginPort,
+    PluginTabReady(u16),
+    PluginPolicySaved(Result<(), String>),
     PluginInventoryFailed(String),
     TogglePluginsPanel,
     HidePluginsPanel,
@@ -520,6 +527,9 @@ pub struct SessionView {
     /// Monotonic tick bumped on every `ForwardsChanged` frame; passed to the
     /// forward-chip strip as a prop so it refetches (docs/PORT_FORWARDING.md).
     forwards_refresh: u32,
+    current_forward_port: Option<u16>,
+    pending_plugin_port: Option<(u16, bool)>,
+    plugin_tab_ready: bool,
     /// One-shot hint from an explicit agent forward registration. The surface
     /// opens only after the authoritative REST refetch returns its metadata.
     open_forward_on_load: bool,
@@ -528,6 +538,8 @@ pub struct SessionView {
     pending_surface_restore: Option<ForwardSurfaceMemory>,
     active_surface: Option<SessionSurface>,
     plugins: Vec<PortalPluginInfo>,
+    injected_context: Vec<PluginContextEntry>,
+    plugin_policy_feedback: Option<String>,
     plugin_error: Option<String>,
     plugin_notice_expanded: bool,
     edit_stack_items: Vec<EditStackItem>,
@@ -655,10 +667,15 @@ impl Component for SessionView {
             ephemeral_status: None,
             muse_live_turn: MuseLiveTurn::default(),
             forwards_refresh: 0,
+            current_forward_port: None,
+            pending_plugin_port: None,
+            plugin_tab_ready: false,
             open_forward_on_load: false,
             pending_surface_restore: load_open_surface(session_id),
             active_surface: None,
             plugins: Vec::new(),
+            injected_context: Vec::new(),
+            plugin_policy_feedback: None,
             plugin_error: None,
             plugin_notice_expanded: load_plugin_notice_expanded(session_id),
             edit_stack_items: Vec::new(),
@@ -680,6 +697,8 @@ impl Component for SessionView {
         if ctx.props().session.id != old_props.session.id {
             self.active_surface = None;
             self.plugins.clear();
+            self.injected_context.clear();
+            self.plugin_policy_feedback = None;
             self.plugin_error = None;
             self.plugin_notice_expanded = load_plugin_notice_expanded(ctx.props().session.id);
             self.edit_stack_items.clear();
@@ -689,6 +708,9 @@ impl Component for SessionView {
             self.edit_stack_panel_open = false;
             self.edit_stack_view = EditStackView::Pending;
             self.open_forward_on_load = false;
+            self.current_forward_port = None;
+            self.pending_plugin_port = None;
+            self.plugin_tab_ready = false;
             self.pending_surface_restore = load_open_surface(ctx.props().session.id);
             self.surface_split_percent = load_split_percent(ctx.props().session.id);
             edit_stack_fetch(ctx.link().clone(), ctx.props().session.id);
@@ -891,6 +913,7 @@ impl Component for SessionView {
                 reasoning_effort,
             } => self.handle_secret_drop(ctx, upload_id, file_size, reasoning_effort),
             SessionViewMsg::OpenForwardSurface(forward) => {
+                self.current_forward_port = Some(forward.port);
                 if let Some(surface) = self.active_surface.as_mut() {
                     let same_forward = surface
                         .forward()
@@ -923,9 +946,121 @@ impl Component for SessionView {
                 self.edit_stack_error = Some(err);
                 true
             }
-            SessionViewMsg::PluginInventoryLoaded(plugins) => {
-                self.plugins = plugins;
+            SessionViewMsg::PluginInventoryLoaded(data) => {
+                self.plugins = data.plugins;
+                self.injected_context = data.injected_context;
                 self.plugin_error = None;
+                true
+            }
+            SessionViewMsg::RequestPluginPort(port, new_tab) => {
+                if self
+                    .current_forward_port
+                    .is_some_and(|current| current != port)
+                {
+                    self.pending_plugin_port = Some((port, new_tab));
+                } else {
+                    ctx.link()
+                        .send_message(SessionViewMsg::OpenPluginPort(port, new_tab));
+                }
+                true
+            }
+            SessionViewMsg::CancelPluginPort => {
+                self.pending_plugin_port = None;
+                true
+            }
+            SessionViewMsg::PluginTabReady(port) => {
+                self.current_forward_port = Some(port);
+                self.plugin_tab_ready = true;
+                self.forwards_refresh = self.forwards_refresh.wrapping_add(1);
+                true
+            }
+            SessionViewMsg::OpenPluginPort(port, new_tab) => {
+                self.pending_plugin_port = None;
+                self.plugin_tab_ready = false;
+                let session_id = ctx.props().session.id;
+                let link = ctx.link().clone();
+                wasm_bindgen_futures::spawn_local(async move {
+                    let result = async {
+                        let response = utils::send_json(
+                            Request::post(&format!("/api/sessions/{session_id}/forwards")),
+                            &shared::api::CreateForwardRequest { port },
+                        )
+                        .await
+                        .map_err(|e| e.to_string())?;
+                        if !response.ok() {
+                            return Err(format!("Could not open surface ({})", response.status()));
+                        }
+                        response
+                            .json::<shared::api::CreateForwardResponse>()
+                            .await
+                            .map_err(|e| e.to_string())
+                    }
+                    .await;
+                    match result {
+                        Ok(response) => {
+                            if new_tab {
+                                link.send_message(SessionViewMsg::PluginTabReady(port));
+                            } else {
+                                link.send_message(SessionViewMsg::OpenForwardSurface(
+                                    response.forward,
+                                ));
+                            }
+                        }
+                        Err(error) => {
+                            link.send_message(SessionViewMsg::PluginInventoryFailed(error))
+                        }
+                    }
+                });
+                true
+            }
+            SessionViewMsg::DisablePlugin(name) => {
+                if let Some(launcher_id) = ctx.props().session.launcher_id {
+                    let body = PluginRequest {
+                        session_id: Some(ctx.props().session.id),
+                        working_directory: Some(ctx.props().session.working_directory.clone()),
+                        action: PluginAction::SetPolicy {
+                            name,
+                            policy: PluginPolicy::Never,
+                        },
+                    };
+                    let link = ctx.link().clone();
+                    wasm_bindgen_futures::spawn_local(async move {
+                        let result = async {
+                            let response = utils::send_json(
+                                Request::post(&format!("/api/launchers/{launcher_id}/plugins")),
+                                &body,
+                            )
+                            .await
+                            .map_err(|e| e.to_string())?;
+                            if !response.ok() {
+                                return Err(format!(
+                                    "Policy update failed ({})",
+                                    response.status()
+                                ));
+                            }
+                            let response = response
+                                .json::<PluginResponse>()
+                                .await
+                                .map_err(|e| e.to_string())?;
+                            if response.success {
+                                Ok(())
+                            } else {
+                                Err(response
+                                    .error
+                                    .unwrap_or_else(|| "Policy update failed".into()))
+                            }
+                        }
+                        .await;
+                        link.send_message(SessionViewMsg::PluginPolicySaved(result));
+                    });
+                }
+                false
+            }
+            SessionViewMsg::PluginPolicySaved(result) => {
+                self.plugin_policy_feedback = Some(match result {
+                    Ok(()) => "Disabled for future sessions in this project. This session’s injected context is unchanged.".into(),
+                    Err(error) => error,
+                });
                 true
             }
             SessionViewMsg::PluginInventoryFailed(err) => {
@@ -1039,6 +1174,7 @@ impl Component for SessionView {
                 true
             }
             SessionViewMsg::ForwardsLoaded(forwards) => {
+                self.current_forward_port = forwards.first().map(|forward| forward.port);
                 if self.open_forward_on_load {
                     self.open_forward_on_load = false;
                     if let Some(forward) = forwards.first() {
@@ -1490,7 +1626,10 @@ impl Component for SessionView {
                                     </div>
                                 }
                                 <PluginContextNotice
-                                    plugins={self.plugins.clone()}
+                                    entries={self.injected_context.clone()}
+                                    feedback={self.plugin_policy_feedback.clone()}
+                                    can_disable={ctx.props().session.launcher_id.is_some() && ctx.props().current_user_id.as_deref().is_some_and(|id| id == ctx.props().session.user_id.to_string())}
+                                    on_disable={ctx.link().callback(SessionViewMsg::DisablePlugin)}
                                     expanded={self.plugin_notice_expanded}
                                     on_toggle={ctx.link().callback(|_| SessionViewMsg::TogglePluginNotice)}
                                 />
@@ -1560,6 +1699,15 @@ impl Component for SessionView {
                         } else if surface.is_plugins() {
                             <PluginDiscoverySurface
                                 plugins={self.plugins.clone()}
+                                session_id={ctx.props().session.id}
+                                launcher_id={ctx.props().session.launcher_id}
+                                working_directory={ctx.props().session.working_directory.clone()}
+                                tab_ready={self.plugin_tab_ready}
+                                pending_port={self.pending_plugin_port}
+                                current_forward_port={self.current_forward_port}
+                                on_cancel_port={ctx.link().callback(|_| SessionViewMsg::CancelPluginPort)}
+                                on_confirm_port={ctx.link().callback(|(port, new_tab)| SessionViewMsg::OpenPluginPort(port, new_tab))}
+                                on_request_port={ctx.link().callback(|(port, new_tab)| SessionViewMsg::RequestPluginPort(port, new_tab))}
                                 error={self.plugin_error.clone()}
                                 collapsed={surface.collapsed}
                                 fullscreen={surface.mode == SessionSurfaceMode::Fullscreen}

@@ -197,6 +197,10 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
         // App configuration (public, no auth required)
         .route("/api/config", get(handlers::config::get_config))
         .route("/api/plugins", get(handlers::plugins::list_plugins))
+        .route(
+            "/api/launchers/{launcher_id}/plugins",
+            post(handlers::plugins::manage_plugins),
+        )
         // Session API routes
         .route("/api/sessions", get(handlers::sessions::list_sessions))
         .route(

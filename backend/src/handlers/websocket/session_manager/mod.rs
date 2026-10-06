@@ -15,7 +15,7 @@
 
 use dashmap::{DashMap, DashSet};
 use shared::api::ForwardError;
-use shared::{FileDownloadResponseFields, ForwardStatusFields, ServerToClient, ServerToProxy};
+use shared::{FileDownloadResponseFields, ForwardStatusFields, LauncherToServer, ServerToClient, ServerToProxy};
 use std::collections::VecDeque;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
@@ -213,6 +213,7 @@ pub struct SessionManager {
     /// `try_register_launcher`, removed by `unregister_launcher`.
     launcher_dedup: Arc<DashMap<(Uuid, String), Uuid>>,
     pending_launcher_requests: Arc<LauncherRequests>,
+    pending_plugin_requests: Arc<DashMap<Uuid, (Uuid, oneshot::Sender<LauncherToServer>)>>,
     pending_file_downloads: Arc<DashMap<Uuid, oneshot::Sender<FileDownloadResponseFields>>>,
     /// Pending `ForwardOpen` → `ForwardStatus` round-trips, keyed by
     /// `(session_id, port)` — the reply frame carries no request id.
@@ -277,6 +278,7 @@ impl Default for SessionManager {
             launchers: Arc::new(DashMap::new()),
             launcher_dedup: Arc::new(DashMap::new()),
             pending_launcher_requests: Arc::new(DashMap::new()),
+            pending_plugin_requests: Arc::new(DashMap::new()),
             pending_file_downloads: Arc::new(DashMap::new()),
             pending_forward_status: Arc::new(DashMap::new()),
             forward_health: Arc::new(DashMap::new()),

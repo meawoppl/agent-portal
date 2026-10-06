@@ -20,6 +20,7 @@ mod model_select;
 pub mod muse_renderer;
 mod onboarding_tutorial;
 pub mod plugin_discovery;
+pub mod plugin_manager;
 mod proxy_token_setup;
 mod schedule_dialog;
 mod share_dialog;

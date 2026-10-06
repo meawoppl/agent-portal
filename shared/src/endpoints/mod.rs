@@ -255,6 +255,7 @@ mod tests {
     #[test]
     fn server_to_launcher_launch_roundtrip() {
         let msg = ServerToLauncher::LaunchSession {
+            plugin_overrides: Vec::new(),
             request_id: Uuid::nil(),
             user_id: Uuid::nil(),
             auth_token: "token".into(),

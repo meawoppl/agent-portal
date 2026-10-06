@@ -43,6 +43,10 @@ pub enum SessionExitReason {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum LauncherToServer {
+    PluginResponse {
+        request_id: Uuid,
+        response: crate::api::PluginResponse,
+    },
     /// Register a launcher daemon
     LauncherRegister {
         launcher_id: Uuid,
@@ -227,6 +231,10 @@ pub enum LauncherRejectReason {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ServerToLauncher {
+    PluginRequest {
+        request_id: Uuid,
+        request: crate::api::PluginRequest,
+    },
     /// Acknowledge launcher registration
     LauncherRegisterAck {
         success: bool,
@@ -246,6 +254,8 @@ pub enum ServerToLauncher {
 
     /// Request to launch a new proxy instance
     LaunchSession {
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        plugin_overrides: Vec<crate::api::PluginOverride>,
         request_id: Uuid,
         user_id: Uuid,
         auth_token: String,

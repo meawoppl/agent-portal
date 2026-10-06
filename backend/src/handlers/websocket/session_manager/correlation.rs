@@ -3,7 +3,7 @@
 //! matching response frame arrives.
 
 use shared::api::ForwardError;
-use shared::{FileDownloadResponseFields, ForwardStatusFields};
+use shared::{FileDownloadResponseFields, ForwardStatusFields, LauncherToServer};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
@@ -296,5 +296,72 @@ mod tests {
                 process: None
             })
         );
+    }
+}
+
+impl SessionManager {
+    pub fn register_plugin_request(
+        &self,
+        request_id: Uuid,
+        launcher_id: Uuid,
+    ) -> oneshot::Receiver<LauncherToServer> {
+        let (tx, rx) = oneshot::channel();
+        self.pending_plugin_requests
+            .insert(request_id, (launcher_id, tx));
+        rx
+    }
+
+    pub fn complete_plugin_request(
+        &self,
+        request_id: Uuid,
+        launcher_id: Uuid,
+        msg: LauncherToServer,
+    ) {
+        // Bind replies to the host that received the request, even if another
+        // authenticated launcher learns a correlation id.
+        if let Some((_, (_, tx))) = self
+            .pending_plugin_requests
+            .remove_if(&request_id, |_, (owner, _)| *owner == launcher_id)
+        {
+            let _ = tx.send(msg);
+        }
+    }
+
+    pub fn cancel_plugin_request(&self, request_id: Uuid) {
+        self.pending_plugin_requests.remove(&request_id);
+    }
+}
+
+#[cfg(test)]
+mod plugin_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn plugin_reply_must_come_from_selected_host() {
+        let manager = SessionManager::default();
+        let request = Uuid::new_v4();
+        let host = Uuid::new_v4();
+        let mut rx = manager.register_plugin_request(request, host);
+        let reply = LauncherToServer::PluginResponse {
+            request_id: request,
+            response: shared::api::PluginResponse::default(),
+        };
+        manager.complete_plugin_request(request, Uuid::new_v4(), reply.clone());
+        assert!(matches!(
+            rx.try_recv(),
+            Err(oneshot::error::TryRecvError::Empty)
+        ));
+        manager.complete_plugin_request(request, host, reply);
+        assert!(rx.await.is_ok());
+        assert!(manager.pending_plugin_requests.is_empty());
+    }
+
+    #[tokio::test]
+    async fn cancelled_plugin_request_releases_waiter() {
+        let manager = SessionManager::default();
+        let request = Uuid::new_v4();
+        let rx = manager.register_plugin_request(request, Uuid::new_v4());
+        manager.cancel_plugin_request(request);
+        assert!(rx.await.is_err());
     }
 }

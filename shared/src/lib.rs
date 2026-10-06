@@ -1011,6 +1011,9 @@ pub fn uuid_matches_prefix(id: &Uuid, prefix: &str) -> bool {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum PortalContent {
+    PluginCommand {
+        record: api::PluginCommandRecord,
+    },
     Text {
         text: String,
     },
@@ -1195,6 +1198,7 @@ impl std::fmt::Debug for PortalContent {
                 .field("animated", animated)
                 .field("duration", duration)
                 .finish(),
+            Self::PluginCommand { record } => f.debug_tuple("PluginCommand").field(record).finish(),
             Self::Reminder { title, body } => f
                 .debug_struct("Reminder")
                 .field("title", title)

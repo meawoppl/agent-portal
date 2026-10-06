@@ -154,6 +154,7 @@ pub enum PluginAction {
     RunCommand {
         name: String,
         command: String,
+        expected_run: String,
         args: Vec<String>,
         approved: bool,
     },
@@ -255,6 +256,7 @@ mod tests {
             action: PluginAction::RunCommand {
                 name: "tools".into(),
                 command: "inspect".into(),
+                expected_run: "inspect --safe".into(),
                 args: vec!["a file; $(literal)".into()],
                 approved: false,
             },
@@ -277,4 +279,20 @@ mod tests {
         assert_eq!(response.plugins[0].policy, PluginPolicy::Ask);
         assert!(response.plugins[0].activation.is_none());
     }
+}
+
+/// Durable Portal command audit card, independent of an agent's shell tools.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginCommandRecord {
+    pub plugin: String,
+    pub command: String,
+    pub run: String,
+    pub args: Vec<String>,
+    pub launcher_id: uuid::Uuid,
+    pub working_directory: String,
+    pub requested_by: uuid::Uuid,
+    pub status: String,
+    pub exit_code: Option<i32>,
+    pub output: String,
 }

@@ -661,6 +661,7 @@ fn launcher_to_server_exit_reason_defaults() {
 #[test]
 fn launcher_server_to_launcher_launch_roundtrip_golden() {
     let msg = ServerToLauncher::LaunchSession {
+        plugin_overrides: Vec::new(),
         request_id: nil(),
         user_id: nil(),
         auth_token: "tok".into(),

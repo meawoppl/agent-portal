@@ -789,6 +789,7 @@ pub fn dashboard_page() -> Html {
                             html! {}
                         }
                     }
+                    <a class="header-button" href="/plugins">{ "Plugins" }</a>
                     <button class="header-button" onclick={go_to_settings.clone()}>
                         { "Settings" }
                     </button>

@@ -55,6 +55,17 @@ fn render_portal_content(
     on_schedule_continuation: Callback<Uuid>,
 ) -> Html {
     match content {
+        shared::PortalContent::PluginCommand { record } => html! {
+            <details class="plugin-context-card">
+                <summary>{ format!("Plugin command · {}:{} · {}", record.plugin, record.command, record.status) }</summary>
+                <div class="plugin-context-body">
+                    <p>{ format!("Computer: {} · Directory: {}", record.launcher_id, record.working_directory) }</p>
+                    <p>{ format!("Approved by {} · arguments: {:?} · exit: {:?}", record.requested_by, record.args, record.exit_code) }</p>
+                    <code>{ &record.run }</code>
+                    <pre>{ &record.output }</pre>
+                </div>
+            </details>
+        },
         shared::PortalContent::Text { text } => render_markdown_for_session(text, session_id),
         shared::PortalContent::ConnectionCycle { duration } => {
             // One line, no badge, no host/cwd/agent id. A planned redeploy is

@@ -30,6 +30,8 @@ pub enum Route {
     Demo,
     #[at("/settings")]
     Settings,
+    #[at("/plugins")]
+    Plugins,
     #[at("/history")]
     History,
     #[at("/history/:user/:session")]
@@ -68,6 +70,7 @@ fn switch(routes: Route) -> Html {
         Route::Dashboard => html! { <DashboardPage /> },
         Route::Demo => html! { <DemoPage /> },
         Route::Settings => html! { <SettingsRoute /> },
+        Route::Plugins => html! { <pages::plugins::PluginsPage /> },
         Route::History => html! { <HistoryBrowserPage /> },
         Route::HistorySession { user, session } => html! {
             <HistoryTranscriptPage {user} {session} />

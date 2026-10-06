@@ -114,6 +114,7 @@ pub async fn launch_session(
         .register_launch_session(request_id, session_id);
 
     let launch_msg = ServerToLauncher::LaunchSession {
+        plugin_overrides: req.plugin_overrides,
         request_id,
         user_id,
         auth_token,
@@ -308,6 +309,7 @@ pub async fn fork_session(
         .session_manager
         .register_launch_session(request_id, session_id);
     let launch = ServerToLauncher::LaunchSession {
+        plugin_overrides: Vec::new(),
         request_id,
         user_id,
         auth_token,

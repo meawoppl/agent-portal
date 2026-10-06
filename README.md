@@ -19,6 +19,18 @@ Supported agents: **Claude Code**, **OpenAI Codex**, and **Meta Muse Code**
 
 ---
 
+## Plugins
+
+[Agent Portal Plugins](https://github.com/meawoppl/agent-portal-plugins) is the
+companion repository for plugins that add skills, prompt context, named commands,
+toolchains, and dock surfaces to agent sessions. Open **Plugins** in the Portal
+to browse installed plugins on a host, manage their lifecycle, and choose a
+per-project activation policy.
+
+To build your own plugin, start with the [Plugin Authoring guide](docs/PLUGIN_AUTHORING.md)
+for the manifest, discovery rules, commands, and surface contract. Plugins run
+on the launcher host, alongside your project.
+
 ## Quick Start
 
 ### Use the hosted portal

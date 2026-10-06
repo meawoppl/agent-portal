@@ -56,6 +56,8 @@ impl WorktreeMode {
 /// Request to launch a session via a launcher
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LaunchRequest {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plugin_overrides: Vec<super::PluginOverride>,
     #[serde(flatten)]
     pub launch: LaunchSpec,
     #[serde(default)]

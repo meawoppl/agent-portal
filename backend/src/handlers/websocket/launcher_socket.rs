@@ -713,6 +713,11 @@ fn handle_launcher_message(
                 msg,
             );
         }
+        LauncherToServer::PluginResponse { request_id, .. } => {
+            app_state
+                .session_manager
+                .complete_plugin_request(request_id, launcher_id, msg);
+        }
         LauncherToServer::ProbeAgentsResult { request_id, .. } => {
             app_state.session_manager.complete_launcher_request(
                 super::LauncherRpcKind::Agent,
@@ -796,6 +801,7 @@ fn handle_launcher_message(
             match crate::handlers::launchers::mint_launch_token(app_state, user_id) {
                 Ok(auth_token) => {
                     let launch_msg = ServerToLauncher::LaunchSession {
+                        plugin_overrides: Vec::new(),
                         request_id,
                         user_id,
                         auth_token,
@@ -1168,6 +1174,7 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
         );
 
         let launch_msg = ServerToLauncher::LaunchSession {
+            plugin_overrides: Vec::new(),
             request_id,
             user_id,
             auth_token,

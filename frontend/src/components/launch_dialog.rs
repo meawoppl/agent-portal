@@ -329,6 +329,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     let debounce_handle = use_mut_ref(|| None::<Timeout>);
     let agent_installs = use_state(Vec::<AgentInstall>::new);
     let probing_agents = use_state(|| false);
+    let plugin_overrides = use_state(Vec::<shared::api::PluginOverride>::new);
     let plugin_suggestions = use_state(Vec::<shared::api::PortalPluginInfo>::new);
     let plugin_suggestion_error = use_state(|| None::<String>);
 
@@ -377,27 +378,45 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
 
     {
         let path = (*dir.path).clone();
+        let launcher = *selected_launcher;
         let plugin_suggestions = plugin_suggestions.clone();
         let plugin_suggestion_error = plugin_suggestion_error.clone();
-        use_effect_with(path, move |path| {
-            let path = path.clone();
-            spawn_local(async move {
-                let api_path = plugin_inventory_api_path(None, Some(&path));
-                match utils::fetch_json::<PluginInventoryResponse>(&api_path, On401::Ignore).await {
-                    Ok(data) => {
-                        plugin_suggestions.set(data.plugins);
-                        plugin_suggestion_error.set(None);
+        let plugin_overrides = plugin_overrides.clone();
+        use_effect_with((launcher, path), move |(launcher, path)| {
+            let cancelled = std::rc::Rc::new(std::cell::Cell::new(false));
+            let obsolete = cancelled.clone();
+            plugin_overrides.set(Vec::new());
+            plugin_suggestions.set(Vec::new());
+            plugin_suggestion_error.set(None);
+            if let Some(launcher) = *launcher {
+                let path = path.clone();
+                spawn_local(async move {
+                    let api_path = plugin_inventory_api_path(Some(launcher), None, Some(&path));
+                    let result =
+                        utils::fetch_json::<PluginInventoryResponse>(&api_path, On401::Ignore)
+                            .await;
+                    if obsolete.get() {
+                        return;
                     }
-                    Err(err) => {
-                        plugin_suggestions.set(Vec::new());
-                        plugin_suggestion_error
-                            .set(Some(format!("Could not load plugin suggestions: {err}")));
+                    match result {
+                        Ok(data) => plugin_suggestions.set(data.plugins),
+                        Err(err) => plugin_suggestion_error
+                            .set(Some(format!("Could not load plugin suggestions: {err}"))),
                     }
-                }
-            });
-            || ()
+                });
+            }
+            move || cancelled.set(true)
         });
     }
+    let on_plugin_override = {
+        let plugin_overrides = plugin_overrides.clone();
+        Callback::from(move |item: shared::api::PluginOverride| {
+            let mut overrides = (*plugin_overrides).clone();
+            overrides.retain(|existing| existing.name != item.name);
+            overrides.push(item);
+            plugin_overrides.set(overrides);
+        })
+    };
 
     let on_path_input = {
         let selected_launcher = selected_launcher.clone();
@@ -549,6 +568,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     // Primary action, invoked by the Launch button and by Enter from any
     // non-button field (#1384). `Callback<()>` so both call sites can fire it.
     let launch: Callback<()> = {
+        let plugin_overrides = plugin_overrides.clone();
         let dir_path = dir.path.clone();
         let home_root = dir.home_root.clone();
         let extra_args = extra_args.clone();
@@ -587,6 +607,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                 );
             }
 
+            let plugin_overrides = (*plugin_overrides).clone();
             let launcher_id = *selected_launcher;
             let selected_agent_type = *agent_type;
             let want_worktree = *create_worktree;
@@ -615,6 +636,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                     launcher_id,
                     name,
                     create_worktree: false,
+                    plugin_overrides,
                 };
 
                 match utils::send_json(Request::post("/api/launch"), &body).await {
@@ -799,6 +821,8 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
 
                     <PluginSuggestionStrip
                         plugins={(*plugin_suggestions).clone()}
+                        overrides={(*plugin_overrides).clone()}
+                        on_override={on_plugin_override}
                         error={(*plugin_suggestion_error).clone()}
                     />
 

@@ -341,6 +341,7 @@ pub async fn resume_session(
     crate::db::session_lifecycle::resume(&mut conn, session_id)?;
 
     let launch_msg = shared::ServerToLauncher::LaunchSession {
+        plugin_overrides: Vec::new(),
         request_id,
         user_id: session.user_id,
         auth_token,
