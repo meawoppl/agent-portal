@@ -242,3 +242,39 @@ pub enum PluginContextKind {
     Skill,
     Prompt,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_approval_is_explicit_and_arguments_round_trip() {
+        let request = PluginRequest {
+            working_directory: Some("/project".into()),
+            session_id: None,
+            action: PluginAction::RunCommand {
+                name: "tools".into(),
+                command: "inspect".into(),
+                args: vec!["a file; $(literal)".into()],
+                approved: false,
+            },
+        };
+        let wire = serde_json::to_string(&request).unwrap();
+        assert_eq!(
+            serde_json::from_str::<PluginRequest>(&wire).unwrap(),
+            request
+        );
+        let missing_approval = wire.replace(",\"approved\":false", "");
+        assert!(serde_json::from_str::<PluginRequest>(&missing_approval).is_err());
+    }
+
+    #[test]
+    fn legacy_inventory_defaults_to_no_injection_claim() {
+        let response: PluginInventoryResponse =
+            serde_json::from_str(r#"{"plugins":[{"name":"tools","displayName":"Tools"}]}"#)
+                .unwrap();
+        assert!(response.injected_context.is_empty());
+        assert_eq!(response.plugins[0].policy, PluginPolicy::Ask);
+        assert!(response.plugins[0].activation.is_none());
+    }
+}
