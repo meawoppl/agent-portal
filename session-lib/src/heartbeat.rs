@@ -1,13 +1,5 @@
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-
-/// Lock the heartbeat timestamp, recovering the guarded value when a previous
-/// holder panicked. Poisoning is sticky: without recovery every later
-/// `received`/`is_expired` call would panic and the proxy would never notice
-/// a dead connection (or never stop seeing one as dead).
-fn lock_timestamp(mutex: &Mutex<Instant>) -> std::sync::MutexGuard<'_, Instant> {
-    mutex.lock().unwrap_or_else(PoisonError::into_inner)
-}
 
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 pub const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -37,17 +29,19 @@ impl HeartbeatTracker {
 
     /// Called when a heartbeat echo is received from the backend.
     pub fn received(&self) {
-        *lock_timestamp(&self.last_received) = Instant::now();
+        *shared::sync::lock_recovering_poison(&self.last_received) = Instant::now();
     }
 
     /// Returns true if no heartbeat echo has been received within the timeout.
     pub fn is_expired(&self) -> bool {
-        lock_timestamp(&self.last_received).elapsed() > HEARTBEAT_TIMEOUT
+        shared::sync::lock_recovering_poison(&self.last_received).elapsed() > HEARTBEAT_TIMEOUT
     }
 
     /// Seconds since last heartbeat echo, for logging.
     pub fn elapsed_secs(&self) -> u64 {
-        lock_timestamp(&self.last_received).elapsed().as_secs()
+        shared::sync::lock_recovering_poison(&self.last_received)
+            .elapsed()
+            .as_secs()
     }
 }
 

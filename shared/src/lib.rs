@@ -133,6 +133,9 @@ pub mod fmt;
 // Blank-string guard shared between frontend and native crates
 pub mod strings;
 
+// Poison-tolerant std Mutex locking shared between native crates
+pub mod sync;
+
 // HTTP<->WebSocket scheme helpers shared between frontend and native crates
 pub mod urls;
 
