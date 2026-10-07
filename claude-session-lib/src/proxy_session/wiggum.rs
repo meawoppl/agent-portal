@@ -565,6 +565,10 @@ mod tests {
             api_error_status: None,
             api_error_code: None,
             startup_failure_reason: None,
+            // Remote timing and safety diagnostics are absent in synthetic results.
+            resume_store_confirm_detail: None,
+            system_prompt_detail: None,
+            safety_stops: None,
             stop_reason: None,
             terminal_reason: None,
             fast_mode_state: None,
