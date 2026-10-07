@@ -201,7 +201,7 @@ impl TunnelManager {
                 mgr.probe_tick().await;
             }
         });
-        *mgr.prober.lock().unwrap_or_else(|e| e.into_inner()) = Some(handle);
+        *shared::sync::lock_recovering_poison(&mgr.prober) = Some(handle);
         mgr
     }
 
@@ -354,7 +354,7 @@ impl TunnelManager {
     /// connection; a reconnect builds a fresh one and the backend replays
     /// `ForwardOpen`s to rebuild the allowlist.
     pub async fn shutdown(&self) {
-        if let Some(prober) = self.prober.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        if let Some(prober) = shared::sync::lock_recovering_poison(&self.prober).take() {
             prober.abort();
         }
         // Release the data-plane writer too: teardown must be complete on its
