@@ -1669,3 +1669,77 @@
         scroll-snap-align: start;
     }
 }
+
+/* Theme selector (Settings > Appearance). Unscoped: it has to read well in
+   every theme, and each swatch previews its own theme. */
+.theme-choices {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.theme-choice {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 10px 14px;
+    text-align: left;
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: border-color 0.15s, transform 0.15s;
+}
+
+.theme-choice:hover {
+    transform: translateY(-1px);
+    border-color: var(--text-muted);
+}
+
+.theme-choice.active {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+}
+
+.theme-choice-swatch {
+    display: block;
+    height: 64px;
+    border-radius: 6px;
+}
+
+.theme-choice.linux .theme-choice-swatch {
+    background:
+        linear-gradient(transparent 0 14px, rgba(0, 0, 0, 0) 14px),
+        repeating-linear-gradient(180deg, transparent 0 9px, rgba(158, 206, 106, 0.55) 9px 10px, transparent 10px 15px),
+        #16161e;
+    border: 1px solid #292e42;
+}
+
+.theme-choice.windows .theme-choice-swatch {
+    background:
+        linear-gradient(180deg, #0a5fd8 0, #3b8cf5 9px, #0a4cc2 18px, #ece9d8 18px),
+        #ece9d8;
+    border: 1px solid #0831a8;
+}
+
+.theme-choice.apple .theme-choice-swatch {
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.06)) 14px 14px / calc(100% - 28px) calc(100% - 28px) no-repeat,
+        radial-gradient(60% 80% at 20% 20%, #385cff, transparent 70%),
+        radial-gradient(60% 80% at 85% 25%, #b044ff, transparent 70%),
+        radial-gradient(70% 80% at 70% 100%, #00c4ba, transparent 70%),
+        #06070b;
+}
+
+.theme-choice-label {
+    font-size: 0.9rem;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+.theme-choice-caption {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+}

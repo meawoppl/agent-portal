@@ -3,7 +3,7 @@ use crate::pages::dashboard::{
     load_group_by_host, load_rail_position, load_vim_mode, save_group_by_host, save_rail_position,
     save_vim_mode, RailPosition,
 };
-use crate::ui_refresh::{load_ui_refresh, set_ui_refresh};
+use crate::ui_theme::{load_ui_theme, set_ui_theme, UiTheme};
 use yew::prelude::*;
 
 const ALL_POSITIONS: &[(RailPosition, &str)] = &[
@@ -19,17 +19,7 @@ pub fn appearance_panel() -> Html {
     let vim_enabled = use_state(load_vim_mode);
     let group_by_host = use_state(load_group_by_host);
     let voice_hold_open = use_state(load_voice_hold_open);
-    let ui_refresh = use_state(load_ui_refresh);
-
-    let on_toggle_ui_refresh = {
-        let ui_refresh = ui_refresh.clone();
-        Callback::from(move |e: Event| {
-            let input: web_sys::HtmlInputElement = e.target_unchecked_into();
-            let enabled = input.checked();
-            set_ui_refresh(enabled);
-            ui_refresh.set(enabled);
-        })
-    };
+    let ui_theme = use_state(load_ui_theme);
 
     let on_toggle_group_by_host = {
         let group_by_host = group_by_host.clone();
@@ -71,21 +61,34 @@ pub fn appearance_panel() -> Html {
             </div>
 
             <div class="appearance-setting">
-                <h3>{ "Refreshed design (preview)" }</h3>
+                <h3>{ "Theme" }</h3>
                 <p class="setting-description">
-                    { "Try the in-progress visual refresh: neutral graphite \
-                       surfaces, one accent color, Inter and JetBrains Mono, and \
-                       quieter cards and badges. Applies instantly in this browser; \
-                       turn it off to return to the current look." }
+                    { "How should Agent Portal look? Applies instantly in this browser." }
                 </p>
-                <label class="toggle-label">
-                    <input
-                        type="checkbox"
-                        checked={*ui_refresh}
-                        onchange={on_toggle_ui_refresh}
-                    />
-                    <span>{ if *ui_refresh { "Enabled" } else { "Disabled" } }</span>
-                </label>
+                <div class="theme-choices" role="radiogroup">
+                    { for UiTheme::ALL.into_iter().map(|theme| {
+                        let active = *ui_theme == theme;
+                        let setter = ui_theme.clone();
+                        let onclick = Callback::from(move |_: MouseEvent| {
+                            set_ui_theme(theme);
+                            setter.set(theme);
+                        });
+                        html! {
+                            <button
+                                key={theme.as_str()}
+                                type="button"
+                                role="radio"
+                                aria-checked={active.to_string()}
+                                class={classes!("theme-choice", theme.as_str(), active.then_some("active"))}
+                                {onclick}
+                            >
+                                <span class="theme-choice-swatch" aria-hidden="true"></span>
+                                <span class="theme-choice-label">{ format!("\u{201c}{}\u{201d}", theme.label()) }</span>
+                                <span class="theme-choice-caption">{ theme.caption() }</span>
+                            </button>
+                        }
+                    })}
+                </div>
             </div>
 
             <div class="appearance-setting">

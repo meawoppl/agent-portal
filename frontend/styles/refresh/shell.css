@@ -1,331 +1,455 @@
 /*
- * Refreshed design (preview) — app chrome: typography, headers, the session
- * rail, the session header/input frame, settings, onboarding, and the /demo
- * harness. Everything is scoped to html[data-ui="refresh"]; tokens live in
- * tokens.css, transcript surfaces in transcript.css.
+ * Refreshed design (preview) — app chrome, in a "liquid glass" direction: a
+ * vivid, slowly drifting wallpaper behind everything, and the chrome as
+ * floating translucent islands (backdrop blur, a lit top edge, an inner
+ * hairline, a deep soft shadow), capsule controls and large radii.
  *
- * Direction: neutral graphite surfaces, hairline borders, one accent used for
- * focus and primary actions only, no glows or gradients, and a real type
- * scale instead of all-caps chips and monospace badges.
+ * Scoped to html[data-ui="apple"]; tokens live in tokens.css, transcript
+ * surfaces in transcript.css. Reduced-motion and reduced-transparency
+ * preferences fall back to a static wallpaper and solid panels.
  */
 
-/* ---- Base typography ---------------------------------------------------- */
+/* ---- Wallpaper ---------------------------------------------------------- */
 
-html[data-ui="refresh"],
-html[data-ui="refresh"] body {
+html[data-ui="apple"] {
+    background: var(--refresh-bg);
+}
+
+/* The body stays transparent: its background would paint over the
+   negative-z-index wallpaper layers below. */
+html[data-ui="apple"] body {
+    background: transparent;
+    color: var(--refresh-text);
     font-family: var(--refresh-font-sans);
     font-size: var(--refresh-text-base);
-    font-feature-settings: "cv11", "ss01", "ss03";
+    letter-spacing: -0.003em;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
-    background: var(--refresh-bg);
-    color: var(--refresh-text);
 }
 
-html[data-ui="refresh"] button,
-html[data-ui="refresh"] input,
-html[data-ui="refresh"] select,
-html[data-ui="refresh"] textarea {
+html[data-ui="apple"] body::before,
+html[data-ui="apple"] body::after {
+    content: "";
+    position: fixed;
+    inset: -20vmax;
+    z-index: -1;
+    pointer-events: none;
+}
+
+html[data-ui="apple"] body::before {
+    background:
+        radial-gradient(36vmax 30vmax at 18% 14%, rgba(56, 92, 255, 0.62), transparent 70%),
+        radial-gradient(32vmax 28vmax at 84% 18%, rgba(176, 68, 255, 0.5), transparent 70%),
+        radial-gradient(38vmax 30vmax at 72% 88%, rgba(0, 196, 186, 0.42), transparent 70%),
+        radial-gradient(30vmax 26vmax at 22% 86%, rgba(255, 110, 72, 0.34), transparent 70%),
+        radial-gradient(26vmax 22vmax at 50% 50%, rgba(255, 64, 160, 0.18), transparent 70%);
+    filter: blur(20px) saturate(130%);
+    animation: refresh-wallpaper-drift 48s ease-in-out infinite alternate;
+}
+
+/* A soft vignette keeps the edges deep so glass reads as glass. */
+html[data-ui="apple"] body::after {
+    inset: 0;
+    background: radial-gradient(120% 90% at 50% 40%, transparent 55%, rgba(0, 0, 0, 0.55));
+}
+
+@keyframes refresh-wallpaper-drift {
+    0% {
+        transform: translate3d(0, 0, 0) rotate(0deg) scale(1);
+    }
+    50% {
+        transform: translate3d(3vmax, -2vmax, 0) rotate(8deg) scale(1.06);
+    }
+    100% {
+        transform: translate3d(-3vmax, 2vmax, 0) rotate(-6deg) scale(1.02);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    html[data-ui="apple"] body::before {
+        animation: none;
+    }
+}
+
+html[data-ui="apple"] button,
+html[data-ui="apple"] input,
+html[data-ui="apple"] select,
+html[data-ui="apple"] textarea {
     font-family: inherit;
 }
 
-html[data-ui="refresh"] code,
-html[data-ui="refresh"] pre,
-html[data-ui="refresh"] kbd {
+html[data-ui="apple"] code,
+html[data-ui="apple"] pre,
+html[data-ui="apple"] kbd {
     font-family: var(--refresh-font-mono);
 }
 
-html[data-ui="refresh"] ::selection {
-    background: rgba(138, 180, 248, 0.28);
+html[data-ui="apple"] ::selection {
+    background: rgba(10, 132, 255, 0.4);
 }
 
-html[data-ui="refresh"] :focus-visible {
+html[data-ui="apple"] :focus-visible {
     outline: none;
     box-shadow: var(--refresh-focus);
 }
 
-html[data-ui="refresh"] #loading {
-    background: var(--refresh-bg);
-    color: var(--refresh-text-3);
-}
-
-/* ---- Shared controls ---------------------------------------------------- */
-
-html[data-ui="refresh"] .header-button,
-html[data-ui="refresh"] .onboarding-secondary,
-html[data-ui="refresh"] .platform-option {
+html[data-ui="apple"] #loading {
     background: transparent;
     color: var(--refresh-text-2);
-    border: 1px solid var(--refresh-border-strong);
-    border-radius: var(--refresh-radius-md);
+}
+
+/* ---- Glass primitives --------------------------------------------------- */
+
+/* Floating islands: headers, rails, panels, cards. */
+html[data-ui="apple"] .focus-flow-header,
+html[data-ui="apple"] .settings-header,
+html[data-ui="apple"] .settings-tabs,
+html[data-ui="apple"] .session-view-header,
+html[data-ui="apple"] .onboarding-panel,
+html[data-ui="apple"] .profile-setting,
+html[data-ui="apple"] .appearance-setting {
+    background: var(--refresh-glass);
+    -webkit-backdrop-filter: var(--refresh-glass-blur);
+    backdrop-filter: var(--refresh-glass-blur);
+    border: none;
+    box-shadow: var(--refresh-glass-edge), var(--refresh-shadow-2);
+}
+
+/* Menus, dialogs and anything layered over content: denser glass. */
+html[data-ui="apple"] .pill-dropdown,
+html[data-ui="apple"] .pill-submenu-panel,
+html[data-ui="apple"] .send-mode-dropdown,
+html[data-ui="apple"] .launch-dialog,
+html[data-ui="apple"] .modal-content,
+html[data-ui="apple"] .confirm-modal,
+html[data-ui="apple"] .share-dialog,
+html[data-ui="apple"] .sched-dialog,
+html[data-ui="apple"] .sched-editor-dialog,
+html[data-ui="apple"] .help-dialog,
+html[data-ui="apple"] .health-timer-dialog,
+html[data-ui="apple"] .agent-login-modal,
+html[data-ui="apple"] .session-overlay-content {
+    background: var(--refresh-glass-strong);
+    -webkit-backdrop-filter: var(--refresh-glass-blur);
+    backdrop-filter: var(--refresh-glass-blur);
+    border: none;
+    border-radius: var(--refresh-radius-lg);
+    box-shadow: var(--refresh-glass-edge), 0 30px 80px rgba(0, 0, 0, 0.55);
+}
+
+html[data-ui="apple"] .modal-overlay,
+html[data-ui="apple"] .launch-dialog-backdrop,
+html[data-ui="apple"] .session-overlay-backdrop,
+html[data-ui="apple"] .help-overlay,
+html[data-ui="apple"] .sched-overlay,
+html[data-ui="apple"] .health-timer-overlay,
+html[data-ui="apple"] .agent-login-overlay {
+    background: rgba(4, 5, 10, 0.35);
+    -webkit-backdrop-filter: blur(10px) saturate(120%);
+    backdrop-filter: blur(10px) saturate(120%);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+    html[data-ui="apple"] .focus-flow-header,
+    html[data-ui="apple"] .settings-header,
+    html[data-ui="apple"] .settings-tabs,
+    html[data-ui="apple"] .session-view-header,
+    html[data-ui="apple"] .onboarding-panel,
+    html[data-ui="apple"] .profile-setting,
+    html[data-ui="apple"] .appearance-setting,
+    html[data-ui="apple"] .session-pill,
+    html[data-ui="apple"] .pill-dropdown,
+    html[data-ui="apple"] .launch-dialog,
+    html[data-ui="apple"] .modal-content {
+        background: #1b1d26;
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+    }
+}
+
+/* ---- Controls ----------------------------------------------------------- */
+
+html[data-ui="apple"] .header-button,
+html[data-ui="apple"] .onboarding-secondary,
+html[data-ui="apple"] .platform-option {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--refresh-text);
+    border: none;
+    border-radius: var(--refresh-radius-pill);
     font-size: var(--refresh-text-sm);
     font-weight: 500;
-    padding: 6px 12px;
-    box-shadow: none;
+    padding: 7px 16px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), inset 0 0 0 1px rgba(255, 255, 255, 0.07);
     transition: background var(--refresh-duration) var(--refresh-ease),
-        color var(--refresh-duration) var(--refresh-ease),
-        border-color var(--refresh-duration) var(--refresh-ease);
+        transform var(--refresh-duration) var(--refresh-ease);
 }
 
-html[data-ui="refresh"] .header-button:hover,
-html[data-ui="refresh"] .onboarding-secondary:hover,
-html[data-ui="refresh"] .platform-option:hover {
-    background: var(--refresh-surface-3);
+html[data-ui="apple"] .header-button:hover,
+html[data-ui="apple"] .onboarding-secondary:hover,
+html[data-ui="apple"] .platform-option:hover {
+    background: rgba(255, 255, 255, 0.16);
     color: var(--refresh-text);
-    border-color: var(--refresh-border-strong);
 }
 
-html[data-ui="refresh"] .platform-option.selected {
-    background: var(--refresh-surface-3);
-    color: var(--refresh-text);
-    border-color: var(--refresh-text-3);
+html[data-ui="apple"] .header-button:active,
+html[data-ui="apple"] .new-session-button:active,
+html[data-ui="apple"] .send-button:active {
+    transform: scale(0.97);
 }
 
-html[data-ui="refresh"] .new-session-button,
-html[data-ui="refresh"] .create-button,
-html[data-ui="refresh"] .onboarding-primary,
-html[data-ui="refresh"] .send-button {
-    background: var(--refresh-accent);
+html[data-ui="apple"] .platform-option.selected {
+    background: rgba(255, 255, 255, 0.22);
+}
+
+html[data-ui="apple"] .new-session-button,
+html[data-ui="apple"] .create-button,
+html[data-ui="apple"] .onboarding-primary,
+html[data-ui="apple"] .send-button {
+    background: linear-gradient(180deg, #3d9bff 0%, #0a84ff 55%, #0071e3 100%);
     color: var(--refresh-on-accent);
-    border: 1px solid transparent;
-    border-radius: var(--refresh-radius-md);
+    border: none;
+    border-radius: var(--refresh-radius-pill);
     font-size: var(--refresh-text-sm);
     font-weight: 600;
-    padding: 6px 14px;
-    box-shadow: none;
+    padding: 7px 18px;
     text-shadow: none;
-    transition: background var(--refresh-duration) var(--refresh-ease);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 6px 20px rgba(10, 132, 255, 0.35);
+    transition: filter var(--refresh-duration) var(--refresh-ease),
+        transform var(--refresh-duration) var(--refresh-ease);
 }
 
-html[data-ui="refresh"] .new-session-button:hover,
-html[data-ui="refresh"] .create-button:hover,
-html[data-ui="refresh"] .onboarding-primary:hover,
-html[data-ui="refresh"] .send-button:hover {
-    background: var(--refresh-accent-strong);
+html[data-ui="apple"] .new-session-button:hover,
+html[data-ui="apple"] .create-button:hover,
+html[data-ui="apple"] .onboarding-primary:hover,
+html[data-ui="apple"] .send-button:hover {
+    filter: brightness(1.12);
 }
 
-html[data-ui="refresh"] .create-button:disabled,
-html[data-ui="refresh"] .send-button:disabled {
-    background: var(--refresh-surface-3);
+html[data-ui="apple"] .create-button:disabled,
+html[data-ui="apple"] .send-button:disabled {
+    background: rgba(255, 255, 255, 0.1);
     color: var(--refresh-text-3);
+    box-shadow: none;
 }
 
-html[data-ui="refresh"] input[type="text"],
-html[data-ui="refresh"] input[type="search"],
-html[data-ui="refresh"] input[type="number"],
-html[data-ui="refresh"] input:not([type]),
-html[data-ui="refresh"] select,
-html[data-ui="refresh"] .profile-nickname-input {
-    background: var(--refresh-surface-1);
+html[data-ui="apple"] input[type="text"],
+html[data-ui="apple"] input[type="search"],
+html[data-ui="apple"] input[type="number"],
+html[data-ui="apple"] input:not([type]),
+html[data-ui="apple"] select,
+html[data-ui="apple"] .profile-nickname-input {
+    background: rgba(0, 0, 0, 0.25);
     color: var(--refresh-text);
-    border: 1px solid var(--refresh-border-strong);
-    border-radius: var(--refresh-radius-md);
+    border: none;
+    border-radius: var(--refresh-radius-sm);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1), inset 0 1px 2px rgba(0, 0, 0, 0.3);
     font-size: var(--refresh-text-sm);
 }
 
-html[data-ui="refresh"] input[type="checkbox"] {
+html[data-ui="apple"] input[type="checkbox"] {
     accent-color: var(--refresh-accent);
 }
 
 /* ---- App header --------------------------------------------------------- */
 
-html[data-ui="refresh"] .focus-flow-header,
-html[data-ui="refresh"] .settings-header {
-    background: var(--refresh-bg);
-    border-bottom: 1px solid var(--refresh-border);
-    box-shadow: none;
+html[data-ui="apple"] .focus-flow-header,
+html[data-ui="apple"] .settings-header {
+    margin: 10px 12px 0;
+    border-radius: 20px;
 }
 
-html[data-ui="refresh"] .focus-flow-header h1,
-html[data-ui="refresh"] .settings-header h1 {
+html[data-ui="apple"] .focus-flow-header h1,
+html[data-ui="apple"] .settings-header h1 {
     font-size: var(--refresh-text-md);
     font-weight: 600;
-    letter-spacing: -0.01em;
+    letter-spacing: -0.015em;
     color: var(--refresh-text);
 }
 
-html[data-ui="refresh"] .header-collapse-toggle {
+html[data-ui="apple"] .header-collapse-toggle {
     color: var(--refresh-text-3);
 }
 
 /* ---- Session rail ------------------------------------------------------- */
 
-html[data-ui="refresh"] .session-rail-container {
-    background: var(--refresh-bg);
-    border-color: var(--refresh-border);
+html[data-ui="apple"] .session-rail-container {
+    background: transparent;
+    border: none;
 }
 
-html[data-ui="refresh"] .session-rail-host-group {
+html[data-ui="apple"] .session-rail-host-group {
     background: transparent;
     border: none;
     padding: 0;
 }
 
-html[data-ui="refresh"] .session-rail-host-header {
-    color: var(--refresh-text-3);
+html[data-ui="apple"] .session-rail-host-header {
+    color: var(--refresh-text-2);
     font-size: var(--refresh-text-xs);
-    font-weight: 500;
-    letter-spacing: 0;
+    font-weight: 600;
+    letter-spacing: 0.01em;
     text-transform: none;
 }
 
-html[data-ui="refresh"] .session-rail-host-header .host-header-count {
+html[data-ui="apple"] .session-rail-host-header .host-header-count {
     color: var(--refresh-text-3);
 }
 
-html[data-ui="refresh"] .session-rail-divider .divider-line {
+html[data-ui="apple"] .session-rail-divider .divider-line {
     background: var(--refresh-border);
 }
 
-html[data-ui="refresh"] .session-pill {
-    background: var(--refresh-surface-1);
-    border: 1px solid var(--refresh-border);
-    border-radius: var(--refresh-radius-md);
-    box-shadow: none;
+html[data-ui="apple"] .session-pill {
+    background: var(--refresh-glass);
+    -webkit-backdrop-filter: var(--refresh-glass-blur);
+    backdrop-filter: var(--refresh-glass-blur);
+    border: none;
+    border-radius: 18px;
+    box-shadow: var(--refresh-glass-edge), var(--refresh-shadow-1);
     transition: background var(--refresh-duration) var(--refresh-ease),
-        border-color var(--refresh-duration) var(--refresh-ease);
+        transform var(--refresh-duration) var(--refresh-ease),
+        box-shadow var(--refresh-duration) var(--refresh-ease);
 }
 
-html[data-ui="refresh"] .session-pill:hover {
-    background: var(--refresh-surface-2);
-    border-color: var(--refresh-border-strong);
+html[data-ui="apple"] .session-pill:hover {
+    background: rgba(48, 52, 66, 0.5);
+    transform: translateY(-1px);
 }
 
-html[data-ui="refresh"] .session-pill.focused,
-html[data-ui="refresh"] .session-pill.focused.awaiting {
-    background: var(--refresh-surface-3);
-    border-color: var(--refresh-text-3);
-    box-shadow: inset 2px 0 0 var(--refresh-accent);
+html[data-ui="apple"] .session-pill.focused,
+html[data-ui="apple"] .session-pill.focused.awaiting {
+    background: rgba(255, 255, 255, 0.16);
+    box-shadow: var(--refresh-glass-edge), inset 0 0 0 1px rgba(255, 255, 255, 0.28),
+        0 10px 30px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(10, 132, 255, 0.0);
 }
 
-html[data-ui="refresh"] .session-pill.awaiting {
-    border-color: rgba(229, 127, 127, 0.55);
+html[data-ui="apple"] .session-pill.awaiting {
+    box-shadow: var(--refresh-glass-edge), inset 0 0 0 1px rgba(255, 69, 58, 0.6),
+        0 0 24px rgba(255, 69, 58, 0.25);
 }
 
-/* The big agent logo / model-number watermarks become a quiet hint. */
-html[data-ui="refresh"] .pill-watermark,
-html[data-ui="refresh"] .pill-model-watermark {
-    opacity: 0.07;
-    filter: grayscale(1);
+html[data-ui="apple"] .pill-watermark,
+html[data-ui="apple"] .pill-model-watermark {
+    opacity: 0.1;
+    filter: grayscale(1) brightness(1.6);
 }
 
-html[data-ui="refresh"] .pill-watermark.antigravity {
-    color: var(--refresh-text-3);
+html[data-ui="apple"] .pill-watermark.antigravity {
+    color: var(--refresh-text-2);
 }
 
-html[data-ui="refresh"] .pill-session-name {
+html[data-ui="apple"] .pill-session-name {
     font-size: var(--refresh-text-sm);
-    font-weight: 500;
+    font-weight: 600;
     color: var(--refresh-text);
 }
 
-html[data-ui="refresh"] .pill-repo {
+html[data-ui="apple"] .pill-repo {
     font-size: var(--refresh-text-xs);
-    color: var(--refresh-text-3);
+    color: var(--refresh-text-2);
 }
 
-html[data-ui="refresh"] .pill-branch {
+html[data-ui="apple"] .pill-branch {
     font-size: var(--refresh-text-xs);
     color: var(--refresh-text-2);
     font-style: normal;
 }
 
-html[data-ui="refresh"] .pill-menu-toggle {
-    color: var(--refresh-text-3);
+html[data-ui="apple"] .pill-menu-toggle {
+    color: var(--refresh-text-2);
 }
 
-html[data-ui="refresh"] .pill-dropdown {
-    background: var(--refresh-surface-2);
-    border: 1px solid var(--refresh-border-strong);
-    border-radius: var(--refresh-radius-md);
-    box-shadow: var(--refresh-shadow-2);
+html[data-ui="apple"] .pill-broadcast-strand {
+    background: linear-gradient(90deg, transparent, #64d2ff 50%, transparent);
+    box-shadow: 0 0 12px rgba(100, 210, 255, 0.6);
 }
 
-/* Inter-agent broadcast effects: keep the signal, drop the neon. */
-html[data-ui="refresh"] .pill-broadcast-strand {
-    background: linear-gradient(90deg, transparent, var(--refresh-accent) 50%, transparent);
-    box-shadow: none;
-}
-
-html[data-ui="refresh"] .pill-broadcast-core {
-    border-color: var(--refresh-accent);
-    box-shadow: none;
+html[data-ui="apple"] .pill-broadcast-core {
+    border-color: rgba(100, 210, 255, 0.8);
+    box-shadow: 0 0 16px rgba(100, 210, 255, 0.45);
 }
 
 /* ---- Session header + input frame --------------------------------------- */
 
-html[data-ui="refresh"] .session-view-header {
-    background: var(--refresh-bg);
-    border-bottom: 1px solid var(--refresh-border);
+html[data-ui="apple"] .session-view {
+    background: transparent;
+}
+
+html[data-ui="apple"] .session-view-header {
+    margin: 8px 12px 0;
+    border-radius: 18px;
     gap: 10px;
 }
 
-html[data-ui="refresh"] .session-view-header .session-name {
+html[data-ui="apple"] .session-view-header .session-name {
     font-size: var(--refresh-text-md);
-    font-weight: 600;
-    letter-spacing: -0.01em;
+    font-weight: 650;
+    letter-spacing: -0.015em;
     color: var(--refresh-text);
 }
 
-html[data-ui="refresh"] .session-view-header .session-hostname,
-html[data-ui="refresh"] .session-view-header .session-path {
+html[data-ui="apple"] .session-view-header .session-hostname,
+html[data-ui="apple"] .session-view-header .session-path {
     font-size: var(--refresh-text-sm);
-    color: var(--refresh-text-3);
+    color: var(--refresh-text-2);
 }
 
-html[data-ui="refresh"] .session-view-header .session-path {
+html[data-ui="apple"] .session-view-header .session-path {
     font-family: var(--refresh-font-mono);
     font-size: var(--refresh-text-xs);
 }
 
-html[data-ui="refresh"] .session-launcher-version {
-    background: transparent;
+html[data-ui="apple"] .session-launcher-version {
+    background: rgba(255, 255, 255, 0.08);
     border: none;
-    color: var(--refresh-text-3);
+    border-radius: var(--refresh-radius-pill);
+    color: var(--refresh-text-2);
     font-family: var(--refresh-font-sans);
     font-size: var(--refresh-text-xs);
-    padding: 0;
+    padding: 2px 10px;
 }
 
-/* Connection status: a dot and a word rather than a filled lozenge. */
-html[data-ui="refresh"] .session-view-header .status {
+html[data-ui="apple"] .session-view-header .status {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    background: transparent;
+    background: rgba(255, 255, 255, 0.08);
     border: none;
-    padding: 0;
+    border-radius: var(--refresh-radius-pill);
+    padding: 2px 10px;
     font-size: var(--refresh-text-xs);
-    font-weight: 500;
-    color: var(--refresh-text-2);
+    font-weight: 600;
+    color: var(--refresh-text);
     text-transform: lowercase;
     box-shadow: none;
     text-shadow: none;
 }
 
-html[data-ui="refresh"] .session-view-header .status::before {
+html[data-ui="apple"] .session-view-header .status::before {
     content: "";
-    width: 6px;
-    height: 6px;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
     background: var(--refresh-text-3);
 }
 
-html[data-ui="refresh"] .session-view-header .status.connected::before {
+html[data-ui="apple"] .session-view-header .status.connected::before {
     background: var(--refresh-success);
+    box-shadow: 0 0 10px rgba(48, 209, 88, 0.8);
 }
 
-html[data-ui="refresh"] .session-view-header .status.disconnected::before {
+html[data-ui="apple"] .session-view-header .status.disconnected::before {
     background: var(--refresh-danger);
+    box-shadow: 0 0 10px rgba(255, 69, 58, 0.8);
 }
 
-html[data-ui="refresh"] .session-view-input {
-    background: var(--refresh-bg);
-    border-top: 1px solid var(--refresh-border);
+html[data-ui="apple"] .session-view-input {
+    background: transparent;
+    border-top: none;
 }
 
-html[data-ui="refresh"] .session-view-input .input-prompt {
+html[data-ui="apple"] .session-view-input .input-prompt {
     color: var(--refresh-text-3);
     font-family: var(--refresh-font-mono);
     font-size: var(--refresh-text-sm);
@@ -333,125 +457,144 @@ html[data-ui="refresh"] .session-view-input .input-prompt {
 
 /* ---- Settings ----------------------------------------------------------- */
 
-html[data-ui="refresh"] .settings-container {
-    background: var(--refresh-bg);
-}
-
-html[data-ui="refresh"] .settings-tabs {
-    background: var(--refresh-bg);
-    border-bottom: 1px solid var(--refresh-border);
-    gap: 2px;
-}
-
-html[data-ui="refresh"] .settings-tabs .tab-button {
-    color: var(--refresh-text-3);
-    font-size: var(--refresh-text-sm);
-    font-weight: 500;
-    border-bottom: 2px solid transparent;
+html[data-ui="apple"] .settings-container {
     background: transparent;
 }
 
-html[data-ui="refresh"] .settings-tabs .tab-button:hover {
-    color: var(--refresh-text);
+/* Tabs as a floating segmented control. */
+html[data-ui="apple"] .settings-tabs {
+    margin: 12px auto 0;
+    width: fit-content;
+    max-width: calc(100% - 24px);
+    padding: 4px;
+    gap: 2px;
+    border-radius: var(--refresh-radius-pill);
+    overflow-x: auto;
 }
 
-html[data-ui="refresh"] .settings-tabs .tab-button.active {
-    color: var(--refresh-text);
-    border-bottom-color: var(--refresh-text);
-}
-
-html[data-ui="refresh"] .count-badge {
-    background: var(--refresh-surface-3);
+html[data-ui="apple"] .settings-tabs .tab-button {
     color: var(--refresh-text-2);
+    font-size: var(--refresh-text-sm);
     font-weight: 500;
+    border: none;
+    border-radius: var(--refresh-radius-pill);
+    background: transparent;
+    padding: 6px 14px;
+    white-space: nowrap;
 }
 
-html[data-ui="refresh"] .settings-content .section-header h2 {
-    font-size: var(--refresh-text-lg);
+html[data-ui="apple"] .settings-tabs .tab-button:hover {
+    color: var(--refresh-text);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+html[data-ui="apple"] .settings-tabs .tab-button.active {
+    color: var(--refresh-text);
+    background: rgba(255, 255, 255, 0.18);
+    border-bottom: none;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 2px 10px rgba(0, 0, 0, 0.3);
+}
+
+html[data-ui="apple"] .count-badge {
+    background: rgba(255, 255, 255, 0.14);
+    color: var(--refresh-text);
     font-weight: 600;
-    letter-spacing: -0.015em;
 }
 
-html[data-ui="refresh"] .settings-content h3 {
-    font-size: var(--refresh-text-base);
+html[data-ui="apple"] .settings-content .section-header h2 {
+    font-size: var(--refresh-text-xl);
+    font-weight: 700;
+    letter-spacing: -0.025em;
+}
+
+html[data-ui="apple"] .settings-content h3 {
+    font-size: var(--refresh-text-md);
     font-weight: 600;
+    letter-spacing: -0.01em;
 }
 
-html[data-ui="refresh"] .section-description,
-html[data-ui="refresh"] .setting-description {
+html[data-ui="apple"] .section-description,
+html[data-ui="apple"] .setting-description {
     color: var(--refresh-text-2);
     font-size: var(--refresh-text-sm);
     line-height: 1.55;
 }
 
-html[data-ui="refresh"] .profile-setting,
-html[data-ui="refresh"] .appearance-setting {
-    background: var(--refresh-surface-1);
-    border: 1px solid var(--refresh-border);
+html[data-ui="apple"] .profile-setting,
+html[data-ui="apple"] .appearance-setting {
     border-radius: var(--refresh-radius-lg);
-    box-shadow: none;
+    padding: 20px 22px;
 }
 
-html[data-ui="refresh"] .orientation-choice {
-    background: var(--refresh-surface-1);
-    border: 1px solid var(--refresh-border);
+html[data-ui="apple"] .orientation-choice {
+    background: rgba(255, 255, 255, 0.05);
+    border: none;
     border-radius: var(--refresh-radius-md);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
-html[data-ui="refresh"] .orientation-choice.active {
-    border-color: var(--refresh-text-3);
-    background: var(--refresh-surface-3);
+html[data-ui="apple"] .orientation-choice.active {
+    background: rgba(10, 132, 255, 0.22);
+    box-shadow: inset 0 0 0 1px rgba(10, 132, 255, 0.7);
 }
 
 /* ---- Onboarding --------------------------------------------------------- */
 
-html[data-ui="refresh"] .onboarding-panel,
-html[data-ui="refresh"] .onboarding-feature {
-    background: var(--refresh-surface-1);
-    border: 1px solid var(--refresh-border);
+html[data-ui="apple"] .onboarding-panel {
     border-radius: var(--refresh-radius-lg);
-    box-shadow: none;
 }
 
-html[data-ui="refresh"] .onboarding-kicker {
+html[data-ui="apple"] .onboarding-feature {
+    background: rgba(255, 255, 255, 0.05);
+    border: none;
+    border-radius: var(--refresh-radius-md);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+}
+
+html[data-ui="apple"] .onboarding-kicker {
     background: transparent;
     border: none;
     padding: 0;
-    color: var(--refresh-text-3);
-    font-size: var(--refresh-text-xs);
-    font-weight: 500;
-    text-transform: none;
-    letter-spacing: 0;
-}
-
-html[data-ui="refresh"] .onboarding-step-badge,
-html[data-ui="refresh"] .step-number {
-    background: transparent;
-    color: var(--refresh-text-3);
-    border: 1px solid var(--refresh-border-strong);
-    text-transform: none;
-    letter-spacing: 0;
-}
-
-html[data-ui="refresh"] .onboarding-lede {
     color: var(--refresh-text-2);
+    font-size: var(--refresh-text-xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+html[data-ui="apple"] .onboarding-step-badge,
+html[data-ui="apple"] .step-number {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--refresh-text);
+    border: none;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+html[data-ui="apple"] .onboarding-lede {
+    color: var(--refresh-text-2);
+}
+
+html[data-ui="apple"] .copy-command-block {
+    background: rgba(0, 0, 0, 0.35);
+    border: none;
+    border-radius: var(--refresh-radius-sm);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
 }
 
 /* ---- /demo harness ------------------------------------------------------ */
 
-html[data-ui="refresh"] .demo-portal-page {
-    background: var(--refresh-bg);
-}
-
-html[data-ui="refresh"] .demo-portal-header {
-    border-bottom-color: var(--refresh-border);
-}
-
-html[data-ui="refresh"] .demo-playback-chip {
+html[data-ui="apple"] .demo-portal-page {
     background: transparent;
+}
+
+html[data-ui="apple"] .demo-playback-chip {
+    background: rgba(255, 255, 255, 0.08);
     border: none;
-    color: var(--refresh-text-3);
+    border-radius: var(--refresh-radius-pill);
+    color: var(--refresh-text-2);
     font-family: var(--refresh-font-sans);
     font-size: var(--refresh-text-xs);
-    padding: 0 4px;
+    padding: 3px 10px;
 }

@@ -33,17 +33,18 @@
     <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
 
-    <!-- Refreshed design (preview) flag: apply before first paint so opted-in
-         browsers never flash the legacy theme. Mirrors src/ui_refresh.rs. -->
+    <!-- Visual theme (Settings > Appearance): apply before first paint so a
+         chosen theme never flashes the default. Mirrors src/ui_theme.rs. -->
     <script>
         (function () {
-            try {
-                if (localStorage.getItem('claude-portal-ui-refresh') !== 'true') return;
-            } catch (e) { return; }
-            document.documentElement.setAttribute('data-ui', 'refresh');
+            var theme;
+            try { theme = localStorage.getItem('claude-portal-ui-theme'); } catch (e) { return; }
+            if (theme !== 'apple' && theme !== 'windows') return;
+            document.documentElement.setAttribute('data-ui', theme);
+            if (theme !== 'apple') return;
             [
-                ['ui-refresh-font-sans', 'https://cdn.jsdelivr.net/npm/@fontsource-variable/inter@5/index.css'],
-                ['ui-refresh-font-mono', 'https://cdn.jsdelivr.net/npm/@fontsource-variable/jetbrains-mono@5/index.css']
+                ['ui-theme-font-sans', 'https://cdn.jsdelivr.net/npm/@fontsource-variable/inter@5/index.css'],
+                ['ui-theme-font-mono', 'https://cdn.jsdelivr.net/npm/@fontsource-variable/jetbrains-mono@5/index.css']
             ].forEach(function (f) {
                 var link = document.createElement('link');
                 link.id = f[0];
@@ -311,11 +312,12 @@
     <link data-trunk rel="css" href="styles/performance.css" />
     <link data-trunk rel="css" href="styles/admin.css" />
     <link data-trunk rel="css" href="styles/banned.css" />
-    <!-- Refreshed design (preview): last, so it overrides; inert unless
-         html[data-ui="refresh"]. -->
+    <!-- Themes: last, so they override; each is inert unless its
+         html[data-ui] value is set (see src/ui_theme.rs). -->
     <link data-trunk rel="css" href="styles/refresh/tokens.css" />
     <link data-trunk rel="css" href="styles/refresh/shell.css" />
     <link data-trunk rel="css" href="styles/refresh/transcript.css" />
+    <link data-trunk rel="css" href="styles/themes/windows.css" />
     <link data-trunk rel="copy-file" href="katex-helper.js" />
     <script defer src="/katex-helper.js"></script>
     <link data-trunk rel="copy-file" href="assets/wiggum.png" />

@@ -1,14 +1,14 @@
 /* Preview-only transcript skin. Keep layout/state selectors in the original
    stylesheets: switching the flag changes presentation, never visibility or
    control behavior. Status colors remain reserved for actual outcomes. */
-html[data-ui="refresh"] .session-view-messages {
+html[data-ui="apple"] .session-view-messages {
     /* Size the reading column from this pane, not the viewport: a split
        surface must keep its own usable width. The scroller stays full-width. */
     padding: 1.5rem max(1rem, calc((100% - 920px) / 2)) 0.5rem;
     background: var(--bg-dark);
 }
 
-html[data-ui="refresh"] .claude-message {
+html[data-ui="apple"] .claude-message {
     margin-bottom: 1.5rem;
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -16,36 +16,36 @@ html[data-ui="refresh"] .claude-message {
     box-shadow: none;
 }
 
-html[data-ui="refresh"] .claude-message .message-header {
+html[data-ui="apple"] .claude-message .message-header {
     gap: 0.625rem;
     padding: 0.625rem 1rem;
     background: transparent;
     border-bottom-color: var(--border);
 }
 
-html[data-ui="refresh"] .claude-message .message-body {
+html[data-ui="apple"] .claude-message .message-body {
     padding: 0.875rem 1rem 1rem;
 }
 
 /* Assistant prose reads as a document; the user keeps a quiet surface so
    authorship stays apparent without assigning every agent a neon color. */
-html[data-ui="refresh"] .assistant-message,
-html[data-ui="refresh"] .codex-group,
-html[data-ui="refresh"] .muse-message,
-html[data-ui="refresh"] .antigravity-message {
+html[data-ui="apple"] .assistant-message,
+html[data-ui="apple"] .codex-group,
+html[data-ui="apple"] .muse-message,
+html[data-ui="apple"] .antigravity-message {
     background: transparent;
     border-color: transparent;
 }
 
-html[data-ui="refresh"] .user-message,
-html[data-ui="refresh"] .user-group {
+html[data-ui="apple"] .user-message,
+html[data-ui="apple"] .user-group {
     border-left: 2px solid var(--accent);
 }
 
-html[data-ui="refresh"] .message-type-badge,
-html[data-ui="refresh"] .tool-badge,
-html[data-ui="refresh"] .init-badge,
-html[data-ui="refresh"] .question-badge {
+html[data-ui="apple"] .message-type-badge,
+html[data-ui="apple"] .tool-badge,
+html[data-ui="apple"] .init-badge,
+html[data-ui="apple"] .question-badge {
     background: transparent;
     color: var(--text-secondary);
     padding: 0.125rem 0;
@@ -56,7 +56,7 @@ html[data-ui="refresh"] .question-badge {
     letter-spacing: 0;
 }
 
-html[data-ui="refresh"] .system-message.compact {
+html[data-ui="apple"] .system-message.compact {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -66,8 +66,8 @@ html[data-ui="refresh"] .system-message.compact {
     border-color: transparent;
 }
 
-html[data-ui="refresh"] .message-count,
-html[data-ui="refresh"] .task-type-badge {
+html[data-ui="apple"] .message-count,
+html[data-ui="apple"] .task-type-badge {
     background: var(--refresh-surface-2);
     color: var(--text-secondary);
     border-radius: 4px;
@@ -76,54 +76,54 @@ html[data-ui="refresh"] .task-type-badge {
     letter-spacing: 0;
 }
 
-html[data-ui="refresh"] .message-type-badge.user,
-html[data-ui="refresh"] .message-type-badge.assistant {
+html[data-ui="apple"] .message-type-badge.user,
+html[data-ui="apple"] .message-type-badge.assistant {
     color: var(--text-primary);
 }
 
-html[data-ui="refresh"] .message-type-badge.result.error,
-html[data-ui="refresh"] .tool-badge.mcp.error {
+html[data-ui="apple"] .message-type-badge.result.error,
+html[data-ui="apple"] .tool-badge.mcp.error {
     color: var(--error);
 }
 
-html[data-ui="refresh"] .message-type-badge:is(.error, .anthropic-error, .failed) {
+html[data-ui="apple"] .message-type-badge:is(.error, .anthropic-error, .failed) {
     color: var(--error);
 }
 
-html[data-ui="refresh"] .message-type-badge:is(.overload, .rate-limit) {
+html[data-ui="apple"] .message-type-badge:is(.overload, .rate-limit) {
     color: var(--warning);
 }
 
-html[data-ui="refresh"] :is(.error-message-display, .anthropic-error-message, .result-message.error) {
+html[data-ui="apple"] :is(.error-message-display, .anthropic-error-message, .result-message.error) {
     border-left: 2px solid var(--error);
     background: var(--refresh-danger-soft);
 }
 
-html[data-ui="refresh"] .codex-cmd-status.running { color: var(--warning); }
-html[data-ui="refresh"] .codex-cmd-status.ok { color: var(--success); }
-html[data-ui="refresh"] .codex-cmd-status.err { color: var(--error); }
+html[data-ui="apple"] .codex-cmd-status.running { color: var(--warning); }
+html[data-ui="apple"] .codex-cmd-status.ok { color: var(--success); }
+html[data-ui="apple"] .codex-cmd-status.err { color: var(--error); }
 
-html[data-ui="refresh"] .assistant-text,
-html[data-ui="refresh"] .user-message .user-text,
-html[data-ui="refresh"] .antigravity-text {
+html[data-ui="apple"] .assistant-text,
+html[data-ui="apple"] .user-message .user-text,
+html[data-ui="apple"] .antigravity-text {
     font-size: var(--refresh-text-md);
     line-height: 1.75;
     color: var(--text-primary);
 }
 
-html[data-ui="refresh"] .claude-message :is(.assistant-text, .user-text) {
+html[data-ui="apple"] .claude-message :is(.assistant-text, .user-text) {
     max-width: 80ch;
 }
 
-html[data-ui="refresh"] .md-paragraph {
+html[data-ui="apple"] .md-paragraph {
     margin-block: 0.75rem;
     line-height: 1.75;
 }
 
-html[data-ui="refresh"] .md-paragraph:first-child { margin-top: 0; }
-html[data-ui="refresh"] .md-paragraph:last-child { margin-bottom: 0; }
+html[data-ui="apple"] .md-paragraph:first-child { margin-top: 0; }
+html[data-ui="apple"] .md-paragraph:last-child { margin-bottom: 0; }
 
-html[data-ui="refresh"] .md-heading {
+html[data-ui="apple"] .md-heading {
     margin-block: 1.5rem 0.625rem;
     font-weight: 600;
     letter-spacing: -0.02em;
@@ -131,18 +131,18 @@ html[data-ui="refresh"] .md-heading {
     border-bottom: 0;
 }
 
-html[data-ui="refresh"] .md-h1 { font-size: var(--refresh-text-xl); }
-html[data-ui="refresh"] .md-h2 { font-size: var(--refresh-text-lg); }
-html[data-ui="refresh"] .md-h3 { font-size: var(--refresh-text-md); }
+html[data-ui="apple"] .md-h1 { font-size: var(--refresh-text-xl); }
+html[data-ui="apple"] .md-h2 { font-size: var(--refresh-text-lg); }
+html[data-ui="apple"] .md-h3 { font-size: var(--refresh-text-md); }
 
-html[data-ui="refresh"] .md-link {
+html[data-ui="apple"] .md-link {
     color: var(--accent);
     text-decoration-style: solid;
     text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent);
     text-underline-offset: 0.2em;
 }
 
-html[data-ui="refresh"] .md-inline-code {
+html[data-ui="apple"] .md-inline-code {
     color: var(--text-primary);
     background: var(--refresh-surface-2);
     border-radius: 4px;
@@ -150,128 +150,128 @@ html[data-ui="refresh"] .md-inline-code {
     font-size: 0.85em;
 }
 
-html[data-ui="refresh"] .md-code-block {
+html[data-ui="apple"] .md-code-block {
     margin-block: 1rem;
     border-radius: 8px;
     background: var(--bg-darker);
 }
 
-html[data-ui="refresh"] .md-code-block .md-code {
+html[data-ui="apple"] .md-code-block .md-code {
     padding: 1rem 1.125rem;
     line-height: 1.65;
     font-size: var(--refresh-text-sm);
 }
 
-html[data-ui="refresh"] .md-blockquote {
+html[data-ui="apple"] .md-blockquote {
     background: transparent;
     border-left: 2px solid var(--border);
     padding: 0.25rem 1rem;
     margin-block: 1rem;
 }
 
-html[data-ui="refresh"] .code-copy-button {
+html[data-ui="apple"] .code-copy-button {
     background: var(--refresh-surface-2);
     border: 1px solid var(--border);
     color: var(--text-secondary);
 }
 
-html[data-ui="refresh"] .code-copy-button:focus-visible,
-html[data-ui="refresh"] .md-code-block:focus-within .code-copy-button {
+html[data-ui="apple"] .code-copy-button:focus-visible,
+html[data-ui="apple"] .md-code-block:focus-within .code-copy-button {
     opacity: 1;
 }
 
 /* Tool types share one frame. Diffs, error results and running states retain
    their semantic cues instead of relying on a different frame per tool. */
-html[data-ui="refresh"] .tool-use,
-html[data-ui="refresh"] .tool-result,
-html[data-ui="refresh"] .diff-card,
-html[data-ui="refresh"] .command-result,
-html[data-ui="refresh"] .question-card {
+html[data-ui="apple"] .tool-use,
+html[data-ui="apple"] .tool-result,
+html[data-ui="apple"] .diff-card,
+html[data-ui="apple"] .command-result,
+html[data-ui="apple"] .question-card {
     background: var(--refresh-surface-1);
     border: 1px solid var(--border);
     border-radius: 8px;
     box-shadow: none;
 }
 
-html[data-ui="refresh"] .tool-use-header,
-html[data-ui="refresh"] .diff-card-header {
+html[data-ui="apple"] .tool-use-header,
+html[data-ui="apple"] .diff-card-header {
     background: transparent;
     padding: 0.625rem 0.875rem;
     gap: 0.5rem;
 }
 
-html[data-ui="refresh"] .tool-use .tool-icon,
-html[data-ui="refresh"] .tool-use .tool-name {
+html[data-ui="apple"] .tool-use .tool-icon,
+html[data-ui="apple"] .tool-use .tool-name {
     color: var(--text-secondary);
 }
 
-html[data-ui="refresh"] .tool-input-content,
-html[data-ui="refresh"] .tool-result-content,
-html[data-ui="refresh"] .command-result-output,
-html[data-ui="refresh"] .diff-view {
+html[data-ui="apple"] .tool-input-content,
+html[data-ui="apple"] .tool-result-content,
+html[data-ui="apple"] .command-result-output,
+html[data-ui="apple"] .diff-view {
     font-family: var(--font-mono);
     font-size: var(--refresh-text-sm);
     line-height: 1.6;
 }
 
-html[data-ui="refresh"] .bash-command-inline,
-html[data-ui="refresh"] .glob-pattern-inline,
-html[data-ui="refresh"] .grep-pattern-inline {
+html[data-ui="apple"] .bash-command-inline,
+html[data-ui="apple"] .glob-pattern-inline,
+html[data-ui="apple"] .grep-pattern-inline {
     background: transparent;
     color: var(--text-primary);
     padding-inline: 0;
 }
 
-html[data-ui="refresh"] .thinking-block {
+html[data-ui="apple"] .thinking-block {
     background: transparent;
     border-left: 1px solid var(--border);
     border-radius: 0;
 }
 
-html[data-ui="refresh"] .thinking-label,
-html[data-ui="refresh"] .thinking-content {
+html[data-ui="apple"] .thinking-label,
+html[data-ui="apple"] .thinking-content {
     color: var(--text-secondary);
 }
 
-html[data-ui="refresh"] .diff-line.added {
+html[data-ui="apple"] .diff-line.added {
     background: color-mix(in srgb, var(--success) 10%, transparent);
     color: var(--success);
 }
 
-html[data-ui="refresh"] .diff-line.removed {
+html[data-ui="apple"] .diff-line.removed {
     background: color-mix(in srgb, var(--error) 10%, transparent);
     color: var(--error);
 }
 
-html[data-ui="refresh"] .diff-line.added .diff-marker { color: var(--success); }
-html[data-ui="refresh"] .diff-line.removed .diff-marker { color: var(--error); }
+html[data-ui="apple"] .diff-line.added .diff-marker { color: var(--success); }
+html[data-ui="apple"] .diff-line.removed .diff-marker { color: var(--error); }
 
-html[data-ui="refresh"] .tool-result.error,
-html[data-ui="refresh"] .command-result.failed {
+html[data-ui="apple"] .tool-result.error,
+html[data-ui="apple"] .command-result.failed {
     border-color: color-mix(in srgb, var(--error) 50%, var(--border));
 }
 
-html[data-ui="refresh"] .turn-metrics-footer,
-html[data-ui="refresh"] .result-message .result-stats-bar {
+html[data-ui="apple"] .turn-metrics-footer,
+html[data-ui="apple"] .result-message .result-stats-bar {
     background: transparent;
     color: var(--text-muted);
     font-size: var(--refresh-text-xs);
 }
 
 /* Composer keeps its existing textarea measurement and attachment layout. */
-html[data-ui="refresh"] .session-view-input {
+html[data-ui="apple"] .session-view-input {
     background: var(--bg-dark);
     border-top: 1px solid var(--border);
     padding: 0.875rem max(1rem, calc((100% - 920px) / 2)) 1rem;
     gap: 0.625rem;
 }
 
-html[data-ui="refresh"] .session-view-input .input-prompt {
+html[data-ui="apple"] .session-view-input .input-prompt {
     color: var(--text-muted);
     font-weight: 400;
 }
 
-html[data-ui="refresh"] .session-view-input .message-input {
+html[data-ui="apple"] .session-view-input .message-input {
     background: var(--refresh-surface-1);
     border: 1px solid var(--border);
     border-radius: 12px;
@@ -281,63 +281,63 @@ html[data-ui="refresh"] .session-view-input .message-input {
     color: var(--text-primary);
 }
 
-html[data-ui="refresh"] .session-view-input .message-input:focus {
+html[data-ui="apple"] .session-view-input .message-input:focus {
     border-color: var(--accent);
     box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
-html[data-ui="refresh"] .session-view-input .message-input::placeholder {
+html[data-ui="apple"] .session-view-input .message-input::placeholder {
     color: var(--text-muted);
 }
 
-html[data-ui="refresh"] .session-view .send-button,
-html[data-ui="refresh"] .session-view .send-mode-toggle {
+html[data-ui="apple"] .session-view .send-button,
+html[data-ui="apple"] .session-view .send-mode-toggle {
     background: var(--accent);
     color: var(--refresh-on-accent);
     box-shadow: none;
     font-weight: 600;
 }
 
-html[data-ui="refresh"] .session-view .send-mode-dropdown,
-html[data-ui="refresh"] .session-view .reasoning-effort-select {
+html[data-ui="apple"] .session-view .send-mode-dropdown,
+html[data-ui="apple"] .session-view .reasoning-effort-select {
     background: var(--refresh-surface-2);
     border-color: var(--border);
     border-radius: 8px;
     color: var(--text-primary);
 }
 
-html[data-ui="refresh"] .overload-message,
-html[data-ui="refresh"] .rate-limit-message {
+html[data-ui="apple"] .overload-message,
+html[data-ui="apple"] .rate-limit-message {
     border-left-color: var(--warning);
     background: var(--refresh-warning-soft);
 }
 
-html[data-ui="refresh"] .overload-title,
-html[data-ui="refresh"] .rate-limit-status {
+html[data-ui="apple"] .overload-title,
+html[data-ui="apple"] .rate-limit-status {
     color: var(--warning);
 }
 
-html[data-ui="refresh"] .compaction-message,
-html[data-ui="refresh"] .task-message {
+html[data-ui="apple"] .compaction-message,
+html[data-ui="apple"] .task-message {
     background: var(--refresh-surface-1);
     border-left-color: var(--border);
 }
 
-html[data-ui="refresh"] .task-message.failed {
+html[data-ui="apple"] .task-message.failed {
     border-left-color: var(--error);
     background: var(--refresh-danger-soft);
 }
 
-html[data-ui="refresh"] .task-code {
+html[data-ui="apple"] .task-code {
     background: var(--bg-darker);
     border-color: var(--border);
     color: var(--text-primary);
 }
 
-html[data-ui="refresh"] .task-agent-type,
-html[data-ui="refresh"] .plugin-card-badge,
-html[data-ui="refresh"] .plugin-skill-pill,
-html[data-ui="refresh"] .plugin-command-pill {
+html[data-ui="apple"] .task-agent-type,
+html[data-ui="apple"] .plugin-card-badge,
+html[data-ui="apple"] .plugin-skill-pill,
+html[data-ui="apple"] .plugin-command-pill {
     color: var(--text-secondary);
     background: var(--refresh-surface-2);
     border-color: var(--border);
@@ -347,7 +347,7 @@ html[data-ui="refresh"] .plugin-command-pill {
 
 /* Prompts are actionable, not failures. Preserve the selected/allow/deny
    states, and use the warning edge to distinguish an authorization request. */
-html[data-ui="refresh"] .permission-prompt {
+html[data-ui="apple"] .permission-prompt {
     background: var(--refresh-surface-1);
     border: 1px solid var(--border);
     border-left: 2px solid var(--warning);
@@ -358,78 +358,78 @@ html[data-ui="refresh"] .permission-prompt {
     animation: none;
 }
 
-html[data-ui="refresh"] .permission-prompt.ask-user-question {
+html[data-ui="apple"] .permission-prompt.ask-user-question {
     background: var(--refresh-surface-1);
     border-color: var(--border);
     border-left-color: var(--accent);
 }
 
-html[data-ui="refresh"] .permission-title {
+html[data-ui="apple"] .permission-title {
     color: var(--text-primary);
     font-size: var(--refresh-text-base);
 }
 
-html[data-ui="refresh"] .permission-input {
+html[data-ui="apple"] .permission-input {
     background: var(--bg-darker);
     border: 1px solid var(--border);
     border-radius: 4px;
 }
 
-html[data-ui="refresh"] .permission-option {
+html[data-ui="apple"] .permission-option {
     padding: 0.5rem 0.625rem;
     border-radius: 4px;
 }
 
-html[data-ui="refresh"] .permission-option.selected,
-html[data-ui="refresh"] .option-item.selected {
+html[data-ui="apple"] .permission-option.selected,
+html[data-ui="apple"] .option-item.selected {
     background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
-html[data-ui="refresh"] .plugin-context-card,
-html[data-ui="refresh"] .plugin-card,
-html[data-ui="refresh"] .fork-lineage-card,
-html[data-ui="refresh"] .portal-reminder {
+html[data-ui="apple"] .plugin-context-card,
+html[data-ui="apple"] .plugin-card,
+html[data-ui="apple"] .fork-lineage-card,
+html[data-ui="apple"] .portal-reminder {
     background: var(--refresh-surface-1);
     border: 1px solid var(--border);
     border-radius: 8px;
 }
 
-html[data-ui="refresh"] .plugin-context-summary,
-html[data-ui="refresh"] .portal-reminder-header {
+html[data-ui="apple"] .plugin-context-summary,
+html[data-ui="apple"] .portal-reminder-header {
     background: transparent;
     color: var(--text-secondary);
     padding: 0.625rem 0.875rem;
 }
 
-html[data-ui="refresh"] .plugin-context-summary:hover,
-html[data-ui="refresh"] .portal-reminder-header:hover {
+html[data-ui="apple"] .plugin-context-summary:hover,
+html[data-ui="apple"] .portal-reminder-header:hover {
     background: var(--refresh-surface-2);
 }
 
-html[data-ui="refresh"] .session-view :is(button, a, input, textarea, select, [tabindex]):focus-visible {
+html[data-ui="apple"] .session-view :is(button, a, input, textarea, select, [tabindex]):focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 3px;
 }
 
 @media (max-width: 768px) {
-    html[data-ui="refresh"] .session-view-messages {
+    html[data-ui="apple"] .session-view-messages {
         padding: 0.875rem 0.5rem 0;
     }
 
-    html[data-ui="refresh"] .claude-message .message-header {
+    html[data-ui="apple"] .claude-message .message-header {
         padding: 0.5rem 0.625rem;
     }
 
-    html[data-ui="refresh"] .claude-message .message-body {
+    html[data-ui="apple"] .claude-message .message-body {
         padding: 0.625rem;
     }
 
-    html[data-ui="refresh"] .session-view-input {
+    html[data-ui="apple"] .session-view-input {
         padding: 0.625rem;
         gap: 0.5rem;
     }
 
-    html[data-ui="refresh"] .permission-prompt {
+    html[data-ui="apple"] .permission-prompt {
         margin: 0.5rem;
         padding: 0.75rem;
     }
