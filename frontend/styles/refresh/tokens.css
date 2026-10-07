@@ -37,7 +37,8 @@ html[data-ui="apple"] {
     --refresh-accent: #0a84ff;
     --refresh-accent-strong: #409cff;
     --refresh-accent-soft: rgba(10, 132, 255, 0.2);
-    --refresh-on-accent: #ffffff;
+    --refresh-on-accent: #fff;
+
     /* Fill for solid accent surfaces carrying small white text (4.7:1). */
     --refresh-accent-fill: #0071e3;
     --refresh-success: #30d158;
