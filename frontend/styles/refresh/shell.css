@@ -38,20 +38,22 @@ html[data-ui="apple"] body::after {
 }
 
 html[data-ui="apple"] body::before {
+    inset: -10vmax;
     background:
-        radial-gradient(36vmax 30vmax at 18% 14%, rgba(56, 92, 255, 0.62), transparent 70%),
-        radial-gradient(32vmax 28vmax at 84% 18%, rgba(176, 68, 255, 0.5), transparent 70%),
-        radial-gradient(38vmax 30vmax at 72% 88%, rgba(0, 196, 186, 0.42), transparent 70%),
-        radial-gradient(30vmax 26vmax at 22% 86%, rgba(255, 110, 72, 0.34), transparent 70%),
-        radial-gradient(26vmax 22vmax at 50% 50%, rgba(255, 64, 160, 0.18), transparent 70%);
-    filter: blur(20px) saturate(130%);
+        radial-gradient(42vmax 34vmax at 28% 26%, rgba(64, 98, 255, 0.85), transparent 68%),
+        radial-gradient(38vmax 32vmax at 76% 24%, rgba(186, 76, 255, 0.72), transparent 68%),
+        radial-gradient(44vmax 34vmax at 70% 76%, rgba(0, 206, 196, 0.6), transparent 68%),
+        radial-gradient(36vmax 30vmax at 26% 78%, rgba(255, 112, 70, 0.55), transparent 68%),
+        radial-gradient(30vmax 26vmax at 50% 50%, rgba(255, 70, 170, 0.35), transparent 70%),
+        linear-gradient(135deg, #121a4a 0%, #1d1036 45%, #062b33 100%);
+    filter: blur(40px) saturate(140%);
     animation: refresh-wallpaper-drift 48s ease-in-out infinite alternate;
 }
 
 /* A soft vignette keeps the edges deep so glass reads as glass. */
 html[data-ui="apple"] body::after {
     inset: 0;
-    background: radial-gradient(120% 90% at 50% 40%, transparent 55%, rgba(0, 0, 0, 0.55));
+    background: radial-gradient(140% 110% at 50% 45%, transparent 60%, rgba(0, 0, 0, 0.4));
 }
 
 @keyframes refresh-wallpaper-drift {
@@ -486,6 +488,10 @@ html[data-ui="apple"] .settings-tabs .tab-button {
 html[data-ui="apple"] .settings-tabs .tab-button:hover {
     color: var(--refresh-text);
     background: rgba(255, 255, 255, 0.06);
+}
+
+html[data-ui="apple"] .settings-tabs .tab-button::after {
+    display: none;
 }
 
 html[data-ui="apple"] .settings-tabs .tab-button.active {
