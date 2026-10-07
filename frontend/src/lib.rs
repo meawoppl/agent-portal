@@ -3,6 +3,7 @@ mod components;
 mod health_timer;
 mod hooks;
 mod pages;
+mod ui_refresh;
 #[cfg(test)]
 pub mod test_fixtures;
 pub mod utils;

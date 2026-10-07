@@ -1,0 +1,81 @@
+/*
+ * Refreshed design (preview) — design tokens.
+ *
+ * Everything under styles/refresh/ is scoped to html[data-ui="refresh"],
+ * which is set from the Settings > Appearance toggle (see
+ * frontend/src/ui_refresh.rs). With the flag off none of these rules match,
+ * so the legacy look is untouched.
+ *
+ * The legacy variables (--bg-dark, --accent, ...) are remapped here too, so
+ * every stylesheet that already reads them picks up the new palette; the
+ * refresh/*.css files then restyle what the legacy CSS hard-codes.
+ */
+html[data-ui="refresh"] {
+    /* Surfaces: neutral graphite, three elevation steps above the page. */
+    --refresh-bg: #111214;
+    --refresh-surface-1: #16171a;
+    --refresh-surface-2: #1c1d21;
+    --refresh-surface-3: #24262b;
+    --refresh-border: #26282d;
+    --refresh-border-strong: #353840;
+
+    /* Text */
+    --refresh-text: #e8e9ec;
+    --refresh-text-2: #a7abb4;
+    --refresh-text-3: #70747e;
+
+    /* One calm accent; status colors are reserved for status. */
+    --refresh-accent: #8ab4f8;
+    --refresh-accent-strong: #aac8fb;
+    --refresh-accent-soft: rgba(138, 180, 248, 0.12);
+    --refresh-on-accent: #0d1420;
+    --refresh-success: #7dbf8f;
+    --refresh-success-soft: rgba(125, 191, 143, 0.12);
+    --refresh-warning: #d9b46c;
+    --refresh-warning-soft: rgba(217, 180, 108, 0.12);
+    --refresh-danger: #e57f7f;
+    --refresh-danger-soft: rgba(229, 127, 127, 0.12);
+    --refresh-info: #82b9cc;
+
+    /* Shape, depth, focus */
+    --refresh-radius-sm: 4px;
+    --refresh-radius-md: 8px;
+    --refresh-radius-lg: 12px;
+    --refresh-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --refresh-shadow-2: 0 10px 30px rgba(0, 0, 0, 0.4);
+    --refresh-focus: 0 0 0 2px var(--refresh-bg), 0 0 0 4px rgba(138, 180, 248, 0.5);
+
+    /* Type */
+    --refresh-font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system,
+        "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    --refresh-font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, "SF Mono",
+        Menlo, Consolas, "Liberation Mono", monospace;
+    --refresh-text-xs: 12px;
+    --refresh-text-sm: 13px;
+    --refresh-text-base: 14px;
+    --refresh-text-md: 15px;
+    --refresh-text-lg: 18px;
+    --refresh-text-xl: 22px;
+
+    /* Motion */
+    --refresh-ease: cubic-bezier(0.2, 0, 0, 1);
+    --refresh-duration: 120ms;
+
+    /* Legacy variables, remapped. */
+    --bg-dark: var(--refresh-bg);
+    --bg-darker: #0c0d0f;
+    --text-primary: var(--refresh-text);
+    --text-secondary: var(--refresh-text-2);
+    --text-muted: var(--refresh-text-3);
+    --accent: var(--refresh-accent);
+    --accent-hover: var(--refresh-accent-strong);
+    --link-color: var(--refresh-accent);
+    --link-visited: #a3b6dc;
+    --success: var(--refresh-success);
+    --error: var(--refresh-danger);
+    --warning: var(--refresh-warning);
+    --border: var(--refresh-border);
+    --font-mono: var(--refresh-font-mono);
+
+    color-scheme: dark;
+}

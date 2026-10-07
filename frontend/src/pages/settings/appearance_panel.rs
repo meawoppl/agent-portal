@@ -3,6 +3,7 @@ use crate::pages::dashboard::{
     load_group_by_host, load_rail_position, load_vim_mode, save_group_by_host, save_rail_position,
     save_vim_mode, RailPosition,
 };
+use crate::ui_refresh::{load_ui_refresh, set_ui_refresh};
 use yew::prelude::*;
 
 const ALL_POSITIONS: &[(RailPosition, &str)] = &[
@@ -18,6 +19,17 @@ pub fn appearance_panel() -> Html {
     let vim_enabled = use_state(load_vim_mode);
     let group_by_host = use_state(load_group_by_host);
     let voice_hold_open = use_state(load_voice_hold_open);
+    let ui_refresh = use_state(load_ui_refresh);
+
+    let on_toggle_ui_refresh = {
+        let ui_refresh = ui_refresh.clone();
+        Callback::from(move |e: Event| {
+            let input: web_sys::HtmlInputElement = e.target_unchecked_into();
+            let enabled = input.checked();
+            set_ui_refresh(enabled);
+            ui_refresh.set(enabled);
+        })
+    };
 
     let on_toggle_group_by_host = {
         let group_by_host = group_by_host.clone();
@@ -56,6 +68,24 @@ pub fn appearance_panel() -> Html {
                 <p class="section-description">
                     { "Layout preferences. Saved in this browser." }
                 </p>
+            </div>
+
+            <div class="appearance-setting">
+                <h3>{ "Refreshed design (preview)" }</h3>
+                <p class="setting-description">
+                    { "Try the in-progress visual refresh: neutral graphite \
+                       surfaces, one accent color, Inter and JetBrains Mono, and \
+                       quieter cards and badges. Applies instantly in this browser; \
+                       turn it off to return to the current look." }
+                </p>
+                <label class="toggle-label">
+                    <input
+                        type="checkbox"
+                        checked={*ui_refresh}
+                        onchange={on_toggle_ui_refresh}
+                    />
+                    <span>{ if *ui_refresh { "Enabled" } else { "Disabled" } }</span>
+                </label>
             </div>
 
             <div class="appearance-setting">

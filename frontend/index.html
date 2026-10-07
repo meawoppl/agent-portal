@@ -33,6 +33,27 @@
     <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
 
+    <!-- Refreshed design (preview) flag: apply before first paint so opted-in
+         browsers never flash the legacy theme. Mirrors src/ui_refresh.rs. -->
+    <script>
+        (function () {
+            try {
+                if (localStorage.getItem('claude-portal-ui-refresh') !== 'true') return;
+            } catch (e) { return; }
+            document.documentElement.setAttribute('data-ui', 'refresh');
+            [
+                ['ui-refresh-font-sans', 'https://cdn.jsdelivr.net/npm/@fontsource-variable/inter@5/index.css'],
+                ['ui-refresh-font-mono', 'https://cdn.jsdelivr.net/npm/@fontsource-variable/jetbrains-mono@5/index.css']
+            ].forEach(function (f) {
+                var link = document.createElement('link');
+                link.id = f[0];
+                link.rel = 'stylesheet';
+                link.href = f[1];
+                document.head.appendChild(link);
+            });
+        })();
+    </script>
+
     <!-- KaTeX for rendering LaTeX math in messages -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"
           integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+" crossorigin="anonymous" />
@@ -290,6 +311,11 @@
     <link data-trunk rel="css" href="styles/performance.css" />
     <link data-trunk rel="css" href="styles/admin.css" />
     <link data-trunk rel="css" href="styles/banned.css" />
+    <!-- Refreshed design (preview): last, so it overrides; inert unless
+         html[data-ui="refresh"]. -->
+    <link data-trunk rel="css" href="styles/refresh/tokens.css" />
+    <link data-trunk rel="css" href="styles/refresh/shell.css" />
+    <link data-trunk rel="css" href="styles/refresh/transcript.css" />
     <link data-trunk rel="copy-file" href="katex-helper.js" />
     <script defer src="/katex-helper.js"></script>
     <link data-trunk rel="copy-file" href="assets/wiggum.png" />
