@@ -2,7 +2,9 @@
    stylesheets: switching the flag changes presentation, never visibility or
    control behavior. Status colors remain reserved for actual outcomes. */
 html[data-ui="refresh"] .session-view-messages {
-    padding: 1.5rem clamp(0.75rem, 2.5vw, 2.5rem) 0.5rem;
+    /* Size the reading column from this pane, not the viewport: a split
+       surface must keep its own usable width. The scroller stays full-width. */
+    padding: 1.5rem max(1rem, calc((100% - 920px) / 2)) 0.5rem;
     background: var(--bg-dark);
 }
 
@@ -48,7 +50,7 @@ html[data-ui="refresh"] .question-badge {
     color: var(--text-secondary);
     padding: 0.125rem 0;
     border-radius: 4px;
-    font-size: 0.75rem;
+    font-size: var(--refresh-text-xs);
     font-weight: 600;
     text-transform: none;
     letter-spacing: 0;
@@ -104,7 +106,7 @@ html[data-ui="refresh"] .codex-cmd-status.err { color: var(--error); }
 html[data-ui="refresh"] .assistant-text,
 html[data-ui="refresh"] .user-message .user-text,
 html[data-ui="refresh"] .antigravity-text {
-    font-size: 0.9375rem;
+    font-size: var(--refresh-text-md);
     line-height: 1.75;
     color: var(--text-primary);
 }
@@ -129,9 +131,9 @@ html[data-ui="refresh"] .md-heading {
     border-bottom: 0;
 }
 
-html[data-ui="refresh"] .md-h1 { font-size: 1.5rem; }
-html[data-ui="refresh"] .md-h2 { font-size: 1.25rem; }
-html[data-ui="refresh"] .md-h3 { font-size: 1.0625rem; }
+html[data-ui="refresh"] .md-h1 { font-size: var(--refresh-text-xl); }
+html[data-ui="refresh"] .md-h2 { font-size: var(--refresh-text-lg); }
+html[data-ui="refresh"] .md-h3 { font-size: var(--refresh-text-md); }
 
 html[data-ui="refresh"] .md-link {
     color: var(--accent);
@@ -157,7 +159,7 @@ html[data-ui="refresh"] .md-code-block {
 html[data-ui="refresh"] .md-code-block .md-code {
     padding: 1rem 1.125rem;
     line-height: 1.65;
-    font-size: 0.8125rem;
+    font-size: var(--refresh-text-sm);
 }
 
 html[data-ui="refresh"] .md-blockquote {
@@ -208,7 +210,7 @@ html[data-ui="refresh"] .tool-result-content,
 html[data-ui="refresh"] .command-result-output,
 html[data-ui="refresh"] .diff-view {
     font-family: var(--font-mono);
-    font-size: 0.8125rem;
+    font-size: var(--refresh-text-sm);
     line-height: 1.6;
 }
 
@@ -253,14 +255,14 @@ html[data-ui="refresh"] .turn-metrics-footer,
 html[data-ui="refresh"] .result-message .result-stats-bar {
     background: transparent;
     color: var(--text-muted);
-    font-size: 0.75rem;
+    font-size: var(--refresh-text-xs);
 }
 
 /* Composer keeps its existing textarea measurement and attachment layout. */
 html[data-ui="refresh"] .session-view-input {
     background: var(--bg-dark);
     border-top: 1px solid var(--border);
-    padding: 0.875rem 1.25rem 1rem;
+    padding: 0.875rem max(1rem, calc((100% - 920px) / 2)) 1rem;
     gap: 0.625rem;
 }
 
@@ -274,7 +276,7 @@ html[data-ui="refresh"] .session-view-input .message-input {
     border: 1px solid var(--border);
     border-radius: 12px;
     padding: 0.75rem 0.875rem;
-    font-size: 0.9375rem;
+    font-size: var(--refresh-text-md);
     line-height: 1.5;
     color: var(--text-primary);
 }
@@ -351,6 +353,7 @@ html[data-ui="refresh"] .permission-prompt {
     border-left: 2px solid var(--warning);
     border-radius: 8px;
     padding: 1rem 1.125rem;
+    margin: 0.5rem max(1rem, calc((100% - 920px) / 2));
     box-shadow: none;
     animation: none;
 }
@@ -363,7 +366,7 @@ html[data-ui="refresh"] .permission-prompt.ask-user-question {
 
 html[data-ui="refresh"] .permission-title {
     color: var(--text-primary);
-    font-size: 0.875rem;
+    font-size: var(--refresh-text-base);
 }
 
 html[data-ui="refresh"] .permission-input {
