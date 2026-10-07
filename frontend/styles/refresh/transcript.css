@@ -84,6 +84,23 @@ html[data-ui="refresh"] .tool-badge.mcp.error {
     color: var(--error);
 }
 
+html[data-ui="refresh"] .message-type-badge:is(.error, .anthropic-error, .failed) {
+    color: var(--error);
+}
+
+html[data-ui="refresh"] .message-type-badge:is(.overload, .rate-limit) {
+    color: var(--warning);
+}
+
+html[data-ui="refresh"] :is(.error-message-display, .anthropic-error-message, .result-message.error) {
+    border-left: 2px solid var(--error);
+    background: var(--refresh-danger-soft);
+}
+
+html[data-ui="refresh"] .codex-cmd-status.running { color: var(--warning); }
+html[data-ui="refresh"] .codex-cmd-status.ok { color: var(--success); }
+html[data-ui="refresh"] .codex-cmd-status.err { color: var(--error); }
+
 html[data-ui="refresh"] .assistant-text,
 html[data-ui="refresh"] .user-message .user-text,
 html[data-ui="refresh"] .antigravity-text {
