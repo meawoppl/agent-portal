@@ -1,1 +1,416 @@
-/* Refreshed design (preview): transcript surfaces. Owned by ap-sol. Scoped to html[data-ui="refresh"]. */
+/* Preview-only transcript skin. Keep layout/state selectors in the original
+   stylesheets: switching the flag changes presentation, never visibility or
+   control behavior. Status colors remain reserved for actual outcomes. */
+html[data-ui="refresh"] .session-view-messages {
+    padding: 1.5rem clamp(0.75rem, 2.5vw, 2.5rem) 0.5rem;
+    background: var(--bg-dark);
+}
+
+html[data-ui="refresh"] .claude-message {
+    margin-bottom: 1.5rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--refresh-surface-1);
+    box-shadow: none;
+}
+
+html[data-ui="refresh"] .claude-message .message-header {
+    gap: 0.625rem;
+    padding: 0.625rem 1rem;
+    background: transparent;
+    border-bottom-color: var(--border);
+}
+
+html[data-ui="refresh"] .claude-message .message-body {
+    padding: 0.875rem 1rem 1rem;
+}
+
+/* Assistant prose reads as a document; the user keeps a quiet surface so
+   authorship stays apparent without assigning every agent a neon color. */
+html[data-ui="refresh"] .assistant-message,
+html[data-ui="refresh"] .codex-group,
+html[data-ui="refresh"] .muse-message,
+html[data-ui="refresh"] .antigravity-message {
+    background: transparent;
+    border-color: transparent;
+}
+
+html[data-ui="refresh"] .user-message,
+html[data-ui="refresh"] .user-group {
+    border-left: 2px solid var(--accent);
+}
+
+html[data-ui="refresh"] .message-type-badge,
+html[data-ui="refresh"] .tool-badge,
+html[data-ui="refresh"] .init-badge,
+html[data-ui="refresh"] .question-badge {
+    background: transparent;
+    color: var(--text-secondary);
+    padding: 0.125rem 0;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+html[data-ui="refresh"] .system-message.compact {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 0.5rem 1rem;
+    background: transparent;
+    border-color: transparent;
+}
+
+html[data-ui="refresh"] .message-count,
+html[data-ui="refresh"] .task-type-badge {
+    background: var(--refresh-surface-2);
+    color: var(--text-secondary);
+    border-radius: 4px;
+    font-weight: 500;
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+html[data-ui="refresh"] .message-type-badge.user,
+html[data-ui="refresh"] .message-type-badge.assistant {
+    color: var(--text-primary);
+}
+
+html[data-ui="refresh"] .message-type-badge.result.error,
+html[data-ui="refresh"] .tool-badge.mcp.error {
+    color: var(--error);
+}
+
+html[data-ui="refresh"] .assistant-text,
+html[data-ui="refresh"] .user-message .user-text,
+html[data-ui="refresh"] .antigravity-text {
+    font-size: 0.9375rem;
+    line-height: 1.75;
+    color: var(--text-primary);
+}
+
+html[data-ui="refresh"] .claude-message :is(.assistant-text, .user-text) {
+    max-width: 80ch;
+}
+
+html[data-ui="refresh"] .md-paragraph {
+    margin-block: 0.75rem;
+    line-height: 1.75;
+}
+
+html[data-ui="refresh"] .md-paragraph:first-child { margin-top: 0; }
+html[data-ui="refresh"] .md-paragraph:last-child { margin-bottom: 0; }
+
+html[data-ui="refresh"] .md-heading {
+    margin-block: 1.5rem 0.625rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    line-height: 1.35;
+    border-bottom: 0;
+}
+
+html[data-ui="refresh"] .md-h1 { font-size: 1.5rem; }
+html[data-ui="refresh"] .md-h2 { font-size: 1.25rem; }
+html[data-ui="refresh"] .md-h3 { font-size: 1.0625rem; }
+
+html[data-ui="refresh"] .md-link {
+    color: var(--accent);
+    text-decoration-style: solid;
+    text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent);
+    text-underline-offset: 0.2em;
+}
+
+html[data-ui="refresh"] .md-inline-code {
+    color: var(--text-primary);
+    background: var(--refresh-surface-2);
+    border-radius: 4px;
+    padding: 0.125rem 0.3rem;
+    font-size: 0.85em;
+}
+
+html[data-ui="refresh"] .md-code-block {
+    margin-block: 1rem;
+    border-radius: 8px;
+    background: var(--bg-darker);
+}
+
+html[data-ui="refresh"] .md-code-block .md-code {
+    padding: 1rem 1.125rem;
+    line-height: 1.65;
+    font-size: 0.8125rem;
+}
+
+html[data-ui="refresh"] .md-blockquote {
+    background: transparent;
+    border-left: 2px solid var(--border);
+    padding: 0.25rem 1rem;
+    margin-block: 1rem;
+}
+
+html[data-ui="refresh"] .code-copy-button {
+    background: var(--refresh-surface-2);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+}
+
+html[data-ui="refresh"] .code-copy-button:focus-visible,
+html[data-ui="refresh"] .md-code-block:focus-within .code-copy-button {
+    opacity: 1;
+}
+
+/* Tool types share one frame. Diffs, error results and running states retain
+   their semantic cues instead of relying on a different frame per tool. */
+html[data-ui="refresh"] .tool-use,
+html[data-ui="refresh"] .tool-result,
+html[data-ui="refresh"] .diff-card,
+html[data-ui="refresh"] .command-result,
+html[data-ui="refresh"] .question-card {
+    background: var(--refresh-surface-1);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: none;
+}
+
+html[data-ui="refresh"] .tool-use-header,
+html[data-ui="refresh"] .diff-card-header {
+    background: transparent;
+    padding: 0.625rem 0.875rem;
+    gap: 0.5rem;
+}
+
+html[data-ui="refresh"] .tool-use .tool-icon,
+html[data-ui="refresh"] .tool-use .tool-name {
+    color: var(--text-secondary);
+}
+
+html[data-ui="refresh"] .tool-input-content,
+html[data-ui="refresh"] .tool-result-content,
+html[data-ui="refresh"] .command-result-output,
+html[data-ui="refresh"] .diff-view {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.6;
+}
+
+html[data-ui="refresh"] .bash-command-inline,
+html[data-ui="refresh"] .glob-pattern-inline,
+html[data-ui="refresh"] .grep-pattern-inline {
+    background: transparent;
+    color: var(--text-primary);
+    padding-inline: 0;
+}
+
+html[data-ui="refresh"] .thinking-block {
+    background: transparent;
+    border-left: 1px solid var(--border);
+    border-radius: 0;
+}
+
+html[data-ui="refresh"] .thinking-label,
+html[data-ui="refresh"] .thinking-content {
+    color: var(--text-secondary);
+}
+
+html[data-ui="refresh"] .diff-line.added {
+    background: color-mix(in srgb, var(--success) 10%, transparent);
+    color: var(--success);
+}
+
+html[data-ui="refresh"] .diff-line.removed {
+    background: color-mix(in srgb, var(--error) 10%, transparent);
+    color: var(--error);
+}
+
+html[data-ui="refresh"] .diff-line.added .diff-marker { color: var(--success); }
+html[data-ui="refresh"] .diff-line.removed .diff-marker { color: var(--error); }
+
+html[data-ui="refresh"] .tool-result.error,
+html[data-ui="refresh"] .command-result.failed {
+    border-color: color-mix(in srgb, var(--error) 50%, var(--border));
+}
+
+html[data-ui="refresh"] .turn-metrics-footer,
+html[data-ui="refresh"] .result-message .result-stats-bar {
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+
+/* Composer keeps its existing textarea measurement and attachment layout. */
+html[data-ui="refresh"] .session-view-input {
+    background: var(--bg-dark);
+    border-top: 1px solid var(--border);
+    padding: 0.875rem 1.25rem 1rem;
+    gap: 0.625rem;
+}
+
+html[data-ui="refresh"] .session-view-input .input-prompt {
+    color: var(--text-muted);
+    font-weight: 400;
+}
+
+html[data-ui="refresh"] .session-view-input .message-input {
+    background: var(--refresh-surface-1);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 0.75rem 0.875rem;
+    font-size: 0.9375rem;
+    line-height: 1.5;
+    color: var(--text-primary);
+}
+
+html[data-ui="refresh"] .session-view-input .message-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+html[data-ui="refresh"] .session-view-input .message-input::placeholder {
+    color: var(--text-muted);
+}
+
+html[data-ui="refresh"] .session-view .send-button,
+html[data-ui="refresh"] .session-view .send-mode-toggle {
+    background: var(--accent);
+    color: var(--refresh-on-accent);
+    box-shadow: none;
+    font-weight: 600;
+}
+
+html[data-ui="refresh"] .session-view .send-mode-dropdown,
+html[data-ui="refresh"] .session-view .reasoning-effort-select {
+    background: var(--refresh-surface-2);
+    border-color: var(--border);
+    border-radius: 8px;
+    color: var(--text-primary);
+}
+
+html[data-ui="refresh"] .overload-message,
+html[data-ui="refresh"] .rate-limit-message {
+    border-left-color: var(--warning);
+    background: var(--refresh-warning-soft);
+}
+
+html[data-ui="refresh"] .overload-title,
+html[data-ui="refresh"] .rate-limit-status {
+    color: var(--warning);
+}
+
+html[data-ui="refresh"] .compaction-message,
+html[data-ui="refresh"] .task-message {
+    background: var(--refresh-surface-1);
+    border-left-color: var(--border);
+}
+
+html[data-ui="refresh"] .task-message.failed {
+    border-left-color: var(--error);
+    background: var(--refresh-danger-soft);
+}
+
+html[data-ui="refresh"] .task-code {
+    background: var(--bg-darker);
+    border-color: var(--border);
+    color: var(--text-primary);
+}
+
+html[data-ui="refresh"] .task-agent-type,
+html[data-ui="refresh"] .plugin-card-badge,
+html[data-ui="refresh"] .plugin-skill-pill,
+html[data-ui="refresh"] .plugin-command-pill {
+    color: var(--text-secondary);
+    background: var(--refresh-surface-2);
+    border-color: var(--border);
+    border-radius: 4px;
+    font-weight: 500;
+}
+
+/* Prompts are actionable, not failures. Preserve the selected/allow/deny
+   states, and use the warning edge to distinguish an authorization request. */
+html[data-ui="refresh"] .permission-prompt {
+    background: var(--refresh-surface-1);
+    border: 1px solid var(--border);
+    border-left: 2px solid var(--warning);
+    border-radius: 8px;
+    padding: 1rem 1.125rem;
+    box-shadow: none;
+    animation: none;
+}
+
+html[data-ui="refresh"] .permission-prompt.ask-user-question {
+    background: var(--refresh-surface-1);
+    border-color: var(--border);
+    border-left-color: var(--accent);
+}
+
+html[data-ui="refresh"] .permission-title {
+    color: var(--text-primary);
+    font-size: 0.875rem;
+}
+
+html[data-ui="refresh"] .permission-input {
+    background: var(--bg-darker);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+}
+
+html[data-ui="refresh"] .permission-option {
+    padding: 0.5rem 0.625rem;
+    border-radius: 4px;
+}
+
+html[data-ui="refresh"] .permission-option.selected,
+html[data-ui="refresh"] .option-item.selected {
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+html[data-ui="refresh"] .plugin-context-card,
+html[data-ui="refresh"] .plugin-card,
+html[data-ui="refresh"] .fork-lineage-card,
+html[data-ui="refresh"] .portal-reminder {
+    background: var(--refresh-surface-1);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+html[data-ui="refresh"] .plugin-context-summary,
+html[data-ui="refresh"] .portal-reminder-header {
+    background: transparent;
+    color: var(--text-secondary);
+    padding: 0.625rem 0.875rem;
+}
+
+html[data-ui="refresh"] .plugin-context-summary:hover,
+html[data-ui="refresh"] .portal-reminder-header:hover {
+    background: var(--refresh-surface-2);
+}
+
+html[data-ui="refresh"] .session-view :is(button, a, input, textarea, select, [tabindex]):focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+}
+
+@media (max-width: 768px) {
+    html[data-ui="refresh"] .session-view-messages {
+        padding: 0.875rem 0.5rem 0;
+    }
+
+    html[data-ui="refresh"] .claude-message .message-header {
+        padding: 0.5rem 0.625rem;
+    }
+
+    html[data-ui="refresh"] .claude-message .message-body {
+        padding: 0.625rem;
+    }
+
+    html[data-ui="refresh"] .session-view-input {
+        padding: 0.625rem;
+        gap: 0.5rem;
+    }
+
+    html[data-ui="refresh"] .permission-prompt {
+        margin: 0.5rem;
+        padding: 0.75rem;
+    }
+}
