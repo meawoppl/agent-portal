@@ -22,7 +22,7 @@ html[data-ui="refresh"] {
     /* Text */
     --refresh-text: #e8e9ec;
     --refresh-text-2: #a7abb4;
-    --refresh-text-3: #70747e;
+    --refresh-text-3: #8e939d;
 
     /* One calm accent; status colors are reserved for status. */
     --refresh-accent: #8ab4f8;
