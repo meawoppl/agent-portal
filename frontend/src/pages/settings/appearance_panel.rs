@@ -3,6 +3,7 @@ use crate::pages::dashboard::{
     load_group_by_host, load_rail_position, load_vim_mode, save_group_by_host, save_rail_position,
     save_vim_mode, RailPosition,
 };
+use crate::ui_theme::{load_ui_theme, set_ui_theme, UiTheme};
 use yew::prelude::*;
 
 const ALL_POSITIONS: &[(RailPosition, &str)] = &[
@@ -18,6 +19,7 @@ pub fn appearance_panel() -> Html {
     let vim_enabled = use_state(load_vim_mode);
     let group_by_host = use_state(load_group_by_host);
     let voice_hold_open = use_state(load_voice_hold_open);
+    let ui_theme = use_state(load_ui_theme);
 
     let on_toggle_group_by_host = {
         let group_by_host = group_by_host.clone();
@@ -56,6 +58,37 @@ pub fn appearance_panel() -> Html {
                 <p class="section-description">
                     { "Layout preferences. Saved in this browser." }
                 </p>
+            </div>
+
+            <div class="appearance-setting">
+                <h3>{ "Theme" }</h3>
+                <p class="setting-description">
+                    { "How should Agent Portal look? Applies instantly in this browser." }
+                </p>
+                <div class="theme-choices" role="radiogroup">
+                    { for UiTheme::ALL.into_iter().map(|theme| {
+                        let active = *ui_theme == theme;
+                        let setter = ui_theme.clone();
+                        let onclick = Callback::from(move |_: MouseEvent| {
+                            set_ui_theme(theme);
+                            setter.set(theme);
+                        });
+                        html! {
+                            <button
+                                key={theme.as_str()}
+                                type="button"
+                                role="radio"
+                                aria-checked={active.to_string()}
+                                class={classes!("theme-choice", theme.as_str(), active.then_some("active"))}
+                                {onclick}
+                            >
+                                <span class="theme-choice-swatch" aria-hidden="true"></span>
+                                <span class="theme-choice-label">{ format!("\u{201c}{}\u{201d}", theme.label()) }</span>
+                                <span class="theme-choice-caption">{ theme.caption() }</span>
+                            </button>
+                        }
+                    })}
+                </div>
             </div>
 
             <div class="appearance-setting">

@@ -1,0 +1,308 @@
+/*
+ * Windows: an intentionally nostalgic Luna desktop. Keep the existing layout
+ * and interaction targets; the bevels and title bars are paint, not new chrome.
+ * Every override is scoped so Linux retains its original styles.
+ */
+html[data-ui="windows"] {
+    color-scheme: light;
+
+    --bg-dark: #ece9d8;
+    --bg-darker: #fff;
+    --text-primary: #172337;
+    --text-secondary: #46566c;
+    --text-muted: #58677a;
+    --accent: #1455b5;
+    --accent-hover: #073b8e;
+    --link-color: #0645ad;
+    --link-visited: #639;
+    --success: #247226;
+    --error: #ad2424;
+    --warning: #865500;
+    --border: #a2aec0;
+    --font-mono: Consolas, "Lucida Console", monospace;
+    --windows-title: linear-gradient(#4195f5 0%, #0863dc 12%, #0050c8 85%, #003c9e);
+    --windows-bevel: inset 1px 1px 0 #fff, inset -1px -1px 0 #aca899;
+
+    background: #397bc5;
+}
+
+html[data-ui="windows"] body {
+    background: linear-gradient(145deg, #448bd4, #81b8e4 58%, #bad8ea);
+    color: var(--text-primary);
+    font-family: Tahoma, "Segoe UI", sans-serif;
+    font-size: 13px;
+}
+
+html[data-ui="windows"] :is(button, input, select, textarea) {
+    font-family: inherit;
+}
+
+html[data-ui="windows"] :focus-visible {
+    outline: 2px dotted #173d76;
+    outline-offset: 2px;
+}
+
+html[data-ui="windows"] ::selection {
+    color: #fff;
+    background: #245edb;
+}
+
+html[data-ui="windows"] :is(.focus-flow-header, .settings-header, .session-view-header) {
+    color: #fff;
+    background: var(--windows-title);
+    border: 1px solid #003b9c;
+    border-radius: 7px 7px 0 0;
+    box-shadow: inset 0 1px 0 #8dc2ff;
+    text-shadow: 1px 1px #003378;
+}
+
+html[data-ui="windows"] :is(.focus-flow-header h1, .settings-header h1, .session-view-header .session-name) {
+    color: #fff;
+    font-weight: 700;
+}
+
+html[data-ui="windows"] :is(.session-view-header .session-directory, .session-view-header .hostname, .session-view-header .host-name) {
+    color: #e0edff;
+}
+
+html[data-ui="windows"] :is(.session-rail-container, .settings-tabs, .session-view-input) {
+    background: linear-gradient(#faf9f4, #ece9d8);
+    border-color: #a6a391;
+    box-shadow: inset 0 1px 0 #fff;
+}
+
+html[data-ui="windows"] .session-rail-container {
+    padding: 8px;
+    border-bottom: 1px solid #7a96bf;
+}
+
+html[data-ui="windows"] .session-pill {
+    color: #193c6b;
+    background: linear-gradient(#fff, #e4edfa);
+    border: 1px solid #7b9ebd;
+    border-radius: 4px;
+    box-shadow: var(--windows-bevel);
+}
+
+html[data-ui="windows"] .session-pill:hover {
+    background: linear-gradient(#fff7d9, #f9dc8c);
+}
+
+html[data-ui="windows"] .session-pill.focused {
+    color: #fff;
+    background: linear-gradient(#3984e4, #1854a1);
+    border-color: #174780;
+    box-shadow: inset 1px 1px 3px #0c397a;
+}
+
+html[data-ui="windows"] :is(.pill-watermark, .pill-model-watermark) {
+    opacity: 0.06;
+}
+
+html[data-ui="windows"] :is(.pill-dropdown, .pill-submenu-panel, .send-mode-dropdown, .modal-content, .launch-dialog, .confirm-modal, .share-dialog, .sched-dialog, .help-dialog, .agent-login-modal, .health-timer-dialog) {
+    color: var(--text-primary);
+    background: #ece9d8;
+    border: 1px solid #466b9b;
+    border-radius: 6px;
+    box-shadow: var(--windows-bevel), 3px 5px 12px #23436655;
+}
+
+html[data-ui="windows"] :is(.settings-content, .onboarding-panel, .profile-setting, .appearance-setting, .session-portal, .theme-option) {
+    color: var(--text-primary);
+    background: #f8f7f0;
+    border: 1px solid #b4b0a0;
+    border-radius: 4px;
+    box-shadow: inset 0 1px 0 #fff;
+}
+
+html[data-ui="windows"] :is(button, .header-button, .tab-button, .platform-option) {
+    color: #172337;
+    background: linear-gradient(#fff, #f5f4ec 48%, #e5e2d3);
+    border: 1px solid #7f9db9;
+    border-radius: 3px;
+    box-shadow: var(--windows-bevel);
+    text-shadow: none;
+}
+
+html[data-ui="windows"] button:hover:not(:disabled) {
+    border-color: #ce9634;
+    background: linear-gradient(#fffdf6, #f5e4b5);
+}
+
+html[data-ui="windows"] button:active:not(:disabled) {
+    background: #dfdfd2;
+    box-shadow: inset 1px 1px 2px #938f80;
+}
+
+html[data-ui="windows"] :is(.new-session-button, .onboarding-primary, .send-button, .send-mode-toggle) {
+    color: #fff;
+    background: linear-gradient(#68b957, #388d32 48%, #257a23 49%, #378d2e);
+    border: 1px solid #246323;
+    border-radius: 5px;
+    box-shadow: inset 0 1px 1px #b6e8a4, inset 0 -1px 1px #185616;
+    text-shadow: 1px 1px #235c21;
+}
+
+html[data-ui="windows"] :is(.new-session-button, .onboarding-primary, .send-button, .send-mode-toggle):hover:not(:disabled) {
+    color: #fff;
+    background: linear-gradient(#7bcd68, #348c2b);
+    border-color: #246323;
+}
+
+html[data-ui="windows"] button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+html[data-ui="windows"] :is(input:not([type="checkbox"], [type="radio"]), textarea, select) {
+    color: #172337;
+    background: #fff;
+    border: 1px solid #7f9db9;
+    border-radius: 2px;
+    box-shadow: inset 1px 1px 2px #bdc7d2;
+}
+
+html[data-ui="windows"] :is(input, textarea)::placeholder {
+    color: #627082;
+}
+
+html[data-ui="windows"] :is(input[type="checkbox"], input[type="radio"]) {
+    accent-color: #245edb;
+}
+
+html[data-ui="windows"] .session-view-messages {
+    background: #fff;
+    padding: 1rem max(1rem, calc((100% - 1000px) / 2));
+}
+
+html[data-ui="windows"] :is(.claude-message, .tool-use, .tool-result, .diff-card, .command-result, .permission-prompt) {
+    color: #172337;
+    background: #fafbfe;
+    border: 1px solid #b7c8dc;
+    border-radius: 4px;
+    box-shadow: 0 1px 2px #26436a12;
+}
+
+html[data-ui="windows"] :is(.message-header, .tool-header, .tool-result-header, .diff-card-header, .command-result-header) {
+    color: #244975;
+    background: linear-gradient(#f5f9ff, #dce9f7);
+    border-bottom-color: #b7c8dc;
+}
+
+html[data-ui="windows"] :is(.user-message, .user-group) {
+    background: #edf4ff;
+    border-color: #8cafd9;
+}
+
+html[data-ui="windows"] :is(.role-label, .tool-badge, .init-badge) {
+    color: #234e84;
+    background: #e0ebfa;
+    border: 1px solid #afc5df;
+    border-radius: 3px;
+}
+
+html[data-ui="windows"] :is(.markdown-content pre, .markdown-content code, .command-output, .tool-result-content, .diff-content, .code-block) {
+    color: #172337;
+    background: #f2f4f7;
+    border-color: #c2ccda;
+}
+
+html[data-ui="windows"] :is(.diff-line-added, .diff-line.added) {
+    color: #195b20;
+    background: #e1f3dd;
+}
+
+html[data-ui="windows"] :is(.diff-line-removed, .diff-line.removed) {
+    color: #912424;
+    background: #fce5e5;
+}
+
+html[data-ui="windows"] :is(.error-message, .api-error-message, .task-message.failed, .tool-result.error) {
+    color: #a12222;
+    background: #fff0ef;
+    border-color: #c96560;
+}
+
+html[data-ui="windows"] :is(.warning-message, .rate-limit-message, .permission-prompt) {
+    color: #684500;
+    background: #fff9df;
+    border-color: #c6a74f;
+}
+
+html[data-ui="windows"] .permission-prompt.ask-user-question {
+    color: #172337;
+    background: #f4f8ff;
+    border-color: #729bd0;
+}
+
+html[data-ui="windows"] .question-option.selected {
+    color: #fff;
+    background: #245edb;
+    border-color: #17479e;
+}
+
+html[data-ui="windows"] .session-view-input {
+    padding: 10px max(12px, calc((100% - 1000px) / 2));
+    border-top: 1px solid #a6a391;
+}
+
+html[data-ui="windows"] .session-view-input .message-input {
+    color: #172337;
+    background: #fff;
+    border: 1px solid #7f9db9;
+    border-radius: 3px;
+}
+
+@media (max-width: 600px) {
+    html[data-ui="windows"] .session-view-messages {
+        padding: 8px;
+    }
+
+    html[data-ui="windows"] .session-view-input {
+        padding: 8px;
+    }
+}
+
+/* Legacy identity colors were tuned for a dark canvas. */
+html[data-ui="windows"] .message-header :is(.message-type-badge, .task-type-badge) {
+    color: #234e84;
+    background: #dce9fa;
+}
+
+html[data-ui="windows"] .message-header :is(.message-type-badge.assistant, .message-type-badge.result) {
+    color: #226424;
+    background: #dfefda;
+}
+
+html[data-ui="windows"] .message-header :is(.message-type-badge.error, .message-type-badge.anthropic-error, .message-type-badge.overload, .message-type-badge.task.failed) {
+    color: #992323;
+    background: #f8dedd;
+}
+
+html[data-ui="windows"] .session-view-header :is(.session-hostname, .session-path, .session-model, .session-launcher-version) {
+    color: #e8f1ff;
+}
+
+html[data-ui="windows"] .session-pill.focused :is(.pill-name, .pill-title, .pill-path, .pill-directory, .pill-branch, .pill-session-id, .pill-label) {
+    color: #fff;
+}
+
+html[data-ui="windows"] .session-pill.focused :is(.pill-session-name, .pill-repo, .pill-pr-num) {
+    color: #fff;
+}
+
+html[data-ui="windows"] .session-view-header .status.connected {
+    color: #fff;
+    background: #236b25;
+}
+
+html[data-ui="windows"] .session-view-header .status.disconnected {
+    color: #fff;
+    background: #90352a;
+}
+
+html[data-ui="windows"] .theme-choice.active {
+    border-color: #9c6500;
+    background: #fff4cf;
+    box-shadow: inset 0 0 0 2px #edb54c, 0 0 0 1px #9c6500;
+}

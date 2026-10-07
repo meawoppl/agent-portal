@@ -1,0 +1,606 @@
+/*
+ * Refreshed design (preview) — app chrome, in a "liquid glass" direction: a
+ * vivid, slowly drifting wallpaper behind everything, and the chrome as
+ * floating translucent islands (backdrop blur, a lit top edge, an inner
+ * hairline, a deep soft shadow), capsule controls and large radii.
+ *
+ * Scoped to html[data-ui="apple"]; tokens live in tokens.css, transcript
+ * surfaces in transcript.css. Reduced-motion and reduced-transparency
+ * preferences fall back to a static wallpaper and solid panels.
+ */
+
+/* ---- Wallpaper ---------------------------------------------------------- */
+
+html[data-ui="apple"] {
+    background: var(--refresh-bg);
+}
+
+/* The body stays transparent: its background would paint over the
+   negative-z-index wallpaper layers below. */
+html[data-ui="apple"] body {
+    background: transparent;
+    color: var(--refresh-text);
+    font-family: var(--refresh-font-sans);
+    font-size: var(--refresh-text-base);
+    letter-spacing: -0.003em;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+}
+
+html[data-ui="apple"] body::before,
+html[data-ui="apple"] body::after {
+    content: "";
+    position: fixed;
+    inset: -20vmax;
+    z-index: -1;
+    pointer-events: none;
+}
+
+html[data-ui="apple"] body::before {
+    inset: -10vmax;
+    background:
+        radial-gradient(42vmax 34vmax at 28% 26%, rgba(64, 98, 255, 0.85), transparent 68%),
+        radial-gradient(38vmax 32vmax at 76% 24%, rgba(186, 76, 255, 0.72), transparent 68%),
+        radial-gradient(44vmax 34vmax at 70% 76%, rgba(0, 206, 196, 0.6), transparent 68%),
+        radial-gradient(36vmax 30vmax at 26% 78%, rgba(255, 112, 70, 0.55), transparent 68%),
+        radial-gradient(30vmax 26vmax at 50% 50%, rgba(255, 70, 170, 0.35), transparent 70%),
+        linear-gradient(135deg, #121a4a 0%, #1d1036 45%, #062b33 100%);
+    filter: blur(40px) saturate(140%);
+    animation: refresh-wallpaper-drift 48s ease-in-out infinite alternate;
+}
+
+/* A soft vignette keeps the edges deep so glass reads as glass. */
+html[data-ui="apple"] body::after {
+    inset: 0;
+    background: radial-gradient(140% 110% at 50% 45%, transparent 60%, rgba(0, 0, 0, 0.4));
+}
+
+@keyframes refresh-wallpaper-drift {
+    0% {
+        transform: translate3d(0, 0, 0) rotate(0deg) scale(1);
+    }
+    50% {
+        transform: translate3d(3vmax, -2vmax, 0) rotate(8deg) scale(1.06);
+    }
+    100% {
+        transform: translate3d(-3vmax, 2vmax, 0) rotate(-6deg) scale(1.02);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    html[data-ui="apple"] body::before {
+        animation: none;
+    }
+}
+
+html[data-ui="apple"] button,
+html[data-ui="apple"] input,
+html[data-ui="apple"] select,
+html[data-ui="apple"] textarea {
+    font-family: inherit;
+}
+
+html[data-ui="apple"] code,
+html[data-ui="apple"] pre,
+html[data-ui="apple"] kbd {
+    font-family: var(--refresh-font-mono);
+}
+
+html[data-ui="apple"] ::selection {
+    background: rgba(10, 132, 255, 0.4);
+}
+
+html[data-ui="apple"] :focus-visible {
+    outline: none;
+    box-shadow: var(--refresh-focus);
+}
+
+html[data-ui="apple"] #loading {
+    background: transparent;
+    color: var(--refresh-text-2);
+}
+
+/* ---- Glass primitives --------------------------------------------------- */
+
+/* Floating islands: headers, rails, panels, cards. */
+html[data-ui="apple"] .focus-flow-header,
+html[data-ui="apple"] .settings-header,
+html[data-ui="apple"] .settings-tabs,
+html[data-ui="apple"] .session-view-header,
+html[data-ui="apple"] .onboarding-panel,
+html[data-ui="apple"] .profile-setting,
+html[data-ui="apple"] .appearance-setting {
+    background: var(--refresh-glass);
+    -webkit-backdrop-filter: var(--refresh-glass-blur);
+    backdrop-filter: var(--refresh-glass-blur);
+    border: none;
+    box-shadow: var(--refresh-glass-edge), var(--refresh-shadow-2);
+}
+
+/* Menus, dialogs and anything layered over content: denser glass. */
+html[data-ui="apple"] .pill-dropdown,
+html[data-ui="apple"] .pill-submenu-panel,
+html[data-ui="apple"] .send-mode-dropdown,
+html[data-ui="apple"] .launch-dialog,
+html[data-ui="apple"] .modal-content,
+html[data-ui="apple"] .confirm-modal,
+html[data-ui="apple"] .share-dialog,
+html[data-ui="apple"] .sched-dialog,
+html[data-ui="apple"] .sched-editor-dialog,
+html[data-ui="apple"] .help-dialog,
+html[data-ui="apple"] .health-timer-dialog,
+html[data-ui="apple"] .agent-login-modal,
+html[data-ui="apple"] .session-overlay-content {
+    background: var(--refresh-glass-strong);
+    -webkit-backdrop-filter: var(--refresh-glass-blur);
+    backdrop-filter: var(--refresh-glass-blur);
+    border: none;
+    border-radius: var(--refresh-radius-lg);
+    box-shadow: var(--refresh-glass-edge), 0 30px 80px rgba(0, 0, 0, 0.55);
+}
+
+html[data-ui="apple"] .modal-overlay,
+html[data-ui="apple"] .launch-dialog-backdrop,
+html[data-ui="apple"] .session-overlay-backdrop,
+html[data-ui="apple"] .help-overlay,
+html[data-ui="apple"] .sched-overlay,
+html[data-ui="apple"] .health-timer-overlay,
+html[data-ui="apple"] .agent-login-overlay {
+    background: rgba(4, 5, 10, 0.35);
+    -webkit-backdrop-filter: blur(10px) saturate(120%);
+    backdrop-filter: blur(10px) saturate(120%);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+    html[data-ui="apple"] .focus-flow-header,
+    html[data-ui="apple"] .settings-header,
+    html[data-ui="apple"] .settings-tabs,
+    html[data-ui="apple"] .session-view-header,
+    html[data-ui="apple"] .onboarding-panel,
+    html[data-ui="apple"] .profile-setting,
+    html[data-ui="apple"] .appearance-setting,
+    html[data-ui="apple"] .session-pill,
+    html[data-ui="apple"] .pill-dropdown,
+    html[data-ui="apple"] .launch-dialog,
+    html[data-ui="apple"] .modal-content {
+        background: #1b1d26;
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+    }
+}
+
+/* ---- Controls ----------------------------------------------------------- */
+
+html[data-ui="apple"] .header-button,
+html[data-ui="apple"] .onboarding-secondary,
+html[data-ui="apple"] .platform-option {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--refresh-text);
+    border: none;
+    border-radius: var(--refresh-radius-pill);
+    font-size: var(--refresh-text-sm);
+    font-weight: 500;
+    padding: 7px 16px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+    transition: background var(--refresh-duration) var(--refresh-ease),
+        transform var(--refresh-duration) var(--refresh-ease);
+}
+
+html[data-ui="apple"] .header-button:hover,
+html[data-ui="apple"] .onboarding-secondary:hover,
+html[data-ui="apple"] .platform-option:hover {
+    background: rgba(255, 255, 255, 0.16);
+    color: var(--refresh-text);
+}
+
+html[data-ui="apple"] .header-button:active,
+html[data-ui="apple"] .new-session-button:active,
+html[data-ui="apple"] .send-button:active {
+    transform: scale(0.97);
+}
+
+html[data-ui="apple"] .platform-option.selected {
+    background: rgba(255, 255, 255, 0.22);
+}
+
+html[data-ui="apple"] .new-session-button,
+html[data-ui="apple"] .create-button,
+html[data-ui="apple"] .onboarding-primary,
+html[data-ui="apple"] .send-button {
+    background: linear-gradient(180deg, #3d9bff 0%, #0a84ff 55%, #0071e3 100%);
+    color: var(--refresh-on-accent);
+    border: none;
+    border-radius: var(--refresh-radius-pill);
+    font-size: var(--refresh-text-sm);
+    font-weight: 600;
+    padding: 7px 18px;
+    text-shadow: none;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 6px 20px rgba(10, 132, 255, 0.35);
+    transition: filter var(--refresh-duration) var(--refresh-ease),
+        transform var(--refresh-duration) var(--refresh-ease);
+}
+
+html[data-ui="apple"] .new-session-button:hover,
+html[data-ui="apple"] .create-button:hover,
+html[data-ui="apple"] .onboarding-primary:hover,
+html[data-ui="apple"] .send-button:hover {
+    filter: brightness(1.12);
+}
+
+html[data-ui="apple"] .create-button:disabled,
+html[data-ui="apple"] .send-button:disabled {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--refresh-text-3);
+    box-shadow: none;
+}
+
+html[data-ui="apple"] input[type="text"],
+html[data-ui="apple"] input[type="search"],
+html[data-ui="apple"] input[type="number"],
+html[data-ui="apple"] input:not([type]),
+html[data-ui="apple"] select,
+html[data-ui="apple"] .profile-nickname-input {
+    background: rgba(0, 0, 0, 0.25);
+    color: var(--refresh-text);
+    border: none;
+    border-radius: var(--refresh-radius-sm);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1), inset 0 1px 2px rgba(0, 0, 0, 0.3);
+    font-size: var(--refresh-text-sm);
+}
+
+html[data-ui="apple"] input[type="checkbox"] {
+    accent-color: var(--refresh-accent);
+}
+
+/* ---- App header --------------------------------------------------------- */
+
+html[data-ui="apple"] .focus-flow-header,
+html[data-ui="apple"] .settings-header {
+    margin: 10px 12px 0;
+    border-radius: 20px;
+}
+
+html[data-ui="apple"] .focus-flow-header h1,
+html[data-ui="apple"] .settings-header h1 {
+    font-size: var(--refresh-text-md);
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    color: var(--refresh-text);
+}
+
+html[data-ui="apple"] .header-collapse-toggle {
+    color: var(--refresh-text-3);
+}
+
+/* ---- Session rail ------------------------------------------------------- */
+
+html[data-ui="apple"] .session-rail-container {
+    background: transparent;
+    border: none;
+}
+
+html[data-ui="apple"] .session-rail-host-group {
+    background: transparent;
+    border: none;
+    padding: 0;
+}
+
+html[data-ui="apple"] .session-rail-host-header {
+    color: var(--refresh-text-2);
+    font-size: var(--refresh-text-xs);
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    text-transform: none;
+}
+
+html[data-ui="apple"] .session-rail-host-header .host-header-count {
+    color: var(--refresh-text-3);
+}
+
+html[data-ui="apple"] .session-rail-divider .divider-line {
+    background: var(--refresh-border);
+}
+
+html[data-ui="apple"] .session-pill {
+    background: var(--refresh-glass);
+    -webkit-backdrop-filter: var(--refresh-glass-blur);
+    backdrop-filter: var(--refresh-glass-blur);
+    border: none;
+    border-radius: 18px;
+    box-shadow: var(--refresh-glass-edge), var(--refresh-shadow-1);
+    transition: background var(--refresh-duration) var(--refresh-ease),
+        transform var(--refresh-duration) var(--refresh-ease),
+        box-shadow var(--refresh-duration) var(--refresh-ease);
+}
+
+html[data-ui="apple"] .session-pill:hover {
+    background: rgba(48, 52, 66, 0.5);
+    transform: translateY(-1px);
+}
+
+html[data-ui="apple"] .session-pill.focused,
+html[data-ui="apple"] .session-pill.focused.awaiting {
+    background: rgba(255, 255, 255, 0.16);
+    box-shadow: var(--refresh-glass-edge), inset 0 0 0 1px rgba(255, 255, 255, 0.28),
+        0 10px 30px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(10, 132, 255, 0.0);
+}
+
+html[data-ui="apple"] .session-pill.awaiting {
+    box-shadow: var(--refresh-glass-edge), inset 0 0 0 1px rgba(255, 69, 58, 0.6),
+        0 0 24px rgba(255, 69, 58, 0.25);
+}
+
+html[data-ui="apple"] .pill-watermark,
+html[data-ui="apple"] .pill-model-watermark {
+    opacity: 0.1;
+    filter: grayscale(1) brightness(1.6);
+}
+
+html[data-ui="apple"] .pill-watermark.antigravity {
+    color: var(--refresh-text-2);
+}
+
+html[data-ui="apple"] .pill-session-name {
+    font-size: var(--refresh-text-sm);
+    font-weight: 600;
+    color: var(--refresh-text);
+}
+
+html[data-ui="apple"] .pill-repo {
+    font-size: var(--refresh-text-xs);
+    color: var(--refresh-text-2);
+}
+
+html[data-ui="apple"] .pill-branch {
+    font-size: var(--refresh-text-xs);
+    color: var(--refresh-text-2);
+    font-style: normal;
+}
+
+html[data-ui="apple"] .pill-menu-toggle {
+    color: var(--refresh-text-2);
+}
+
+html[data-ui="apple"] .pill-broadcast-strand {
+    background: linear-gradient(90deg, transparent, #64d2ff 50%, transparent);
+    box-shadow: 0 0 12px rgba(100, 210, 255, 0.6);
+}
+
+html[data-ui="apple"] .pill-broadcast-core {
+    border-color: rgba(100, 210, 255, 0.8);
+    box-shadow: 0 0 16px rgba(100, 210, 255, 0.45);
+}
+
+/* ---- Session header + input frame --------------------------------------- */
+
+html[data-ui="apple"] .session-view {
+    background: transparent;
+}
+
+html[data-ui="apple"] .session-view-header {
+    margin: 8px 12px 0;
+    border-radius: 18px;
+    gap: 10px;
+}
+
+html[data-ui="apple"] .session-view-header .session-name {
+    font-size: var(--refresh-text-md);
+    font-weight: 650;
+    letter-spacing: -0.015em;
+    color: var(--refresh-text);
+}
+
+html[data-ui="apple"] .session-view-header .session-hostname,
+html[data-ui="apple"] .session-view-header .session-path {
+    font-size: var(--refresh-text-sm);
+    color: var(--refresh-text-2);
+}
+
+html[data-ui="apple"] .session-view-header .session-path {
+    font-family: var(--refresh-font-mono);
+    font-size: var(--refresh-text-xs);
+}
+
+html[data-ui="apple"] .session-launcher-version {
+    background: rgba(255, 255, 255, 0.08);
+    border: none;
+    border-radius: var(--refresh-radius-pill);
+    color: var(--refresh-text-2);
+    font-family: var(--refresh-font-sans);
+    font-size: var(--refresh-text-xs);
+    padding: 2px 10px;
+}
+
+html[data-ui="apple"] .session-view-header .status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(255, 255, 255, 0.08);
+    border: none;
+    border-radius: var(--refresh-radius-pill);
+    padding: 2px 10px;
+    font-size: var(--refresh-text-xs);
+    font-weight: 600;
+    color: var(--refresh-text);
+    text-transform: lowercase;
+    box-shadow: none;
+    text-shadow: none;
+}
+
+html[data-ui="apple"] .session-view-header .status::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--refresh-text-3);
+}
+
+html[data-ui="apple"] .session-view-header .status.connected::before {
+    background: var(--refresh-success);
+    box-shadow: 0 0 10px rgba(48, 209, 88, 0.8);
+}
+
+html[data-ui="apple"] .session-view-header .status.disconnected::before {
+    background: var(--refresh-danger);
+    box-shadow: 0 0 10px rgba(255, 69, 58, 0.8);
+}
+
+html[data-ui="apple"] .session-view-input {
+    background: transparent;
+    border-top: none;
+}
+
+html[data-ui="apple"] .session-view-input .input-prompt {
+    color: var(--refresh-text-3);
+    font-family: var(--refresh-font-mono);
+    font-size: var(--refresh-text-sm);
+}
+
+/* ---- Settings ----------------------------------------------------------- */
+
+html[data-ui="apple"] .settings-container {
+    background: transparent;
+}
+
+/* Tabs as a floating segmented control. */
+html[data-ui="apple"] .settings-tabs {
+    margin: 12px auto 0;
+    width: fit-content;
+    max-width: calc(100% - 24px);
+    padding: 4px;
+    gap: 2px;
+    border-radius: var(--refresh-radius-pill);
+    overflow-x: auto;
+}
+
+html[data-ui="apple"] .settings-tabs .tab-button {
+    color: var(--refresh-text-2);
+    font-size: var(--refresh-text-sm);
+    font-weight: 500;
+    border: none;
+    border-radius: var(--refresh-radius-pill);
+    background: transparent;
+    padding: 6px 14px;
+    white-space: nowrap;
+}
+
+html[data-ui="apple"] .settings-tabs .tab-button:hover {
+    color: var(--refresh-text);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+html[data-ui="apple"] .settings-tabs .tab-button::after {
+    display: none;
+}
+
+html[data-ui="apple"] .settings-tabs .tab-button.active {
+    color: var(--refresh-text);
+    background: rgba(255, 255, 255, 0.18);
+    border-bottom: none;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 2px 10px rgba(0, 0, 0, 0.3);
+}
+
+html[data-ui="apple"] .count-badge {
+    background: rgba(255, 255, 255, 0.14);
+    color: var(--refresh-text);
+    font-weight: 600;
+}
+
+html[data-ui="apple"] .settings-content .section-header h2 {
+    font-size: var(--refresh-text-xl);
+    font-weight: 700;
+    letter-spacing: -0.025em;
+}
+
+html[data-ui="apple"] .settings-content h3 {
+    font-size: var(--refresh-text-md);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+
+html[data-ui="apple"] .section-description,
+html[data-ui="apple"] .setting-description {
+    color: var(--refresh-text-2);
+    font-size: var(--refresh-text-sm);
+    line-height: 1.55;
+}
+
+html[data-ui="apple"] .profile-setting,
+html[data-ui="apple"] .appearance-setting {
+    border-radius: var(--refresh-radius-lg);
+    padding: 20px 22px;
+}
+
+html[data-ui="apple"] .orientation-choice {
+    background: rgba(255, 255, 255, 0.05);
+    border: none;
+    border-radius: var(--refresh-radius-md);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+html[data-ui="apple"] .orientation-choice.active {
+    background: rgba(10, 132, 255, 0.22);
+    box-shadow: inset 0 0 0 1px rgba(10, 132, 255, 0.7);
+}
+
+/* ---- Onboarding --------------------------------------------------------- */
+
+html[data-ui="apple"] .onboarding-panel {
+    border-radius: var(--refresh-radius-lg);
+}
+
+html[data-ui="apple"] .onboarding-feature {
+    background: rgba(255, 255, 255, 0.05);
+    border: none;
+    border-radius: var(--refresh-radius-md);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+}
+
+html[data-ui="apple"] .onboarding-kicker {
+    background: transparent;
+    border: none;
+    padding: 0;
+    color: var(--refresh-text-2);
+    font-size: var(--refresh-text-xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+html[data-ui="apple"] .onboarding-step-badge,
+html[data-ui="apple"] .step-number {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--refresh-text);
+    border: none;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+html[data-ui="apple"] .onboarding-lede {
+    color: var(--refresh-text-2);
+}
+
+html[data-ui="apple"] .copy-command-block {
+    background: rgba(0, 0, 0, 0.35);
+    border: none;
+    border-radius: var(--refresh-radius-sm);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+}
+
+/* ---- /demo harness ------------------------------------------------------ */
+
+html[data-ui="apple"] .demo-portal-page {
+    background: transparent;
+}
+
+html[data-ui="apple"] .demo-playback-chip {
+    background: rgba(255, 255, 255, 0.08);
+    border: none;
+    border-radius: var(--refresh-radius-pill);
+    color: var(--refresh-text-2);
+    font-family: var(--refresh-font-sans);
+    font-size: var(--refresh-text-xs);
+    padding: 3px 10px;
+}

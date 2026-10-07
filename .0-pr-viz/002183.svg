@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200" font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+<rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+<text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2183 · Add a three-way visual theme selector with Windows and liquid-glass themes</text>
+<text x="55" y="100" font-size="34" fill="#e6e9f5">The portal had a single terminal-dark look baked into every stylesheet;</text>
+<text x="55" y="140" font-size="34" fill="#e6e9f5">now Settings picks linux, windows or apple, each theme scoped to its own html[data-ui].</text>
+<line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+<text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+<text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+<line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+<rect x="80" y="240" width="860" height="300" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+<text x="104" y="282" font-size="26" fill="#7aa2f7">One look for everyone</text>
+<text x="104" y="324" font-size="23" fill="#a9b1d6">base.css :root tokens: Tokyo Night navy, Segoe UI</text>
+<text x="104" y="362" font-size="23" fill="#a9b1d6">hard-coded #7aa2f7 / #bb9af7 tints across 13k lines of CSS</text>
+<text x="104" y="400" font-size="23" fill="#f7768e">no way to opt into a different visual style</text>
+<text x="104" y="438" font-size="23" fill="#f7768e">restyling means editing every legacy stylesheet</text>
+<rect x="80" y="580" width="860" height="300" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+<text x="104" y="622" font-size="26" fill="#7aa2f7">Settings &gt; Appearance</text>
+<text x="104" y="664" font-size="23" fill="#a9b1d6">rail position, host grouping, vim mode, voice hold</text>
+<text x="104" y="702" font-size="23" fill="#f7768e">no theme control</text>
+<rect x="1065" y="240" width="860" height="300" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+<text x="1089" y="282" font-size="26" fill="#7aa2f7">ui_theme::UiTheme { Linux, Windows, Apple }</text>
+<text x="1089" y="324" font-size="23" fill="#9ece6a">set_ui_theme -&gt; html[data-ui=windows|apple]; Linux = none</text>
+<text x="1089" y="362" font-size="23" fill="#9ece6a">index.html boot script applies it before first paint</text>
+<text x="1089" y="400" font-size="22" fill="#565f89">localStorage claude-portal-ui-theme; per browser</text>
+<text x="1089" y="438" font-size="22" fill="#565f89">apple fonts fetched only when apple is chosen</text>
+<rect x="1065" y="580" width="860" height="300" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+<text x="1089" y="622" font-size="26" fill="#7aa2f7">Theme stylesheets, all scoped to their data-ui</text>
+<text x="1089" y="664" font-size="23" fill="#9ece6a">refresh/tokens + shell + transcript.css: liquid glass</text>
+<text x="1089" y="702" font-size="23" fill="#9ece6a">themes/windows.css: Luna title bars, bevels, beige</text>
+<text x="1089" y="740" font-size="23" fill="#9ece6a">selector cards with snarky labels + live swatches</text>
+<text x="1089" y="778" font-size="22" fill="#565f89">Linux default: no attribute, legacy CSS untouched</text>
+<text x="55" y="1172" font-size="22" fill="#565f89">Per-browser choice only (not synced to the account); backdrop-filter glass costs GPU on low-end devices, and themes override CSS rather than replace it.</text>
+</svg>

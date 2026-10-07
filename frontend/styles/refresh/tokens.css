@@ -1,0 +1,95 @@
+/*
+ * Refreshed design (preview) — design tokens.
+ *
+ * Everything under styles/refresh/ is scoped to html[data-ui="apple"],
+ * which is set from the Settings > Appearance toggle (see
+ * frontend/src/ui_refresh.rs). With the flag off none of these rules match,
+ * so the legacy look is untouched.
+ *
+ * The legacy variables (--bg-dark, --accent, ...) are remapped here too, so
+ * every stylesheet that already reads them picks up the new palette; the
+ * refresh/*.css files then restyle what the legacy CSS hard-codes.
+ */
+html[data-ui="apple"] {
+    /* Base under the wallpaper, and the translucent surfaces above it. */
+    --refresh-bg: #06070b;
+    --refresh-surface-1: rgba(255, 255, 255, 0.05);
+    --refresh-surface-2: rgba(255, 255, 255, 0.08);
+    --refresh-surface-3: rgba(255, 255, 255, 0.12);
+    --refresh-border: rgba(255, 255, 255, 0.1);
+    --refresh-border-strong: rgba(255, 255, 255, 0.18);
+
+    /* Liquid glass: fill, refraction, and the lit edge. */
+    --refresh-glass: rgba(28, 30, 40, 0.42);
+    --refresh-glass-strong: rgba(18, 20, 28, 0.66);
+    --refresh-glass-thin: rgba(255, 255, 255, 0.04);
+    --refresh-glass-blur: blur(28px) saturate(180%);
+    --refresh-glass-edge: inset 0 1px 0 rgba(255, 255, 255, 0.22),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+        inset 0 -1px 0 rgba(255, 255, 255, 0.03);
+
+    /* Text */
+    --refresh-text: #f5f6fa;
+    --refresh-text-2: rgba(235, 238, 245, 0.74);
+    --refresh-text-3: rgba(235, 238, 245, 0.54);
+
+    /* Apple dark-mode system colors. */
+    --refresh-accent: #0a84ff;
+    --refresh-accent-strong: #409cff;
+    --refresh-accent-soft: rgba(10, 132, 255, 0.2);
+    --refresh-on-accent: #fff;
+
+    /* Fill for solid accent surfaces carrying small white text (4.7:1). */
+    --refresh-accent-fill: #0071e3;
+    --refresh-success: #30d158;
+    --refresh-success-soft: rgba(48, 209, 88, 0.18);
+    --refresh-warning: #ff9f0a;
+    --refresh-warning-soft: rgba(255, 159, 10, 0.18);
+    --refresh-danger: #ff453a;
+    --refresh-danger-soft: rgba(255, 69, 58, 0.18);
+    --refresh-info: #64d2ff;
+
+    /* Shape, depth, focus */
+    --refresh-radius-sm: 10px;
+    --refresh-radius-md: 16px;
+    --refresh-radius-lg: 24px;
+    --refresh-radius-pill: 999px;
+    --refresh-shadow-1: 0 2px 8px rgba(0, 0, 0, 0.25);
+    --refresh-shadow-2: 0 18px 50px rgba(0, 0, 0, 0.45);
+    --refresh-focus: 0 0 0 3px rgba(10, 132, 255, 0.55);
+
+    /* Type */
+    --refresh-font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter Variable",
+        "Inter", ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+    --refresh-font-mono: ui-monospace, "SF Mono", "JetBrains Mono Variable", "JetBrains Mono",
+        Menlo, Consolas, "Liberation Mono", monospace;
+    --refresh-text-xs: 12px;
+    --refresh-text-sm: 13px;
+    --refresh-text-base: 14px;
+    --refresh-text-md: 15px;
+    --refresh-text-lg: 19px;
+    --refresh-text-xl: 26px;
+
+    /* Motion */
+    --refresh-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+    --refresh-duration: 180ms;
+
+    /* Legacy variables, remapped. --bg-dark goes transparent so the
+       wallpaper shows through the app's existing containers. */
+    --bg-dark: transparent;
+    --bg-darker: rgba(0, 0, 0, 0.28);
+    --text-primary: var(--refresh-text);
+    --text-secondary: var(--refresh-text-2);
+    --text-muted: var(--refresh-text-3);
+    --accent: var(--refresh-accent);
+    --accent-hover: var(--refresh-accent-strong);
+    --link-color: #64b5ff;
+    --link-visited: #a08cff;
+    --success: var(--refresh-success);
+    --error: var(--refresh-danger);
+    --warning: var(--refresh-warning);
+    --border: var(--refresh-border);
+    --font-mono: var(--refresh-font-mono);
+
+    color-scheme: dark;
+}

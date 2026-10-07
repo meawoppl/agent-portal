@@ -33,6 +33,28 @@
     <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
 
+    <!-- Visual theme (Settings > Appearance): apply before first paint so a
+         chosen theme never flashes the default. Mirrors src/ui_theme.rs. -->
+    <script>
+        (function () {
+            var theme;
+            try { theme = localStorage.getItem('claude-portal-ui-theme'); } catch (e) { return; }
+            if (theme !== 'apple' && theme !== 'windows') return;
+            document.documentElement.setAttribute('data-ui', theme);
+            if (theme !== 'apple') return;
+            [
+                ['ui-theme-font-sans', 'https://cdn.jsdelivr.net/npm/@fontsource-variable/inter@5/index.css'],
+                ['ui-theme-font-mono', 'https://cdn.jsdelivr.net/npm/@fontsource-variable/jetbrains-mono@5/index.css']
+            ].forEach(function (f) {
+                var link = document.createElement('link');
+                link.id = f[0];
+                link.rel = 'stylesheet';
+                link.href = f[1];
+                document.head.appendChild(link);
+            });
+        })();
+    </script>
+
     <!-- KaTeX for rendering LaTeX math in messages -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"
           integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+" crossorigin="anonymous" />
@@ -290,6 +312,12 @@
     <link data-trunk rel="css" href="styles/performance.css" />
     <link data-trunk rel="css" href="styles/admin.css" />
     <link data-trunk rel="css" href="styles/banned.css" />
+    <!-- Themes: last, so they override; each is inert unless its
+         html[data-ui] value is set (see src/ui_theme.rs). -->
+    <link data-trunk rel="css" href="styles/refresh/tokens.css" />
+    <link data-trunk rel="css" href="styles/refresh/shell.css" />
+    <link data-trunk rel="css" href="styles/refresh/transcript.css" />
+    <link data-trunk rel="css" href="styles/themes/windows.css" />
     <link data-trunk rel="copy-file" href="katex-helper.js" />
     <script defer src="/katex-helper.js"></script>
     <link data-trunk rel="copy-file" href="assets/wiggum.png" />

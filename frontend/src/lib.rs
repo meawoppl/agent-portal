@@ -5,6 +5,7 @@ mod hooks;
 mod pages;
 #[cfg(test)]
 pub mod test_fixtures;
+mod ui_theme;
 pub mod utils;
 
 /// Application version — derived at build time from the git commit count
