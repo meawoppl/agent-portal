@@ -286,3 +286,23 @@ html[data-ui="windows"] .session-view-header :is(.session-hostname, .session-pat
 html[data-ui="windows"] .session-pill.focused :is(.pill-name, .pill-title, .pill-path, .pill-directory, .pill-branch, .pill-session-id, .pill-label) {
     color: #fff;
 }
+
+html[data-ui="windows"] .session-pill.focused :is(.pill-session-name, .pill-repo, .pill-pr-num) {
+    color: #fff;
+}
+
+html[data-ui="windows"] .session-view-header .status.connected {
+    color: #fff;
+    background: #236b25;
+}
+
+html[data-ui="windows"] .session-view-header .status.disconnected {
+    color: #fff;
+    background: #90352a;
+}
+
+html[data-ui="windows"] .theme-choice.active {
+    border-color: #9c6500;
+    background: #fff4cf;
+    box-shadow: inset 0 0 0 2px #edb54c, 0 0 0 1px #9c6500;
+}
