@@ -80,7 +80,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 claude-codes = { version = "2.1.291", default-features = false, features = ["types"] }
 
 # Muse CLI integration
-muse-codes = { version = "1.4.3", default-features = false, features = ["types"] }
+muse-codes = { version = "1.4.4", default-features = false, features = ["types"] }
 codex-codes = { version = "0.160.7", default-features = false, features = ["types"] }
 antigravity-codes = { version = "0.1.20", default-features = false, features = ["types"] }
 
