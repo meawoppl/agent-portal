@@ -3,9 +3,9 @@ mod components;
 mod health_timer;
 mod hooks;
 mod pages;
-mod ui_theme;
 #[cfg(test)]
 pub mod test_fixtures;
+mod ui_theme;
 pub mod utils;
 
 /// Application version — derived at build time from the git commit count
