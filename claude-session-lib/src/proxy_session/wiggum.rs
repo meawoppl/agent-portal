@@ -567,7 +567,6 @@ mod tests {
             startup_failure_reason: None,
             // Remote timing and safety diagnostics are absent in synthetic results.
             resume_store_confirm_detail: None,
-            system_prompt_detail: None,
             safety_stops: None,
             stop_reason: None,
             terminal_reason: None,
