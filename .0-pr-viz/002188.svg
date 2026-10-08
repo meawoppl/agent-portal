@@ -17,12 +17,12 @@
 
   <rect x="115" y="325" width="760" height="150" rx="16" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
   <text x="145" y="371" fill="#c0caf5" font-family="sans-serif" font-size="28" font-weight="700">install.rs - skip-collect tail</text>
-  <text x="145" y="415" fill="#c0caf5" font-family="monospace" font-size="23">.skip(len - N).collect() + "…"</text>
+  <text x="145" y="415" fill="#c0caf5" font-family="monospace" font-size="23">.skip(len - N).collect() + "..."</text>
   <text x="145" y="453" fill="#a9b1d6" font-family="sans-serif" font-size="24">session-lib failure_detail, N = 2000</text>
 
   <rect x="115" y="500" width="760" height="150" rx="16" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
   <text x="145" y="546" fill="#c0caf5" font-family="sans-serif" font-size="28" font-weight="700">login.rs - indexed-slice tail</text>
-  <text x="145" y="590" fill="#c0caf5" font-family="monospace" font-size="23">chars[len-N..].iter().collect() + "…"</text>
+  <text x="145" y="590" fill="#c0caf5" font-family="monospace" font-size="23">chars[len-N..].iter().collect() + "..."</text>
   <text x="145" y="628" fill="#a9b1d6" font-family="sans-serif" font-size="24">claude transcript_tail, N = 400</text>
 
   <rect x="115" y="675" width="760" height="150" rx="16" fill="#1e202e" stroke="#f7768e" stroke-width="3"/>
