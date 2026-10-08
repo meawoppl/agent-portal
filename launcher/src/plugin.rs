@@ -1130,7 +1130,7 @@ fn git_revision(dir: &Path) -> Option<String> {
         .status
         .success()
         .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
-        .filter(|rev| !rev.is_empty())
+        .filter(|rev| shared::strings::is_non_empty(rev))
 }
 
 /// Whether the recorded git source has moved past the installed revision.
