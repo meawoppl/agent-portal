@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-labelledby="pr2188-title pr2188-desc">
+  <title id="pr2188-title">PR 2188 - Route tail truncations via shared helper</title>
+  <desc id="pr2188-desc">Two failure-message tails spelled take-last-N plus ellipsis two ways; both now call shared::strings::tail_with_ellipsis.</desc>
+  <rect width="2000" height="1200" fill="#16161e"/>
+
+  <text x="55" y="68" fill="#565f89" font-family="sans-serif" font-size="24" letter-spacing="1">PR #2188 - Route tail truncations via shared helper</text>
+  <text x="55" y="122" fill="#e6e9f5" font-family="sans-serif" font-size="34" font-weight="700">Two failure tails spelled take-last-N plus ellipsis two ways.</text>
+  <text x="55" y="164" fill="#e6e9f5" font-family="sans-serif" font-size="34" font-weight="700">One shared helper now owns the tail.</text>
+  <line x1="55" y1="192" x2="1945" y2="192" stroke="#3d4666" stroke-width="2"/>
+
+  <text x="55" y="244" fill="#f7768e" font-family="sans-serif" font-size="22" font-weight="700" letter-spacing="4">BEFORE</text>
+  <text x="1055" y="244" fill="#9ece6a" font-family="sans-serif" font-size="22" font-weight="700" letter-spacing="4">AFTER</text>
+  <line x1="1000" y1="210" x2="1000" y2="1140" stroke="#3d4666" stroke-width="3" stroke-dasharray="14 16"/>
+
+  <rect x="70" y="285" width="850" height="750" rx="26" fill="#1a1b26" stroke="#3d4666" stroke-width="3"/>
+  <rect x="1085" y="285" width="850" height="750" rx="26" fill="#1a1b26" stroke="#3d4666" stroke-width="3"/>
+
+  <rect x="115" y="325" width="760" height="150" rx="16" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="145" y="371" fill="#c0caf5" font-family="sans-serif" font-size="28" font-weight="700">install.rs - skip-collect tail</text>
+  <text x="145" y="415" fill="#c0caf5" font-family="monospace" font-size="23">.skip(len - N).collect() + "…"</text>
+  <text x="145" y="453" fill="#a9b1d6" font-family="sans-serif" font-size="24">session-lib failure_detail, N = 2000</text>
+
+  <rect x="115" y="500" width="760" height="150" rx="16" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="145" y="546" fill="#c0caf5" font-family="sans-serif" font-size="28" font-weight="700">login.rs - indexed-slice tail</text>
+  <text x="145" y="590" fill="#c0caf5" font-family="monospace" font-size="23">chars[len-N..].iter().collect() + "…"</text>
+  <text x="145" y="628" fill="#a9b1d6" font-family="sans-serif" font-size="24">claude transcript_tail, N = 400</text>
+
+  <rect x="115" y="675" width="760" height="150" rx="16" fill="#1e202e" stroke="#f7768e" stroke-width="3"/>
+  <text x="145" y="721" fill="#f7768e" font-family="sans-serif" font-size="28" font-weight="700">same tail, two spellings</text>
+  <text x="145" y="765" fill="#c0caf5" font-family="sans-serif" font-size="24">each site re-counts chars and prefixes the marker</text>
+  <text x="145" y="803" fill="#a9b1d6" font-family="sans-serif" font-size="24">one could drift to byte-slicing and panic</text>
+
+  <rect x="115" y="850" width="760" height="150" rx="16" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="145" y="896" fill="#c0caf5" font-family="sans-serif" font-size="28" font-weight="700">tail tests live in two modules</text>
+  <text x="145" y="940" fill="#c0caf5" font-family="sans-serif" font-size="24">install.rs tail_* x3 + login.rs transcript_tail x1</text>
+  <text x="145" y="978" fill="#a9b1d6" font-family="sans-serif" font-size="24">same contract asserted twice</text>
+
+  <rect x="1125" y="325" width="765" height="150" rx="16" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1155" y="371" fill="#9ece6a" font-family="sans-serif" font-size="28" font-weight="700">install.rs routed</text>
+  <text x="1155" y="415" fill="#c0caf5" font-family="monospace" font-size="22">tail_with_ellipsis(trimmed, 2000)</text>
+  <text x="1155" y="453" fill="#a9b1d6" font-family="sans-serif" font-size="24">local tail() deleted</text>
+
+  <rect x="1125" y="500" width="765" height="150" rx="16" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1155" y="546" fill="#9ece6a" font-family="sans-serif" font-size="28" font-weight="700">login.rs routed</text>
+  <text x="1155" y="590" fill="#c0caf5" font-family="monospace" font-size="22">tail_with_ellipsis(trimmed, 400)</text>
+  <text x="1155" y="628" fill="#a9b1d6" font-family="sans-serif" font-size="24">transcript_tail keeps trim + const, delegates</text>
+
+  <rect x="1125" y="675" width="765" height="150" rx="16" fill="#1e202e" stroke="#7aa2f7" stroke-width="3"/>
+  <text x="1155" y="721" fill="#7aa2f7" font-family="monospace" font-size="26" font-weight="700">shared::strings::tail_with_ellipsis</text>
+  <text x="1155" y="765" fill="#c0caf5" font-family="sans-serif" font-size="24">ellipsis + last N chars, char-safe</text>
+  <text x="1155" y="803" fill="#a9b1d6" font-family="sans-serif" font-size="24">marker outside max - byte-identical outputs</text>
+
+  <rect x="1125" y="850" width="765" height="150" rx="16" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1155" y="896" fill="#9ece6a" font-family="sans-serif" font-size="28" font-weight="700">tail tests pinned once in shared</text>
+  <text x="1155" y="940" fill="#c0caf5" font-family="sans-serif" font-size="24">tail_with_ellipsis_* x3 in strings.rs</text>
+  <text x="1155" y="978" fill="#a9b1d6" font-family="sans-serif" font-size="24">login wrapper test pins the routed path</text>
+
+  <rect x="110" y="1068" width="770" height="54" rx="12" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="138" y="1103" fill="#a9b1d6" font-family="sans-serif" font-size="22">Two spellings of one tail invite silent drift.</text>
+  <rect x="1125" y="1068" width="770" height="54" rx="12" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="1153" y="1103" fill="#a9b1d6" font-family="sans-serif" font-size="22">One helper owns the tail; call sites just ask.</text>
+
+  <text x="55" y="1172" fill="#565f89" font-family="sans-serif" font-size="22">Scope: 2 sites in session-lib + claude-session-lib; pastebin line-tail untouched; no behavior change.</text>
+</svg>
