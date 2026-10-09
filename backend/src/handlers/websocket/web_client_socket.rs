@@ -29,6 +29,11 @@ pub async fn handle_web_client_socket(socket: WebSocket, app_state: Arc<AppState
     let mut pending_uploads: HashMap<String, PendingUpload> = HashMap::new();
 
     session_manager.add_user_client_with_progress(user_id, tx.clone());
+    // Seed the services monitor so the header shows figures before the
+    // first periodic broadcast lands.
+    let _ = tx.send(ServerToClient::ServiceStatsUpdate {
+        services: crate::service_stats::table_for_user(&app_state, user_id),
+    });
 
     let ctx = WebClientCtx {
         app_state: &app_state,

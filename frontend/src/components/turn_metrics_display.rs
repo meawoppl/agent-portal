@@ -23,40 +23,8 @@ pub(crate) fn compact_labeled(n: i64, unit: &str) -> String {
     format!("{} {unit}", compact_count(n))
 }
 
-/// Strip a vendor prefix and trailing dated suffix so a model name fits a
-/// compact dashboard chip.
-pub(crate) fn compact_model_label(model: &str) -> String {
-    if !is_displayable_model(model) {
-        return "unknown".to_string();
-    }
-    let trimmed = model
-        .strip_prefix("claude-")
-        .or_else(|| model.strip_prefix("gpt-"))
-        .or_else(|| model.strip_prefix("o"))
-        .unwrap_or(model);
-    let mut parts: Vec<&str> = trimmed.split('-').collect();
-    if let Some(last) = parts.last() {
-        if last.len() == 8 && last.chars().all(|c| c.is_ascii_digit()) {
-            parts.pop();
-        }
-    }
-    parts.join("-")
-}
-
 pub(crate) fn is_displayable_model(model: &str) -> bool {
     utils::is_non_blank(model) && model != "<synthetic>"
-}
-
-/// Build the compact dashboard label for a model/tier pair.
-pub(crate) fn format_compact_model_tier_label(
-    model: &Option<String>,
-    tier: &Option<String>,
-) -> String {
-    let short_model = model
-        .as_deref()
-        .map(compact_model_label)
-        .unwrap_or_else(|| "unknown".to_string());
-    append_nonstandard_tier(short_model, tier.as_deref())
 }
 
 /// Build the full settings-panel label for an agent/model/tier group.

@@ -30,6 +30,9 @@ pub struct LauncherConnection {
     /// Epoch seconds of the last inbound frame; read by the liveness
     /// sweeper (see `liveness.rs`). Stamped at registration.
     pub last_seen: std::sync::atomic::AtomicU64,
+    /// Latest resource reading the launcher reported (heartbeat or
+    /// `SystemStats`); `None` until it reports, or from older launchers.
+    pub system: Option<shared::SystemSample>,
 }
 
 impl SessionManager {
@@ -80,6 +83,43 @@ impl SessionManager {
         };
         launcher.running_sessions = running_sessions;
         true
+    }
+
+    /// Record a launcher's latest resource reading.
+    pub fn update_launcher_system(&self, launcher_id: Uuid, sample: shared::SystemSample) -> bool {
+        let Some(mut launcher) = self.launchers.get_mut(&launcher_id) else {
+            return false;
+        };
+        launcher.system = Some(sample);
+        true
+    }
+
+    /// Services-monitor rows for `user_id`: `backend` first, then every
+    /// connected launcher of theirs sorted by name, including launchers that
+    /// have not reported a reading yet (their sample stays zeroed so the
+    /// row still shows the host and session count).
+    pub fn service_stats_for_user(
+        &self,
+        user_id: Uuid,
+        backend: shared::ServiceStats,
+    ) -> Vec<shared::ServiceStats> {
+        let mut rows = vec![backend];
+        let mut launchers: Vec<shared::ServiceStats> = self
+            .launchers
+            .iter()
+            .filter(|entry| entry.value().user_id == user_id)
+            .map(|entry| shared::ServiceStats {
+                id: entry.key().to_string(),
+                kind: shared::ServiceKind::Launcher,
+                name: entry.value().launcher_name.clone(),
+                hostname: entry.value().hostname.clone(),
+                sessions: entry.value().running_sessions.len() as u32,
+                sample: entry.value().system.unwrap_or_default(),
+            })
+            .collect();
+        launchers.sort_by(|a, b| a.name.cmp(&b.name).then(a.id.cmp(&b.id)));
+        rows.extend(launchers);
+        rows
     }
 
     /// Atomically register a launcher, rejecting a duplicate `(user_id, hostname)`
@@ -285,6 +325,7 @@ mod tests {
     fn make_launcher_connection(user_id: Uuid, hostname: &str) -> LauncherConnection {
         let (sender, _rx) = crate::handlers::websocket::conn_channel(64);
         LauncherConnection {
+            system: None,
             sender,
             launcher_name: format!("launcher-{}", hostname),
             hostname: hostname.to_string(),
@@ -418,6 +459,7 @@ mod tests {
         let (sender, rx) = crate::handlers::websocket::conn_channel(64);
         let cancel = CancellationToken::new();
         let conn = LauncherConnection {
+            system: None,
             sender,
             launcher_name: "l".to_string(),
             hostname: "host1".to_string(),
@@ -490,6 +532,7 @@ mod tests {
                 let conn = {
                     let (sender, _rx) = crate::handlers::websocket::conn_channel(64);
                     LauncherConnection {
+                        system: None,
                         sender,
                         launcher_name: format!("launcher-{}", launcher_id),
                         hostname: host,

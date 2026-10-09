@@ -15,6 +15,10 @@ const HEARTBEAT_INTERVAL: Duration =
 /// or a dropped ack without flapping (#1366).
 const HEARTBEAT_ACK_TIMEOUT: Duration =
     Duration::from_secs(shared::protocol::LAUNCHER_HEARTBEAT_INTERVAL_SECS * 3);
+/// Cadence of `LauncherToServer::SystemStats` against a backend that accepts
+/// it (`SERVER_CAPABILITY_SYSTEM_STATS`); the heartbeat carries a reading
+/// regardless.
+const SYSTEM_STATS_INTERVAL: Duration = Duration::from_secs(5);
 const MAX_BACKOFF: Duration = Duration::from_secs(shared::protocol::MAX_RECONNECT_BACKOFF_SECS);
 /// Retry cadence while parked on a fatal rejection: start here, double to the
 /// cap. Deliberately much slower than the network-error backoff — a fatal
@@ -130,6 +134,7 @@ pub async fn run_launcher_loop(
                 }
 
                 // Wait for RegisterAck. `Err(reason)` = fatal rejection.
+                let mut server_capabilities: Vec<String> = Vec::new();
                 let ack_ok = loop {
                     match ws_receiver.recv().await {
                         Some(Ok(ServerToLauncher::LauncherRegisterAck {
@@ -137,10 +142,12 @@ pub async fn run_launcher_loop(
                             error,
                             fatal,
                             reject_reason,
+                            capabilities,
                             ..
                         })) => {
                             if success {
                                 info!("Registration successful");
+                                server_capabilities = capabilities;
                                 break Ok(true);
                             }
                             let msg = error.unwrap_or_default();
@@ -198,6 +205,23 @@ pub async fn run_launcher_loop(
 
                 // Main loop
                 let mut heartbeat_timer = tokio::time::interval(HEARTBEAT_INTERVAL);
+                // Resource readings for the dashboard's services monitor: on
+                // every heartbeat, and every few seconds when the backend
+                // said it accepts the between-heartbeat frame.
+                let mut sysmon = portal_sysmon::SystemMonitor::new();
+                let fast_stats = server_capabilities
+                    .iter()
+                    .any(|c| c == shared::SERVER_CAPABILITY_SYSTEM_STATS);
+                if fast_stats {
+                    info!(
+                        "Backend accepts system stats; reporting every {}s",
+                        SYSTEM_STATS_INTERVAL.as_secs()
+                    );
+                } else {
+                    info!("Backend predates system stats; reporting on heartbeats only");
+                }
+                let mut stats_timer = tokio::time::interval(SYSTEM_STATS_INTERVAL);
+                stats_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                 let start = Instant::now();
                 // Half-open control-socket detection (#1366). `ack_seen` stays
                 // false against an older backend that doesn't echo heartbeats,
@@ -275,6 +299,7 @@ pub async fn run_launcher_loop(
                                 launcher_id,
                                 running_sessions: process_manager.running_session_ids(),
                                 uptime_secs: start.elapsed().as_secs(),
+                                system: Some(sysmon.sample()),
                             };
                             if ws_sender.send(hb).await.is_err() {
                                 warn!("Failed to send heartbeat");
@@ -284,6 +309,17 @@ pub async fn run_launcher_loop(
                             // Enforce max runtime on scheduled sessions
                             for session_id in scheduler.timed_out_sessions() {
                                 process_manager.stop(&session_id).await;
+                            }
+                        }
+
+                        _ = stats_timer.tick(), if fast_stats => {
+                            let frame = LauncherToServer::SystemStats {
+                                launcher_id,
+                                sample: sysmon.sample(),
+                            };
+                            if ws_sender.send(frame).await.is_err() {
+                                warn!("Failed to send system stats");
+                                break;
                             }
                         }
 

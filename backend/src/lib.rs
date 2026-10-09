@@ -18,6 +18,7 @@ pub mod models;
 pub mod push;
 pub mod routes;
 pub mod schema;
+pub mod service_stats;
 
 // Visible to the crate's own `#[cfg(test)]` modules AND to the separate
 // integration-test binaries (e.g. `tests/harness.rs`), which link the lib
@@ -246,6 +247,12 @@ pub async fn run() -> anyhow::Result<()> {
         |state| async move {
             state.media_store.sweep();
         },
+    );
+    background::spawn_periodic(
+        "services monitor broadcast task (every 5 seconds)",
+        service_stats::BROADCAST_PERIOD,
+        app_state.clone(),
+        service_stats::broadcast_service_stats,
     );
     background::spawn_periodic(
         "user spend broadcast task (every 30 seconds)",

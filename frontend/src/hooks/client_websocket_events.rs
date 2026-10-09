@@ -1,4 +1,4 @@
-use shared::{ServerToClient, TurnMetrics};
+use shared::{ServerToClient, ServiceStats, TurnMetrics};
 use std::collections::HashMap;
 use std::rc::Rc;
 use uuid::Uuid;
@@ -9,6 +9,9 @@ use yew::{Reducible, UseReducerHandle, UseStateHandle};
 /// the live WS path trims the buffer back to this length after every
 /// insertion so a long-lived dashboard session can't grow unboundedly.
 pub const RECENT_TURN_BUFFER_CAP: usize = 50;
+/// Points of host-CPU history kept per service for the header sparkline
+/// (readings arrive every 5 s, so about five minutes).
+pub const SERVICE_CPU_HISTORY_CAP: usize = 60;
 
 /// The client-WS state that is updated **relative to its previous value**.
 ///
@@ -34,9 +37,17 @@ pub(crate) struct ClientWsState {
     pub session_progress: HashMap<Uuid, f32>,
     pub launch_event_counter: u32,
     pub launcher_event_counter: u32,
+    /// Services monitor table from the newest
+    /// `ServerToClient::ServiceStatsUpdate`; backend first.
+    pub service_stats: Vec<ServiceStats>,
+    /// Host CPU history per service id, oldest → newest, one point per new
+    /// reading (a repeated reading is not re-appended).
+    pub service_cpu_history: HashMap<String, Vec<(u64, f64)>>,
 }
 
 pub(crate) enum ClientWsAction {
+    /// One `ServerToClient::ServiceStatsUpdate` frame: the full current table.
+    ServiceStats(Vec<ServiceStats>),
     /// One live `ServerToClient::TurnMetrics` frame.
     TurnMetrics(Box<TurnMetrics>),
     /// One-shot REST seed: trend rows plus the per-session latest rows.
@@ -67,8 +78,31 @@ impl Reducible for ClientWsState {
             session_progress: self.session_progress.clone(),
             launch_event_counter: self.launch_event_counter,
             launcher_event_counter: self.launcher_event_counter,
+            service_stats: self.service_stats.clone(),
+            service_cpu_history: self.service_cpu_history.clone(),
         };
         match action {
+            ClientWsAction::ServiceStats(services) => {
+                for s in &services {
+                    let history = next.service_cpu_history.entry(s.id.clone()).or_default();
+                    let newer = history
+                        .last()
+                        .is_none_or(|(at, _)| s.sample.sampled_at_ms > *at);
+                    if newer && s.sample.sampled_at_ms > 0 {
+                        history
+                            .push((s.sample.sampled_at_ms, f64::from(s.sample.host_cpu_percent)));
+                        if history.len() > SERVICE_CPU_HISTORY_CAP {
+                            let excess = history.len() - SERVICE_CPU_HISTORY_CAP;
+                            history.drain(..excess);
+                        }
+                    }
+                }
+                // Forget services that are gone, so a reconnected launcher
+                // with a new id does not drag an old trail along.
+                next.service_cpu_history
+                    .retain(|id, _| services.iter().any(|s| &s.id == id));
+                next.service_stats = services;
+            }
             ClientWsAction::TurnMetrics(metrics) => {
                 next.recent_turn_metrics = insert_recent_metric(
                     next.recent_turn_metrics,
@@ -140,6 +174,9 @@ pub(crate) fn handle_server_message(
         }
         ServerToClient::TurnMetrics(metrics) => {
             live.dispatch(ClientWsAction::TurnMetrics(metrics));
+        }
+        ServerToClient::ServiceStatsUpdate { services } => {
+            live.dispatch(ClientWsAction::ServiceStats(services));
         }
         ServerToClient::SessionProgress {
             session_id,
@@ -449,5 +486,58 @@ mod tests {
         insert_latest_session_metric(&mut latest, unknown);
 
         assert_eq!(latest.get(&session_id).unwrap().started_at.timestamp(), 10);
+    }
+}
+
+#[cfg(test)]
+mod service_stats_tests {
+    use super::*;
+    use shared::{ServiceKind, SystemSample};
+
+    fn row(id: &str, at: u64, cpu: f32) -> ServiceStats {
+        ServiceStats {
+            id: id.into(),
+            kind: ServiceKind::Launcher,
+            name: id.into(),
+            hostname: "h".into(),
+            sessions: 0,
+            sample: SystemSample {
+                sampled_at_ms: at,
+                host_cpu_percent: cpu,
+                ..SystemSample::default()
+            },
+        }
+    }
+
+    #[test]
+    fn history_appends_only_new_readings_and_forgets_gone_services() {
+        let mut state = Rc::new(ClientWsState::default());
+        state = state.reduce(ClientWsAction::ServiceStats(vec![
+            row("a", 1, 10.0),
+            row("b", 1, 5.0),
+        ]));
+        // Same reading again (periodic re-broadcast): no new point.
+        state = state.reduce(ClientWsAction::ServiceStats(vec![row("a", 1, 10.0)]));
+        state = state.reduce(ClientWsAction::ServiceStats(vec![row("a", 2, 20.0)]));
+        assert_eq!(state.service_stats.len(), 1);
+        assert_eq!(state.service_cpu_history["a"], vec![(1, 10.0), (2, 20.0)]);
+        assert!(
+            !state.service_cpu_history.contains_key("b"),
+            "b left the table"
+        );
+        // A zero timestamp (launcher that has not reported) adds nothing.
+        state = state.reduce(ClientWsAction::ServiceStats(vec![row("a", 0, 99.0)]));
+        assert_eq!(state.service_cpu_history["a"].len(), 2);
+    }
+
+    #[test]
+    fn history_is_capped() {
+        let mut state = Rc::new(ClientWsState::default());
+        for i in 1..=(SERVICE_CPU_HISTORY_CAP as u64 + 10) {
+            state = state.reduce(ClientWsAction::ServiceStats(vec![row("a", i, 1.0)]));
+        }
+        let h = &state.service_cpu_history["a"];
+        assert_eq!(h.len(), SERVICE_CPU_HISTORY_CAP);
+        assert_eq!(h.first().unwrap().0, 11);
     }
 }

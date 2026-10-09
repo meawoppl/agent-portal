@@ -409,4 +409,9 @@ pub enum ServerToClient {
     /// would outlive a bar that expired (or a backend that restarted) while it
     /// was away.
     SessionProgressReset,
+
+    /// Resource usage of the portal services serving this user: the backend
+    /// plus each connected launcher. Sent on connect, every few seconds, and
+    /// whenever a launcher reports; the list is the complete current table.
+    ServiceStatsUpdate { services: Vec<crate::ServiceStats> },
 }
