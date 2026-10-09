@@ -2,10 +2,13 @@
 //! login: every machine, role and agent event is a clearly labelled simulation.
 mod audio;
 mod model;
+mod plugins;
 mod scenes;
 
 use gloo::timers::callback::Timeout;
-use model::{Action, Experiment, INSTRUCTIONS, LABELS, SLUGS, TITLES};
+use model::{
+    Action, Experiment, CHAMBER_COUNT, DESIGN_STAGE_COUNT, INSTRUCTIONS, LABELS, SLUGS, TITLES,
+};
 use serde::Deserialize;
 use wasm_bindgen_futures::{spawn_local, JsFuture};
 use yew::prelude::*;
@@ -119,7 +122,8 @@ pub fn aperture_page() -> Html {
                 0 => Action::Transit,
                 1 => Action::Website,
                 2 => Action::Invite,
-                _ => Action::Message,
+                3 => Action::Message,
+                _ => Action::Design,
             });
         })
     };
@@ -131,8 +135,8 @@ pub fn aperture_page() -> Html {
             if state.completed.iter().all(|done| *done) {
                 state.dispatch(Action::Finale);
             } else {
-                let next = (1..=4)
-                    .map(|offset| (chamber + offset) % 4)
+                let next = (1..=CHAMBER_COUNT)
+                    .map(|offset| (chamber + offset) % CHAMBER_COUNT)
                     .find(|index| !state.completed[*index])
                     .unwrap_or(0);
                 state.dispatch(Action::Chamber(next));
@@ -230,22 +234,22 @@ pub fn aperture_page() -> Html {
                 if state.finale {
                     <div class="ap-graduation">
                         <span class="ap-eyebrow">{"APERTURE SCIENCE / TEST RECORD"}</span>
-                        <div class="ap-grade">{"04"}<span>{"/04"}</span></div>
-                        <h1>{"You may now"}<br/>{"think with portals."}</h1>
-                        <p>{"Your agents work across machines. Their websites come to you. Your friends can join. Your agents can collaborate."}</p>
+                        <div class="ap-grade">{format!("{CHAMBER_COUNT:02}")}<span>{format!("/{CHAMBER_COUNT:02}")}</span></div>
+                        <h1>{"Your agents have"}<br/>{"taken it from here."}</h1>
+                        <p>{"Agents set up the work, open the portals, review each other, and design their own tools. Human meat proxy: reassigned to the observation lounge."}</p>
                         <div class="ap-final-actions"><a class="ap-primary" href="/dashboard">{"Open Agent Portal"}</a><button class="ap-secondary" onclick={on_reset.clone()}>{"Repeat the experiment"}</button></div>
                         <span class="ap-fine-print">{"CAKE PROCUREMENT REMAINS AN INDEPENDENT RESEARCH PROBLEM."}</span>
                     </div>
                 } else {
                     <div class="ap-chamber-copy" key={format!("copy-{chamber}")}>
                         <div class="ap-sign-head"><span>{"TEST CHAMBER"}</span><span>{"AP / 2026"}</span></div>
-                        <div class="ap-sign-number">{format!("{:02}", chamber + 1)}<span>{"/ 04"}</span></div>
-                        <div class="ap-sign-bars" aria-hidden="true">{for (0..16).map(|i| html! { <i class={if i < (chamber + 1) * 4 { "filled" } else { "" }} /> })}</div>
+                        <div class="ap-sign-number">{format!("{:02}", chamber + 1)}<span>{format!("/ {CHAMBER_COUNT:02}")}</span></div>
+                        <div class="ap-sign-bars" aria-hidden="true">{for (0..CHAMBER_COUNT * 4).map(|i| html! { <i class={if i < (chamber + 1) * 4 { "filled" } else { "" }} /> })}</div>
                         <h1>{TITLES[chamber]}</h1>
                         <p>{INSTRUCTIONS[chamber]}</p>
-                        <div class="ap-specimen-label"><span aria-hidden="true">{"⌁"}</span><span>{"HUMAN INPUT REQUIRED"}<small>{"No protective equipment supplied."}</small></span></div>
+                        <div class="ap-specimen-label"><span aria-hidden="true">{"⌁"}</span><span>{"HUMAN PRESENCE OPTIONAL"}<small>{"The agent has the keyboard."}</small></span></div>
                         <div class="ap-safety-icons" aria-label="Available experiments">
-                            {for ["machines", "websites", "sharing", "agents"].iter().enumerate().map(|(index, name)| html! {
+                            {for ["machines", "websites", "sharing", "agents", "progress"].iter().enumerate().map(|(index, name)| html! {
                                 <img class={if index == chamber { "active" } else { "" }} src={format!("/aperture-assets/art/icon-{name}.svg")} alt={LABELS[index]} />
                             })}
                         </div>
@@ -260,7 +264,7 @@ pub fn aperture_page() -> Html {
                             {scenes::render(&state, on_action.clone())}
                         </div>
                         <div class="ap-control-deck">
-                            <div class="ap-control-heading"><span>{format!("EXPERIMENT {:02}", chamber + 1)}</span><span class={classes!("ap-test-state", complete.then_some("done"))}>{if complete { "✓ TEST COMPLETE" } else { "AWAITING INPUT" }}</span></div>
+                            <div class="ap-control-heading"><span>{format!("EXPERIMENT {:02}", chamber + 1)}</span><span class={classes!("ap-test-state", complete.then_some("done"))}>{if complete { "✓ TEST COMPLETE" } else { "READY TO DEMONSTRATE" }}</span></div>
                             {scenes::controls(&state)}
                             if chamber == 2 && state.invited {
                                 <div class="ap-invitation">
@@ -272,12 +276,12 @@ pub fn aperture_page() -> Html {
                                 </div>
                             }
                             <div class="ap-deck-actions">
-                                <button class="ap-primary" onclick={on_action} disabled={match chamber { 0 => state.destination == state.machine, 1 => state.website_open, 2 => state.invited, _ => state.messages > 0 }}>
-                                    {match chamber { 0 => "Step through portal", 1 => "Open website portal", 2 => "Create demo invitation", _ => "Request a code review" }}
+                                <button class="ap-primary" onclick={on_action} disabled={match chamber { 0 => state.destination == state.machine, 1 => state.website_open, 2 => state.invited, 3 => state.messages > 0, _ => state.design_runs == DESIGN_STAGE_COUNT }}>
+                                    {match chamber { 0 => "Observe agent transit", 1 => "Watch agent open portal", 2 => "Preview demo invitation", 3 => "Watch agents review", _ => plugins::action_label(state.design_runs) }}
                                     <span aria-hidden="true">{"↗"}</span>
                                 </button>
                                 if complete {
-                                    <button class="ap-next" onclick={on_next}>{if completed_count == 4 { "Collect test results" } else { "Next experiment" }}<span aria-hidden="true">{"→"}</span></button>
+                                    <button class="ap-next" onclick={on_next}>{if completed_count == CHAMBER_COUNT { "Collect test results" } else { "Next experiment" }}<span aria-hidden="true">{"→"}</span></button>
                                 }
                             </div>
                             {scenes::guide(chamber)}
@@ -292,7 +296,7 @@ pub fn aperture_page() -> Html {
             </aside>
             <footer class="ap-footer">
                 <span>{"A PRODUCT OF THE APERTURE SCIENCE CENTER"}</span>
-                <span>{format!("{completed_count:02} / 04 EXPERIMENTS COMPLETE")}</span>
+                <span>{format!("{completed_count:02} / {CHAMBER_COUNT:02} EXPERIMENTS COMPLETE")}</span>
                 <button onclick={on_reset}>{"Reset testing"}</button>
             </footer>
             <p class="ap-attribution">{"An unofficial Portal-inspired Agent Portal fan demo. Not affiliated with Valve. All narration and artwork are original. Machine connections and permissions shown here are simulated."}</p>

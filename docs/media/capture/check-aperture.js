@@ -145,10 +145,52 @@ async function screenshot(page, name) {
     await page.waitForSelector(".ap-agent-result");
     await screenshot(page, "agents.png");
     await page.click(".ap-next");
+    await page.waitForSelector(".ap-plugins-room");
+    assert.match(
+      await page.$eval(".ap-announcer p", (e) => e.textContent),
+      /Chamber five/,
+    );
+    await page.click(".ap-sound");
+    await page.waitForFunction(() =>
+      window.__apertureAudio.some(
+        (a) => a.src.includes("plugins-intro") && a.currentTime > 0.15,
+      ),
+    );
+    await page.click(".ap-sound");
+    for (let stage = 0; stage < 5; stage++) {
+      assert.equal(await page.$(".ap-next"), null);
+      await page.click(".ap-deck-actions .ap-primary");
+      assert.equal(
+        await page.$eval(
+          ".ap-departments",
+          (e) => e.querySelectorAll(".done").length,
+        ),
+        stage + 1,
+      );
+      assert.match(
+        await page.$eval(".ap-plugin-evidence a", (e) => e.href),
+        /agent-portal-plugins\/tree\//,
+      );
+      await screenshot(page, `plugins-${stage + 1}.png`);
+      if (stage === 2) {
+        // Leaving and returning preserves the design series without graduating.
+        await page.click(".ap-chamber-tab:nth-child(1)");
+        await page.click(".ap-chamber-tab:nth-child(5)");
+      }
+    }
+    assert.equal(
+      await page.$eval(".ap-deck-actions .ap-primary", (e) => e.disabled),
+      true,
+    );
+    assert.match(
+      await page.$eval(".ap-announcer p", (e) => e.textContent),
+      /presenter/,
+    );
+    await page.click(".ap-next");
     await page.waitForSelector(".ap-graduation");
     assert.match(
       await page.$eval(".ap-footer", (e) => e.textContent),
-      /04 \/ 04/,
+      /05 \/ 05/,
     );
     await screenshot(page, "finale.png");
     await page.click(".ap-final-actions button");
@@ -158,11 +200,11 @@ async function screenshot(page, name) {
     );
     assert.match(
       await page.$eval(".ap-footer", (e) => e.textContent),
-      /00 \/ 04/,
+      /00 \/ 05/,
     );
     for (const width of [320, 390, 768, 1024, 1440]) {
       await page.setViewport({ width, height: 844 });
-      for (let chamber = 0; chamber < 4; chamber++) {
+      for (let chamber = 0; chamber < 5; chamber++) {
         await page.click(`.ap-chamber-tab:nth-child(${chamber + 1})`);
         const overflow = await page.evaluate(
           () => document.documentElement.scrollWidth > window.innerWidth,
@@ -171,6 +213,7 @@ async function screenshot(page, name) {
         if (width === 390) await screenshot(page, `mobile-${chamber + 1}.png`);
       }
     }
+    await page.click(".ap-chamber-tab:nth-child(4)");
     await page.emulateMediaFeatures([
       { name: "prefers-reduced-motion", value: "reduce" },
     ]);
@@ -183,7 +226,7 @@ async function screenshot(page, name) {
     );
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: all four chambers, sample app, viewer/editor invitations, finale/reset, five viewport widths, reduced motion, audio cancellation, clipboard and denied-clipboard fallback; zero page errors",
+      "PASS: all five chambers and five plugin departments, sample app, viewer/editor invitations, finale/reset, five viewport widths, reduced motion, audio cancellation, clipboard and denied-clipboard fallback; zero page errors",
     );
   } finally {
     await browser.close();

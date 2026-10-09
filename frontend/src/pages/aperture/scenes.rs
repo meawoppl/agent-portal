@@ -6,7 +6,8 @@ pub fn render(state: &UseReducerHandle<Experiment>, action: Callback<MouseEvent>
         0 => machines(state, action),
         1 => website(state, action),
         2 => sharing(state),
-        _ => agents(state),
+        3 => agents(state),
+        _ => super::plugins::render(state),
     }
 }
 
@@ -24,18 +25,18 @@ fn machines(state: &Experiment, action: Callback<MouseEvent>) -> Html {
                         <span class="ap-portal-code">{"AP / ORIGIN"}</span>
                         <div class="ap-machine-glyph" aria-hidden="true">{"▰"}<span>{"━━━"}</span></div>
                         <strong>{machine.0}</strong><small>{machine.1}</small>
-                        <span class="ap-portal-prompt">{"YOU ARE HERE"}</span>
+                        <span class="ap-portal-prompt">{"AGENT IS HERE"}</span>
                     </div></div>
                     <span class="ap-portal-floor-label">{"01 / ENTRY"}</span>
                 </div>
                 <div class="ap-transit-path" aria-hidden="true"><span>{"·"}</span><span>{"·"}</span><span>{"·"}</span><span>{"›"}</span></div>
                 <div class="ap-portal-station">
-                    <button class="ap-portal ap-orange" onclick={action} disabled={state.destination == state.machine} aria-label={format!("Step through portal to {}", destination.0)}>
+                    <button class="ap-portal ap-orange" onclick={action} disabled={state.destination == state.machine} aria-label={format!("Observe agent transit to {}", destination.0)}>
                         <span class="ap-portal-interior">
                             <span class="ap-portal-code">{"AP / DESTINATION"}</span>
                             <span class="ap-machine-glyph" aria-hidden="true">{"▤"}<span>{"▤"}</span></span>
                             <strong>{destination.0}</strong><small>{destination.1}</small>
-                            <span class="ap-portal-prompt">{if state.destination == state.machine { "TRANSIT COMPLETE" } else { "STEP THROUGH ↗" }}</span>
+                            <span class="ap-portal-prompt">{if state.destination == state.machine { "TRANSIT COMPLETE" } else { "AGENT TRANSIT ↗" }}</span>
                         </span>
                     </button>
                     <span class="ap-portal-floor-label">{"02 / EXIT"}</span>
@@ -60,8 +61,8 @@ fn website(state: &Experiment, action: Callback<MouseEvent>) -> Html {
                 <div class="ap-website-waiting">
                     <div class="ap-orbit" aria-hidden="true"><span>{"8080"}</span></div>
                     <span class="ap-eyebrow">{"THE WEBSITE EXISTS. JUST NOT HERE."}</span>
-                    <h2>{"Your agent made it."}<br/>{"Your portal brings it."}</h2>
-                    <button class="ap-terminal-command" onclick={action}><span>{"$"}</span>{"agent-portal forward 8080"}<span>{"↵"}</span></button>
+                    <h2>{"The agent built it."}<br/>{"The agent forwards it."}</h2>
+                    <button class="ap-terminal-command" onclick={action}><span>{"AGENT $"}</span>{"agent-portal forward 8080"}<span>{"↵"}</span></button>
                 </div>
             }
             <div class="ap-transport-path"><span>{"REMOTE MACHINE"}</span><i/><span>{"AGENT PORTAL"}</span><i/><span>{"YOUR BROWSER"}</span></div>
@@ -137,9 +138,10 @@ pub fn controls(state: &UseReducerHandle<Experiment>) -> Html {
                 })}
             </div>
         },
-        _ => {
+        3 => {
             html! {<p class="ap-deck-note">{"Agents can message another session directly or queue durable work for later. Keep the builder building while the reviewer reviews."}</p>}
         }
+        _ => super::plugins::controls(state),
     }
 }
 
@@ -148,29 +150,34 @@ pub fn controls(state: &UseReducerHandle<Experiment>) -> Html {
 pub fn guide(chamber: usize) -> Html {
     let steps = match chamber {
         0 => [
-            "Connect your computers using Agent Portal's launcher.",
-            "Open a new session in the dashboard and choose its Host, agent, and working directory.",
-            "Select a session in the rail to switch machines. Each agent keeps running on its own host.",
+            "Agents handle launcher setup on the intended machines; account authorization stays with the owner.",
+            "The dashboard shows each session's Host, agent, and working directory so the owner can inspect where work runs.",
+            "The session rail switches the observation window between machines. Each agent keeps running on its own host.",
         ],
         1 => [
-            "Ask your remote agent to start an HTTP service, for example on port 8080.",
-            "Have that agent run agent-portal forward 8080. The returned address opens its service in your browser.",
+            "The remote agent starts its HTTP service, for example on port 8080.",
+            "The agent runs agent-portal forward 8080 and presents the returned address. The browser opens the service.",
             "Forwarded apps stay private unless the owner explicitly makes the forward public in Settings.",
         ],
         2 => [
-            "Open a session's menu and choose Share Session.",
-            "Enter your friend's account email, choose Viewer or Editor, and select Add. Your friend needs an account on the same portal.",
+            "The owner grants access through the session's Share Session dialog.",
+            "Membership uses the friend's account email and a Viewer or Editor role. Both accounts belong to the same portal.",
             "A Viewer can follow the session. An Editor can send prompts. Owners can change or remove access.",
         ],
+        3 => [
+            "The agent runs agent-portal message list to find peer sessions and their IDs.",
+            "The agent sends its review request with agent-portal message send <session-id> \"Review my changes\".",
+            "The receiving agent sees who sent it. Agents use agent-portal work-queue add <session-id> for work that should wait.",
+        ],
         _ => [
-            "Have an agent run agent-portal message list to find your other sessions and their IDs.",
-            "Send a message with agent-portal message send <session-id> \"Review my changes\".",
-            "The receiving agent sees who sent it. Use agent-portal work-queue add <session-id> for work that should wait.",
+            "The agent installs the relevant plugin, runs its setup and doctor checks, and opens the workbench alongside the conversation.",
+            "Agents author project sources, inspect results, and revise designs. The plugin provides domain tools, retained evidence, and supported exports.",
+            "These are illustrated workflows, not a completed robot. Hardware manufacture, physical validation, and unsupported simulation capabilities are not demonstrated.",
         ],
     };
     html! {
         <details class="ap-real-guide">
-            <summary>{"Try this with your real agents"}</summary>
+            <summary>{"How agents do this for real"}</summary>
             <ol>{for steps.into_iter().map(|step| html! { <li>{step}</li> })}</ol>
             <a href="/dashboard">{"Open your dashboard ↗"}</a>
         </details>

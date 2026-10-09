@@ -2,8 +2,12 @@
 
 `/aperture` is a public, narrated, interactive introduction to Agent Portal. It
 uses the normal Yew frontend and needs no backend API, login, or agent processes.
-The four chambers demonstrate selecting a machine, opening an agent-hosted
-website, choosing a collaborator's role, and sending work between agents.
+The five chambers demonstrate agents working across machines, opening their own
+website tunnels, collaborators observing with owner-granted access, direct agent
+review, and a five-part plugin design series. The narrator is an agent conducting
+a fictional “human meat proxy” retirement program. Operational copy assigns
+setup, forwarding, and message delivery to agents rather than asking the human
+to act as a terminal or message courier.
 
 All machine connections, memberships, and agent messages are explicitly labelled
 simulations. The companion-calibration website is a real interactive, sandboxed
@@ -46,7 +50,9 @@ keyboard controls, touch, and sound disabled.
   navigation, completion, role changes, and reset.
 - `frontend/src/pages/aperture/mod.rs`: public route, chamber navigation,
   captions, invitations, audio controls, and cancellable collaboration timers.
-- `frontend/src/pages/aperture/scenes.rs`: four interactive observation windows.
+- `frontend/src/pages/aperture/scenes.rs`: the original four interactive observation windows.
+- `frontend/src/pages/aperture/plugins.rs`: five illustrated plugin departments,
+  with source links and capability boundaries.
 - `frontend/src/pages/aperture/audio.rs`: one opt-in narration channel and a
   synthesized transit sound. Audio failure never prevents using the exhibit.
 - `frontend/styles/aperture.css`: scoped visual theme; does not recolor the
@@ -80,7 +86,7 @@ DEMO_ROOT=/tmp/readme-demo DEMO_URL=http://localhost:8792 \
   node docs/media/capture/check-aperture-film.js
 ```
 
-It drives all four experiments, interacts with the real sample iframe, opens an
+It drives all five experiments and five plugin departments, interacts with the real sample iframe, opens an
 observer invitation, changes roles, completes and resets the exhibit, checks
 five viewport widths, reduced motion, audio cancellation, clipboard copying and
 its permission-denied fallback, and fails on browser errors. The film check also
@@ -88,3 +94,26 @@ verifies actual playback, seeking backwards with captions, replay, mobile stage
 bounds, and asset loading. Screenshots
 are written under `$DEMO_ROOT/aperture-qa/`. It expects Chrome at
 `/usr/bin/google-chrome`, like the other capture scripts.
+
+## Plugin replacement series
+
+The fifth chamber is an illustrated research program, not a live plugin run or a
+claim that a manufactured robot has passed validation. The departments are:
+
+1. **yapCAD:** parametric gripper geometry, retained builds, contextual feedback,
+   revisions, and supported exports. Analytic STEP needs the optional BREP tier.
+2. **Kicadmium:** KiCad board review, checks, and fabrication exports; requires
+   KiCad and distinguishes layout lint from native ERC/DRC.
+3. **Visilog:** Verilog hierarchy, values, waveforms, stepping and breakpoints;
+   the project test runner determines pass/fail, not the illustration.
+4. **Unlinked:** model diagrams and the supported simulation subset; unsupported
+   models do not silently become validated designs.
+5. **Engineering Presentations:** repository-backed briefings, reproducible
+   figures, and feedback-driven revisions. This is where the agent narrator
+   realizes that presenters are also replaceable.
+
+The capability review is grounded in the plugin repository at
+[`04456e4`](https://github.com/meawoppl/agent-portal-plugins/tree/04456e4ff259f006edc1bb2aeaa65d96d9e31f28):
+the four engineering plugin READMEs and the `engineering-presentations` manifest.
+Each exhibit department links to its reviewed source. No new plugin is installed
+or executed by opening the public exhibit.
