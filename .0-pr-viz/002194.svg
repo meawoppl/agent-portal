@@ -52,7 +52,7 @@
   <text x="1589" y="340" font-size="26" fill="#9ece6a">LauncherToServer</text>
   <text x="1589" y="384" font-size="23" fill="#c0caf5">Heartbeat { system } every 30 s</text>
   <text x="1589" y="418" font-size="23" fill="#c0caf5">SystemStats { sample } every 5 s</text>
-  <text x="1589" y="452" font-size="23" fill="#e0af68">if the ack lists server.system_stats</text>
+  <text x="1589" y="452" font-size="23" fill="#e0af68">ack lists server.system_stats</text>
 
   <path d="M1755 480V545" stroke="#9ece6a" stroke-width="5"/>
   <polygon points="1755,545 1742,522 1768,522" fill="#9ece6a"/>
