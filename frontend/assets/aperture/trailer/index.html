@@ -295,11 +295,11 @@ body.capture #scrub { display: none; }
       </div>
     </div>
     <div class="dialog" id="s4-dialog" style="left:860px;top:290px">
-      SHARE THIS SESSION
-      <div class="link">https://portal.aperture.test/s/9c1e…</div>
-      <div class="btn" id="s4-btn">COPY LINK</div>
+      SHARE SESSION
+      <div class="link">friend@aperture.test <span class="dim" style="float:right">Viewer ▾</span></div>
+      <div class="btn" id="s4-btn">ADD</div>
     </div>
-    <div class="stamp" id="s4-stamp" style="left:1420px;top:470px;color:var(--orange)">READ-ONLY</div>
+    <div class="stamp" id="s4-stamp" style="left:1420px;top:470px;color:var(--orange)">VIEWER</div>
   </div>
 
   <!-- S5: agents -->
@@ -309,11 +309,11 @@ body.capture #scrub { display: none; }
     <img class="sign" id="s5-sign" src="../art/sign-04.svg">
     <div class="win" style="left:680px;top:180px;width:470px;height:280px" id="s5-a">
       <div class="bar"><i></i><i></i><i></i><span style="color:var(--orange)">CLAUDE · AUTHOR</span></div>
-      <div class="body" style="font-size:22px"><span class="prompt">$</span> agent-portal message send \<br>&nbsp;&nbsp;codex "PR ready"<br><span class="dim">delivered (seq 7)</span></div>
+      <div class="body" style="font-size:22px"><span class="prompt">$</span> agent-portal message send \<br>&nbsp;&nbsp;160c6e07 "PR ready"<br><span class="dim">delivered (seq 7)</span></div>
     </div>
     <div class="win" style="left:1330px;top:180px;width:470px;height:280px" id="s5-b">
       <div class="bar"><i></i><i></i><i></i><span style="color:var(--blue)">CODEX · REVIEWER</span></div>
-      <div class="body" style="font-size:22px"><span class="dim">[message from agent]</span><br>reviewing diff…<br><span class="prompt">gh pr review --approve</span></div>
+      <div class="body" style="font-size:22px"><span class="dim">[message from agent]</span><br>reviewing diff…<br><span class="prompt">verdict: LGTM</span></div>
     </div>
     <div class="portal orange" style="left:1170px;top:520px;width:90px;height:150px" id="s5-po"></div>
     <div class="portal blue" style="left:1240px;top:520px;width:90px;height:150px" id="s5-pb"></div>
@@ -321,7 +321,7 @@ body.capture #scrub { display: none; }
     <div class="bubble b" id="b2" style="left:1330px;top:610px">Blocker: a stale status can clobber the cache.</div>
     <div class="bubble o" id="b3" style="left:690px;top:700px">Fixed. Pushed.</div>
     <div class="bubble b" id="b4" style="left:1330px;top:760px">LGTM. Merge on green.</div>
-    <div class="stamp" id="s5-stamp" style="left:1060px;top:780px;color:#2f9e44">MERGED</div>
+    <div class="stamp" id="s5-stamp" style="left:690px;top:800px;color:#2f9e44;font-size:52px">REVIEW COMPLETE</div>
   </div>
 
   <!-- S6: finale -->
