@@ -96,7 +96,8 @@ It drives the code prologue, all eight sectors, making-of and mission, interacts
 observer invitation, changes roles, completes and resets the exhibit, checks
 five viewport widths, reduced motion, audio cancellation, clipboard copying and
 its permission-denied fallback, and fails on browser errors. The film check also
-verifies actual playback, seeking backwards with captions, replay, mobile stage
+verifies actual playback, every measured caption phrase, stationary closing
+titles, seeking backwards with captions, replay, mobile stage
 bounds, full-size portrait captions/provenance, and asset loading. Screenshots
 are written under `$DEMO_ROOT/aperture-qa/`. It expects Chrome at
 `/usr/bin/google-chrome`, like the other capture scripts.
@@ -144,15 +145,26 @@ Opening the public exhibit runs no engineering tool and accesses no real session
 
 `trailer/index.html`, `film.css` and `film.js` implement one full film. The browser
 builds `window.FILM` from the twenty narration lines, with scene boundaries,
-caption cues and evidence placements. Voice and video are preloaded as Blobs so
+caption cues and evidence placements. Caption phrases follow authored sentence
+and clause boundaries in `captions.json`, aligned to measured word timestamps;
+they are not split by character count or timed proportionally to text length.
+Voice and video are preloaded as Blobs so
 seeking works on static hosts without byte-range support. Capture mode exposes
 `window.seek(t)`; `?capture&external-clips` omits media decoding so original
 masters can be composited after the deterministic browser render.
 
 The reproducible helpers are:
 
+- `docs/media/capture/align-aperture-captions.py ASSETS`:
+  authored caption phrases aligned to `voice/words.json`; validates the rendered
+  audio hash and preserves the exact approved narration text.
 - `docs/media/capture/mix-aperture-score.py ASSETS TIMELINE OUTPUT.mp3`:
-  original music, transitions and narration on the shared film clock.
+  original music, transitions and narration on the shared film clock. RMS speech
+  detection excludes leading silence and room tails from ducking. The bed is
+  held at 0.65 gain during speech, with 25 ms attack, 10 ms lookahead, 100 ms hold
+  and 160 ms release. A `.mix.json` report records detected speech spans.
+  The voice uses a lower, capped pitch contour; generation details accompany
+  the voice assets. Closing titles remain stationary, with whole-scene fades.
 - `docs/media/capture/render-aperture-film.py URL OUT ASSETS MASTERS --workers 8`:
   content-keyed scene cache, parallel Chrome capture, and one final composite.
   Uses NVENC by default; `--encoder libx264` is the CPU fallback. A changed
@@ -162,7 +174,7 @@ The reproducible helpers are:
 
 Python helpers require Playwright/Chrome, NumPy, SciPy, SoundFile and ffmpeg.
 Use a disk-backed temporary directory for Chrome when `/tmp` is memory-limited.
-Masters and exports remain under ignored `builds/aperture-v4/`. The original
+Masters and exports remain under ignored `builds/aperture-v*/` directories. The original
 voice/art scripts live in `~/aperture-work` on the production host. Captured
 workbench segments may be cropped, held or accelerated for readability; the
 underlying geometry, checks and recorded data are unchanged.

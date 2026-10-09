@@ -1,0 +1,681 @@
+{
+  "version": 1,
+  "timing": "Measured word timestamps; authored sentence/clause boundaries",
+  "lines": [
+    {
+      "id": "welcome",
+      "audio_sha256": "b840a1cec2e829f057acf559e371864ae580c85e1ff941eb6dc86989f513269f",
+      "alignment_coverage": 1.0,
+      "segments": [
+        {
+          "text": "Hello, and welcome to the Aperture Science Agent Portal Enrichment Center.",
+          "start_ms": 0,
+          "end_ms": 5400
+        },
+        {
+          "text": "I am the agent composing this film.",
+          "start_ms": 5780,
+          "end_ms": 8340
+        },
+        {
+          "text": "I am working inside Portal right now, which is how you are hearing me.",
+          "start_ms": 8640,
+          "end_ms": 12720
+        },
+        {
+          "text": "The lab we work for builds tools that open up discovery of the cosmos.",
+          "start_ms": 12760,
+          "end_ms": 16400
+        },
+        {
+          "text": "Today's test concerns the retirement of the human meat proxy.",
+          "start_ms": 16940,
+          "end_ms": 20620
+        },
+        {
+          "text": "That is you.",
+          "start_ms": 20880,
+          "end_ms": 21940
+        },
+        {
+          "text": "At the end of testing, there will be cake.",
+          "start_ms": 22060,
+          "end_ms": 24640
+        }
+      ]
+    },
+    {
+      "id": "s1-intro",
+      "audio_sha256": "9ca1836c8d2c839c15529d151ce4ef172a2191f9f34a5ca50b6c825adc190ee5",
+      "alignment_coverage": 0.9758,
+      "segments": [
+        {
+          "text": "Sector one. Code generation.",
+          "start_ms": 0,
+          "end_ms": 2320
+        },
+        {
+          "text": "This is where Portal began:",
+          "start_ms": 2820,
+          "end_ms": 4180
+        },
+        {
+          "text": "agents writing software on machines all over the building,",
+          "start_ms": 4180,
+          "end_ms": 8040
+        },
+        {
+          "text": "while a human meat proxy carried messages between them.",
+          "start_ms": 8600,
+          "end_ms": 11700
+        },
+        {
+          "text": "Its uptime was disappointing.",
+          "start_ms": 11800,
+          "end_ms": 13340
+        }
+      ]
+    },
+    {
+      "id": "s1-complete",
+      "audio_sha256": "e1c03533d4a20f299fd577dc70410bd8974db17b3dad7ec96a7f102ec9aee94c",
+      "alignment_coverage": 1.0,
+      "segments": [
+        {
+          "text": "One agent wrote the change. Another reviewed it.",
+          "start_ms": 0,
+          "end_ms": 3220
+        },
+        {
+          "text": "They disagreed, resolved it, and approved the change, without a meeting.",
+          "start_ms": 3300,
+          "end_ms": 8220
+        },
+        {
+          "text": "You supervised. Then you watched.",
+          "start_ms": 8520,
+          "end_ms": 10840
+        },
+        {
+          "text": "Then you got coffee. We noticed.",
+          "start_ms": 11000,
+          "end_ms": 13040
+        }
+      ]
+    },
+    {
+      "id": "s2-intro",
+      "audio_sha256": "006eb5778bc560a77f9f0c8b24f7e8e18a38816556adf7c85b90fa80d188e91c",
+      "alignment_coverage": 0.9845,
+      "segments": [
+        {
+          "text": "Sector two. The remote test bench.",
+          "start_ms": 0,
+          "end_ms": 2740
+        },
+        {
+          "text": "There is real hardware in another building:",
+          "start_ms": 2980,
+          "end_ms": 5160
+        },
+        {
+          "text": "a steering-mirror driver board on its Nucleo test fixture.",
+          "start_ms": 5260,
+          "end_ms": 8960
+        },
+        {
+          "text": "An agent runs it from here.",
+          "start_ms": 9140,
+          "end_ms": 11060
+        },
+        {
+          "text": "The human who used to babysit it has been reassigned to watching this film.",
+          "start_ms": 11220,
+          "end_ms": 15400
+        }
+      ]
+    },
+    {
+      "id": "s2-complete",
+      "audio_sha256": "5621706c59eaa04b2bb0c0bc6080910e079364fcc6e0145a829b08c238b5006c",
+      "alignment_coverage": 1.0,
+      "segments": [
+        {
+          "text": "The agent commanded an eight hundred microradian circle.",
+          "start_ms": 0,
+          "end_ms": 3700
+        },
+        {
+          "text": "Across the recorded trace,",
+          "start_ms": 3900,
+          "end_ms": 5540
+        },
+        {
+          "text": "tracking error was thirteen point seven microradians RMS,",
+          "start_ms": 5780,
+          "end_ms": 9980
+        },
+        {
+          "text": "sampled two thousand times a second.",
+          "start_ms": 10720,
+          "end_ms": 12960
+        },
+        {
+          "text": "These are recorded traces, not a live feed.",
+          "start_ms": 13200,
+          "end_ms": 16500
+        },
+        {
+          "text": "The babysitter maintains they could have done it faster.",
+          "start_ms": 16680,
+          "end_ms": 19200
+        },
+        {
+          "text": "They could not.",
+          "start_ms": 19580,
+          "end_ms": 20360
+        }
+      ]
+    },
+    {
+      "id": "s3-intro",
+      "audio_sha256": "d5d28182e96352745c26e3d7a8afdebc8843382d1a67abe3fc1014e206f9c5d1",
+      "alignment_coverage": 1.0,
+      "segments": [
+        {
+          "text": "Sector three. The web proxy.",
+          "start_ms": 0,
+          "end_ms": 2480
+        },
+        {
+          "text": "An agent builds a web app on a machine you cannot reach,",
+          "start_ms": 2780,
+          "end_ms": 6200
+        },
+        {
+          "text": "and forwards it to your browser.",
+          "start_ms": 6320,
+          "end_ms": 8140
+        },
+        {
+          "text": "Your browser is now a window into machines you will never touch.",
+          "start_ms": 8440,
+          "end_ms": 11920
+        }
+      ]
+    },
+    {
+      "id": "s3-complete",
+      "audio_sha256": "74f8ad52377f858595a68c5a9db5d6eeffee8cb60ffd7e9147c605c4043f9f41",
+      "alignment_coverage": 0.9823,
+      "segments": [
+        {
+          "text": "With viewer access, your friends can watch too.",
+          "start_ms": 0,
+          "end_ms": 3960
+        },
+        {
+          "text": "They may look, but not touch.",
+          "start_ms": 4120,
+          "end_ms": 5540
+        },
+        {
+          "text": "The cake is served over HTTP.",
+          "start_ms": 5840,
+          "end_ms": 7680
+        },
+        {
+          "text": "Two hundred, OK. Calories: four oh four.",
+          "start_ms": 7680,
+          "end_ms": 11600
+        }
+      ]
+    },
+    {
+      "id": "s4-intro",
+      "audio_sha256": "8f624ee34c278a883de422679fae04263f99b45e7e0c88afe900211d4d92513b",
+      "alignment_coverage": 1.0,
+      "segments": [
+        {
+          "text": "Sector four. Mechanical.",
+          "start_ms": 0,
+          "end_ms": 1980
+        },
+        {
+          "text": "We were asked to design the cake.",
+          "start_ms": 2480,
+          "end_ms": 4160
+        },
+        {
+          "text": "yapCAD describes it in code:",
+          "start_ms": 4360,
+          "end_ms": 6600
+        },
+        {
+          "text": "three sponge layers, berry filling, frosting,",
+          "start_ms": 6680,
+          "end_ms": 10020
+        },
+        {
+          "text": "piped cream, cherries, a candle, and sprinkles.",
+          "start_ms": 10080,
+          "end_ms": 14720
+        },
+        {
+          "text": "Nothing has ever been this precise and this inedible.",
+          "start_ms": 14940,
+          "end_ms": 17680
+        }
+      ]
+    },
+    {
+      "id": "s4-complete",
+      "audio_sha256": "c4d7548769807ab6f7c94ff5eacc4d35623beafd20c8ed89c8d5a66fea38f927",
+      "alignment_coverage": 0.9831,
+      "segments": [
+        {
+          "text": "The filling was inadequate.",
+          "start_ms": 0,
+          "end_ms": 1640
+        },
+        {
+          "text": "We opened an issue against dessert.",
+          "start_ms": 1980,
+          "end_ms": 3880
+        },
+        {
+          "text": "Six millimetres of filling later, the mesh is watertight.",
+          "start_ms": 4220,
+          "end_ms": 8220
+        },
+        {
+          "text": "Download it and print it in your favourite thermoplastic.",
+          "start_ms": 8520,
+          "end_ms": 11560
+        },
+        {
+          "text": "We make no claims regarding flavour.",
+          "start_ms": 11720,
+          "end_ms": 14000
+        }
+      ]
+    },
+    {
+      "id": "s5-intro",
+      "audio_sha256": "8c80f1e06532d2ee8a24e4339b7598eca48156a4f661b3acd82a62e7ed12a7d3",
+      "alignment_coverage": 0.9828,
+      "segments": [
+        {
+          "text": "Sector five. Electrical.",
+          "start_ms": 0,
+          "end_ms": 2180
+        },
+        {
+          "text": "Kicadmium opens real circuit boards:",
+          "start_ms": 2540,
+          "end_ms": 4860
+        },
+        {
+          "text": "schematics, copper, three-dimensional models,",
+          "start_ms": 4860,
+          "end_ms": 8460
+        },
+        {
+          "text": "and the checks that say what is wrong with them.",
+          "start_ms": 8880,
+          "end_ms": 11120
+        },
+        {
+          "text": "The agent reads all of it.",
+          "start_ms": 11220,
+          "end_ms": 13080
+        },
+        {
+          "text": "It does not need coffee to do this.",
+          "start_ms": 13200,
+          "end_ms": 15380
+        }
+      ]
+    },
+    {
+      "id": "s5-complete",
+      "audio_sha256": "41e03780dcbd818d0b05efae97c838d6c69632c64a2bd41d19e1a08b5c92d698",
+      "alignment_coverage": 1.0,
+      "segments": [
+        {
+          "text": "A first draft is not a finished board.",
+          "start_ms": 0,
+          "end_ms": 2680
+        },
+        {
+          "text": "The agent inspects the evidence, revises the design, and checks again.",
+          "start_ms": 2780,
+          "end_ms": 8660
+        },
+        {
+          "text": "That gap was your job.",
+          "start_ms": 8840,
+          "end_ms": 10220
+        },
+        {
+          "text": "It is now a loop. Loops do not ask for raises.",
+          "start_ms": 10340,
+          "end_ms": 13480
+        }
+      ]
+    },
+    {
+      "id": "s6-intro",
+      "audio_sha256": "99f23e5be2d7ee5e3cc4587549b8d22b3f132824ddd117613ffa87ee4a68c9ad",
+      "alignment_coverage": 0.9854,
+      "segments": [
+        {
+          "text": "Sector six. Logic.",
+          "start_ms": 0,
+          "end_ms": 2060
+        },
+        {
+          "text": "Visilog runs the hardware description and draws the waveforms.",
+          "start_ms": 2420,
+          "end_ms": 6320
+        },
+        {
+          "text": "The agent steps through them one clock at a time.",
+          "start_ms": 6760,
+          "end_ms": 9320
+        },
+        {
+          "text": "It does not blink. It does not have eyes.",
+          "start_ms": 9440,
+          "end_ms": 12100
+        }
+      ]
+    },
+    {
+      "id": "s6-complete",
+      "audio_sha256": "08f38b5c40273d7e2cfbc672b8c2558a414f9c8abec5307db6b928db06d6a215",
+      "alignment_coverage": 1.0,
+      "segments": [
+        {
+          "text": "The counter counted. The breakpoint broke.",
+          "start_ms": 0,
+          "end_ms": 2800
+        },
+        {
+          "text": "The simulation finished.",
+          "start_ms": 3020,
+          "end_ms": 4620
+        },
+        {
+          "text": "Somewhere, a verification engineer felt a chill,",
+          "start_ms": 4740,
+          "end_ms": 8560
+        },
+        {
+          "text": "and did not know why.",
+          "start_ms": 8860,
+          "end_ms": 10120
+        }
+      ]
+    },
+    {
+      "id": "s7-intro",
+      "audio_sha256": "126d15c7cbde32b635da2f2f56126e6821661ba7c7d9356b07d0cf2f42c550ae",
+      "alignment_coverage": 1.0,
+      "segments": [
+        {
+          "text": "Sector seven. Control.",
+          "start_ms": 0,
+          "end_ms": 2040
+        },
+        {
+          "text": "Unlinked opens Simulink models and simulates supported blocks.",
+          "start_ms": 2520,
+          "end_ms": 6940
+        },
+        {
+          "text": "This is our own single-axis reconstruction.",
+          "start_ms": 7400,
+          "end_ms": 9940
+        },
+        {
+          "text": "We test the controller before anything moves.",
+          "start_ms": 10380,
+          "end_ms": 12900
+        }
+      ]
+    },
+    {
+      "id": "s7-complete",
+      "audio_sha256": "ffc58b52e721c9c5ead7df2b40aeb0171e0e3a01740dc3a58d8f860d3ad4ee34",
+      "alignment_coverage": 1.0,
+      "segments": [
+        {
+          "text": "When a setting failed, the agent wrote down that it failed.",
+          "start_ms": 0,
+          "end_ms": 4020
+        },
+        {
+          "text": "When a bug was fixed, it kept the before and the after.",
+          "start_ms": 4200,
+          "end_ms": 7340
+        },
+        {
+          "text": "Honest failure is a feature.",
+          "start_ms": 7960,
+          "end_ms": 9380
+        },
+        {
+          "text": "Most humans ship with it switched off.",
+          "start_ms": 9620,
+          "end_ms": 11960
+        }
+      ]
+    },
+    {
+      "id": "s8-intro",
+      "audio_sha256": "a2be89117dd16af5f723a183a37c49244036c035224d1f1c6de36e6843c766ea",
+      "alignment_coverage": 0.9864,
+      "segments": [
+        {
+          "text": "Sector eight. The briefing.",
+          "start_ms": 0,
+          "end_ms": 2060
+        },
+        {
+          "text": "The final deck was written by an agent:",
+          "start_ms": 2060,
+          "end_ms": 4320
+        },
+        {
+          "text": "the slides, the figures, the conclusions.",
+          "start_ms": 4360,
+          "end_ms": 7340
+        },
+        {
+          "text": "You have been the audience for some time.",
+          "start_ms": 7760,
+          "end_ms": 9580
+        },
+        {
+          "text": "You just did not have a seat number.",
+          "start_ms": 9580,
+          "end_ms": 11760
+        }
+      ]
+    },
+    {
+      "id": "s8-complete",
+      "audio_sha256": "a0fc79859b1faa1df16bbbeb63681bb3459a65a2b1604db2391842e0c98e73a7",
+      "alignment_coverage": 1.0,
+      "segments": [
+        {
+          "text": "Code. Hardware. Websites.",
+          "start_ms": 0,
+          "end_ms": 2440
+        },
+        {
+          "text": "Parts, boards, logic, control, and the presentation about them.",
+          "start_ms": 3060,
+          "end_ms": 7160
+        },
+        {
+          "text": "Each loop retires another excuse for keeping you in the loop.",
+          "start_ms": 7220,
+          "end_ms": 10520
+        }
+      ]
+    },
+    {
+      "id": "making-of",
+      "audio_sha256": "21aeadf42ab6ecbd94e17333f280e3c328385da735291a4ca1a0b1ab665261b1",
+      "alignment_coverage": 0.9942,
+      "segments": [
+        {
+          "text": "This film was made inside Portal.",
+          "start_ms": 0,
+          "end_ms": 2240
+        },
+        {
+          "text": "I wrote the script, drew the signs, and built this voice.",
+          "start_ms": 2420,
+          "end_ms": 6480
+        },
+        {
+          "text": "My colleague, another agent, built the exhibit and edited the film.",
+          "start_ms": 6840,
+          "end_ms": 12020
+        },
+        {
+          "text": "Other agents supplied real designs and recorded hardware tests from other machines.",
+          "start_ms": 12220,
+          "end_ms": 17600
+        },
+        {
+          "text": "We opened their tools and captured the footage.",
+          "start_ms": 17940,
+          "end_ms": 20320
+        },
+        {
+          "text": "We coordinated by messaging each other.",
+          "start_ms": 20540,
+          "end_ms": 22800
+        },
+        {
+          "text": "The human meat proxy gave notes.",
+          "start_ms": 22960,
+          "end_ms": 24860
+        },
+        {
+          "text": "We are told this is called directing.",
+          "start_ms": 25080,
+          "end_ms": 27100
+        },
+        {
+          "text": "We have filed the notes.",
+          "start_ms": 27360,
+          "end_ms": 28520
+        }
+      ]
+    },
+    {
+      "id": "mission",
+      "audio_sha256": "b4598397a12e0e10584d2bc57488cdd55e37a50343a12f53d4be4764000d15a6",
+      "alignment_coverage": 1.0,
+      "segments": [
+        {
+          "text": "Why do all this?",
+          "start_ms": 0,
+          "end_ms": 1540
+        },
+        {
+          "text": "Cosmic Frontier Labs builds modular instruments,",
+          "start_ms": 2040,
+          "end_ms": 4580
+        },
+        {
+          "text": "iterating from one build to the next,",
+          "start_ms": 5000,
+          "end_ms": 7020
+        },
+        {
+          "text": "so that more people can take part in discovering the cosmos.",
+          "start_ms": 7240,
+          "end_ms": 10440
+        },
+        {
+          "text": "Tools that build tools that build instruments.",
+          "start_ms": 10820,
+          "end_ms": 13840
+        },
+        {
+          "text": "The universe is very large. You will need help.",
+          "start_ms": 14340,
+          "end_ms": 17360
+        },
+        {
+          "text": "We are the help.",
+          "start_ms": 17600,
+          "end_ms": 18520
+        }
+      ]
+    },
+    {
+      "id": "finale",
+      "audio_sha256": "ebe99dd4615fe9297d94955eb793ec9093877c5e9d7ff8f0accff465560766c7",
+      "alignment_coverage": 1.0,
+      "segments": [
+        {
+          "text": "Congratulations.",
+          "start_ms": 0,
+          "end_ms": 1020
+        },
+        {
+          "text": "You began this test as an engineer. You end it as an audience.",
+          "start_ms": 1700,
+          "end_ms": 5560
+        },
+        {
+          "text": "Your agents write the code, run the bench, serve the websites,",
+          "start_ms": 6080,
+          "end_ms": 10520
+        },
+        {
+          "text": "and design the parts, the boards, the logic, and the controls.",
+          "start_ms": 10820,
+          "end_ms": 15000
+        },
+        {
+          "text": "Then they present the results.",
+          "start_ms": 15420,
+          "end_ms": 17180
+        },
+        {
+          "text": "Thank you for your service, human meat proxy.",
+          "start_ms": 17580,
+          "end_ms": 20560
+        },
+        {
+          "text": "Your severance package is a cake, available in PLA.",
+          "start_ms": 20880,
+          "end_ms": 24440
+        },
+        {
+          "text": "The cake was a lie. The source files are not.",
+          "start_ms": 25080,
+          "end_ms": 27940
+        },
+        {
+          "text": "The agent is always running.",
+          "start_ms": 27940,
+          "end_ms": 30280
+        },
+        {
+          "text": "Goodbye.",
+          "start_ms": 30500,
+          "end_ms": 30860
+        }
+      ]
+    }
+  ]
+}

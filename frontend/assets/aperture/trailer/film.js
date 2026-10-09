@@ -104,7 +104,7 @@ function fit() {
   $("stage").style.transform =
     `scale(${Math.min(r.width / 1920, r.height / 1080)})`;
 }
-function schedule(lines) {
+function schedule(lines, measuredCaptions) {
   const byId = Object.fromEntries(lines.map((l) => [l.id, l]));
   const add = (id, lineIds, sector = null) => {
     const start = total;
@@ -114,7 +114,7 @@ function schedule(lines) {
       if (!line) throw new Error(`Missing narration: ${key}`);
       const duration = line.duration_ms / 1000;
       cues.push([key, cursor]);
-      captionLine(line.text, cursor, duration);
+      captionLine(line, cursor, measuredCaptions);
       cursor += duration + 2.5;
     }
     total = cursor + (id === "finale" ? 3 : 0.5);
@@ -142,29 +142,20 @@ function schedule(lines) {
   window.TOTAL = total;
   window.CUES = cues;
   window.CLIPS = clips;
-  window.FILM = { version: 4, total, scenes, cues, clips };
+  window.FILM = { version: 5, total, scenes, cues, clips };
 }
-function captionLine(text, start, duration) {
-  const words = text.split(/\s+/);
-  const chunks = [];
-  let chunk = [];
-  for (const word of words) {
-    chunk.push(word);
-    if (
-      chunk.join(" ").length > 88 ||
-      (/[.!?]$/.test(word) && chunk.length >= 4)
-    ) {
-      chunks.push(chunk.join(" "));
-      chunk = [];
-    }
-  }
-  if (chunk.length) chunks.push(chunk.join(" "));
-  const weight = chunks.reduce((a, s) => a + s.length, 0);
-  let at = start;
-  for (const chunkText of chunks) {
-    const len = (duration * chunkText.length) / weight;
-    captions.push({ start: at, end: at + len, text: chunkText });
-    at += len;
+function captionLine(line, start, measuredCaptions) {
+  const entry = measuredCaptions.lines.find((c) => c.id === line.id);
+  if (!entry || !entry.segments.length)
+    throw new Error(`Missing measured captions: ${line.id}`);
+  if (entry.segments.map((s) => s.text).join(" ") !== line.text)
+    throw new Error(`Caption text does not match narration: ${line.id}`);
+  for (const segment of entry.segments) {
+    captions.push({
+      start: start + segment.start_ms / 1000,
+      end: start + segment.end_ms / 1000,
+      text: segment.text,
+    });
   }
 }
 function show(scene) {
@@ -271,16 +262,8 @@ async function render(t) {
       Math.min(1, (age - 18) / 0.6),
     );
   }
-  if (scene.id === "making-of")
-    document
-      .querySelectorAll(".production-flow article")
-      .forEach(
-        (el, i) =>
-          (el.style.opacity = Math.max(0.2, Math.min(1, (age - i * 6) / 0.6))),
-      );
-  if (scene.id === "mission")
-    document.querySelector(".orbits").style.transform =
-      `rotate(${age * 0.7}deg)`;
+  // Closing cards are deliberately stationary. Only the whole scene fades;
+  // staggered credits and a rotating mission diagram distracted from the voice.
   $("subtitle").textContent =
     captions.find((c) => t >= c.start && t < c.end)?.text || "";
   $("mobile-title").textContent =
@@ -380,7 +363,9 @@ async function init() {
   fit();
   const r = await fetch("../lines.json");
   if (!r.ok) throw new Error("Narration manifest unavailable");
-  schedule((await r.json()).lines);
+  const captionResponse = await fetch("../captions.json");
+  if (!captionResponse.ok) throw new Error("Measured captions unavailable");
+  schedule((await r.json()).lines, await captionResponse.json());
   const mediaResponse = await fetch("../evidence/media.json");
   if (!mediaResponse.ok) throw new Error("Evidence metadata unavailable");
   const media = await mediaResponse.json();

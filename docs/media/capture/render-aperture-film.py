@@ -6,13 +6,14 @@ Requires Playwright/Chrome and ffmpeg. Cache reuse never substitutes old inputs.
 """
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import json
 import math
-from pathlib import Path
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 from time import perf_counter
+
 from playwright.sync_api import sync_playwright
 
 parser = argparse.ArgumentParser(description=__doc__)
@@ -75,6 +76,7 @@ for pattern in [
     "trailer/*.css",
     "trailer/*.js",
     "lines.json",
+    "captions.json",
     "art/*.svg",
     "fonts/*.woff2",
 ]:
@@ -171,7 +173,7 @@ for i, clip in enumerate(timeline["clips"], 1):
     previous = f"v{i}"
 sound_index = len(timeline["clips"]) + 1
 inputs += ["-i", args.masters / "soundtrack.wav"]
-output = args.out / "aperture-film-v4.mp4"
+output = args.out / f"aperture-film-v{timeline['version']}.mp4"
 ffmpeg(
     [
         *inputs,

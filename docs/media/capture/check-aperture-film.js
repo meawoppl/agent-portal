@@ -26,6 +26,9 @@ const puppeteer = require(path.join(root, "node_modules/puppeteer-core"));
     });
     await page.waitForFunction(() => window.ready, { timeout: 60000 });
     const film = await page.evaluate(() => window.FILM);
+    const measured = await page.evaluate(async () =>
+      (await fetch("../captions.json")).json(),
+    );
     assert.equal(film.scenes.length, 12);
     assert.equal(film.cues.length, 20);
     assert.equal(film.clips.length, 7);
@@ -60,7 +63,9 @@ const puppeteer = require(path.join(root, "node_modules/puppeteer-core"));
       const cue = film.cues.find(
         ([id]) => id === scene.id || id === scene.id + "-intro",
       );
-      await seek(cue[1] + 1);
+      const firstPhrase = measured.lines.find((l) => l.id === cue[0])
+        .segments[0];
+      await seek(cue[1] + (firstPhrase.start_ms + firstPhrase.end_ms) / 2000);
       assert.ok(
         await page.$eval("#subtitle", (e) => e.textContent.length > 0),
         scene.id + " captions",
@@ -79,13 +84,54 @@ const puppeteer = require(path.join(root, "node_modules/puppeteer-core"));
       }
       await page.screenshot({ path: path.join(shots, `film-${scene.id}.png`) });
     }
+    for (const [sceneId, selector] of [
+      [
+        "making-of",
+        ".production-flow article, #making-scene h1, .message-command",
+      ],
+      ["mission", ".orbits, #mission-scene h1, .mission-copy"],
+      ["finale", ".final-logo, #finale-scene h1, .final-actions"],
+    ]) {
+      const scene = film.scenes.find((s) => s.id === sceneId);
+      const settled = async () =>
+        page.$$eval(selector, (els) =>
+          els.map((el) => ({
+            rect: el.getBoundingClientRect().toJSON(),
+            transform: getComputedStyle(el).transform,
+            opacity: getComputedStyle(el).opacity,
+          })),
+        );
+      await seek(scene.start + 3);
+      const first = await settled();
+      await seek(scene.start + 13);
+      assert.deepEqual(
+        await settled(),
+        first,
+        `${sceneId} closing titles remain stationary`,
+      );
+    }
+    for (const line of measured.lines) {
+      const cue = film.cues.find(([id]) => id === line.id)[1];
+      for (const phrase of line.segments) {
+        await seek(cue + (phrase.start_ms + phrase.end_ms) / 2000);
+        assert.equal(
+          await page.$eval("#subtitle", (e) => e.textContent),
+          phrase.text,
+        );
+      }
+    }
     await page.click("#restart");
     await page.waitForFunction(() => {
       const a = document.querySelector("audio");
       return !a.paused && a.currentTime < 2;
     });
     await page.setViewport({ width: 390, height: 844 });
-    await seek(film.cues.find(([id]) => id === "s4-complete")[1] + 2);
+    const mobilePhrase = measured.lines.find((l) => l.id === "s4-complete")
+      .segments[1];
+    await seek(
+      film.cues.find(([id]) => id === "s4-complete")[1] +
+        (mobilePhrase.start_ms + mobilePhrase.end_ms) / 2000,
+    );
     assert.equal(
       await page.$eval("#stage", (e) => {
         const r = e.getBoundingClientRect();
@@ -124,7 +170,7 @@ const puppeteer = require(path.join(root, "node_modules/puppeteer-core"));
     assert.ok(stl.bytes > 100000);
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: 8 sectors, 20 cues, matching audio length, actual playback, pause, reverse seeking/captions, all seven real recordings, restart, mobile fit, STL download and no asset/page errors",
+      "PASS: 8 sectors, 20 cues, matching audio length, actual playback, pause, reverse seeking/captions, all measured caption phrases, stationary closing titles, all seven real recordings, restart, mobile fit, STL download and no asset/page errors",
     );
   } finally {
     await browser.close();
