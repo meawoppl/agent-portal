@@ -769,6 +769,56 @@
           animation: none;
         }
       }
+      /* Agent-built tools */
+      .mpru {
+        position: absolute;
+        left: 680px;
+        top: 140px;
+        width: 1100px;
+        color: var(--ink);
+        font: 900 56px "Barlow Condensed", sans-serif;
+        letter-spacing: 4px;
+        line-height: 1;
+      }
+      .mpru small {
+        display: block;
+        margin-top: 10px;
+        font-size: 22px;
+        font-weight: 600;
+        letter-spacing: 5px;
+        color: var(--muted);
+      }
+      .tool {
+        width: 540px;
+        height: 290px;
+      }
+      .tool svg {
+        display: block;
+        width: 540px;
+        height: 248px;
+        font-family: "DejaVu Sans Mono", monospace;
+      }
+      .slide-frame {
+        position: absolute;
+        inset: 24px;
+        border: 6px solid var(--ink);
+        border-radius: 10px;
+        opacity: 0;
+        pointer-events: none;
+      }
+      .slide-foot {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 0;
+        display: flex;
+        justify-content: space-between;
+        padding: 10px 26px;
+        background: var(--ink);
+        color: #f2f1ec;
+        font: 700 24px "Barlow Condensed", sans-serif;
+        letter-spacing: 4px;
+      }
     </style>
   </head>
   <body>
@@ -1137,6 +1187,85 @@
         </div>
       </div>
 
+      <!-- S7: agent-built tools -->
+      <div class="layer scene" id="s7">
+        <div class="layer wall"></div>
+        <div class="floor"></div>
+        <img class="sign" id="s7-sign" src="../art/sign-05.svg" />
+        <div class="mpru" id="s7-title">
+          MEAT PROXY REPLACEMENT UNIT
+          <small>ILLUSTRATIVE RESEARCH PROGRAM · NOT QUALIFIED HARDWARE</small>
+        </div>
+        <div class="win tool" id="s7-cad" style="left: 680px; top: 250px">
+          <div class="bar">
+            <i></i><i></i><i></i><span>YAPCAD · BODY</span>
+          </div>
+          <svg viewBox="0 0 540 250">
+            <g fill="none" stroke="#c0caf5" stroke-width="4" stroke-linejoin="round">
+              <path d="M170 170 L270 120 L370 170 L270 220 Z" />
+              <path d="M170 170 V195 L270 245 L370 195 V170 M270 220 V245" />
+              <path d="M225 140 V60 L255 45 V128" />
+              <path d="M285 128 V45 L315 60 V140" />
+            </g>
+            <circle cx="315" cy="60" r="9" fill="#ff8a1c" />
+            <path d="M315 60 L390 36" stroke="#ff8a1c" stroke-width="3" />
+            <text x="530" y="34" text-anchor="end" fill="#ffd9a8" font-size="22">grip 38.0 mm</text>
+          </svg>
+        </div>
+        <div class="win tool" id="s7-pcb" style="left: 1240px; top: 250px">
+          <div class="bar">
+            <i></i><i></i><i></i><span>KICADMIUM · CIRCUIT BOARD</span>
+          </div>
+          <svg viewBox="0 0 540 250">
+            <rect x="110" y="25" width="320" height="200" rx="14" fill="#16302a" stroke="#9ece6a" stroke-width="3" />
+            <rect x="225" y="85" width="90" height="80" fill="#0b0c10" />
+            <g stroke="#e0af68" stroke-width="5" fill="none">
+              <path d="M140 60 H225 M140 125 H225 M315 105 H400 M315 145 H370 V200" />
+              <path d="M270 85 V45 H400" />
+            </g>
+            <g fill="#e0af68">
+              <circle cx="140" cy="60" r="9" /><circle cx="140" cy="125" r="9" />
+              <circle cx="400" cy="105" r="9" /><circle cx="370" cy="200" r="9" /><circle cx="400" cy="45" r="9" />
+            </g>
+          </svg>
+        </div>
+        <div class="win tool" id="s7-logic" style="left: 680px; top: 560px">
+          <div class="bar">
+            <i></i><i></i><i></i><span>VISILOG · LOGIC</span>
+          </div>
+          <svg viewBox="0 0 540 250">
+            <g fill="none" stroke-width="4">
+              <path stroke="#7aa2f7" d="M30 60 H90 V30 H150 V60 H210 V30 H270 V60 H330 V30 H390 V60 H450 V30 H510" />
+              <path stroke="#ff8a1c" d="M30 140 H150 V110 H270 V140 H390 V110 H510" />
+              <path stroke="#9ece6a" d="M30 220 H270 V190 H510" />
+            </g>
+            <g fill="#565f89" font-size="18">
+              <text x="30" y="88">clk</text><text x="30" y="168">grip_req</text><text x="30" y="246">closed</text>
+            </g>
+          </svg>
+        </div>
+        <div class="win tool" id="s7-ctrl" style="left: 1240px; top: 560px">
+          <div class="bar">
+            <i></i><i></i><i></i><span>UNLINKED · CONTROL MODEL</span>
+          </div>
+          <svg viewBox="0 0 540 250">
+            <path d="M40 210 H500" stroke="#565f89" stroke-width="2" />
+            <path d="M40 210 V30" stroke="#565f89" stroke-width="2" />
+            <path d="M40 80 H500" stroke="#565f89" stroke-width="2" stroke-dasharray="8 8" />
+            <path d="M40 210 C110 210 120 40 170 55 S240 95 280 82 S360 76 500 80" fill="none" stroke="#bb9af7" stroke-width="5" />
+            <text x="390" y="70" fill="#565f89" font-size="18">setpoint</text>
+          </svg>
+        </div>
+        <div class="slide-frame" id="s7-slide">
+          <div class="slide-foot">
+            <span>AGENT-AUTHORED BRIEFING</span><span>PRESENTER: AGENT</span><span>SLIDE 12 / 12</span>
+          </div>
+        </div>
+        <div class="stamp" id="s7-stamp" style="left: 1050px; top: 420px; color: var(--orange)">
+          PRESENTER REPLACED
+        </div>
+      </div>
+
       <!-- S6: finale -->
       <div class="layer scene black" id="s6">
         <div class="center">
@@ -1153,7 +1282,7 @@
               src="../art/icon-websites.svg"
             /><img src="../art/icon-sharing.svg" /><img
               src="../art/icon-agents.svg"
-            />
+            /><img src="../art/icon-plugins.svg" />
           </div>
           <div class="cta" id="s6-cta">BEGIN TESTING</div>
         </div>
@@ -1218,6 +1347,9 @@
         "agents-complete": 9.84,
         finale: 16.239,
       };
+      // The beat times below were authored against these line lengths. Longer
+      // rerecorded lines push everything after them back (see `when`).
+      const AUTHORED = { ...VOICE };
       const TEXT = {};
       const CUES = [
         ["welcome", 6.0],
@@ -1237,10 +1369,50 @@
         ["s2", 23.5, 48.5],
         ["s3", 48.5, 76],
         ["s4", 76, 102],
-        ["s5", 102, 129.5],
+        ["s5", 102, 129.4],
         ["s6", 129.5, 152],
       ];
-      const TOTAL = 152;
+      let TOTAL = 152;
+      // Chamber 05 is spliced in at this authored time; its beats are placed
+      // relative to its own start (`at`) rather than on the authored clock.
+      const TOOLS_AT = 129.45;
+      let TOOLS_START = 0;
+      let TOOLS_LEN = 0;
+      let SHIFTS = [];
+      const at = (rel) => ({ at: TOOLS_START + rel });
+      // Map an authored time onto the film clock: every narration line that
+      // runs longer than authored delays what follows it, and the tools
+      // chamber delays everything after its insertion point.
+      function when(t) {
+        if (typeof t === "object") return t.at;
+        let shift = 0;
+        for (const [from, total] of SHIFTS) if (t >= from) shift = total;
+        return t + shift;
+      }
+      function computeSchedule() {
+        const points = CUES.map(([id, start]) => [
+          start + AUTHORED[id],
+          Math.max(0, VOICE[id] - AUTHORED[id]),
+        ]);
+        const intro = 1.5;
+        const complete = intro + VOICE["plugins-intro"] + 2.5;
+        TOOLS_LEN = complete + VOICE["plugins-complete"] + 1.6;
+        points.push([TOOLS_AT, TOOLS_LEN]);
+        points.sort((a, b) => a[0] - b[0]);
+        let total = 0;
+        SHIFTS = points.map(([from, add]) => {
+          if (from === TOOLS_AT) TOOLS_START = TOOLS_AT + total;
+          total += add;
+          return [from, total];
+        });
+        CUES.push(["plugins-intro", at(intro)], ["plugins-complete", at(complete)]);
+        TOTAL = when(152);
+      }
+      // Where a phrase lands inside a narration line, by character share.
+      function spoken(id, phrase) {
+        const text = TEXT[id] || "";
+        return (VOICE[id] * Math.max(0, text.indexOf(phrase))) / text.length;
+      }
       const $ = (id) => document.getElementById(id);
       const ms = (s) => s * 1000;
 
@@ -1253,7 +1425,7 @@
       ) {
         if (typeof el === "string") el = $(el);
         return el.animate(frames, {
-          delay: ms(start),
+          delay: ms(when(start)),
           duration: ms(dur),
           fill: "both",
           easing,
@@ -1271,7 +1443,7 @@
       ) {
         if (typeof el === "string") el = $(el);
         return el.animate(frames, {
-          delay: ms(start),
+          delay: ms(when(start)),
           duration: ms(dur),
           fill: "forwards",
           easing,
@@ -1283,23 +1455,23 @@
         for (const [id, a, b] of SCENES) {
           const el = $(id);
           el.animate([{ opacity: 0 }, { opacity: 1 }], {
-            delay: ms(a),
+            delay: ms(when(a)),
             duration: 600,
             fill: "both",
           });
           el.animate([{ opacity: 1 }, { opacity: 0 }], {
-            delay: ms(b - 0.6),
+            delay: ms(when(b) - 0.6),
             duration: 600,
             fill: "forwards",
           });
         }
         $("hud").animate([{ opacity: 0 }, { opacity: 1 }], {
-          delay: ms(6.5),
+          delay: ms(when(6.5)),
           duration: 600,
           fill: "both",
         });
         $("hud").animate([{ opacity: 1 }, { opacity: 0 }], {
-          delay: ms(129),
+          delay: ms(when(129.6)),
           duration: 500,
           fill: "forwards",
         });
@@ -1309,6 +1481,7 @@
           [48.5, "TEST CHAMBER 02"],
           [76, "TEST CHAMBER 03"],
           [102, "TEST CHAMBER 04"],
+          [at(0), "TEST CHAMBER 05"],
         ];
         hudText.forEach(([t, txt], i) => {
           const span = document.createElement("span");
@@ -1317,14 +1490,14 @@
           span.style.left = "0";
           span.style.whiteSpace = "nowrap";
           $("hud-t1").appendChild(span);
-          const end = i + 1 < hudText.length ? hudText[i + 1][0] : 130;
+          const end = i + 1 < hudText.length ? hudText[i + 1][0] : 129.6;
           span.animate([{ opacity: 0 }, { opacity: 1 }], {
-            delay: ms(t),
+            delay: ms(when(t)),
             duration: 300,
             fill: "both",
           });
           span.animate([{ opacity: 1 }, { opacity: 0 }], {
-            delay: ms(end),
+            delay: ms(when(end)),
             duration: 200,
             fill: "forwards",
           });
@@ -1677,7 +1850,70 @@
         anim("s6-foot", [{ opacity: 0 }, { opacity: 1 }], 147.5, 1.0);
 
         [36.6, 62.0, 90.0].forEach(flashSoft);
+        buildTools();
         buildSubs();
+      }
+
+      function buildTools() {
+        const el = $("s7");
+        el.animate([{ opacity: 0 }, { opacity: 1 }], {
+          delay: ms(TOOLS_START),
+          duration: 600,
+          fill: "both",
+        });
+        el.animate([{ opacity: 1 }, { opacity: 0 }], {
+          delay: ms(TOOLS_START + TOOLS_LEN - 0.6),
+          duration: 600,
+          fill: "forwards",
+        });
+        signIn("s7-sign", at(0.1));
+        anim(
+          "s7-title",
+          [
+            { opacity: 0, transform: "translateY(-20px)" },
+            { opacity: 1, transform: "none" },
+          ],
+          at(1.0),
+          0.8,
+        );
+        const intro = 1.5;
+        [
+          ["s7-cad", "yapCAD"],
+          ["s7-pcb", "Kicadmium"],
+          ["s7-logic", "Visilog"],
+          ["s7-ctrl", "Unlinked"],
+        ].forEach(([id, phrase]) =>
+          anim(
+            id,
+            [
+              { opacity: 0, transform: "translateY(40px) scale(.96)" },
+              { opacity: 1, transform: "none" },
+            ],
+            at(intro + spoken("plugins-intro", phrase) - 0.2),
+            0.7,
+          ),
+        );
+        const complete = intro + VOICE["plugins-intro"] + 2.5;
+        anim(
+          "s7-slide",
+          [
+            { opacity: 0, transform: "scale(1.04)" },
+            { opacity: 1, transform: "none" },
+          ],
+          at(complete + spoken("plugins-complete", "I am the presentation")),
+          0.6,
+        );
+        anim(
+          "s7-stamp",
+          [
+            { opacity: 0, transform: "rotate(-8deg) scale(2.2)" },
+            { opacity: 1, transform: "rotate(-8deg) scale(1)" },
+          ],
+          at(complete + spoken("plugins-complete", "The replacement") + 0.8),
+          0.35,
+          "cubic-bezier(.5,0,.8,.4)",
+        );
+        flashSoft(at(complete + spoken("plugins-complete", "I am the presentation") - 0.1));
       }
 
       function signIn(id, t) {
@@ -1741,7 +1977,7 @@
           if (cur.trim()) groups.push(cur.trim());
           const total = groups.reduce((n, g) => n + g.length, 0);
           const voiced = VOICE[id] - 0.6;
-          let t = start + 0.2;
+          let t = when(start) + 0.2;
           for (const g of groups) {
             const d = voiced * (g.length / total);
             const el = document.createElement("div");
@@ -1796,6 +2032,8 @@
           TEXT[l.id] = l.text;
           if (l.duration_ms) VOICE[l.id] = l.duration_ms / 1000;
         }
+        computeSchedule();
+        window.TOTAL = TOTAL;
         build();
         // Retain finished subtitle animations so seeking backwards and replay
         // restore them as well as the always-filled scene animations.
