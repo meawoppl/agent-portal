@@ -1,140 +1,281 @@
 <!doctype html>
 <html lang="en">
-  <meta charset="utf-8" /><meta
-    name="viewport"
-    content="width=device-width,initial-scale=1"
-  /><title>Aperture · Recorded engineering evidence</title
-  ><style>
-    body {
-      background: #1a1b26;
-      color: #c0caf5;
-      font: 17px/1.65 system-ui;
-      max-width: 850px;
-      margin: auto;
-      padding: 28px;
-    }
-    a {
-      color: #7dcfff;
-    }
-    h1,
-    h2 {
-      color: #e0af68;
-    }
-    video {
-      width: 100%;
-      background: #1a1b26;
-    }
-    code {
-      overflow-wrap: anywhere;
-    }
-    section {
-      border-top: 1px solid #565f89;
-      margin-top: 32px;
-    }
-    small {
-      color: #a9b1d6;
-    }
-  </style>
-  <a href="/aperture">← Return to the observation lounge</a>
-  <h1>The evidence survives the joke.</h1>
-  <p>
-    Actual workbench recordings made for this exhibit on 9 October 2026. These
-    are small demonstration projects, not a completed replacement robot.
-    Loading pauses are trimmed from the board recording; the logic view is
-    cropped for readability. Tool results are unchanged.
-    <a href="results.json">Recorded results (JSON)</a>.
-  </p>
-  <section>
-    <h2>01 · yapCAD: revise the mechanism</h2>
-    <video
-      controls
-      muted
-      playsinline
-      preload="metadata"
-      poster="yapcad.jpg"
-      src="yapcad.mp4"
-    ></video>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Aperture · The evidence survives the joke</title>
+    <style>
+      body {
+        background: #1a1b26;
+        color: #c0caf5;
+        font: 17px/1.65 system-ui;
+        max-width: 960px;
+        margin: auto;
+        padding: 28px;
+      }
+      a {
+        color: #7dcfff;
+      }
+      h1,
+      h2 {
+        color: #e0af68;
+      }
+      video,
+      img {
+        width: 100%;
+        background: #1a1b26;
+      }
+      code {
+        overflow-wrap: anywhere;
+      }
+      section {
+        border-top: 1px solid #565f89;
+        margin-top: 32px;
+      }
+      small {
+        color: #a9b1d6;
+      }
+      .download {
+        display: inline-block;
+        padding: 12px 20px;
+        background: #ff9e64;
+        color: #111214;
+        font-weight: 700;
+        text-decoration: none;
+        margin: 5px 5px 5px 0;
+      }
+      .facts {
+        border-left: 4px solid #7dcfff;
+        padding-left: 18px;
+      }
+    </style>
+  </head>
+  <body>
+    <a href="/aperture">← Return to the observation lounge</a>
+    <h1>The evidence survives the joke.</h1>
     <p>
-      The agent builds a one-piece inspection fixture, orbits it, and rebuilds
-      with a jaw opening of 34 mm instead of 20 mm: enough for a 30 mm specimen
-      with 2 mm clearance on each side. Both recorded meshes have one body,
-      2,332 triangles, and are watertight. It is a fixture, not an actuated
-      gripper. This run uses the mesh backend.
+      Version 4 pairs actual software views, recorded physical tests, simulation
+      results and agent-authored geometry. The human meat proxy is fictional
+      office satire. The distinctions below are real.
     </p>
     <p>
-      <a href="sources/gripper.dsl">Parametric DSL source</a> · Build command:
-      <code
-        >yapcad build --file gripper.dsl --command GRIPPER --params
-        '{"jaw_gap":34.0}'</code
-      >.
+      Mission context:
+      <a href="https://www.cosmicfrontier.org/">Cosmic Frontier Labs</a> builds
+      scientific tools and iterates to broaden access to exploration. The film
+      paraphrases that public mission; it does not quote a separate formal
+      charter.
     </p>
-  </section>
-  <section>
-    <h2>02 · Visilog: inspect the logic</h2>
-    <video
-      controls
-      muted
-      playsinline
-      preload="metadata"
-      poster="visilog.jpg"
-      src="visilog.mp4"
-    ></video>
-    <p>
-      The actual counter testbench steps through clock edges and stops on a
-      count breakpoint before running to completion. The native run finishes at
-      500 ns with zero assertion failures. Waveform values use the viewer's
-      display radix. Functional simulation is not timing sign-off.
-    </p>
-    <p>
-      <a href="sources/counter.v">Counter source</a> ·
-      <a href="sources/counter_tb.v">Testbench source</a>.
-    </p>
-  </section>
-  <section>
-    <h2>03 · Kicadmium: route a real board</h2>
-    <video
-      controls
-      muted
-      playsinline
-      preload="metadata"
-      poster="pcb.jpg"
-      src="pcb.mp4"
-    ></video>
-    <p>
-      A public three-component LED fixture goes from placed components to native
-      Kicadmium routing, then a real KiCad 9.0.9 GLB export in the workbench's
-      3D viewer. The router produces 13 segments, connects 3/3 nets and uses no
-      vias. The camera motion is a recording of the actual viewer.
-    </p>
-    <p>
-      The first attempt with automatic copper pouring produced a zone KiCad 9
-      could not load. The agent reran without automatic pouring. The recorded
-      final board loads and exports successfully. Native DRC reports no
-      unconnected items and three footprint-library mismatch warnings. Schematic
-      parity and ERC are unavailable for this board-only fixture. Quality
-      inspection reports zero errors, three warnings and two informational
-      findings. These results do not establish fabrication readiness.
-    </p>
-    <p>
-      <a href="sources/led-placed.kicad_pcb">Placed board</a> ·
-      <a href="sources/led-routed.kicad_pcb">Routed board</a> ·
-      <a href="results.json">Check details</a>.
-    </p>
-  </section>
-  <section>
-    <h2>Provenance</h2>
-    <p>
-      The fixture and Verilog example come from
-      <a
-        href="https://github.com/meawoppl/agent-portal-plugins/tree/04456e4ff259f006edc1bb2aeaa65d96d9e31f28"
-        >agent-portal-plugins, revision 04456e4</a
-      >; the yapCAD source was authored for this exhibit. The film's Unlinked
-      panel is explicitly a concept illustration. The tools, their limitations,
-      and the refinement history are real. The retirement paperwork is satire.
-    </p>
-    <small
-      >Aperture Science Agent Portal Enrichment Center · Human involvement
-      remains under review.</small
-    >
-  </section>
+    <section>
+      <h2>02 · Remote test bench: measured mirror motion</h2>
+      <video
+        controls
+        muted
+        playsinline
+        preload="metadata"
+        poster="bench.jpg"
+        src="bench.mp4"
+      ></video>
+      <p>
+        Existing v4.1.0 release-candidate tests from 9 October 2026: a
+        CF-00020-01 steering-mirror driver board through its Nucleo fixture on
+        <code>cfl-test-bench</code>. This is a replay of recorded physical data,
+        not a live feed or new hardware actuation.
+      </p>
+      <p class="facts">
+        Commanded circle radius: 800 µrad. Nominal telemetry: 2 kHz. RMS
+        tracking error across the recorded analysis window: 13.732 µrad;
+        on-circle-only RMS: 16.472 µrad. The two windows are different
+        measurements. The B5 calibration flash commit has a 1000.5 ms board-time
+        telemetry gap. One bench board; these results do not establish flight
+        qualification. The recorded fixture flash used the health-gate override
+        documented in the source provenance. Replay rates are labelled on the
+        protocol sequence.
+      </p>
+      <p>
+        <a href="sources/bench-results.json"
+          >Computed metrics and selection counts</a
+        >
+        · <a href="bench-evidence.zip">Raw CSVs, logs and source hashes</a>
+      </p>
+    </section>
+    <section>
+      <h2>04 · Mechanical: the severance package</h2>
+      <video
+        controls
+        muted
+        playsinline
+        preload="metadata"
+        poster="cake.jpg"
+        src="cake.mp4"
+      ></video>
+      <p>
+        Scratch authored this cake in yapCAD and retained the actual initial,
+        revised, exploded and printable runs. Inspection found inadequate berry
+        filling: 0.8 → 6 mm. Frosting increased from 3 → 7 mm. The video is the
+        native pane, including parameter edits and matching model geometry.
+      </p>
+      <p class="facts">
+        Printable STL: 108 × 108 × 60 mm, one watertight body, consistent
+        winding, positive volume 184,967.64 mm³, flat underside at z = 0. This
+        is the assembled decorative print version; the exploded display geometry
+        is separate. Mesh checks passed; no physical print trial has been
+        performed.
+      </p>
+      <a class="download" href="cake.stl" download="aperture-cake.stl"
+        >Print your cake · STL</a
+      ><a class="download" href="cake-source.zip" download
+        >Editable source + retained evidence</a
+      >
+      <p>
+        Available in your preferred thermoplastic. We make no claims regarding
+        flavour. <a href="sources/cake.dsl">DSL source</a> ·
+        <a href="sources/cake-print-validation.json"
+          >Independent mesh validation</a
+        >.
+      </p>
+    </section>
+    <section>
+      <h2>05 · Electrical: actual schematics, copper and boards</h2>
+      <video
+        controls
+        muted
+        playsinline
+        preload="metadata"
+        poster="boards.jpg"
+        src="boards.mp4"
+      ></video>
+      <p>
+        The Kicadmium workbench opens real bp-test designs with KiCad 10.0.6:
+        the ESP32-C6 + iCE40 M.2 module v2 (46 footprints) and Tesla-coil
+        controller (326 footprints). The sequence shows native schematic and PCB
+        views, an earlier M.2 routing snapshot, and populated 3D exports. Camera
+        movement is accelerated for the film; geometry and check results are
+        unchanged.
+      </p>
+      <p class="facts">
+        M.2 initial revision <code>178e51d</code> → final
+        <code>bb640bd43f68007ceb8ea398f57f6e4a920166df</code>; Tesla board
+        revision <code>663fc49</code>. Export checks report zero ERC/DRC
+        violations, unconnected items and schematic-parity findings. The final
+        M.2 quality check still has 31 errors in categories documented by its
+        design contract. These are development designs, not fabrication or
+        flight approval. The M.2 card uses a custom pinout and is not PCIe/NVMe
+        compatible.
+      </p>
+      <p>
+        <a href="m2-board-source.tar.gz"
+          >M.2 schematic, PCB, project and local models</a
+        >
+        · <a href="sources/board-provenance.txt">Export provenance</a> ·
+        <a href="sources/KiCad-LICENSE.md">KiCad model licence</a>. Manufacturer
+        models retain their owners' terms; see the model-source notes inside the
+        archive. The exported revision was local to bp-test when captured and is
+        not represented as a published GitHub revision.
+      </p>
+    </section>
+    <section>
+      <h2>06 · Logic: clock edges and waveforms</h2>
+      <video
+        controls
+        muted
+        playsinline
+        preload="metadata"
+        poster="visilog.jpg"
+        src="visilog.mp4"
+      ></video>
+      <p>
+        The actual Visilog counter testbench shows live values, edge stepping, a
+        breakpoint and <code>$finish</code>. The native run completes at 500 ns
+        with zero assertion failures. Values are hexadecimal. This is simulation
+        evidence, not timing sign-off.
+      </p>
+      <p>
+        <a href="sources/counter.v">Counter RTL</a> ·
+        <a href="sources/counter_tb.v">Testbench</a>
+      </p>
+    </section>
+    <section>
+      <h2>07 · Control: keep the failures</h2>
+      <video
+        controls
+        muted
+        playsinline
+        preload="metadata"
+        poster="controls.jpg"
+        src="controls.mp4"
+      ></video>
+      <p>
+        Unlinked opens and simulates JLG's own SI single-axis model. The native
+        diagram and payload-position trace are followed by actual JLG review
+        figures. Unlinked supports a subset of Simulink; a successful run is not
+        a claim of MathWorks numerical equivalence.
+      </p>
+      <p class="facts">
+        The numerical-integration correction compares the same single-D270
+        conductor path, field and −0.5 mm displacement: transverse force changes
+        from +0.62948 to +0.003109 N/A with refined quadrature. This corrects a
+        calculation; it does not demonstrate a physically improved actuator. The
+        blend sweep includes failed settings. All JLG traces and force plots are
+        simulated or analytic, not measured telescope performance.
+      </p>
+      <p>
+        <a href="sources/cdi_single_axis_si.mdl"
+          >Agent-authored reconstruction</a
+        >
+        ·
+        <a href="sources/control-verification.json"
+          >Equation and step-halving verification</a
+        >
+        ·
+        <a href="https://github.com/CosmicFrontierLabs/justletgo/pull/1"
+          >Simulation review notebook</a
+        >
+        ·
+        <a href="https://github.com/CosmicFrontierLabs/justletgo/pull/3"
+          >Hardware design review notebook</a
+        >
+      </p>
+    </section>
+    <section>
+      <h2>08 · Briefing: the presenter is also replaceable</h2>
+      <video
+        controls
+        muted
+        playsinline
+        preload="metadata"
+        poster="briefing.jpg"
+        src="briefing.mp4"
+      ></video>
+      <p>
+        These are rendered pages from the actual agent-authored Just Let Go
+        review deck, not a fictional replacement-product pitch. Its limitations
+        remain visible: simulated/analytic results, an unrouted leg-controller
+        board, and an accelerometer requirement that has not been met.
+      </p>
+      <p>
+        <a href="justletgo-review.pdf">Read the complete 27-page review</a> ·
+        Source snapshot <code>d875d475416b8601b732042f3767462e73a4f9cd</code> in
+        <a href="https://github.com/CosmicFrontierLabs/justletgo">Just Let Go</a
+        >.
+      </p>
+    </section>
+    <section>
+      <h2>How this orientation was made</h2>
+      <p>
+        Claude authored the script, original signs and processed synthetic
+        voice. Codex built the exhibit, opened the tools, captured views and
+        composed the film. Scratch supplied the cake; bp-test supplied board
+        exports and a read-only workbench; the FSM bench agent supplied recorded
+        physical tests; the JLG agents supplied simulation and review evidence.
+        The sessions coordinated through Agent Portal messages and shared
+        previews. The human supplied notes. The notes have been filed.
+      </p>
+      <p>
+        The exhibit's machine transit, invitation and peer-review controls are
+        isolated demonstrations. They do not connect to or change your sessions.
+        Its forwarded-site example is a real local sample app; the cake download
+        is a real STL.
+      </p>
+    </section>
+  </body>
 </html>

@@ -1,0 +1,8 @@
+Source repo: github.com/meawoppl/bp-test (local branch gps-calibrator-routing on cfl-test-bench; this commit is NOT on GitHub)
+Commit: bb640bd43f68007ceb8ea398f57f6e4a920166df
+Commit subject: Move the v2 module to the QFN40 ESP32-C6 with a 16 MB flash
+Exported: 2026-10-09T19:13:13Z with git archive (committed files only)
+Opens in: KiCad 10.0 (files written by KiCad 10.0.x, pcb format 20260206); checked with kicad-cli 10.0.6
+Checks on this export: ERC 0, DRC with schematic parity 0 violations / 0 unconnected / 0 parity; every 3D model path resolves (${KIPRJMOD}/3dmodels)
+Native project manifest: .kicad-pcb.json at the archive root (Kicadmium project list)
+3D models: see 3dmodels/ and the board README / MODEL-SOURCES notes. KiCad packages3D models are CC-BY-SA 4.0 with the KiCad library exception; manufacturer models keep their owners' terms.

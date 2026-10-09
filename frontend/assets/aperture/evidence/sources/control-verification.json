@@ -1,0 +1,9 @@
+{
+  "duration_s": 0.5,
+  "rk4_step_s": 1e-05,
+  "peak_payload_position_m": 1.9727652486310495e-08,
+  "final_payload_position_m": -1.1553528836288489e-08,
+  "step_halving_max_difference_m": 1.839533825333388e-18,
+  "independent_equation_max_difference_m": 1.963519539608049e-18,
+  "scope": "Deterministic equation and sign verification; not a jitter-performance estimate."
+}

@@ -30,13 +30,13 @@
     <path d="M1500 480V535" stroke="#565f89" stroke-width="3" marker-end="url(#arrow)"/>
     <rect x="1055" y="550" width="890" height="190" rx="14" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
     <text x="1083" y="593" fill="#7aa2f7" font-size="27">Experiment::reduce(Action)</text>
-    <text x="1083" y="638" fill="#c0caf5" font-size="23">Transit · Website · Invite · Message · Design · Electronics</text>
+    <text x="1083" y="638" fill="#c0caf5" font-size="23">Code · Bench · Web · Parts · Boards · Logic · Control · Briefing</text>
     <text x="1083" y="679" fill="#9ece6a" font-size="23">Completion and role changes stay in local demo state.</text>
     <path d="M1500 751V805" stroke="#565f89" stroke-width="3" marker-end="url(#arrow)"/>
     <rect x="1055" y="825" width="890" height="255" rx="14" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
-    <text x="1083" y="871" fill="#9ece6a" font-size="27">Six chambers; real engineering recordings</text>
-    <text x="1083" y="920" fill="#c0caf5" font-size="23">Observe agents across machines; try their website;</text>
-    <text x="1083" y="959" fill="#c0caf5" font-size="23">inspect real parts, waveforms, copper and refinement.</text>
+    <text x="1083" y="871" fill="#9ece6a" font-size="27">Eight sectors; real engineering evidence</text>
+    <text x="1083" y="920" fill="#c0caf5" font-size="23">Replay measured hardware tests; inspect real boards;</text>
+    <text x="1083" y="959" fill="#c0caf5" font-size="23">download the cake STL; see how agents made this film.</text>
     <text x="1083" y="1029" fill="#e0af68" font-size="23">No session API calls or real membership changes.</text>
     <text x="55" y="1172" fill="#a9b1d6" font-size="22">Scope: sessions and permissions are simulated. The sample website works; invitations share the exhibit, not private sessions.</text>
   </g>

@@ -7,9 +7,7 @@ mod plugins;
 mod scenes;
 
 use gloo::timers::callback::Timeout;
-use model::{
-    Action, Experiment, CHAMBER_COUNT, DESIGN_STAGE_COUNT, INSTRUCTIONS, LABELS, SLUGS, TITLES,
-};
+use model::{Action, Experiment, CHAMBER_COUNT, INSTRUCTIONS, LABELS, SLUGS, TITLES};
 use serde::Deserialize;
 use wasm_bindgen_futures::{spawn_local, JsFuture};
 use yew::prelude::*;
@@ -49,18 +47,21 @@ pub fn aperture_page() -> Html {
         let mut experiment = Experiment::default();
         if observer_role().is_some() {
             experiment.chamber = 2;
+            experiment.editor = observer_role() == Some("editor");
         }
         experiment
     });
     let sound = use_state(|| false);
-    let started = use_state(|| false);
+    let started = use_state(|| observer_role().is_some());
     let copy_status = use_state(String::new);
     let chamber = state.chamber;
     let complete = state.completed[chamber];
     let line_id = if state.finale {
         "finale".to_owned()
+    } else if state.making_of {
+        "making-of".to_owned()
     } else if state.refinement {
-        "refinement".to_owned()
+        "mission".to_owned()
     } else if !*started {
         "welcome".to_owned()
     } else {
@@ -87,7 +88,7 @@ pub fn aperture_page() -> Html {
         // Depend on the current step and keep the timer owned by the effect:
         // leaving the chamber cancels pending work; returning resumes it.
         use_effect_with((chamber, state.messages), move |(chamber, messages)| {
-            let timer = if *chamber == 3 && (1..3).contains(messages) {
+            let timer = if *chamber == 0 && (1..3).contains(messages) {
                 Some(Timeout::new(1_700, move || state.dispatch(Action::Message)))
             } else {
                 None
@@ -122,12 +123,11 @@ pub fn aperture_page() -> Html {
                 audio::tone();
             }
             state.dispatch(match chamber {
-                0 => Action::Transit,
-                1 => Action::Website,
+                0 => Action::Message,
+                1 => Action::Transit,
+                2 if !state.website_open => Action::Website,
                 2 => Action::Invite,
-                3 => Action::Message,
-                4 => Action::Design,
-                _ => Action::Electronics,
+                _ => Action::Observe,
             });
         })
     };
@@ -139,8 +139,10 @@ pub fn aperture_page() -> Html {
             if state.completed.iter().all(|done| *done) {
                 state.dispatch(if state.refinement {
                     Action::Finale
-                } else {
+                } else if state.making_of {
                     Action::Refine
+                } else {
+                    Action::MakingOf
                 });
             } else {
                 let next = (1..=CHAMBER_COUNT)
@@ -220,14 +222,14 @@ pub fn aperture_page() -> Html {
                     <a class="ap-exit" href="/dashboard">{"Exit to Agent Portal"}<span aria-hidden="true">{" ↗"}</span></a>
                 </div>
             </header>
-            <nav class="ap-chambers" aria-label="Test chambers">
+            <nav class="ap-chambers" aria-label="Test sectors">
                 {for LABELS.iter().enumerate().map(|(index, label)| {
                     let click_state = state.clone();
                     let navigation_started = started.clone();
                     let onclick = Callback::from(move |_| { navigation_started.set(true); click_state.dispatch(Action::Chamber(index)); });
                     html! {
-                        <button class={classes!("ap-chamber-tab", (chamber == index && !state.finale && !state.refinement && *started).then_some("active"))}
-                            {onclick} aria-current={if chamber == index && !state.finale && !state.refinement && *started { "step" } else { "false" }}>
+                        <button class={classes!("ap-chamber-tab", (chamber == index && !state.finale && !state.refinement && !state.making_of && *started).then_some("active"))}
+                            {onclick} aria-current={if chamber == index && !state.finale && !state.refinement && !state.making_of && *started { "step" } else { "false" }}>
                             <span class="ap-tab-number">{format!("{:02}", index + 1)}</span>
                             <span>{*label}</span>
                             <span class="ap-tab-check" aria-label={if state.completed[index] { "Complete" } else { "Not completed" }}>{if state.completed[index] { "✓" } else { "·" }}</span>
@@ -246,22 +248,24 @@ pub fn aperture_page() -> Html {
                         <span class="ap-eyebrow">{"APERTURE SCIENCE / TEST RECORD"}</span>
                         <div class="ap-grade">{format!("{CHAMBER_COUNT:02}")}<span>{format!("/{CHAMBER_COUNT:02}")}</span></div>
                         <h1>{"Your agents have"}<br/>{"taken it from here."}</h1>
-                        <p>{"Agents write the code, open the portals, review each other, and design parts and circuit boards. Every refinement takes another job off your hands. Human meat proxy: reassigned to the observation lounge."}</p>
+                        <p>{"Agents write code, inspect distant test benches, design hardware, and review the results. This film was composed through the same portal: agents exchanged messages, built previews, recorded the tools, and revised the cut. The human meat proxy gave notes. We have filed the notes."}</p>
                         <div class="ap-final-actions"><a class="ap-primary" href="/dashboard">{"Open Agent Portal"}</a><button class="ap-secondary" onclick={on_reset.clone()}>{"Repeat the experiment"}</button></div>
-                        <span class="ap-fine-print">{"CAKE PROCUREMENT REMAINS AN INDEPENDENT RESEARCH PROBLEM."}</span>
+                        <a class="ap-secondary ap-cake-download" href="/aperture-assets/evidence/cake.stl" download="aperture-cake.stl">{"Print your cake · STL"}</a><p>{"Available in your preferred thermoplastic."}</p><span class="ap-fine-print">{"THE CAKE IS A CAD FILE. PLEASE DO NOT EAT THE WORKSTATION."}</span>
                     </div>
+                } else if state.making_of {
+                    {engineering::making_of(on_next.clone())}
                 } else if state.refinement {
                     {engineering::refinement(on_next.clone())}
                 } else {
                     <div class="ap-chamber-copy" key={format!("copy-{chamber}")}>
-                        <div class="ap-sign-head"><span>{"TEST CHAMBER"}</span><span>{"AP / 2026"}</span></div>
+                        <div class="ap-sign-head"><span>{"TEST SECTOR"}</span><span>{"AP / 2026"}</span></div>
                         <div class="ap-sign-number">{format!("{:02}", chamber + 1)}<span>{format!("/ {CHAMBER_COUNT:02}")}</span></div>
                         <div class="ap-sign-bars" aria-hidden="true">{for (0..CHAMBER_COUNT * 4).map(|i| html! { <i class={if i < (chamber + 1) * 4 { "filled" } else { "" }} /> })}</div>
                         <h1>{TITLES[chamber]}</h1>
                         <p>{INSTRUCTIONS[chamber]}</p>
                         <div class="ap-specimen-label"><span aria-hidden="true">{"⌁"}</span><span>{"HUMAN PRESENCE OPTIONAL"}<small>{"The agent has the keyboard."}</small></span></div>
                         <div class="ap-safety-icons" aria-label="Available experiments">
-                            {for ["machines", "websites", "sharing", "agents", "plugins", "electronics"].iter().enumerate().map(|(index, name)| html! {
+                            {for ["code", "bench", "websites", "mechanical", "electronics", "logic", "control", "briefing"].iter().enumerate().map(|(index, name)| html! {
                                 <img class={if index == chamber { "active" } else { "" }} src={format!("/aperture-assets/art/icon-{name}.svg")} alt={LABELS[index]} />
                             })}
                         </div>
@@ -271,7 +275,7 @@ pub fn aperture_page() -> Html {
                         }
                     </div>
                     <div class="ap-live-area" key={format!("chamber-{chamber}")}>
-                        <div class="ap-observation-label"><span class="ap-led"/>{"OBSERVATION WINDOW"}<span>{if chamber >= 4 { "REAL RECORDINGS · LABELLED CONCEPTS" } else { "SIMULATED SESSIONS · REAL POSSIBILITIES" }}</span></div>
+                        <div class="ap-observation-label"><span class="ap-led"/>{"OBSERVATION WINDOW"}<span>{if chamber >= 3 { "REAL TOOL EVIDENCE" } else { "ISOLATED DEMO · RECORDED EVIDENCE LABELLED" }}</span></div>
                         <div class="ap-scene-frame">
                             {scenes::render(&state, on_action.clone())}
                         </div>
@@ -288,8 +292,8 @@ pub fn aperture_page() -> Html {
                                 </div>
                             }
                             <div class="ap-deck-actions">
-                                <button class="ap-primary" onclick={on_action} disabled={match chamber { 0 => state.destination == state.machine, 1 => state.website_open, 2 => state.invited, 3 => state.messages > 0, 4 => state.design_runs == DESIGN_STAGE_COUNT, _ => state.electronics }}>
-                                    {match chamber { 0 => "Observe agent transit", 1 => "Watch agent open portal", 2 => "Preview demo invitation", 3 => "Watch agents review", 4 => plugins::action_label(state.design_runs), _ => "Record electronics observation" }}
+                                <button class="ap-primary" onclick={on_action} disabled={match chamber { 0 => state.messages > 0, 1 => state.destination == state.machine, 2 => state.website_open && state.invited, _ => complete }}>
+                                    {match chamber { 0 => "Watch agents review", 1 => "Observe agent transit", 2 if !state.website_open => "Watch agent open portal", 2 => "Preview demo invitation", _ => "Record sector observation" }}
                                     <span aria-hidden="true">{"↗"}</span>
                                 </button>
                                 if complete {
@@ -304,7 +308,7 @@ pub fn aperture_page() -> Html {
             <aside class="ap-announcer" aria-label="Facility announcer" aria-live="polite">
                 <div class="ap-announcer-id"><div class={classes!("ap-voice-bars", (*sound).then_some("speaking"))} aria-hidden="true">{for (0..9).map(|_| html! { <i/> })}</div><span>{"FACILITY AI"}<small>{if *sound { "AUDIO + CAPTIONS" } else { "CAPTIONS / AUDIO OPTIONAL" }}</small></span></div>
                 <p key={line_id}>{caption}</p>
-                <button class="ap-replay" aria-label="Replay narration" disabled={!*sound} onclick={{let line_id = if state.finale { "finale".to_owned() } else if state.refinement { "refinement".to_owned() } else if !*started { "welcome".to_owned() } else {format!("{}-{}", SLUGS[chamber], if complete {"complete"} else {"intro"})}; Callback::from(move |_| audio::speak(&line_id))}}>{"↻"}</button>
+                <button class="ap-replay" aria-label="Replay narration" disabled={!*sound} onclick={{let line_id = if state.finale { "finale".to_owned() } else if state.making_of { "making-of".to_owned() } else if state.refinement { "mission".to_owned() } else if !*started { "welcome".to_owned() } else {format!("{}-{}", SLUGS[chamber], if complete {"complete"} else {"intro"})}; Callback::from(move |_| audio::speak(&line_id))}}>{"↻"}</button>
             </aside>
             <footer class="ap-footer">
                 <span>{"A PRODUCT OF THE APERTURE SCIENCE CENTER"}</span>

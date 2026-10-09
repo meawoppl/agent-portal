@@ -1,21 +1,21 @@
-// Browser checks for the HTML orientation film, including static-host seeking.
+// Exercise the actual audio clock, bidirectional seeking and every evidence scene.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const root = process.env.DEMO_ROOT || "/tmp/readme-demo";
+const root = process.env.DEMO_ROOT || "/tmp/pp";
 const base = process.env.DEMO_URL || "http://localhost:8792";
-const shots = path.join(root, "aperture-qa");
+const shots = process.env.DEMO_SHOTS || path.join(root, "aperture-qa");
 fs.mkdirSync(shots, { recursive: true });
-const p = require(path.join(root, "node_modules/puppeteer-core"));
+const puppeteer = require(path.join(root, "node_modules/puppeteer-core"));
 (async () => {
-  const b = await p.launch({
+  const browser = await puppeteer.launch({
     executablePath: "/usr/bin/google-chrome",
     headless: true,
     args: ["--no-sandbox"],
   });
   try {
-    const page = await b.newPage();
-    const errors = [];
+    const page = await browser.newPage(),
+      errors = [];
     page.on("pageerror", (e) => errors.push(e.message));
     page.on("response", (r) => {
       if (r.status() >= 400) errors.push(`${r.status()} ${r.url()}`);
@@ -24,59 +24,68 @@ const p = require(path.join(root, "node_modules/puppeteer-core"));
     await page.goto(base + "/aperture-assets/trailer/index.html", {
       waitUntil: "domcontentloaded",
     });
-    await page.waitForFunction(() => window.ready);
-    assert.equal(await page.$eval("#film-start", (e) => e.hidden), false);
-    await page.screenshot({ path: path.join(shots, "film-start.png") });
-    await page.click("#start-screening");
+    await page.waitForFunction(() => window.ready, { timeout: 60000 });
+    const film = await page.evaluate(() => window.FILM);
+    assert.equal(film.scenes.length, 12);
+    assert.equal(film.cues.length, 20);
+    assert.equal(film.clips.length, 7);
+    assert.equal(await page.$eval("#gate", (e) => e.hidden), false);
+    const length = await page.$eval("audio", (a) => a.duration);
+    assert.ok(
+      Math.abs(length - film.total) < 0.3,
+      "Soundtrack and timeline must agree",
+    );
+    await page.click("#begin");
     await page.waitForFunction(
       () => document.querySelector("audio").currentTime > 0.2,
     );
-    assert.equal(await page.$eval("#film-start", (e) => e.hidden), true);
-    const sharingTime = await page.evaluate(
-      () => when(CUES.find(([id]) => id === "sharing-complete")[1]) + 1,
-    );
-    await page.evaluate((time) => {
-      const a = document.querySelector("audio");
-      a.pause();
-      a.currentTime = time;
-    }, sharingTime);
-    await page.waitForFunction(() =>
-      [...document.querySelectorAll(".sub")].some(
-        (e) =>
-          getComputedStyle(e).opacity > 0.9 &&
-          e.textContent.includes("Your friend"),
-      ),
-    );
-    await page.screenshot({ path: path.join(shots, "film-share.png") });
-    await page.evaluate(
-      () =>
-        (document.querySelector("audio").currentTime =
-          when(CUES.find(([id]) => id === "welcome")[1]) + 1),
-    );
-    await page.waitForFunction(() =>
-      [...document.querySelectorAll(".sub")].some(
-        (e) =>
-          getComputedStyle(e).opacity > 0.9 && e.textContent.includes("Hello"),
-      ),
-    );
-    await page.click("#restart-film");
+    assert.equal(await page.$eval("#gate", (e) => e.hidden), true);
+    await page.click("#play");
+    assert.equal(await page.$eval("audio", (a) => a.paused), true);
+    async function seek(t) {
+      await page.evaluate((t) => {
+        const a = document.querySelector("audio");
+        a.pause();
+        a.currentTime = t;
+        return window.seek(t);
+      }, t);
+      await page.waitForFunction(() =>
+        [...document.querySelectorAll("#hero video")].every(
+          (v) => !v.seeking && v.readyState >= 2 && !v.error,
+        ),
+      );
+    }
+    // Reverse order catches state left behind by later scenes and stale captions.
+    for (const scene of [...film.scenes].reverse()) {
+      const cue = film.cues.find(
+        ([id]) => id === scene.id || id === scene.id + "-intro",
+      );
+      await seek(cue[1] + 1);
+      assert.ok(
+        await page.$eval("#subtitle", (e) => e.textContent.length > 0),
+        scene.id + " captions",
+      );
+      if (scene.sector) {
+        assert.ok(
+          (await page.$eval("#sector-count", (e) => e.textContent)).includes(
+            "/ 08",
+          ),
+        );
+        if (scene.sector.clip) {
+          const clip = film.clips.find((c) => c.scene === scene.id);
+          await seek(clip.start + 8);
+          assert.ok(await page.$eval("#hero video", (v) => v.currentTime > 1));
+        }
+      }
+      await page.screenshot({ path: path.join(shots, `film-${scene.id}.png`) });
+    }
+    await page.click("#restart");
     await page.waitForFunction(() => {
       const a = document.querySelector("audio");
       return !a.paused && a.currentTime < 2;
     });
     await page.setViewport({ width: 390, height: 844 });
-    await page.evaluate((time) => {
-      const a = document.querySelector("audio");
-      a.pause();
-      a.currentTime = time;
-    }, sharingTime);
-    await page.waitForFunction(() =>
-      [...document.querySelectorAll(".sub")].some(
-        (e) =>
-          getComputedStyle(e).opacity > 0.9 &&
-          e.textContent.includes("Your friend"),
-      ),
-    );
+    await seek(film.cues.find(([id]) => id === "s4-complete")[1] + 2);
     assert.equal(
       await page.$eval("#stage", (e) => {
         const r = e.getBoundingClientRect();
@@ -84,79 +93,41 @@ const p = require(path.join(root, "node_modules/puppeteer-core"));
           r.left >= -0.5 &&
           r.right <= innerWidth + 0.5 &&
           r.top >= 0 &&
-          r.bottom <= innerHeight - 75
+          r.bottom <= innerHeight - 50
         );
       }),
       true,
     );
-    await page.screenshot({ path: path.join(shots, "film-mobile.png") });
     assert.equal(
       await page.evaluate(
         () => document.documentElement.scrollWidth > innerWidth,
       ),
       false,
     );
-    // Check the new engineering sequence at its authored cue, not a fixed
-    // second that silently points to a different scene after narration edits.
-    const pluginsTime = await page.evaluate(
-      () => when(CUES.find(([id]) => id === "plugins-complete")[1]) + 1,
+    assert.equal(
+      await page.$eval("#mobile-caption", (e) => getComputedStyle(e).fontSize),
+      "24px",
     );
-    await page.evaluate(
-      (time) => (document.querySelector("audio").currentTime = time),
-      pluginsTime,
+    assert.match(
+      await page.$eval("#mobile-provenance", (e) => e.textContent),
+      /PRINT VARIANT/,
     );
-    await page.waitForFunction(() =>
-      [...document.querySelectorAll(".sub")].some(
-        (e) =>
-          getComputedStyle(e).opacity > 0.9 &&
-          /Every design/.test(e.textContent),
-      ),
+    assert.ok(
+      await page.$eval("#mobile-caption", (e) => e.textContent.length > 0),
     );
-    await page.screenshot({ path: path.join(shots, "film-plugins.png") });
-    for (const [id, phrase, clip] of [
-      ["electronics-intro", "Chamber six", "clip-pcb"],
-      ["refinement", "None of these tools", "refine-yapcad"],
-    ]) {
-      const t = await page.evaluate(
-        (id) => when(CUES.find(([key]) => key === id)[1]),
-        id,
-      );
-      await page.evaluate((t) => {
-        const a = document.querySelector("audio");
-        a.pause();
-        a.currentTime = t + 1;
-      }, t);
-      await page.waitForFunction(
-        (phrase) =>
-          [...document.querySelectorAll(".sub")].some(
-            (e) =>
-              getComputedStyle(e).opacity > 0.9 &&
-              e.textContent.includes(phrase),
-          ),
-        {},
-        phrase,
-      );
-      await page.evaluate((t) => {
-        document.querySelector("audio").currentTime = t + 8;
-      }, t);
-      await page.waitForFunction(
-        (id) => document.getElementById(id).currentTime > 2,
-        {},
-        clip,
-      );
-      await page.screenshot({ path: path.join(shots, `film-${id}.png`) });
-    }
-    await page.waitForFunction(() =>
-      [...document.querySelectorAll("video")].every(
-        (v) => !v.seeking && v.readyState >= 2 && !v.error,
-      ),
-    );
+    await page.screenshot({ path: path.join(shots, "film-mobile.png") });
+    const stl = await page.evaluate(async () => {
+      const r = await fetch("../evidence/cake.stl");
+      return { status: r.status, bytes: (await r.arrayBuffer()).byteLength };
+    });
+    assert.equal(stl.status, 200);
+    assert.ok(stl.bytes > 100000);
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: film start, actual audio, pause/seek, backwards captions, restart, mobile fit, mechanism/electronics/refinement sequences, real video seeking, all assets load",
+      "PASS: 8 sectors, 20 cues, matching audio length, actual playback, pause, reverse seeking/captions, all seven real recordings, restart, mobile fit, STL download and no asset/page errors",
     );
   } finally {
-    await b.close();
+    await browser.close();
   }
 })().catch((e) => {
   console.error(e);

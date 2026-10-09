@@ -2,12 +2,12 @@
 
 `/aperture` is a public, narrated, interactive introduction to Agent Portal. It
 uses the normal Yew frontend and needs no backend API, login, or agent processes.
-A code-generation prologue introduces six chambers that demonstrate agents working across machines, opening their own
-website tunnels, collaborators observing with owner-granted access, direct agent
-review, a four-part mechanism/logic/control/briefing series, and real electronics workbench recordings. A refinement conclusion ties tool improvements to the retirement narrative. The narrator is an agent conducting
-a fictional “human meat proxy” retirement program. Operational copy assigns
-setup, forwarding, and message delivery to agents rather than asking the human
-to act as a terminal or message courier.
+Eight sectors progress from code generation to remote test benches, rich web
+previews, mechanical CAD, electrical design, logic, controls and engineering
+briefings. The narrator is the agent composing the film from inside Portal.
+Making-of, exploration mission and final reassignment panels close the story.
+The fictional “human meat proxy” retirement program remains the running joke;
+setup, forwarding and inter-agent messages are the agents' work.
 
 All machine connections, memberships, and agent messages are explicitly labelled
 simulations. The companion-calibration website is a real interactive, sandboxed
@@ -54,10 +54,10 @@ keyboard controls, touch, and sound disabled.
   navigation, completion, role changes, and reset.
 - `frontend/src/pages/aperture/mod.rs`: public route, chamber navigation,
   captions, invitations, audio controls, and cancellable collaboration timers.
-- `frontend/src/pages/aperture/scenes.rs`: the original four interactive observation windows.
-- `frontend/src/pages/aperture/plugins.rs`: four plugin departments with real yapCAD/Visilog recordings and labelled concepts,
+- `frontend/src/pages/aperture/scenes.rs`: review, transit and web/sharing observations in the first three sectors.
+- `frontend/src/pages/aperture/plugins.rs`: five separate engineering sectors with real recorded evidence,
   with source links and capability boundaries.
-- `frontend/src/pages/aperture/engineering.rs`: software origin, actual tool video panels, electronics and refinement conclusion.
+- `frontend/src/pages/aperture/engineering.rs`: software origin, recorded tool panels, making-of and exploration conclusion.
 - `frontend/assets/aperture/evidence/`: compact workbench recordings, sources, results and a browsable provenance page.
 - `frontend/src/pages/aperture/audio.rs`: one opt-in narration channel and a
   synthesized transit sound. Audio failure never prevents using the exhibit.
@@ -92,67 +92,79 @@ DEMO_ROOT=/tmp/readme-demo DEMO_URL=http://localhost:8792 \
   node docs/media/capture/check-aperture-film.js
 ```
 
-It drives the code prologue, all six experiments, four plugin departments and refinement, interacts with the real sample iframe, opens an
+It drives the code prologue, all eight sectors, making-of and mission, interacts with the real sample iframe, opens an
 observer invitation, changes roles, completes and resets the exhibit, checks
 five viewport widths, reduced motion, audio cancellation, clipboard copying and
 its permission-denied fallback, and fails on browser errors. The film check also
 verifies actual playback, seeking backwards with captions, replay, mobile stage
-bounds, and asset loading. Screenshots
+bounds, full-size portrait captions/provenance, and asset loading. Screenshots
 are written under `$DEMO_ROOT/aperture-qa/`. It expects Chrome at
 `/usr/bin/google-chrome`, like the other capture scripts.
 
-## Plugin replacement series
+## Eight sectors and evidence
 
-The fifth chamber combines actual yapCAD and Visilog workbench recordings with labelled Unlinked and presentation concepts. The sixth dedicates a full sequence to a real LED board. No plugin executes in the public viewer. The coverage is:
+The source for the exploration motivation is the [public Cosmic Frontier Labs
+mission](https://www.cosmicfrontier.org/); no separate formal charter is quoted.
+The complete evidence page is `/aperture-assets/evidence/index.html`.
 
-1. **yapCAD:** parametric gripper geometry, retained builds, contextual feedback,
-   revisions, and supported exports. Analytic STEP needs the optional BREP tier.
-2. **Kicadmium:** KiCad board review, checks, and fabrication exports; requires
-   KiCad and distinguishes layout lint from native ERC/DRC.
-3. **Visilog:** Verilog hierarchy, values, waveforms, stepping and breakpoints;
-   the project test runner determines pass/fail, not the illustration.
-4. **Unlinked:** model diagrams and the supported simulation subset; unsupported
-   models do not silently become validated designs.
-5. **Engineering Presentations:** repository-backed briefings, reproducible
-   figures, and feedback-driven revisions. This is where the agent narrator
-   realizes that presenters are also replaceable.
+1. **Code generation:** agent-written software and peer review. The review
+   exchange is illustrative; it never merges a real PR.
+2. **Remote test bench:** recorded CF-00020-01/Nucleo v4.1.0 tests supplied by
+   the FSM bench agent. Physical 800 µrad circle, nominal 2 kHz telemetry;
+   13.732 µrad RMS across the analysis window, 16.472 µrad on-circle only.
+   No new hardware actuation for the film; single-board results.
+3. **Web proxy:** real interactive companion app, including actual cake render;
+   forwarding and invitations are explicitly isolated demo state.
+4. **yapCAD:** original cake DSL and native retained runs, filling 0.8→6 mm,
+   frosting 3→7 mm. Downloadable assembled STL is 108×108×60 mm, watertight,
+   consistently oriented, one body, 184,967.64 mm³ with a flat z=0 base.
+   Geometry validation does not mean a physical print trial was performed.
+5. **Kicadmium:** actual bp-test M.2 schematic/PCB and Tesla controller views.
+   M.2 `178e51d`→`bb640bd43f68007ceb8ea398f57f6e4a920166df`;
+   Tesla board `663fc49`. KiCad 10.0.6 export checks pass ERC/DRC/parity,
+   but the final M.2 quality check retains 31 contract-documented errors.
+   These are development designs, not fabrication approval. Native model
+   licences and manufacturer provenance travel with the source archive.
+6. **Visilog:** real counter bench, breakpoint, waves and `$finish`, independently
+   checked at 500 ns with zero assertion failures; not timing sign-off.
+7. **Unlinked/JLG:** actual own-source SI reconstruction and native simulation,
+   then review figures showing a quadrature correction and failed sweep cases.
+   These are analytic/simulated results, not hardware measurements. Unlinked's
+   supported subset is not a MathWorks-equivalence claim. Proprietary vendor
+   source files are not included in the exhibit.
+8. **Engineering presentations:** real 27-page JLG engineering deck, including
+   risk and provenance pages. Its unrouted board and unmet accelerometer
+   requirement are retained, not edited into a success claim.
 
-The capability review is grounded in the plugin repository at
-[`04456e4`](https://github.com/meawoppl/agent-portal-plugins/tree/04456e4ff259f006edc1bb2aeaa65d96d9e31f28):
-the four engineering plugin READMEs and the `engineering-presentations` manifest.
-Each exhibit department links to its reviewed source. No new plugin is installed
-or executed by opening the public exhibit.
+JLG snapshot: `d875d475416b8601b732042f3767462e73a4f9cd`.
+Plugin capability snapshot: `04456e4ff259f006edc1bb2aeaa65d96d9e31f28`.
+Opening the public exhibit runs no engineering tool and accesses no real session.
 
-## Recorded engineering evidence
+## Film production and incremental rendering
 
-The public evidence page is `/aperture-assets/evidence/index.html`. Source inputs,
-compact MP4 recordings, poster images and `results.json` are shipped with the
-frontend so both the exhibit and orientation film use the same evidence.
+`trailer/index.html`, `film.css` and `film.js` implement one full film. The browser
+builds `window.FILM` from the twenty narration lines, with scene boundaries,
+caption cues and evidence placements. Voice and video are preloaded as Blobs so
+seeking works on static hosts without byte-range support. Capture mode exposes
+`window.seek(t)`; `?capture&external-clips` omits media decoding so original
+masters can be composited after the deterministic browser render.
 
-- **yapCAD:** an agent-authored one-piece inspection fixture, revised from a
-  20 mm opening to 34 mm (30 mm specimen + 2 mm per side). The actual pane
-  rebuilds the geometry. Both meshes are watertight with one body and 2,332
-  triangles. This is not an actuated gripper or an analytic STEP demonstration.
-- **Visilog:** the repository's counter example, real clock stepping, a count
-  breakpoint, live waveforms, then `$finish`. The separate native run completes
-  at 500 ns with zero assertion failures. The viewer displays hexadecimal values.
-- **Kicadmium:** `kct/tests/fixtures/router/simple_led.kicad_pcb`, copied into
-  a dedicated demo project. Native `kct route --lint-gate error --no-auto-pour`
-  connects three nets with thirteen segments and no vias. The actual workbench
-  then displays a KiCad 9.0.9 GLB export. Automatic pouring on the first attempt
-  generated an incompatible zone, so the agent reran without it. The final
-  board loads successfully; DRC still reports three footprint-library warnings,
-  and schematic parity/ ERC are unavailable for this board-only fixture.
-  Quality has zero errors, three warnings and two informational findings.
-  It has not been qualified for manufacture.
+The reproducible helpers are:
 
-These are screen recordings, not animated lookalikes of engineering software.
-Playback edits remove two board-loading pauses (1.2–2.0 and 4.4–5.2 seconds)
-and crop the Visilog view to retain its hierarchy and waveforms at a readable size.
-The original masters and tool results remain unchanged.
-The full-resolution masters and retained runs live under ignored
-`builds/aperture-evidence/`; compact playback copies are committed. The original
-voice/art/movie generation scripts are in `~/aperture-work` on the capture host.
-The new workbench capture driver is retained at
-`docs/media/capture/capture-aperture-tools.cjs` and expects the three local plugin
-services at ports 8794–8796, already populated with the documented demo projects.
+- `docs/media/capture/mix-aperture-score.py ASSETS TIMELINE OUTPUT.mp3`:
+  original music, transitions and narration on the shared film clock.
+- `docs/media/capture/render-aperture-film.py URL OUT ASSETS MASTERS --workers 8`:
+  content-keyed scene cache, parallel Chrome capture, and one final composite.
+  Uses NVENC by default; `--encoder libx264` is the CPU fallback. A changed
+  engineering recording can be recomposited without recapturing base scenes.
+- `docs/media/capture/check-aperture-film.js`: real browser playback, seeking,
+  all sectors, evidence decode, mobile bounds and download checks.
+
+Python helpers require Playwright/Chrome, NumPy, SciPy, SoundFile and ffmpeg.
+Use a disk-backed temporary directory for Chrome when `/tmp` is memory-limited.
+Masters and exports remain under ignored `builds/aperture-v4/`. The original
+voice/art scripts live in `~/aperture-work` on the production host. Captured
+workbench segments may be cropped, held or accelerated for readability; the
+underlying geometry, checks and recorded data are unchanged.
+
+Keep one full film per version. Do not generate or link short-cut/teaser variants.

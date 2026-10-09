@@ -65,6 +65,8 @@
         transition: transform 0.65s;
         z-index: 1;
       }
+      #dessert { width: 180px; height: 180px; object-fit: contain; position: relative; z-index: 2; }
+      [hidden] { display: none !important; }
       .face {
         position: absolute;
         inset: 0;
@@ -214,6 +216,7 @@
         role="img"
         aria-label="Three dimensional companion cube"
       >
+        <img id="dessert" src="/aperture-assets/evidence/cake-web.jpg" alt="Actual yapCAD cake render" hidden />
         <div class="cube" id="cube">
           <div class="face front"></div>
           <div class="face back"></div>
@@ -232,6 +235,7 @@
         <div class="controls">
           <button id="rotate">Rotate cube</button
           ><button id="launch" class="secondary">Launch gently</button>
+          <button id="serve-cake" class="secondary">Serve cake</button>
         </div>
       </div>
     </main>
@@ -261,6 +265,12 @@
           cube.classList.remove("launch");
           status.textContent = "LANDED / FEELINGS INTACT";
         }, 1200);
+      });
+    document.querySelector("#serve-cake").addEventListener("click", () => {
+        const cake = document.querySelector("#dessert");
+        cake.hidden = !cake.hidden;
+        document.querySelector("#cube").hidden = !cake.hidden;
+        document.querySelector("#status").textContent = cake.hidden ? "CUBE STABLE" : "HTTP 200 OK · CALORIES 404";
       });
     </script>
   </body>

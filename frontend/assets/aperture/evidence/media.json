@@ -1,0 +1,37 @@
+{
+  "bench": {
+    "duration": 32.133333,
+    "width": 1280,
+    "height": 720
+  },
+  "cake": {
+    "duration": 26.966667,
+    "width": 1280,
+    "height": 720
+  },
+  "boards": {
+    "duration": 33.866667,
+    "width": 1280,
+    "height": 720
+  },
+  "visilog": {
+    "duration": 10.5,
+    "width": 1280,
+    "height": 720
+  },
+  "controls": {
+    "duration": 26.0,
+    "width": 1280,
+    "height": 720
+  },
+  "briefing": {
+    "duration": 27.0,
+    "width": 1280,
+    "height": 720
+  },
+  "web": {
+    "duration": 18.666667,
+    "width": 1280,
+    "height": 720
+  }
+}
