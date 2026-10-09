@@ -1179,6 +1179,7 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
 
         let pending_fork = session.fork_launch_pending;
         let create_worktree = pending_fork && session.fork_create_worktree;
+        let resume = reconcile_resume_flag(pending_fork, session.input_seq);
 
         info!(
             "Reconcile relaunching session {} ({}) on launcher {}: {}, \
@@ -1188,8 +1189,10 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
             launcher_id,
             if pending_fork {
                 "initial fork"
-            } else {
+            } else if resume {
                 "resume"
+            } else {
+                "fresh start (never messaged)"
             },
             session.launch_failure_count,
             session.working_directory
@@ -1205,10 +1208,7 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
             agent_type,
             scheduled_task_id: None,
             resume_session_id: Some(session.id),
-            // A desired fork may be reconciled before its first proxy registers
-            // (for example after a backend restart). Keep replaying the durable
-            // fork recipe until registration clears `fork_launch_pending`.
-            resume: Some(!pending_fork),
+            resume: Some(resume),
             create_worktree,
             worktree_branch: create_worktree.then(|| session.session_name.clone()),
             scratch_worktree: false,
@@ -1231,6 +1231,21 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
             );
         }
     }
+}
+
+/// Whether a reconcile relaunch should `--resume` the session or create it
+/// fresh under the same id.
+///
+/// A desired fork may be reconciled before its first proxy registers (for
+/// example after a backend restart); keep replaying the durable fork recipe
+/// until registration clears `fork_launch_pending`. A session that has never
+/// been sent any input (`input_seq == 0`) has no transcript to resume: claude
+/// only writes one on the first turn. Resuming it anyway made the launcher
+/// rotate to a fresh id, which minted a new session row on every heartbeat
+/// until the launcher hit its session cap. Starting it fresh under the id the
+/// row already has is exactly what the original dialog launch did.
+fn reconcile_resume_flag(pending_fork: bool, input_seq: i64) -> bool {
+    !pending_fork && input_seq > 0
 }
 
 /// Consecutive failed launches after which reconcile gives up and auto-pauses
@@ -1371,6 +1386,20 @@ fn get_dev_user_id(app_state: &AppState) -> Option<Uuid> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn never_messaged_sessions_restart_fresh_instead_of_resuming() {
+        use super::reconcile_resume_flag;
+        assert!(
+            !reconcile_resume_flag(true, 5),
+            "pending fork replays the fork"
+        );
+        assert!(
+            !reconcile_resume_flag(false, 0),
+            "no input yet: nothing to resume"
+        );
+        assert!(reconcile_resume_flag(false, 1), "one turn in: resume it");
+    }
+
     /// Stopping a session must take it out of the launcher's desired set.
     ///
     /// Regression for #1776: `stop_session` used to write `paused = false`,
