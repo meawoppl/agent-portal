@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 400" width="240" height="400">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0.62" stop-color="#2ea8ff" stop-opacity="0"/>
+      <stop offset="0.80" stop-color="#2ea8ff" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#2ea8ff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="inner" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#0b0d10"/><stop offset="0.75" stop-color="#14181d"/>
+      <stop offset="1" stop-color="#2ea8ff" stop-opacity="0.9"/>
+    </radialGradient>
+    <filter id="soft" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="6"/></filter>
+    <filter id="wobble">
+      <feTurbulence type="fractalNoise" baseFrequency="0.035 0.02" numOctaves="2" seed="7">
+        <animate attributeName="seed" values="1;2;3;4;5;6;7;8;9;10" dur="1.2s" repeatCount="indefinite"/>
+      </feTurbulence>
+      <feDisplacementMap in="SourceGraphic" scale="9"/>
+    </filter>
+  </defs>
+  <ellipse cx="120" cy="200" rx="118" ry="198" fill="url(#glow)"/>
+  <ellipse cx="120" cy="200" rx="88" ry="168" fill="url(#inner)"/>
+  <g filter="url(#wobble)">
+    <ellipse cx="120" cy="200" rx="92" ry="172" fill="none" stroke="#2ea8ff" stroke-width="16" filter="url(#soft)"/>
+    <ellipse cx="120" cy="200" rx="92" ry="172" fill="none" stroke="#bfe6ff" stroke-width="6"/>
+    <ellipse cx="120" cy="200" rx="92" ry="172" fill="none" stroke="#ffffff" stroke-width="2" opacity="0.8"/>
+  </g>
+  <ellipse cx="120" cy="200" rx="92" ry="172" fill="none" stroke="#2ea8ff" stroke-width="3" stroke-dasharray="14 22" opacity="0.9">
+    <animate attributeName="stroke-dashoffset" from="0" to="-360" dur="3s" repeatCount="indefinite"/>
+  </ellipse>
+</svg>
