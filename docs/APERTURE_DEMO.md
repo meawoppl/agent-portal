@@ -34,6 +34,10 @@ soundtrack is preloaded as a Blob so seeking works even on embedded static hosts
 that do not provide HTTP byte ranges. Capture mode (`?capture`) exposes
 `window.seek(seconds)` for deterministic frame rendering and skips audio loading.
 
+Publish one film per version: the full cut. Do not produce separate teaser or
+short-cut exports or offer them in watch/download links. The existing `trailer/`
+asset path is retained for compatibility; its player presents the full film.
+
 The exhibit works without an API server. Its **Exit to Agent Portal** and
 **Open Agent Portal** links lead to `/dashboard`, which requires a normal backend.
 If your environment defines `NO_COLOR=1` and Trunk rejects it, run Trunk with
