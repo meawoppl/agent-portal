@@ -71,6 +71,36 @@ fn now_ms() -> u64 {
     js_sys::Date::now() as u64
 }
 
+/// localStorage key remembering which service the header shows.
+const SELECTION_KEY: &str = "service-monitor.selected";
+
+/// Which service to show: the remembered one if it is still in the table,
+/// else the first launcher (your machines matter more than the server),
+/// else the first row.
+pub fn pick_selected<'a>(
+    services: &'a [ServiceStats],
+    remembered: Option<&str>,
+) -> Option<&'a ServiceStats> {
+    remembered
+        .and_then(|id| services.iter().find(|s| s.id == id))
+        .or_else(|| services.iter().find(|s| s.kind == ServiceKind::Launcher))
+        .or_else(|| services.first())
+}
+
+fn remembered_selection() -> Option<String> {
+    web_sys::window()?
+        .local_storage()
+        .ok()??
+        .get_item(SELECTION_KEY)
+        .ok()?
+}
+
+fn remember_selection(id: &str) {
+    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
+        let _ = storage.set_item(SELECTION_KEY, id);
+    }
+}
+
 #[function_component(ServiceMonitor)]
 pub fn service_monitor(props: &Props) -> Html {
     let open = use_state(|| false);
@@ -127,17 +157,36 @@ pub fn service_monitor(props: &Props) -> Html {
         })
     };
 
+    // Hooks must run unconditionally, so the remembered pick is read before the
+    // empty-state early return below.
+    let chosen = use_state(remembered_selection);
+
     if props.services.is_empty() {
         return html! {
             <div ref={root} class="service-monitor empty" title="Waiting for the first service readings">
                 <span class="service-monitor-label">{ "services" }</span>
-                <span class="service-monitor-muted">{ "…" }</span>
+                <span class="service-monitor-muted">{ "\u{2026}" }</span>
             </div>
         };
     }
 
+    // One machine at a time: a picker plus one compact two-line chip.
     let now = now_ms();
-    let chips = props.services.iter().map(|s| {
+    let Some(selected) = pick_selected(&props.services, chosen.as_deref()).cloned() else {
+        return html! {};
+    };
+    let on_pick = {
+        let chosen = chosen.clone();
+        Callback::from(move |e: Event| {
+            let value = e
+                .target_unchecked_into::<web_sys::HtmlSelectElement>()
+                .value();
+            remember_selection(&value);
+            chosen.set(Some(value));
+        })
+    };
+    let chip = {
+        let s = &selected;
         let cpu = s.sample.host_cpu_percent;
         let mem = s.sample.mem_fraction().map(|f| f * 100.0).unwrap_or(0.0);
         let stale = is_stale(s.sample.sampled_at_ms, now);
@@ -151,18 +200,28 @@ pub fn service_monitor(props: &Props) -> Html {
             format_bytes_short(s.sample.host_mem_total_bytes),
             mem,
             load_text(s.sample.load_avg, s.sample.cores),
-            if stale { " — stale" } else { "" }
+            if stale { " \u{2014} stale" } else { "" }
         );
         html! {
             <span class={classes!("service-chip", stale.then_some("stale"))} title={title}>
-                <span class="service-chip-name">{ chip_name(s) }</span>
-                <span class={classes!("service-chip-cpu", level_class(cpu))}>{ format!("{cpu:.0}%") }</span>
-                <Sparkline values={history} width={44.0} height={14.0} />
-                <span class={classes!("service-chip-mem", level_class(mem))}>{ format!("{mem:.0}%") }</span>
-                <span class="service-chip-load">{ format!("{:.1}", s.sample.load_avg[0]) }</span>
+                <span class="service-chip-top">
+                    <select class="service-chip-pick" value={s.id.clone()} onchange={on_pick}
+                        onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}
+                        aria-label="Which service to show">
+                        { for props.services.iter().map(|o| html! {
+                            <option value={o.id.clone()} selected={o.id == s.id}>{ chip_name(o) }</option>
+                        }) }
+                    </select>
+                    <Sparkline values={history} width={44.0} height={14.0} />
+                </span>
+                <span class="service-chip-stats">
+                    <span class={classes!("service-chip-cpu", level_class(cpu))}>{ format!("{cpu:.0}%") }</span>
+                    <span class={classes!("service-chip-mem", level_class(mem))}>{ format!("{mem:.0}%") }</span>
+                    <span class="service-chip-load">{ format!("{:.1}", s.sample.load_avg[0]) }</span>
+                </span>
             </span>
         }
-    });
+    };
 
     let rows = props.services.iter().map(|s| {
         let cpu = s.sample.host_cpu_percent;
@@ -186,9 +245,9 @@ pub fn service_monitor(props: &Props) -> Html {
     });
 
     html! {
-        <div ref={root} class={classes!("service-monitor", open.then_some("open"))} onclick={on_toggle.clone()}>
-            <span class="service-monitor-label">{ "services" }</span>
-            { for chips }
+        <div ref={root} class={classes!("service-monitor", open.then_some("open"))} onclick={on_toggle.clone()}
+            title="Click for every service's readings">
+            { chip }
             <span class={classes!("service-monitor-chevron", open.then_some("open"))} aria-hidden="true">{ "\u{25be}" }</span>
             {
                 if *open {
@@ -233,6 +292,36 @@ mod tests {
         assert!(is_stale(0, 1_000));
         assert!(!is_stale(1_000, 50_000));
         assert!(is_stale(1_000, 1_000 + STALE_AFTER_MS + 1));
+    }
+
+    fn row(id: &str, kind: ServiceKind) -> ServiceStats {
+        ServiceStats {
+            id: id.into(),
+            kind,
+            name: id.into(),
+            hostname: id.into(),
+            sessions: 0,
+            sample: shared::SystemSample::default(),
+        }
+    }
+
+    #[test]
+    fn selection_prefers_remembered_then_first_launcher_then_anything() {
+        let table = vec![
+            row("backend", ServiceKind::Backend),
+            row("l1", ServiceKind::Launcher),
+            row("l2", ServiceKind::Launcher),
+        ];
+        assert_eq!(pick_selected(&table, Some("l2")).unwrap().id, "l2");
+        assert_eq!(
+            pick_selected(&table, Some("gone")).unwrap().id,
+            "l1",
+            "stale memory falls back"
+        );
+        assert_eq!(pick_selected(&table, None).unwrap().id, "l1");
+        let only_backend = vec![row("backend", ServiceKind::Backend)];
+        assert_eq!(pick_selected(&only_backend, None).unwrap().id, "backend");
+        assert!(pick_selected(&[], Some("l1")).is_none());
     }
 
     #[test]
