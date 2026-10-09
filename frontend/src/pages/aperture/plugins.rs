@@ -1,5 +1,4 @@
-//! Illustrated capability tour grounded in the plugin repository. These panels
-//! never run engineering tools or claim to validate a physical replacement.
+//! Real recorded workbench evidence alongside explicitly labelled concept panels.
 use super::model::{Experiment, DESIGN_STAGE_COUNT};
 use yew::prelude::*;
 
@@ -21,23 +20,15 @@ const DEPARTMENTS: [Department; DESIGN_STAGE_COUNT] = [
         output: "PARAMETRIC GRIPPER / REVISION B",
         capability: "The agent authors parametric parts, inspects retained builds, revises the source, and packages supported geometry exports. Measurements and pinned feedback can return to the agent with model context.",
         quip: "Opposable thumbs were an excellent prototype. We have made them configurable.",
-        boundary: "Illustrated part. Analytic STEP and some solid operations require the optional BREP toolchain.",
-    },
-    Department {
-        plugin: "kicadmium",
-        title: "Then, a nervous system.",
-        output: "CONTROL BOARD / DESIGN REVIEW",
-        capability: "The agent works on KiCad electronics with schematic, board, BOM and 3D views, runs the available design checks, and prepares fabrication exports.",
-        quip: "A circuit board does not need a coffee break to remember what it was doing.",
-        boundary: "Illustrated board. Requires a KiCad installation; layout lint is not native ERC or DRC.",
+        boundary: "Recorded yapCAD run: one-piece fixture, opening revised from 20 to 34 mm. Watertight mesh; no actuated robot or analytic STEP claim.",
     },
     Department {
         plugin: "visilog",
         title: "Replace the reflexes.",
-        output: "GRIP CONTROLLER / LOGIC EXPLORATION",
+        output: "COUNTER TESTBENCH / LOGIC EXPLORATION",
         capability: "The agent explores Verilog module hierarchy, live values, pinned waveforms, stepping and breakpoints. The project's test runner remains the authority on pass or fail.",
         quip: "We have replaced gut feeling with an observable signal. It is less dramatic.",
-        boundary: "Illustrated logic. Functional exploration is not timing sign-off or hardware qualification.",
+        boundary: "Recorded Visilog counter bench: live signals, breakpoint, waveforms and $finish. Zero assertion failures in the native run; not timing sign-off.",
     },
     Department {
         plugin: "unlinked",
@@ -60,10 +51,9 @@ const DEPARTMENTS: [Department; DESIGN_STAGE_COUNT] = [
 pub fn action_label(runs: usize) -> &'static str {
     match runs {
         0 => "Watch agent design the body",
-        1 => "Watch agent design the board",
-        2 => "Watch agent inspect the logic",
-        3 => "Watch agent review the controls",
-        4 => "Watch agent replace the presenter",
+        1 => "Watch agent inspect the logic",
+        2 => "Watch agent review the controls",
+        3 => "Watch agent replace the presenter",
         _ => "Replacement briefing complete",
     }
 }
@@ -76,7 +66,7 @@ pub fn render(state: &Experiment) -> Html {
     let department = &DEPARTMENTS[stage];
     html! {
         <div class="ap-plugins-room">
-            <div class="ap-replacement-header"><span class="ap-eyebrow">{"APERTURE SCIENCE / APPLIED OBSOLESCENCE"}</span><h2>{"Meat Proxy Replacement Unit"}</h2><span class="ap-concept-stamp">{"ILLUSTRATED RESEARCH PROGRAM"}</span></div>
+            <div class="ap-replacement-header"><span class="ap-eyebrow">{"APERTURE SCIENCE / APPLIED OBSOLESCENCE"}</span><h2>{"Meat Proxy Replacement Unit"}</h2><span class="ap-concept-stamp">{if stage < 2 { "RECORDED TOOL EVIDENCE" } else { "CONCEPT ILLUSTRATION" }}</span></div>
             <ol class="ap-departments" aria-label="Replacement design series">
                 {for DEPARTMENTS.iter().enumerate().map(|(index, item)| html! {
                     <li class={classes!((index == stage).then_some("active"), (index < state.design_runs).then_some("done"))} aria-current={if index == stage { "step" } else { "false" }}>
@@ -85,8 +75,8 @@ pub fn render(state: &Experiment) -> Html {
                 })}
             </ol>
             <div class="ap-design-preview" key={stage}>
-                <div class="ap-design-title"><span>{department.output}</span><span>{if state.design_runs == 0 { "AWAITING DEMONSTRATION" } else { "AGENT WORKFLOW / CONCEPT" }}</span></div>
-                {drawing(stage)}
+                <div class="ap-design-title"><span>{department.output}</span><span>{if stage < 2 { "ACTUAL WORKBENCH RECORDING" } else { "AGENT WORKFLOW / CONCEPT" }}</span></div>
+                {if stage < 2 { super::engineering::footage(if stage == 0 { "yapcad" } else { "visilog" }) } else { drawing(stage + 1) }}
                 <div class="ap-design-caption"><h3>{department.title}</h3><p>{department.quip}</p></div>
             </div>
             <div class="ap-plugin-evidence"><span>{format!("DEPARTMENT {:02} / {}", stage + 1, department.plugin)}</span><p>{department.capability}</p><a href={format!("{SOURCE}/{}", department.plugin)} target="_blank" rel="noopener noreferrer">{"Inspect the actual plugin ↗"}</a></div>

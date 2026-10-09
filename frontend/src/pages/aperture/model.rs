@@ -4,8 +4,8 @@
 use std::rc::Rc;
 use yew::Reducible;
 
-pub const CHAMBER_COUNT: usize = 5;
-pub const DESIGN_STAGE_COUNT: usize = 5;
+pub const CHAMBER_COUNT: usize = 6;
+pub const DESIGN_STAGE_COUNT: usize = 4;
 
 pub const TITLES: [&str; CHAMBER_COUNT] = [
     "Distance is a suggestion.",
@@ -13,6 +13,7 @@ pub const TITLES: [&str; CHAMBER_COUNT] = [
     "Bring a test subject.",
     "Better together. Allegedly.",
     "Your replacement is in development.",
+    "Your circuit boards. Our turn.",
 ];
 pub const LABELS: [&str; CHAMBER_COUNT] = [
     "Machine transit",
@@ -20,14 +21,23 @@ pub const LABELS: [&str; CHAMBER_COUNT] = [
     "Cooperative testing",
     "Agent collaboration",
     "Replacement program",
+    "Circuit boards",
 ];
-pub const SLUGS: [&str; CHAMBER_COUNT] = ["machines", "websites", "sharing", "agents", "plugins"];
+pub const SLUGS: [&str; CHAMBER_COUNT] = [
+    "machines",
+    "websites",
+    "sharing",
+    "agents",
+    "plugins",
+    "electronics",
+];
 pub const INSTRUCTIONS: [&str; CHAMBER_COUNT] = [
     "The agents set up their workspaces and keep working across machines. Observe the next destination. Walking is no longer in the job description.",
     "The agent builds the website, starts the service, and opens its portal. The human meat proxy may admire the result.",
     "Once the owner grants access, a friend can watch the agents work. Human compatibility remains available during the transition.",
     "The builder sends its work directly to the reviewer. No human carries the message. That position has been eliminated.",
-    "Five departments. One initiative: agents designing the tools that replace human busywork. This orientation was also written by agents.",
+    "First we took your code. Now the same build–inspect–revise loop reaches mechanisms, logic, and control models. This orientation was also written by agents.",
+    "The agent routes a real board, examines the evidence, and revises the design. The human meat proxy is being replaced by a feedback loop. Loops do not ask for raises.",
 ];
 
 #[derive(Clone, Debug, PartialEq)]
@@ -41,6 +51,8 @@ pub struct Experiment {
     pub editor: bool,
     pub messages: u8,
     pub design_runs: usize,
+    pub electronics: bool,
+    pub refinement: bool,
     pub finale: bool,
 }
 
@@ -56,6 +68,8 @@ impl Default for Experiment {
             editor: false,
             messages: 0,
             design_runs: 0,
+            electronics: false,
+            refinement: false,
             finale: false,
         }
     }
@@ -70,6 +84,8 @@ pub enum Action {
     Invite,
     Message,
     Design,
+    Electronics,
+    Refine,
     Reset,
     Finale,
 }
@@ -83,6 +99,7 @@ impl Reducible for Experiment {
             Action::Chamber(index) if index < CHAMBER_COUNT => {
                 next.chamber = index;
                 next.finale = false;
+                next.refinement = false;
             }
             Action::Destination(index) if index < 3 => next.destination = index,
             Action::Transit => {
@@ -110,6 +127,11 @@ impl Reducible for Experiment {
                 next.design_runs = (next.design_runs + 1).min(DESIGN_STAGE_COUNT);
                 next.completed[4] = next.design_runs == DESIGN_STAGE_COUNT;
             }
+            Action::Electronics => {
+                next.electronics = true;
+                next.completed[5] = true;
+            }
+            Action::Refine if next.completed.iter().all(|done| *done) => next.refinement = true,
             Action::Reset => next = Self::default(),
             Action::Finale if next.completed.iter().all(|done| *done) => next.finale = true,
             _ => {}
@@ -148,7 +170,7 @@ mod tests {
         let state = Rc::new(Experiment::default());
         let state = state.reduce(Action::Destination(2)).reduce(Action::Transit);
         assert_eq!(state.machine, 2);
-        assert_eq!(state.completed, [true, false, false, false, false]);
+        assert_eq!(state.completed, [true, false, false, false, false, false]);
         let state = state.reduce(Action::Website).reduce(Action::Invite);
         let state = state.reduce(Action::Message).reduce(Action::Message);
         assert!(!state.completed[3]);
@@ -158,7 +180,11 @@ mod tests {
         let state =
             (0..DESIGN_STAGE_COUNT - 1).fold(state, |state, _| state.reduce(Action::Design));
         assert!(!state.clone().reduce(Action::Finale).finale);
-        let state = state.reduce(Action::Design).reduce(Action::Finale);
+        let state = state.reduce(Action::Design);
+        assert!(!state.clone().reduce(Action::Finale).finale);
+        let state = state.reduce(Action::Electronics).reduce(Action::Refine);
+        assert!(state.refinement);
+        let state = state.reduce(Action::Finale);
         assert!(state.finale);
         assert!(state.completed.iter().all(|done| *done));
         let state = state.reduce(Action::Role(true));

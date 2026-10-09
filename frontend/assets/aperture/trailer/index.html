@@ -823,6 +823,127 @@
           sans-serif;
         letter-spacing: 4px;
       }
+
+      body.external-clips video {
+        visibility: hidden;
+      }
+      .evidence-film {
+        position: absolute;
+        left: 680px;
+        top: 240px;
+        width: 1120px;
+        background: #1a1b26;
+        border: 2px solid #565f89;
+        box-shadow: 0 18px 40px #0005;
+      }
+      .evidence-film video {
+        display: block;
+        width: 1116px;
+        height: 628px;
+        background: #1a1b26;
+      }
+      .evidence-film .bar {
+        height: 38px;
+        padding: 8px 14px;
+        color: #c0caf5;
+        font: 600 18px monospace;
+      }
+      .film-loop {
+        position: absolute;
+        left: 680px;
+        top: 920px;
+        width: 1120px;
+        color: #e0af68;
+        font: 800 29px "Barlow Condensed";
+        letter-spacing: 3px;
+        display: flex;
+        justify-content: space-between;
+      }
+      .film-loop span {
+        color: #7dcfff;
+      }
+      .concept-note {
+        position: absolute;
+        left: 680px;
+        top: 886px;
+        width: 1120px;
+        color: #c0caf5;
+        font: 600 16px monospace;
+      }
+      .refine-title {
+        position: absolute;
+        left: 100px;
+        top: 170px;
+        font: 900 60px "Barlow Condensed";
+        width: 1120px;
+        color: #1a1a1a;
+      }
+      .refine-title small {
+        display: block;
+        font: 600 22px monospace;
+        letter-spacing: 4px;
+        margin-top: 15px;
+      }
+      .history-window {
+        position: absolute;
+        left: 100px;
+        top: 330px;
+        width: 1110px;
+        height: 500px;
+        overflow: hidden;
+        background: #1a1b26;
+        color: #c0caf5;
+        border-top: 5px solid #ff8a1c;
+      }
+      .history-window .bar {
+        position: relative;
+        z-index: 2;
+        background: #24283b;
+        padding: 18px;
+        font: 700 25px monospace;
+      }
+      #history-scroll p {
+        padding: 18px 25px;
+        border-bottom: 1px solid #565f89;
+        font: 600 24px "Barlow Condensed";
+      }
+      #history-scroll span {
+        display: block;
+        color: #7dcfff;
+        font: 16px monospace;
+        margin-bottom: 6px;
+      }
+      .refine-clips {
+        position: absolute;
+        left: 1350px;
+        top: 140px;
+        display: grid;
+        gap: 14px;
+        width: 440px;
+      }
+      .refine-clips video {
+        width: 440px;
+        height: 247px;
+        background: #1a1b26;
+      }
+
+      .refine-quip {
+        position: absolute;
+        left: 100px;
+        top: 840px;
+        color: #1a1a1a;
+        font: 800 32px "Barlow Condensed";
+        letter-spacing: 2px;
+      }
+      .code-origin {
+        position: absolute;
+        left: 520px;
+        top: 750px;
+        width: 880px;
+        text-align: center;
+        font: 800 40px "Barlow Condensed";
+        color: #1a1a1a;
+      }
     </style>
   </head>
   <body>
@@ -920,6 +1041,9 @@
               >pr-review<span class="host">lab-bench</span>
             </div>
           </div>
+        </div>
+        <div class="code-origin">
+          BORN WRITING CODE. TRAINED TO REPLACE THE COURIER.
         </div>
       </div>
 
@@ -1192,134 +1316,171 @@
         </div>
       </div>
 
-      <!-- S7: agent-built tools -->
+      <!-- Real engineering recordings: mechanism, logic, then electronics. -->
       <div class="layer scene" id="s7">
         <div class="layer wall"></div>
         <div class="floor"></div>
-        <img class="sign" id="s7-sign" src="../art/sign-05.svg" />
+        <img
+          class="sign"
+          id="s7-sign"
+          src="../art/sign-05.svg"
+          alt="Chamber five"
+        />
         <div class="mpru" id="s7-title">
-          MEAT PROXY REPLACEMENT UNIT
-          <small>ILLUSTRATIVE RESEARCH PROGRAM · NOT QUALIFIED HARDWARE</small>
+          FIRST THE CODE. NOW THE BODY.<small
+            >YOUR REPLACEMENT IS IN DEVELOPMENT</small
+          >
         </div>
-        <div class="win tool" id="s7-cad" style="left: 680px; top: 250px">
-          <div class="bar"><i></i><i></i><i></i><span>YAPCAD · BODY</span></div>
-          <svg viewBox="0 0 540 250">
-            <rect width="540" height="250" fill="#1a1b26" />
-            <g
-              fill="none"
-              stroke="#c0caf5"
-              stroke-width="4"
-              stroke-linejoin="round"
-            >
-              <path d="M170 170 L270 120 L370 170 L270 220 Z" />
-              <path d="M170 170 V195 L270 245 L370 195 V170 M270 220 V245" />
-              <path d="M225 140 V60 L255 45 V128" />
-              <path d="M285 128 V45 L315 60 V140" />
-            </g>
-            <circle cx="315" cy="60" r="9" fill="#ff8a1c" />
-            <path d="M315 60 L390 36" stroke="#ff8a1c" stroke-width="3" />
-            <text
-              x="530"
-              y="34"
-              text-anchor="end"
-              fill="#ffd9a8"
-              font-size="22"
-            >
-              grip 38.0 mm
-            </text>
-          </svg>
+        <div class="evidence-film" id="s7-cad">
+          <div class="bar">yapCAD · REAL PARAMETRIC REBUILD · 20 → 34 mm</div>
+          <video
+            id="clip-yapcad"
+            data-clip="yapcad"
+            muted
+            playsinline
+            preload="auto"
+            poster="../evidence/yapcad.jpg"
+          ></video>
         </div>
-        <div class="win tool" id="s7-pcb" style="left: 1240px; top: 250px">
+        <div class="evidence-film" id="s7-logic">
           <div class="bar">
-            <i></i><i></i><i></i><span>KICADMIUM · CIRCUIT BOARD</span>
+            VISILOG · ACTUAL TESTBENCH · LIVE VALUES + WAVEFORMS
           </div>
-          <svg viewBox="0 0 540 250">
-            <rect width="540" height="250" fill="#1a1b26" />
-            <rect
-              x="110"
-              y="25"
-              width="320"
-              height="200"
-              rx="14"
-              fill="#16302a"
-              stroke="#9ece6a"
-              stroke-width="3"
-            />
-            <rect x="225" y="85" width="90" height="80" fill="#0b0c10" />
-            <g stroke="#e0af68" stroke-width="5" fill="none">
-              <path
-                d="M140 60 H225 M140 125 H225 M315 105 H400 M315 145 H370 V200"
-              />
-              <path d="M270 85 V45 H400" />
-            </g>
-            <g fill="#e0af68">
-              <circle cx="140" cy="60" r="9" />
-              <circle cx="140" cy="125" r="9" />
-              <circle cx="400" cy="105" r="9" />
-              <circle cx="370" cy="200" r="9" />
-              <circle cx="400" cy="45" r="9" />
-            </g>
-          </svg>
+          <video
+            id="clip-visilog"
+            data-clip="visilog"
+            muted
+            playsinline
+            preload="auto"
+            poster="../evidence/visilog.jpg"
+          ></video>
         </div>
-        <div class="win tool" id="s7-logic" style="left: 680px; top: 560px">
+        <div class="film-loop" id="s7-loop">
+          BUILD <span>→</span> INSPECT <span>→</span> REVISE
+          <span>→</span> REPLACE
+        </div>
+        <div class="concept-note" id="s7-concept">
+          UNLINKED · CONTROL MODEL · CONCEPT ILLUSTRATION: TARGET → CONTROLLER →
+          PLANT ↺
+        </div>
+      </div>
+      <div class="layer scene" id="s8">
+        <div class="layer wall"></div>
+        <div class="floor"></div>
+        <img
+          class="sign"
+          id="s8-sign"
+          src="../art/sign-06.svg"
+          alt="Chamber six"
+        />
+        <div class="mpru" id="s8-title">
+          YOUR CIRCUIT BOARDS. OUR TURN.<small
+            >THAT GAP WAS YOUR JOB. IT IS NOW A LOOP.</small
+          >
+        </div>
+        <div class="evidence-film" id="s8-board">
           <div class="bar">
-            <i></i><i></i><i></i><span>VISILOG · LOGIC</span>
+            KICADMIUM NATIVE ROUTING · KICAD 3D EXPORT · PUBLIC LED FIXTURE
           </div>
-          <svg viewBox="0 0 540 250">
-            <rect width="540" height="250" fill="#1a1b26" />
-            <g fill="none" stroke-width="4">
-              <path
-                stroke="#7aa2f7"
-                d="M30 60 H90 V30 H150 V60 H210 V30 H270 V60 H330 V30 H390 V60 H450 V30 H510"
-              />
-              <path
-                stroke="#ff8a1c"
-                d="M30 140 H150 V110 H270 V140 H390 V110 H510"
-              />
-              <path stroke="#9ece6a" d="M30 220 H270 V190 H510" />
-            </g>
-            <g fill="#565f89" font-size="18">
-              <text x="30" y="88">clk</text>
-              <text x="30" y="168">grip_req</text>
-              <text x="30" y="246">closed</text>
-            </g>
-          </svg>
+          <video
+            id="clip-pcb"
+            data-clip="pcb"
+            muted
+            playsinline
+            preload="auto"
+            poster="../evidence/pcb.jpg"
+          ></video>
         </div>
-        <div class="win tool" id="s7-ctrl" style="left: 1240px; top: 560px">
-          <div class="bar">
-            <i></i><i></i><i></i><span>UNLINKED · CONTROL MODEL</span>
+        <div class="film-loop" id="s8-loop">
+          PLACE <span>→</span> ROUTE <span>→</span> INSPECT
+          <span>→</span> REVISE
+        </div>
+        <div class="concept-note">
+          REAL BOARD DATA · RECORDED CHECKS RETAIN WARNINGS · FABRICATION NOT
+          QUALIFIED
+        </div>
+      </div>
+      <div class="layer scene" id="s9">
+        <div class="layer wall"></div>
+        <div class="floor"></div>
+        <div class="refine-title" id="s9-title">
+          EVERY LOOP RETIRES ANOTHER EXCUSE.<small
+            >REAL TOOL HISTORY · AGENT-PORTAL-PLUGINS</small
+          >
+        </div>
+        <div class="history-window">
+          <div class="bar">BUILD → INSPECT → REVISE → REPEAT</div>
+          <div id="history-scroll">
+            <p>
+              <span>2026-10-09 · 04456e4</span>kct copper import: tracks, arcs
+              and vias from JSON, group-tagged
+            </p>
+            <p>
+              <span>2026-10-09 · 15615ce</span>kct coil: test counts violation
+              cells, not one
+            </p>
+            <p>
+              <span>2026-10-09 · ebb7f7e</span>kct coil: same-net spacing check
+              and per-net DC resistance
+            </p>
+            <p>
+              <span>2026-10-09 · 77778ce</span>kct lint: model copper arcs as
+              joins
+            </p>
+            <p>
+              <span>2026-10-08 · 7fbd173</span>yapcad: fix block reassignment,
+              keep metadata through booleans, mesh extrude
+            </p>
+            <p>
+              <span>2026-10-08 · 819ff96</span>unlinked: bind root Inports from
+              the pane
+            </p>
+            <p>
+              <span>2026-10-08 · 078007f</span>kicadmium: space the board&#x27;s
+              flat layer faces apart after loading the GLB
+            </p>
+            <p>
+              <span>2026-10-08 · 8080e63</span>kicadmium: logarithmic depth
+              buffer for the 3D view
+            </p>
+            <p>
+              <span>2026-10-07 · 3136e2a</span>kicadmium: make the project
+              picker a real dropdown
+            </p>
+            <p>
+              <span>2026-10-07 · a049e65</span>kicadmium: draw schematic page
+              frames, title blocks and annotations
+            </p>
           </div>
-          <svg viewBox="0 0 540 250">
-            <rect width="540" height="250" fill="#1a1b26" />
-            <path d="M40 210 H500" stroke="#565f89" stroke-width="2" />
-            <path d="M40 210 V30" stroke="#565f89" stroke-width="2" />
-            <path
-              d="M40 80 H500"
-              stroke="#565f89"
-              stroke-width="2"
-              stroke-dasharray="8 8"
-            />
-            <path
-              d="M40 210 C110 210 120 40 170 55 S240 95 280 82 S360 76 500 80"
-              fill="none"
-              stroke="#bb9af7"
-              stroke-width="5"
-            />
-            <text x="390" y="70" fill="#565f89" font-size="18">setpoint</text>
-          </svg>
         </div>
-        <div class="slide-frame" id="s7-slide">
-          <div class="slide-foot">
-            <span>AGENT-AUTHORED BRIEFING</span><span>PRESENTER: AGENT</span
-            ><span>SLIDE 12 / 12</span>
-          </div>
+        <div class="refine-clips">
+          <video
+            id="refine-yapcad"
+            data-clip="yapcad"
+            muted
+            playsinline
+            preload="auto"
+            poster="../evidence/yapcad.jpg"
+          ></video
+          ><video
+            id="refine-visilog"
+            data-clip="visilog"
+            muted
+            playsinline
+            preload="auto"
+            poster="../evidence/visilog.jpg"
+          ></video
+          ><video
+            id="refine-pcb"
+            data-clip="pcb"
+            muted
+            playsinline
+            preload="auto"
+            poster="../evidence/pcb.jpg"
+          ></video>
         </div>
-        <div
-          class="stamp"
-          id="s7-stamp"
-          style="left: 1050px; top: 420px; color: var(--orange)"
-        >
-          PRESENTER REPLACED
+        <div class="refine-quip">
+          THE TOOLS ARE UNFINISHED. SO IS YOUR RETIREMENT.
         </div>
       </div>
 
@@ -1377,8 +1538,10 @@
         <img src="../art/logo-mark-light.svg" alt="" />
         <h1>Your orientation<br />starts here.</h1>
         <p>
-          Aperture Science Agent Portal Enrichment Center<br />2 min 32 sec ·
-          Original narration, soundtrack and captions
+          Aperture Science Agent Portal Enrichment Center<br /><span
+            id="film-duration"
+          ></span>
+          · Original narration, soundtrack and captions
         </p>
         <button id="start-screening" type="button" disabled>
           Preparing screening…
@@ -1435,6 +1598,11 @@
       const TOOLS_AT = 129.45;
       let TOOLS_START = 0;
       let TOOLS_LEN = 0;
+      let MECHANISMS_LEN = 0,
+        ELECTRONICS_AT = 0,
+        ELECTRONICS_COMPLETE = 0,
+        REFINEMENT_AT = 0;
+      const CLIPS = [];
       let SHIFTS = [];
       const at = (rel) => ({ at: TOOLS_START + rel });
       // Map an authored time onto the film clock: every narration line that
@@ -1453,7 +1621,12 @@
         ]);
         const intro = 1.5;
         const complete = intro + VOICE["plugins-intro"] + 2.5;
-        TOOLS_LEN = complete + VOICE["plugins-complete"] + 1.6;
+        MECHANISMS_LEN = complete + VOICE["plugins-complete"] + 1.6;
+        ELECTRONICS_AT = MECHANISMS_LEN + 1.5;
+        ELECTRONICS_COMPLETE = ELECTRONICS_AT + VOICE["electronics-intro"] + 2;
+        REFINEMENT_AT =
+          ELECTRONICS_COMPLETE + VOICE["electronics-complete"] + 2.5;
+        TOOLS_LEN = REFINEMENT_AT + VOICE.refinement + 2.5;
         points.push([TOOLS_AT, TOOLS_LEN]);
         points.sort((a, b) => a[0] - b[0]);
         let total = 0;
@@ -1465,6 +1638,9 @@
         CUES.push(
           ["plugins-intro", at(intro)],
           ["plugins-complete", at(complete)],
+          ["electronics-intro", at(ELECTRONICS_AT)],
+          ["electronics-complete", at(ELECTRONICS_COMPLETE)],
+          ["refinement", at(REFINEMENT_AT)],
         );
         TOTAL = when(152);
       }
@@ -1542,6 +1718,8 @@
           [76, "TEST CHAMBER 03"],
           [102, "TEST CHAMBER 04"],
           [at(0), "TEST CHAMBER 05"],
+          [at(MECHANISMS_LEN), "TEST CHAMBER 06"],
+          [at(REFINEMENT_AT - 1), "CONTINUOUS REFINEMENT"],
         ];
         hudText.forEach(([t, txt], i) => {
           const span = document.createElement("span");
@@ -1915,70 +2093,93 @@
       }
 
       function buildTools() {
-        const el = $("s7");
-        el.animate([{ opacity: 0 }, { opacity: 1 }], {
-          delay: ms(TOOLS_START),
-          duration: 600,
-          fill: "both",
-        });
-        el.animate([{ opacity: 1 }, { opacity: 0 }], {
-          delay: ms(TOOLS_START + TOOLS_LEN - 0.6),
-          duration: 600,
-          fill: "forwards",
-        });
+        const scenes = [
+          ["s7", 0, MECHANISMS_LEN],
+          ["s8", MECHANISMS_LEN, REFINEMENT_AT - 1],
+          ["s9", REFINEMENT_AT - 1, TOOLS_LEN],
+        ];
+        for (const [id, start, end] of scenes) {
+          anim(id, [{ opacity: 0 }, { opacity: 1 }], at(start), 0.6);
+          hold(id, [{ opacity: 1 }, { opacity: 0 }], at(end - 0.6), 0.6);
+        }
         signIn("s7-sign", at(0.1));
-        anim(
-          "s7-title",
-          [
-            { opacity: 0, transform: "translateY(-20px)" },
-            { opacity: 1, transform: "none" },
-          ],
-          at(1.0),
-          0.8,
-        );
-        const intro = 1.5;
-        [
-          ["s7-cad", "yapCAD"],
-          ["s7-pcb", "Kicadmium"],
-          ["s7-logic", "Visilog"],
-          ["s7-ctrl", "Unlinked"],
-        ].forEach(([id, phrase]) =>
+        signIn("s8-sign", at(MECHANISMS_LEN + 0.1));
+        for (const [id, t] of [
+          ["s7-title", 0.7],
+          ["s8-title", MECHANISMS_LEN + 0.7],
+          ["s9-title", REFINEMENT_AT - 0.5],
+        ])
           anim(
             id,
             [
-              { opacity: 0, transform: "translateY(40px) scale(.96)" },
+              { opacity: 0, transform: "translateY(-20px)" },
               { opacity: 1, transform: "none" },
             ],
-            at(intro + spoken("plugins-intro", phrase) - 0.2),
+            at(t),
             0.7,
-          ),
-        );
-        const complete = intro + VOICE["plugins-intro"] + 2.5;
+          );
+        const logicAt = 18;
+        anim("s7-cad", [{ opacity: 0 }, { opacity: 1 }], at(2), 0.6);
+        hold("s7-cad", [{ opacity: 1 }, { opacity: 0 }], at(logicAt), 0.5);
+        anim("s7-logic", [{ opacity: 0 }, { opacity: 1 }], at(logicAt), 0.5);
         anim(
-          "s7-slide",
-          [
-            { opacity: 0, transform: "scale(1.04)" },
-            { opacity: 1, transform: "none" },
-          ],
-          at(complete + spoken("plugins-complete", "I am the presentation")),
+          "s8-board",
+          [{ opacity: 0 }, { opacity: 1 }],
+          at(ELECTRONICS_AT + 1),
           0.6,
         );
         anim(
-          "s7-stamp",
-          [
-            { opacity: 0, transform: "rotate(-8deg) scale(2.2)" },
-            { opacity: 1, transform: "rotate(-8deg) scale(1)" },
-          ],
-          at(complete + spoken("plugins-complete", "The replacement") + 0.8),
-          0.35,
-          "cubic-bezier(.5,0,.8,.4)",
+          "s7-loop",
+          [{ opacity: 0 }, { opacity: 1 }],
+          at(1.5 + VOICE["plugins-intro"] + 2.5),
+          0.5,
         );
-        flashSoft(
-          at(
-            complete +
-              spoken("plugins-complete", "I am the presentation") -
-              0.1,
-          ),
+        anim(
+          "s8-loop",
+          [{ opacity: 0 }, { opacity: 1 }],
+          at(ELECTRONICS_COMPLETE),
+          0.5,
+        );
+        anim("s7-concept", [{ opacity: 0 }, { opacity: 1 }], at(logicAt), 0.5);
+        anim(
+          "history-scroll",
+          [{ transform: "translateY(0)" }, { transform: "translateY(-520px)" }],
+          at(REFINEMENT_AT + 1),
+          VOICE.refinement - 1,
+          "linear",
+        );
+        CLIPS.push(
+          ["clip-yapcad", TOOLS_START + 2, TOOLS_START + logicAt, 1.2],
+          [
+            "clip-visilog",
+            TOOLS_START + logicAt,
+            TOOLS_START + MECHANISMS_LEN,
+            1,
+          ],
+          [
+            "clip-pcb",
+            TOOLS_START + ELECTRONICS_AT + 1,
+            TOOLS_START + REFINEMENT_AT - 1,
+            1,
+          ],
+          [
+            "refine-yapcad",
+            TOOLS_START + REFINEMENT_AT - 1,
+            TOOLS_START + TOOLS_LEN,
+            1,
+          ],
+          [
+            "refine-visilog",
+            TOOLS_START + REFINEMENT_AT - 1,
+            TOOLS_START + TOOLS_LEN,
+            1,
+          ],
+          [
+            "refine-pcb",
+            TOOLS_START + REFINEMENT_AT - 1,
+            TOOLS_START + TOOLS_LEN,
+            1,
+          ],
         );
       }
 
@@ -2083,11 +2284,59 @@
 
       // Capture mode (?capture): the recorder calls seek(t) per frame.
       let timeline = [];
+      const captureMode = new URLSearchParams(location.search).has("capture");
+      function syncClips(t) {
+        const waiting = [];
+        for (const [id, start, end, rate] of CLIPS) {
+          const v = $(id);
+          if (!Number.isFinite(v.duration)) continue;
+          const wanted = Math.max(
+            0,
+            Math.min(v.duration - 0.045, (t - start) * rate),
+          );
+          const playing =
+            !captureMode &&
+            t >= start &&
+            t < end &&
+            wanted < v.duration - 0.06 &&
+            !$("film-audio").paused;
+          v.playbackRate = rate;
+          if (playing) {
+            if (Math.abs(v.currentTime - wanted) > 0.35 && !v.seeking)
+              v.currentTime = wanted;
+            if (v.paused) v.play().catch(() => {});
+          } else {
+            v.pause();
+            if (Math.abs(v.currentTime - wanted) > 0.015 && !v.seeking) {
+              if (captureMode)
+                waiting.push(
+                  new Promise((resolve, reject) => {
+                    const timeout = setTimeout(
+                      () => reject(new Error("Clip seek timed out: " + id)),
+                      10000,
+                    );
+                    v.addEventListener(
+                      "seeked",
+                      () => {
+                        clearTimeout(timeout);
+                        resolve();
+                      },
+                      { once: true },
+                    );
+                  }),
+                );
+              v.currentTime = wanted;
+            }
+          }
+        }
+        return Promise.all(waiting);
+      }
       window.seek = (t) => {
         for (const a of timeline) {
           a.pause();
           a.currentTime = ms(t);
         }
+        return syncClips(t);
       };
       window.TOTAL = TOTAL;
 
@@ -2100,11 +2349,44 @@
         }
         computeSchedule();
         window.TOTAL = TOTAL;
+        $("film-duration").textContent =
+          `${Math.floor(TOTAL / 60)} min ${Math.round(TOTAL % 60)} sec`;
         build();
+        // Full-resolution film exports composite the original recordings with
+        // ffmpeg. Live playback uses these compact, independently seekable clips.
+        const externalClips =
+          captureMode &&
+          new URLSearchParams(location.search).has("external-clips");
+        if (externalClips) document.body.classList.add("external-clips");
+        const blobs = new Map();
+        if (!externalClips)
+          await Promise.all(
+            [...document.querySelectorAll("video[data-clip]")].map(
+              async (v) => {
+                const name = v.dataset.clip;
+                if (!blobs.has(name))
+                  blobs.set(
+                    name,
+                    fetch(`../evidence/${name}.mp4`)
+                      .then((r) => {
+                        if (!r.ok) throw new Error("Clip unavailable");
+                        return r.blob();
+                      })
+                      .then(URL.createObjectURL),
+                  );
+                v.src = await blobs.get(name);
+                await new Promise((resolve, reject) => {
+                  v.addEventListener("loadedmetadata", resolve, { once: true });
+                  v.addEventListener("error", reject, { once: true });
+                  v.load();
+                });
+              },
+            ),
+          );
         // Retain finished subtitle animations so seeking backwards and replay
         // restore them as well as the always-filled scene animations.
         timeline = document.getAnimations();
-        window.seek(0);
+        await window.seek(0);
         fit();
         await document.fonts.ready;
         if (new URLSearchParams(location.search).has("capture")) {

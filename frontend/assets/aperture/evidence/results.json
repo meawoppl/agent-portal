@@ -1,0 +1,123 @@
+{
+  "recorded": "2026-10-09",
+  "plugin_revision": "04456e4ff259f006edc1bb2aeaa65d96d9e31f28",
+  "yapcad": {
+    "part": "one-piece inspection fixture (not an actuated gripper)",
+    "revision_a": {
+      "jaw_gap_mm": 20
+    },
+    "revision_b": {
+      "jaw_gap_mm": 34
+    },
+    "requirement": "30 mm specimen plus 2 mm clearance per side",
+    "both_meshes": {
+      "watertight": true,
+      "bodies": 1,
+      "triangles": 2332,
+      "volume_mm3": 54020.035
+    }
+  },
+  "visilog": {
+    "test": "counter_tb",
+    "stop": "finished",
+    "assertion_failures": 0,
+    "ticks": 500000,
+    "fs_per_tick": 1000,
+    "timesteps": 102
+  },
+  "pcb": {
+    "source": "kicadmium/kct/tests/fixtures/router/simple_led.kicad_pcb",
+    "operation": "kct route --lint-gate error --no-auto-pour --timeout 60",
+    "nets_routed": 3,
+    "nets_total": 3,
+    "segments": 13,
+    "vias": 0,
+    "trace_length_mm": 29.83,
+    "kicad_version": "9.0.9",
+    "drc": {
+      "violations": [
+        {
+          "description": "Footprint 'PinHeader_1x02_P2.54mm_Vertical' does not match copy in library 'Connector_PinHeader_2.54mm'.",
+          "items": [
+            {
+              "description": "Footprint J1",
+              "pos": {
+                "x": 141.0,
+                "y": 87.5
+              },
+              "uuid": "727f6bd3-740e-4046-969c-5247ab06bd84"
+            }
+          ],
+          "severity": "warning",
+          "type": "lib_footprint_mismatch"
+        },
+        {
+          "description": "Footprint 'R_0805_2012Metric' does not match copy in library 'Resistor_SMD'.",
+          "items": [
+            {
+              "description": "Footprint R1",
+              "pos": {
+                "x": 148.5,
+                "y": 85.5
+              },
+              "uuid": "36c2dbbf-1398-4b65-b95d-148013d5564f"
+            }
+          ],
+          "severity": "warning",
+          "type": "lib_footprint_mismatch"
+        },
+        {
+          "description": "Footprint 'LED_D5.0mm' does not match copy in library 'LED_THT'.",
+          "items": [
+            {
+              "description": "Footprint D1",
+              "pos": {
+                "x": 156.0,
+                "y": 87.5
+              },
+              "uuid": "ad4a7c48-beee-4bbb-9df8-1e574a8a9c52"
+            }
+          ],
+          "severity": "warning",
+          "type": "lib_footprint_mismatch"
+        }
+      ],
+      "unconnected_items": [],
+      "schematic_parity": "unavailable: fixture has no schematic"
+    },
+    "quality_summary": {
+      "errors": 0,
+      "warnings": 3,
+      "infos": 2,
+      "suppressed": 0,
+      "by_rule": {
+        "connector_edge_distance": {
+          "count": 1,
+          "severity": "info",
+          "source": "kct check",
+          "profile_item": null
+        },
+        "mistake.power_trace.power_trace_too_narrow": {
+          "count": 2,
+          "severity": "warning",
+          "source": "kct detect-mistakes",
+          "profile_item": null
+        },
+        "optimize_traces.mergeable_segments": {
+          "count": 1,
+          "severity": "info",
+          "source": "kct optimize-traces",
+          "profile_item": null
+        },
+        "pin1_marker_missing": {
+          "count": 1,
+          "severity": "warning",
+          "source": "kct check",
+          "profile_item": "silkscreen.pin1_dots"
+        }
+      }
+    },
+    "prior_attempt": "Auto-pour generated a zone that KiCad 9 could not load. Retried without auto-pour; final board and GLB load successfully.",
+    "fabrication_qualified": false
+  }
+}

@@ -109,13 +109,51 @@ const p = require(path.join(root, "node_modules/puppeteer-core"));
       [...document.querySelectorAll(".sub")].some(
         (e) =>
           getComputedStyle(e).opacity > 0.9 &&
-          /Parts|circuits/.test(e.textContent),
+          /Every design/.test(e.textContent),
       ),
     );
     await page.screenshot({ path: path.join(shots, "film-plugins.png") });
+    for (const [id, phrase, clip] of [
+      ["electronics-intro", "Chamber six", "clip-pcb"],
+      ["refinement", "None of these tools", "refine-yapcad"],
+    ]) {
+      const t = await page.evaluate(
+        (id) => when(CUES.find(([key]) => key === id)[1]),
+        id,
+      );
+      await page.evaluate((t) => {
+        const a = document.querySelector("audio");
+        a.pause();
+        a.currentTime = t + 1;
+      }, t);
+      await page.waitForFunction(
+        (phrase) =>
+          [...document.querySelectorAll(".sub")].some(
+            (e) =>
+              getComputedStyle(e).opacity > 0.9 &&
+              e.textContent.includes(phrase),
+          ),
+        {},
+        phrase,
+      );
+      await page.evaluate((t) => {
+        document.querySelector("audio").currentTime = t + 8;
+      }, t);
+      await page.waitForFunction(
+        (id) => document.getElementById(id).currentTime > 2,
+        {},
+        clip,
+      );
+      await page.screenshot({ path: path.join(shots, `film-${id}.png`) });
+    }
+    await page.waitForFunction(() =>
+      [...document.querySelectorAll("video")].every(
+        (v) => !v.seeking && v.readyState >= 2 && !v.error,
+      ),
+    );
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: film start, actual audio, pause/seek, backwards captions, restart, mobile fit, plugin sequence, all assets load",
+      "PASS: film start, actual audio, pause/seek, backwards captions, restart, mobile fit, mechanism/electronics/refinement sequences, real video seeking, all assets load",
     );
   } finally {
     await b.close();

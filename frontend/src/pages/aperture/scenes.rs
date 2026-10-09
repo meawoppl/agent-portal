@@ -7,7 +7,8 @@ pub fn render(state: &UseReducerHandle<Experiment>, action: Callback<MouseEvent>
         1 => website(state, action),
         2 => sharing(state),
         3 => agents(state),
-        _ => super::plugins::render(state),
+        4 => super::plugins::render(state),
+        _ => super::engineering::electronics(state),
     }
 }
 
@@ -141,7 +142,10 @@ pub fn controls(state: &UseReducerHandle<Experiment>) -> Html {
         3 => {
             html! {<p class="ap-deck-note">{"Agents can message another session directly or queue durable work for later. Keep the builder building while the reviewer reviews."}</p>}
         }
-        _ => super::plugins::controls(state),
+        4 => super::plugins::controls(state),
+        _ => {
+            html! {<p class="ap-deck-note">{"Actual recordings of a public LED fixture. Routed copper and a 3D export are demonstrated; fabrication qualification is not."}</p>}
+        }
     }
 }
 
@@ -172,7 +176,7 @@ pub fn guide(chamber: usize) -> Html {
         _ => [
             "The agent installs the relevant plugin, runs its setup and doctor checks, and opens the workbench alongside the conversation.",
             "Agents author project sources, inspect results, and revise designs. The plugin provides domain tools, retained evidence, and supported exports.",
-            "These are illustrated workflows, not a completed robot. Hardware manufacture, physical validation, and unsupported simulation capabilities are not demonstrated.",
+            "The recordings preserve real tool output. Concept panels are labelled separately. Inspect the source and run evidence; hardware manufacture and physical qualification are not demonstrated.",
         ],
     };
     html! {

@@ -40,7 +40,23 @@ async function screenshot(page, name) {
     page.on("pageerror", (e) => errors.push(e.message));
     await page.setViewport({ width: 1440, height: 1000 });
     await page.goto(base + "/aperture", { waitUntil: "domcontentloaded" });
-    await page.waitForSelector(".ap-orange");
+    await page.waitForSelector(".ap-prologue");
+    assert.match(
+      await page.$eval(".ap-prologue", (e) => e.textContent),
+      /First, we took/,
+    );
+    await screenshot(page, "prologue.png");
+    for (const width of [320, 390]) {
+      await page.setViewport({ width, height: 844 });
+      assert.equal(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth > innerWidth,
+        ),
+        false,
+      );
+      await screenshot(page, `prologue-${width}.png`);
+    }
+    await page.setViewport({ width: 1440, height: 1000 });
     await page.click(".ap-sound");
     await page.waitForFunction(() =>
       window.__apertureAudio.some((a) => a.currentTime > 0.15),
@@ -51,6 +67,7 @@ async function screenshot(page, name) {
       ),
       1,
     );
+    await page.click(".ap-begin");
     await page.click(".ap-orange");
     await page.waitForFunction(() =>
       document
@@ -157,7 +174,7 @@ async function screenshot(page, name) {
       ),
     );
     await page.click(".ap-sound");
-    for (let stage = 0; stage < 5; stage++) {
+    for (let stage = 0; stage < 4; stage++) {
       assert.equal(await page.$(".ap-next"), null);
       await page.click(".ap-deck-actions .ap-primary");
       assert.equal(
@@ -171,6 +188,13 @@ async function screenshot(page, name) {
         await page.$eval(".ap-plugin-evidence a", (e) => e.href),
         /agent-portal-plugins\/tree\//,
       );
+      if (stage < 2) {
+        await page.$eval(".ap-tool-evidence video", (e) => e.play());
+        await page.waitForFunction(
+          () =>
+            document.querySelector(".ap-tool-evidence video").currentTime > 0.2,
+        );
+      }
       await screenshot(page, `plugins-${stage + 1}.png`);
       if (stage === 2) {
         // Leaving and returning preserves the design series without graduating.
@@ -184,27 +208,53 @@ async function screenshot(page, name) {
     );
     assert.match(
       await page.$eval(".ap-announcer p", (e) => e.textContent),
-      /presenter/,
+      /performance review/,
     );
     await page.click(".ap-next");
+    await page.waitForSelector(".ap-electronics-room");
+    await page.$eval(".ap-tool-evidence video", (e) => e.play());
+    await page.waitForFunction(
+      () => document.querySelector(".ap-tool-evidence video").currentTime > 0.2,
+    );
+    await page.click(".ap-deck-actions .ap-primary");
+    await screenshot(page, "electronics.png");
+    await page.click(".ap-next");
+    await page.waitForSelector(".ap-refinement");
+    assert.match(
+      await page.$eval(".ap-announcer p", (e) => e.textContent),
+      /Every improvement/,
+    );
+    await screenshot(page, "refinement.png");
+    for (const width of [320, 390]) {
+      await page.setViewport({ width, height: 844 });
+      assert.equal(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth > innerWidth,
+        ),
+        false,
+      );
+      await screenshot(page, `refinement-${width}.png`);
+    }
+    await page.setViewport({ width: 1440, height: 1000 });
+    await page.click(".ap-refinement .ap-primary");
     await page.waitForSelector(".ap-graduation");
     assert.match(
       await page.$eval(".ap-footer", (e) => e.textContent),
-      /05 \/ 05/,
+      /06 \/ 06/,
     );
     await screenshot(page, "finale.png");
     await page.click(".ap-final-actions button");
     assert.match(
-      await page.$eval(".ap-room-terminal", (e) => e.textContent),
-      /macbook.local/,
+      await page.$eval(".ap-prologue", (e) => e.textContent),
+      /First, we took/,
     );
     assert.match(
       await page.$eval(".ap-footer", (e) => e.textContent),
-      /00 \/ 05/,
+      /00 \/ 06/,
     );
     for (const width of [320, 390, 768, 1024, 1440]) {
       await page.setViewport({ width, height: 844 });
-      for (let chamber = 0; chamber < 5; chamber++) {
+      for (let chamber = 0; chamber < 6; chamber++) {
         await page.click(`.ap-chamber-tab:nth-child(${chamber + 1})`);
         const overflow = await page.evaluate(
           () => document.documentElement.scrollWidth > window.innerWidth,
@@ -226,7 +276,7 @@ async function screenshot(page, name) {
     );
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: all five chambers and five plugin departments, sample app, viewer/editor invitations, finale/reset, five viewport widths, reduced motion, audio cancellation, clipboard and denied-clipboard fallback; zero page errors",
+      "PASS: software prologue, six chambers, four plugin departments, real tool videos, refinement, sample app, viewer/editor invitations, finale/reset, five viewport widths, reduced motion, audio cancellation, clipboard and denied-clipboard fallback; zero page errors",
     );
   } finally {
     await browser.close();
