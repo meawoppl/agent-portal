@@ -27,7 +27,7 @@ cd frontend
 trunk serve --port 8792
 ```
 
-The **Watch the orientation film** link opens an original 2:32 animated film at
+The **Watch the orientation film** link opens an original 3:26 animated film at
 `/aperture-assets/trailer/index.html`. Its soundtrack drives the animation clock,
 so pause, seek and replay keep narration and captions together. The finite
 soundtrack is preloaded as a Blob so seeking works even on embedded static hosts

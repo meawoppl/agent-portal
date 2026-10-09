@@ -249,7 +249,7 @@ pub fn aperture_page() -> Html {
                         <p>{INSTRUCTIONS[chamber]}</p>
                         <div class="ap-specimen-label"><span aria-hidden="true">{"⌁"}</span><span>{"HUMAN PRESENCE OPTIONAL"}<small>{"The agent has the keyboard."}</small></span></div>
                         <div class="ap-safety-icons" aria-label="Available experiments">
-                            {for ["machines", "websites", "sharing", "agents", "progress"].iter().enumerate().map(|(index, name)| html! {
+                            {for ["machines", "websites", "sharing", "agents", "plugins"].iter().enumerate().map(|(index, name)| html! {
                                 <img class={if index == chamber { "active" } else { "" }} src={format!("/aperture-assets/art/icon-{name}.svg")} alt={LABELS[index]} />
                             })}
                         </div>

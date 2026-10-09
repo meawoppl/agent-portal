@@ -32,11 +32,14 @@ const p = require(path.join(root, "node_modules/puppeteer-core"));
       () => document.querySelector("audio").currentTime > 0.2,
     );
     assert.equal(await page.$eval("#film-start", (e) => e.hidden), true);
-    await page.evaluate(() => {
+    const sharingTime = await page.evaluate(
+      () => when(CUES.find(([id]) => id === "sharing-complete")[1]) + 1,
+    );
+    await page.evaluate((time) => {
       const a = document.querySelector("audio");
       a.pause();
-      a.currentTime = 93;
-    });
+      a.currentTime = time;
+    }, sharingTime);
     await page.waitForFunction(() =>
       [...document.querySelectorAll(".sub")].some(
         (e) =>
@@ -46,7 +49,9 @@ const p = require(path.join(root, "node_modules/puppeteer-core"));
     );
     await page.screenshot({ path: path.join(shots, "film-share.png") });
     await page.evaluate(
-      () => (document.querySelector("audio").currentTime = 7),
+      () =>
+        (document.querySelector("audio").currentTime =
+          when(CUES.find(([id]) => id === "welcome")[1]) + 1),
     );
     await page.waitForFunction(() =>
       [...document.querySelectorAll(".sub")].some(
@@ -60,11 +65,11 @@ const p = require(path.join(root, "node_modules/puppeteer-core"));
       return !a.paused && a.currentTime < 2;
     });
     await page.setViewport({ width: 390, height: 844 });
-    await page.evaluate(() => {
+    await page.evaluate((time) => {
       const a = document.querySelector("audio");
       a.pause();
-      a.currentTime = 93;
-    });
+      a.currentTime = time;
+    }, sharingTime);
     await page.waitForFunction(() =>
       [...document.querySelectorAll(".sub")].some(
         (e) =>
@@ -91,9 +96,26 @@ const p = require(path.join(root, "node_modules/puppeteer-core"));
       ),
       false,
     );
+    // Check the new engineering sequence at its authored cue, not a fixed
+    // second that silently points to a different scene after narration edits.
+    const pluginsTime = await page.evaluate(
+      () => when(CUES.find(([id]) => id === "plugins-complete")[1]) + 1,
+    );
+    await page.evaluate(
+      (time) => (document.querySelector("audio").currentTime = time),
+      pluginsTime,
+    );
+    await page.waitForFunction(() =>
+      [...document.querySelectorAll(".sub")].some(
+        (e) =>
+          getComputedStyle(e).opacity > 0.9 &&
+          /Parts|circuits/.test(e.textContent),
+      ),
+    );
+    await page.screenshot({ path: path.join(shots, "film-plugins.png") });
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: film start, actual audio, pause/seek, backwards captions, restart, mobile fit, all assets load",
+      "PASS: film start, actual audio, pause/seek, backwards captions, restart, mobile fit, plugin sequence, all assets load",
     );
   } finally {
     await b.close();
