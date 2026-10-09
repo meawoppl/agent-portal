@@ -1,0 +1,16 @@
+{
+  "file": "thermoplastic-cake.stl",
+  "units": "mm",
+  "dimensions_mm": [
+    108.0,
+    108.0,
+    60.0
+  ],
+  "watertight": true,
+  "winding_consistent": true,
+  "positive_volume_mm3": 184967.64096394848,
+  "bodies": 1,
+  "triangles": 14690,
+  "flat_base_z_mm": 0.0,
+  "status": "Printable single-piece decorative geometry; no physical print trial performed."
+}

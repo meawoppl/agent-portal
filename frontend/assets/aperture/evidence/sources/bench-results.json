@@ -1,0 +1,84 @@
+{
+  "circle": {
+    "rows_total": 17893,
+    "rows_used": 17270,
+    "rows_gain_selection": 13007,
+    "rows_on_circle": 11676,
+    "commanded_radius_urad": 800.0000632474038,
+    "profile_radius_urad": 800.0,
+    "profile_period_s": 2.0,
+    "gain_x": 1.0010037380018284,
+    "gain_y": 1.0009318949757804,
+    "error_rms_all_urad": 13.732323289405311,
+    "error_max_all_urad": 19.857593676223708,
+    "error_rms_on_circle_urad": 16.472236376083444,
+    "error_max_on_circle_urad": 19.857593676223708,
+    "lag_ms_circle_fit": 6.564759870192098,
+    "lag_cycles_circle_fit": 13.129519740384197
+  },
+  "steps": [
+    {
+      "axis": "x",
+      "level_urad": 100.0,
+      "edge_index": 17660,
+      "edge_time_ms": 9054.551,
+      "baseline_urad": -0.0002972803347280321,
+      "final_urad": 100.004675751503,
+      "gain": 1.0000497303183773,
+      "t10_ms": 4.117000000000189,
+      "t90_ms": 12.618000000000393,
+      "rise_10_90_ms": 8.501000000000204,
+      "settle_2pct_ms": 17.62800000000061,
+      "overshoot_pct": 0.383897280334736,
+      "band_urad": 2.0
+    },
+    {
+      "axis": "y",
+      "level_urad": 100.0,
+      "edge_index": 17678,
+      "edge_time_ms": 9051.097,
+      "baseline_urad": 5.010266940451661e-05,
+      "final_urad": 100.01407094188376,
+      "gain": 1.0001402083921436,
+      "t10_ms": 4.0020000000004075,
+      "t90_ms": 12.001000000000204,
+      "rise_10_90_ms": 7.998999999999796,
+      "settle_2pct_ms": 15.001000000000204,
+      "overshoot_pct": 1.0125498973306009,
+      "band_urad": 2.0
+    }
+  ],
+  "b5_commit": {
+    "gap_host_ms": 1007.49,
+    "gap_cycles": 2001,
+    "gap_board_ms": 1000.5,
+    "complete_reply_ms": 1014.3,
+    "busy_replies": 7,
+    "answered": 14
+  },
+  "videos_s": {
+    "circle.mp4": null,
+    "b5-commit.mp4": null
+  },
+  "release_reference": {
+    "pacing": {
+      "frames": 17893,
+      "duration_s": 9.001,
+      "frame_rate_hz": 1988.0,
+      "resyncs": 1,
+      "frames_with_error_flags": 0
+    },
+    "commanded_extent_urad": 800.0,
+    "measured_extent_urad": 934.9,
+    "tracking_error_rms_urad": 13.7,
+    "tracking_error_max_urad": 19.9,
+    "measured_centre_urad": [
+      134.2,
+      0.0
+    ],
+    "gain_on_circle": {
+      "x": 1.0009,
+      "y": 1.001
+    }
+  }
+}

@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+  <rect width="2000" height="1200" fill="#1a1b26"/>
+  <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#565f89"/></marker></defs>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <text x="55" y="52" fill="#a9b1d6" font-size="24" letter-spacing="1">PR #2189 · An interactive Aperture Science exhibit</text>
+    <text x="55" y="105" fill="#e6e9f5" font-size="34">Visitors could watch fixtures at /demo; /aperture shows agents doing the work.</text>
+    <text x="55" y="151" fill="#e6e9f5" font-size="34">An isolated reducer makes testing replayable without touching real sessions.</text>
+    <path d="M55 183H1945 M1000 210V1120" stroke="#3d4666" stroke-width="2" stroke-dasharray="7 8" fill="none"/>
+    <text x="55" y="240" fill="#f7768e" font-size="22" font-weight="bold" letter-spacing="4">BEFORE</text>
+    <text x="1055" y="240" fill="#9ece6a" font-size="22" font-weight="bold" letter-spacing="4">AFTER</text>
+    <rect x="55" y="280" width="890" height="190" rx="14" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+    <text x="83" y="323" fill="#7aa2f7" font-size="27">DemoPage at /demo</text>
+    <text x="83" y="368" fill="#c0caf5" font-size="23">Fixture messages use the production renderers.</text>
+    <text x="83" y="409" fill="#a9b1d6" font-size="23">Playback ticks reveal canned backend events.</text>
+    <path d="M500 480V535" stroke="#565f89" stroke-width="3" marker-end="url(#arrow)"/>
+    <rect x="55" y="550" width="890" height="190" rx="14" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+    <text x="83" y="593" fill="#7aa2f7" font-size="27">demo-input-preview</text>
+    <text x="83" y="638" fill="#c0caf5" font-size="23">Fixture input is disabled.</text>
+    <text x="83" y="679" fill="#a9b1d6" font-size="23">Useful for inspecting transcript shapes and UI states.</text>
+    <path d="M500 751V805" stroke="#565f89" stroke-width="3" marker-end="url(#arrow)"/>
+    <rect x="55" y="825" width="890" height="255" rx="14" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+    <text x="83" y="871" fill="#f7768e" font-size="27">No guided product experiments</text>
+    <text x="83" y="920" fill="#c0caf5" font-size="23">Visitors cannot try machine transit, website transport,</text>
+    <text x="83" y="959" fill="#c0caf5" font-size="23">observer roles, or an agent review in this catalog.</text>
+    <text x="83" y="1029" fill="#a9b1d6" font-size="23">The existing renderer catalog remains available.</text>
+    <rect x="1055" y="280" width="890" height="190" rx="14" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1083" y="323" fill="#7aa2f7" font-size="27">AperturePage at /aperture</text>
+    <text x="1083" y="368" fill="#c0caf5" font-size="23">Original chamber art, captions and opt-in narration.</text>
+    <text x="1083" y="409" fill="#9ece6a" font-size="23">A public route with no backend or login dependency.</text>
+    <path d="M1500 480V535" stroke="#565f89" stroke-width="3" marker-end="url(#arrow)"/>
+    <rect x="1055" y="550" width="890" height="190" rx="14" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1083" y="593" fill="#7aa2f7" font-size="27">Experiment::reduce(Action)</text>
+    <text x="1083" y="638" fill="#c0caf5" font-size="23">Code · Bench · Web · Parts · Boards · Logic · Control · Briefing</text>
+    <text x="1083" y="679" fill="#9ece6a" font-size="23">Completion and role changes stay in local demo state.</text>
+    <path d="M1500 751V805" stroke="#565f89" stroke-width="3" marker-end="url(#arrow)"/>
+    <rect x="1055" y="825" width="890" height="255" rx="14" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1083" y="871" fill="#9ece6a" font-size="27">Eight sectors; real engineering evidence</text>
+    <text x="1083" y="920" fill="#c0caf5" font-size="23">Replay measured hardware tests; inspect real boards;</text>
+    <text x="1083" y="959" fill="#c0caf5" font-size="23">download the cake STL; see how agents made this film.</text>
+    <text x="1083" y="1029" fill="#e0af68" font-size="23">No session API calls or real membership changes.</text>
+    <text x="55" y="1172" fill="#a9b1d6" font-size="22">Scope: sessions and permissions are simulated. The sample website works; invitations share the exhibit, not private sessions.</text>
+  </g>
+</svg>
