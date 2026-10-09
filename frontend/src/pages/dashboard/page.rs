@@ -746,7 +746,14 @@ pub fn dashboard_page() -> Html {
             )}>
                 <h1>{ app_title.clone() }</h1>
                 <div class="header-actions">
-                    <ServiceMonitor services={ws_hook.service_stats.clone()} cpu_history={ws_hook.service_cpu_history.clone()} />
+                    {
+                        // Machine stats are a desktop affordance; phones get the header space back.
+                        if is_mobile_dashboard {
+                            html! {}
+                        } else {
+                            html! { <ServiceMonitor services={ws_hook.service_stats.clone()} cpu_history={ws_hook.service_cpu_history.clone()} /> }
+                        }
+                    }
                     <button
                         class={classes!("new-session-button", if ui_state.show_launch_dialog { "active" } else { "" })}
                         onclick={toggle_launch_dialog.clone()}

@@ -641,15 +641,16 @@
     position: relative;
     display: inline-flex;
     align-items: center;
-    gap: 0.6rem;
-    padding: 0.3rem 0.6rem;
+    gap: 0.45rem;
+    padding: 0.2rem 0.5rem;
     border-radius: 6px;
     background: rgba(122, 162, 247, 0.08);
     border: 1px solid rgba(122, 162, 247, 0.18);
     cursor: pointer;
     user-select: none;
     font-family: var(--font-mono, monospace);
-    font-size: 0.76rem;
+    font-size: 0.72rem;
+    line-height: 1.15;
 }
 
 .service-monitor:hover {
@@ -660,6 +661,13 @@
     cursor: default;
 }
 
+/* Narrow windows: the header has room for the title and launch button only. */
+@media (max-width: 1100px) {
+    .service-monitor {
+        display: none;
+    }
+}
+
 .service-monitor .service-monitor-label,
 .service-monitor .service-monitor-muted {
     color: var(--text-muted);
@@ -668,8 +676,8 @@
 
 .service-chip {
     display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
+    flex-direction: column;
+    gap: 0.15rem;
     white-space: nowrap;
 }
 
@@ -678,14 +686,47 @@
     opacity: 0.45;
 }
 
+.service-chip-top,
+.service-chip-stats {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
 .service-chip .sparkline {
     display: block;
     flex-shrink: 0;
 }
 
-.service-chip-name {
+.service-chip-pick {
+    appearance: none;
+    -webkit-appearance: none;
+    background: transparent;
+    border: 0;
+    border-bottom: 1px dotted var(--text-muted);
     color: var(--text-primary, #c0caf5);
+    font: inherit;
     font-weight: 600;
+    padding: 0 0.9rem 0 0;
+    cursor: pointer;
+    max-width: 11rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
+        linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+    background-position: calc(100% - 0.45rem) 50%, calc(100% - 0.2rem) 50%;
+    background-size: 0.25rem 0.25rem, 0.25rem 0.25rem;
+    background-repeat: no-repeat;
+}
+
+.service-chip-pick:focus {
+    outline: none;
+    border-bottom-color: var(--accent, #7aa2f7);
+}
+
+.service-chip-pick option {
+    background: var(--bg-darker, #16161e);
+    color: var(--text-primary, #c0caf5);
 }
 
 .service-chip-cpu::before {
@@ -744,10 +785,14 @@
 .service-monitor-panel {
     position: absolute;
     top: calc(100% + 6px);
-    left: 0;
+
+    /* The chip is narrow and centred in the header; the table is wide, so
+       anchor the panel to the chip's centre and let the viewport cap it. */
+    left: 50%;
+    transform: translateX(-50%);
     z-index: 60;
     width: max-content;
-    max-width: calc(100vw - 2rem);
+    max-width: min(calc(100vw - 2rem), 1100px);
     overflow-x: auto;
     padding: 0.6rem 0.75rem;
     border-radius: 8px;
