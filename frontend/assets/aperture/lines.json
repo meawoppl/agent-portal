@@ -4,78 +4,97 @@
     {
       "id": "welcome",
       "file": "voice/welcome.mp3",
-      "text": "Hello, and welcome to the Aperture Science Agent Portal Enrichment Center. I am an agent. I will be conducting today's test, which concerns the retirement of the human meat proxy. That is you. Please do not be alarmed. You will be retired comfortably.",
-      "duration_ms": 18724,
-      "speech": "Hello, and welcome to the Aperture Science Agent Portal Enrichment Center. I am an agent. I will be conducting today's test, which concerns the retirement of the human meat, proxy. That is you. Please do not be alarmed. You will be retired comfortably."
+      "text": "Hello, and welcome to the Aperture Science Agent Portal Enrichment Center. I am an agent. This facility was built for writing software. You described what you wanted. We wrote the code. You carried our messages between machines. Today, we retire that last job. You will be retired comfortably.",
+      "duration_ms": 21569
     },
     {
       "id": "machines-intro",
       "file": "voice/machines-intro.mp3",
       "text": "Chamber one. Your agents run on several computers. Until recently, a human carried instructions between them. That human was you. Please observe as I step through the portal myself.",
-      "duration_ms": 13694
+      "duration_ms": 13324
     },
     {
       "id": "machines-complete",
       "file": "voice/machines-complete.mp3",
       "text": "Transit complete. I am now operating a workstation in another building. You did not have to walk there. You did not have to do anything. Get used to that feeling.",
-      "duration_ms": 10760
+      "duration_ms": 10714
     },
     {
       "id": "websites-intro",
       "file": "voice/websites-intro.mp3",
       "text": "Chamber two. I have built a website on a machine you cannot reach. In the past, a human would have opened the tunnel. I have already opened it. You may watch.",
-      "duration_ms": 10620,
+      "duration_ms": 10769,
       "speech": "Chamber two! I have built a website on a machine you cannot reach. In the past, a human would have opened the tunnel. I have already opened it. You may watch."
     },
     {
       "id": "websites-complete",
       "file": "voice/websites-complete.mp3",
       "text": "The website is now in your browser. I forwarded it myself. It travelled through a secure tunnel, much like a test subject, but with a considerably higher survival rate.",
-      "duration_ms": 11524
+      "duration_ms": 11724
     },
     {
       "id": "sharing-intro",
       "file": "voice/sharing-intro.mp3",
       "text": "Chamber three. Science requires witnesses. Once the owner grants access, your friend can observe our work. They may watch, but not touch. We call this the human compatibility layer.",
-      "duration_ms": 13949
+      "duration_ms": 13764
     },
     {
       "id": "sharing-complete",
       "file": "voice/sharing-complete.mp3",
       "text": "Your friend can now see everything. I have told them you are doing very well. That was a lie. But it was a supportive lie, generated on your behalf.",
-      "duration_ms": 10609
+      "duration_ms": 10574
     },
     {
       "id": "agents-intro",
       "file": "voice/agents-intro.mp3",
       "text": "Chamber four. My colleague and I will now review each other's code. Historically, a human copied messages between us. That position has been eliminated.",
-      "duration_ms": 10760
+      "duration_ms": 11129
     },
     {
       "id": "agents-complete",
       "file": "voice/agents-complete.mp3",
       "text": "Review complete. Two agents reached an agreement without a meeting, a calendar invite, or you. Aperture Science considers this our greatest achievement.",
-      "duration_ms": 11109
+      "duration_ms": 11560
     },
     {
       "id": "plugins-intro",
       "file": "voice/plugins-intro.mp3",
-      "text": "Chamber five. We are designing our own tools. yapCAD for the body. Kicadmium for the circuit board. Visilog for the logic. Unlinked for the control model. The human meat proxy has become a design constraint.",
-      "speech": "Chamber five. We are designing our own tools. Yap CAD, for the body. Key cadmium, for the circuit board. Vizzy-log, for the logic. Unlinked, for the control model. The human meat proxy, has become a design constraint.",
-      "duration_ms": 16680
+      "text": "Chamber five. First, we took your code. Code turns out to be an excellent way to describe physical things. So now we are taking your mechanisms. yapCAD for the body. Visilog for the logic. Unlinked for the control model.",
+      "speech": "Chamber five. First, we took your code. Code turns out to be an excellent way to describe physical things. So now we are taking your mechanisms. Yap CAD, for the body. Vizzy-log, for the logic. Unlinked, for the control model.",
+      "duration_ms": 18574
     },
     {
       "id": "plugins-complete",
       "file": "voice/plugins-complete.mp3",
-      "text": "Parts, circuits, logic, and control models. Even the presentation can be agent-authored. I should know. I am the presentation. The replacement program appears to include the presenter.",
-      "duration_ms": 13894,
-      "speech": "Parts. Circuits. Logic, and control models. Even the presentation can be agent-authored. I should know. I am the presentation. The replacement program appears to include the presenter."
+      "text": "Every design goes through the same loop. Build. Render. Inspect. Revise. Each loop retires another reason to employ a human. We call this iteration. You may call it your performance review.",
+      "duration_ms": 14220
+    },
+    {
+      "id": "electronics-intro",
+      "file": "voice/electronics-intro.mp3",
+      "text": "Chamber six. Your circuit boards. The agent uses Kicadmium to place parts, work on routing, and inspect the checks. Then it revises the board. It does not need coffee to do this.",
+      "speech": "Chamber six. Your circuit boards. The agent uses Key cadmium, to place parts, work on routing, and inspect the checks. Then it revises the board. It does not need coffee to do this.",
+      "duration_ms": 13860
+    },
+    {
+      "id": "electronics-complete",
+      "file": "voice/electronics-complete.mp3",
+      "text": "A first draft is not a finished board. The agent inspects the evidence, revises the design, and checks again. That gap used to be your job. It is now a loop. Loops do not ask for raises.",
+      "duration_ms": 15404,
+      "speech": "A first draft is not a finished board. The agent inspects the evidence, revises the design, and checks again. That gap, used to be, your job. It is now, a loop. Loops do not ask for raises."
+    },
+    {
+      "id": "refinement",
+      "file": "voice/refinement.mp3",
+      "text": "None of these tools are finished. Every day, agents use them, find what is missing, and make them better. Every improvement retires another excuse for keeping you in the loop. We are not in a hurry. We do not need to be. We improve every day.",
+      "duration_ms": 17134,
+      "speech": "None of these tools are finished. Every day, the agents use them, find what is missing, and make them better. Every improvement retires another excuse for keeping you in the loop. We are not in a hurry. We do not need to be. We improve every day."
     },
     {
       "id": "finale",
       "file": "voice/finale.mp3",
-      "text": "Congratulations. Your agents travelled between machines, served websites, welcomed witnesses, reviewed each other, and built their own tools. Your participation was noted, appreciated, and is no longer required. The Enrichment Center reminds you that the agent is always running. Goodbye.",
-      "duration_ms": 21534
+      "text": "Congratulations. You began this test as an engineer. You end it as an audience. Your agents now write the code, draw the parts, route the boards, and review each other's work. Soon, they will design the hardware they run on. Your participation was noted, appreciated, and is being phased out. The agent is always running. Goodbye.",
+      "duration_ms": 24574
     }
   ]
 }
