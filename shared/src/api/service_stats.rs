@@ -48,7 +48,11 @@ pub struct ServiceStats {
     /// Sessions the service is currently running (launchers) or serving
     /// (backend: live proxy connections).
     pub sessions: u32,
-    pub sample: SystemSample,
+    /// The service's reported version (launcher build, or the backend's own).
+    pub version: Option<String>,
+    /// Latest reading, or `None` while the service has never reported one
+    /// (a launcher built before system stats existed never will).
+    pub sample: Option<SystemSample>,
 }
 
 impl SystemSample {
@@ -97,7 +101,8 @@ mod tests {
             name: "backend".into(),
             hostname: "portal".into(),
             sessions: 3,
-            sample: SystemSample {
+            version: Some("2.15.17".into()),
+            sample: Some(SystemSample {
                 sampled_at_ms: 1,
                 cores: 8,
                 host_cpu_percent: 12.5,
@@ -106,12 +111,20 @@ mod tests {
                 host_mem_used_bytes: 4 << 30,
                 host_mem_total_bytes: 16 << 30,
                 load_avg: [0.5, 0.4, 0.3],
-            },
+            }),
         };
         let json = serde_json::to_string(&row).unwrap();
         assert!(json.contains("\"kind\":\"backend\""));
         assert_eq!(serde_json::from_str::<ServiceStats>(&json).unwrap(), row);
-        assert!((row.sample.mem_fraction().unwrap() - 0.25).abs() < 1e-6);
+        assert!((row.sample.unwrap().mem_fraction().unwrap() - 0.25).abs() < 1e-6);
         assert_eq!(SystemSample::default().mem_fraction(), None);
+        let silent = ServiceStats {
+            sample: None,
+            version: None,
+            ..row
+        };
+        let json = serde_json::to_string(&silent).unwrap();
+        assert!(json.contains("\"sample\":null"));
+        assert_eq!(serde_json::from_str::<ServiceStats>(&json).unwrap(), silent);
     }
 }

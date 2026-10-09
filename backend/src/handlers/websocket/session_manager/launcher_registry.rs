@@ -114,7 +114,10 @@ impl SessionManager {
                 name: entry.value().launcher_name.clone(),
                 hostname: entry.value().hostname.clone(),
                 sessions: entry.value().running_sessions.len() as u32,
-                sample: entry.value().system.unwrap_or_default(),
+                version: Some(entry.value().version.clone()),
+                // `None` until the launcher's first reading; an old launcher
+                // never sends one and the UI says so instead of showing zeros.
+                sample: entry.value().system,
             })
             .collect();
         launchers.sort_by(|a, b| a.name.cmp(&b.name).then(a.id.cmp(&b.id)));
