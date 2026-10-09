@@ -23,6 +23,13 @@ cd frontend
 trunk serve --port 8792
 ```
 
+The **Watch the orientation film** link opens an original 2:32 animated film at
+`/aperture-assets/trailer/index.html`. Its soundtrack drives the animation clock,
+so pause, seek and replay keep narration and captions together. The finite
+soundtrack is preloaded as a Blob so seeking works even on embedded static hosts
+that do not provide HTTP byte ranges. Capture mode (`?capture`) exposes
+`window.seek(seconds)` for deterministic frame rendering and skips audio loading.
+
 The exhibit works without an API server. Its **Exit to Agent Portal** and
 **Open Agent Portal** links lead to `/dashboard`, which requires a normal backend.
 If your environment defines `NO_COLOR=1` and Trunk rejects it, run Trunk with
@@ -69,10 +76,15 @@ The browser smoke test uses the existing capture harness's Puppeteer convention:
 npm install --prefix /tmp/readme-demo puppeteer-core
 DEMO_ROOT=/tmp/readme-demo DEMO_URL=http://localhost:8792 \
   node docs/media/capture/check-aperture.js
+DEMO_ROOT=/tmp/readme-demo DEMO_URL=http://localhost:8792 \
+  node docs/media/capture/check-aperture-film.js
 ```
 
 It drives all four experiments, interacts with the real sample iframe, opens an
 observer invitation, changes roles, completes and resets the exhibit, checks
-five viewport widths and reduced motion, and fails on browser errors. Screenshots
+five viewport widths, reduced motion, audio cancellation, clipboard copying and
+its permission-denied fallback, and fails on browser errors. The film check also
+verifies actual playback, seeking backwards with captions, replay, mobile stage
+bounds, and asset loading. Screenshots
 are written under `$DEMO_ROOT/aperture-qa/`. It expects Chrome at
 `/usr/bin/google-chrome`, like the other capture scripts.

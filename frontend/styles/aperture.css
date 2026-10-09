@@ -1868,3 +1868,55 @@
     transform: scale(1);
   }
 }
+
+.ap-real-guide {
+  border-top: 1px solid #d2cbbd;
+  margin-top: 16px;
+  padding-top: 12px;
+  color: #655c4e;
+  font-size: 12px;
+}
+
+.ap-real-guide summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.ap-real-guide summary:focus-visible {
+  outline: 3px solid #007ec8;
+  outline-offset: 4px;
+}
+
+.ap-real-guide ol {
+  margin: 12px 0 10px;
+  padding-left: 22px;
+}
+
+.ap-real-guide li {
+  margin-bottom: 8px;
+  line-height: 1.6;
+}
+
+.ap-invitation p {
+  color: #655c4e;
+  margin: 5px 0;
+  font-size: 11px;
+}
+
+.ap-film-link {
+  display: inline-block;
+  color: #655c4e;
+  margin-top: 18px;
+  font-size: 12px;
+  text-decoration: none;
+  border-bottom: 1px solid #aaa395;
+  padding-bottom: 4px;
+}
+
+@media (max-width: 760px) {
+  .ap-film-link {
+    grid-column: 1 / -1;
+    margin-top: 16px;
+    justify-self: start;
+  }
+}

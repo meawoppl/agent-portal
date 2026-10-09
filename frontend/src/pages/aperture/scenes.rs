@@ -94,7 +94,7 @@ fn agents(state: &Experiment) -> Html {
             <div class="ap-agent-conversation" aria-live="polite">
                 <div class="ap-agent-message"><span>{"CLAUDE"}</span><p>{"The companion calibration app is ready. Requesting an independent review before we introduce humans."}</p></div>
                 if state.messages >= 1 {
-                    <div class="ap-agent-command"><span>{"$ agent-portal message send reviewer"}</span><code>{"\"Review the calibration app. Pay particular attention to the launch button.\""}</code></div>
+                    <div class="ap-agent-command"><span>{"$ agent-portal message send <session-id>"}</span><code>{"\"Review the calibration app. Pay particular attention to the launch button.\""}</code></div>
                 }
                 if state.messages >= 2 {
                     <div class="ap-agent-message orange"><span>{"CODEX"}</span><p>{"Review received on lab-b. Checking boundaries, controls, and the continued existence of the cube…"}</p></div>
@@ -140,5 +140,39 @@ pub fn controls(state: &UseReducerHandle<Experiment>) -> Html {
         _ => {
             html! {<p class="ap-deck-note">{"Agents can message another session directly or queue durable work for later. Keep the builder building while the reviewer reviews."}</p>}
         }
+    }
+}
+
+/// Tie the fictional chambers back to the actual product controls. In
+/// particular, sharing a demo URL must never imply a real membership grant.
+pub fn guide(chamber: usize) -> Html {
+    let steps = match chamber {
+        0 => [
+            "Connect your computers using Agent Portal's launcher.",
+            "Open a new session in the dashboard and choose its Host, agent, and working directory.",
+            "Select a session in the rail to switch machines. Each agent keeps running on its own host.",
+        ],
+        1 => [
+            "Ask your remote agent to start an HTTP service, for example on port 8080.",
+            "Have that agent run agent-portal forward 8080. The returned address opens its service in your browser.",
+            "Forwarded apps stay private unless the owner explicitly makes the forward public in Settings.",
+        ],
+        2 => [
+            "Open a session's menu and choose Share Session.",
+            "Enter your friend's account email, choose Viewer or Editor, and select Add. Your friend needs an account on the same portal.",
+            "A Viewer can follow the session. An Editor can send prompts. Owners can change or remove access.",
+        ],
+        _ => [
+            "Have an agent run agent-portal message list to find your other sessions and their IDs.",
+            "Send a message with agent-portal message send <session-id> \"Review my changes\".",
+            "The receiving agent sees who sent it. Use agent-portal work-queue add <session-id> for work that should wait.",
+        ],
+    };
+    html! {
+        <details class="ap-real-guide">
+            <summary>{"Try this with your real agents"}</summary>
+            <ol>{for steps.into_iter().map(|step| html! { <li>{step}</li> })}</ol>
+            <a href="/dashboard">{"Open your dashboard ↗"}</a>
+        </details>
     }
 }

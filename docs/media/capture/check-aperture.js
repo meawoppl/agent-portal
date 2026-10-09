@@ -26,11 +26,31 @@ async function screenshot(page, name) {
   });
   try {
     const page = await browser.newPage();
+    await page.evaluateOnNewDocument(() => {
+      window.__apertureAudio = [];
+      const OriginalAudio = window.Audio;
+      window.Audio = class extends OriginalAudio {
+        constructor(...args) {
+          super(...args);
+          window.__apertureAudio.push(this);
+        }
+      };
+    });
     const errors = [];
     page.on("pageerror", (e) => errors.push(e.message));
     await page.setViewport({ width: 1440, height: 1000 });
-    await page.goto(base + "/aperture", { waitUntil: "networkidle0" });
+    await page.goto(base + "/aperture", { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".ap-orange");
+    await page.click(".ap-sound");
+    await page.waitForFunction(() =>
+      window.__apertureAudio.some((a) => a.currentTime > 0.15),
+    );
+    assert.equal(
+      await page.evaluate(
+        () => window.__apertureAudio.filter((a) => !a.paused).length,
+      ),
+      1,
+    );
     await page.click(".ap-orange");
     await page.waitForFunction(() =>
       document
@@ -42,6 +62,24 @@ async function screenshot(page, name) {
       /COMPLETE/,
     );
     await page.click(".ap-next");
+    await page.waitForFunction(() =>
+      window.__apertureAudio.some(
+        (a) => a.src.includes("websites-intro") && a.currentTime > 0.1,
+      ),
+    );
+    assert.equal(
+      await page.evaluate(
+        () => window.__apertureAudio.filter((a) => !a.paused).length,
+      ),
+      1,
+    );
+    await page.click(".ap-sound");
+    assert.equal(
+      await page.evaluate(
+        () => window.__apertureAudio.filter((a) => !a.paused).length,
+      ),
+      0,
+    );
     await page.click(".ap-primary");
     await page.waitForSelector("iframe.ap-sample-site");
     const iframe = await (await page.$("iframe.ap-sample-site")).contentFrame();
@@ -55,10 +93,40 @@ async function screenshot(page, name) {
     await screenshot(page, "websites.png");
     await page.click(".ap-next");
     await page.click(".ap-primary");
+    await browser
+      .defaultBrowserContext()
+      .overridePermissions(new URL(base).origin, [
+        "clipboard-read",
+        "clipboard-write",
+        "clipboard-sanitized-write",
+      ]);
+    await page.click(".ap-invitation button");
+    await page.waitForFunction(() =>
+      document
+        .querySelector(".ap-invitation [role=status]")
+        .textContent.includes("copied"),
+    );
+    assert.match(
+      await page.evaluate(() => navigator.clipboard.readText()),
+      /#observer-viewer$/,
+    );
+    await page.evaluate(() =>
+      Object.defineProperty(navigator.clipboard, "writeText", {
+        value: () =>
+          Promise.reject(new Error("Permission denied in regression test")),
+        configurable: true,
+      }),
+    );
+    await page.click(".ap-invitation button");
+    await page.waitForFunction(() =>
+      document
+        .querySelector(".ap-invitation [role=status]")
+        .textContent.includes("Select and copy"),
+    );
     const invitation = await page.$eval("#ap-share-url", (e) => e.value);
     assert.match(invitation, /#observer-viewer$/);
     const guest = await browser.newPage();
-    await guest.goto(invitation, { waitUntil: "networkidle0" });
+    await guest.goto(invitation, { waitUntil: "domcontentloaded" });
     assert.match(
       await guest.$eval(".ap-observer-banner", (e) => e.textContent),
       /viewer demo invitation/,
@@ -115,7 +183,7 @@ async function screenshot(page, name) {
     );
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: all four chambers, sample app, viewer/editor invitations, finale/reset, five viewport widths, reduced motion; zero page errors",
+      "PASS: all four chambers, sample app, viewer/editor invitations, finale/reset, five viewport widths, reduced motion, audio cancellation, clipboard and denied-clipboard fallback; zero page errors",
     );
   } finally {
     await browser.close();

@@ -249,6 +249,7 @@ pub fn aperture_page() -> Html {
                                 <img class={if index == chamber { "active" } else { "" }} src={format!("/aperture-assets/art/icon-{name}.svg")} alt={LABELS[index]} />
                             })}
                         </div>
+                        <a class="ap-film-link" href="/aperture-assets/trailer/index.html">{"▶ Watch the orientation film"}</a>
                         if !*started {
                             <button class="ap-begin" onclick={on_begin}>{"Begin orientation"}<span>{"↓"}</span></button>
                         }
@@ -263,7 +264,8 @@ pub fn aperture_page() -> Html {
                             {scenes::controls(&state)}
                             if chamber == 2 && state.invited {
                                 <div class="ap-invitation">
-                                    <label for="ap-share-url">{"Your demo invitation"}</label>
+                                    <label for="ap-share-url">{"Share this exhibit with a friend"}</label>
+                                    <p>{"This link opens the demo. Real sessions are shared by account email from Share Session."}</p>
                                     <div><input id="ap-share-url" readonly=true value={share_url.clone()} /><button class="ap-secondary" onclick={on_copy}>{"Copy link"}</button></div>
                                     <a href={share_url.clone()} target="_blank" rel="noopener noreferrer">{"Open the observer’s view ↗"}</a>
                                     <span role="status">{(*copy_status).clone()}</span>
@@ -278,6 +280,7 @@ pub fn aperture_page() -> Html {
                                     <button class="ap-next" onclick={on_next}>{if completed_count == 4 { "Collect test results" } else { "Next experiment" }}<span aria-hidden="true">{"→"}</span></button>
                                 }
                             </div>
+                            {scenes::guide(chamber)}
                         </div>
                     </div>
                 }
