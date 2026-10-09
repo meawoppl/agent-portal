@@ -85,12 +85,14 @@ impl Reducible for ClientWsState {
             ClientWsAction::ServiceStats(services) => {
                 for s in &services {
                     let history = next.service_cpu_history.entry(s.id.clone()).or_default();
+                    let Some(sample) = s.sample else {
+                        continue;
+                    };
                     let newer = history
                         .last()
-                        .is_none_or(|(at, _)| s.sample.sampled_at_ms > *at);
-                    if newer && s.sample.sampled_at_ms > 0 {
-                        history
-                            .push((s.sample.sampled_at_ms, f64::from(s.sample.host_cpu_percent)));
+                        .is_none_or(|(at, _)| sample.sampled_at_ms > *at);
+                    if newer && sample.sampled_at_ms > 0 {
+                        history.push((sample.sampled_at_ms, f64::from(sample.host_cpu_percent)));
                         if history.len() > SERVICE_CPU_HISTORY_CAP {
                             let excess = history.len() - SERVICE_CPU_HISTORY_CAP;
                             history.drain(..excess);
@@ -501,11 +503,12 @@ mod service_stats_tests {
             name: id.into(),
             hostname: "h".into(),
             sessions: 0,
-            sample: SystemSample {
+            version: None,
+            sample: (at > 0).then_some(SystemSample {
                 sampled_at_ms: at,
                 host_cpu_percent: cpu,
                 ..SystemSample::default()
-            },
+            }),
         }
     }
 
@@ -525,7 +528,7 @@ mod service_stats_tests {
             !state.service_cpu_history.contains_key("b"),
             "b left the table"
         );
-        // A zero timestamp (launcher that has not reported) adds nothing.
+        // A launcher that has not reported (no sample) adds nothing.
         state = state.reduce(ClientWsAction::ServiceStats(vec![row("a", 0, 99.0)]));
         assert_eq!(state.service_cpu_history["a"].len(), 2);
     }

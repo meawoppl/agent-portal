@@ -686,6 +686,10 @@
     opacity: 0.45;
 }
 
+.service-monitor-panel tr.silent td {
+    color: var(--text-muted);
+}
+
 .service-chip-top,
 .service-chip-stats {
     display: inline-flex;
@@ -783,18 +787,19 @@
 }
 
 .service-monitor-panel {
-    position: absolute;
-    top: calc(100% + 6px);
-
-    /* The chip is narrow and centred in the header; the table is wide, so
-       anchor the panel to the chip's centre and let the viewport cap it. */
+    /* Fixed to the viewport, not the chip: the chip is a narrow thing that
+       may sit near either edge, while the table is wide. `top` is set
+       inline from the chip's measured bottom edge. */
+    position: fixed;
     left: 50%;
     transform: translateX(-50%);
     z-index: 60;
     width: max-content;
-    max-width: min(calc(100vw - 2rem), 1100px);
+    max-width: calc(100vw - 2rem);
     overflow-x: auto;
-    padding: 0.6rem 0.75rem;
+    padding: 0.5rem 0.7rem;
+    font-size: 0.7rem;
+    line-height: 1.25;
     border-radius: 8px;
     background: var(--bg-darker, #16161e);
     border: 1px solid var(--border, #292e42);
@@ -810,9 +815,14 @@
 .service-monitor-panel th,
 .service-monitor-panel td {
     text-align: left;
-    padding: 0.25rem 0.6rem 0.25rem 0;
+    padding: 0.2rem 0.9rem 0.2rem 0;
     white-space: nowrap;
-    vertical-align: baseline;
+    vertical-align: middle;
+}
+
+.service-monitor-panel th:last-child,
+.service-monitor-panel td:last-child {
+    padding-right: 0;
 }
 
 .service-monitor-panel th {
@@ -823,18 +833,27 @@
 
 .service-row-name {
     display: flex;
-    gap: 0.4rem;
+    flex-direction: column;
+    gap: 0.05rem;
+}
+
+.service-row-title {
+    display: inline-flex;
+    gap: 0.35rem;
     align-items: baseline;
+    font-weight: 600;
 }
 
 .service-row-kind {
     color: var(--text-muted);
-    font-size: 0.68rem;
+    font-size: 0.62rem;
+    font-weight: 400;
     text-transform: uppercase;
 }
 
 .service-monitor-footnote {
-    margin-top: 0.5rem;
-    font-size: 0.68rem;
+    margin-top: 0.45rem;
+    font-size: 0.66rem;
     white-space: normal;
+    max-width: 48rem;
 }
