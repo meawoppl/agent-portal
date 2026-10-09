@@ -91,7 +91,7 @@
     /* Per-turn metrics remain on each result card and in Performance. Hiding
        this desktop summary also avoids clipping its dropdown inside a compact
        one-row mobile toolbar. */
-    .turn-metrics-pill {
+    .service-monitor {
         display: none;
     }
 

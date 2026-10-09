@@ -6,7 +6,7 @@ mod client_websocket_events;
 use crate::utils::{self, calculate_backoff, parse_version, On401};
 use client_websocket_events::handle_server_message;
 use shared::api::TurnMetricsResponse;
-use shared::{AppConfig, ClientEndpoint, TurnMetrics, WsEndpoint};
+use shared::{AppConfig, ClientEndpoint, ServiceStats, TurnMetrics, WsEndpoint};
 use std::collections::HashMap;
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
@@ -48,6 +48,11 @@ pub struct UseClientWebSocket {
     /// launcher connected, disconnected, or was evicted. Consumers hang a
     /// `use_effect_with` on it to refetch `/api/launchers` (#710).
     pub launcher_event_counter: u32,
+    /// Services monitor table (backend plus the user's launchers), from the
+    /// newest `ServerToClient::ServiceStatsUpdate`.
+    pub service_stats: Vec<ServiceStats>,
+    /// Host CPU history per service id for the header sparkline.
+    pub service_cpu_history: HashMap<String, Vec<f64>>,
 }
 
 /// Decide whether `next` is strictly newer than `prev`. Falls back to string
@@ -189,6 +194,12 @@ pub fn use_client_websocket() -> UseClientWebSocket {
         session_progress: live.session_progress.clone(),
         launch_event_counter: live.launch_event_counter,
         launcher_event_counter: live.launcher_event_counter,
+        service_stats: live.service_stats.clone(),
+        service_cpu_history: live
+            .service_cpu_history
+            .iter()
+            .map(|(id, points)| (id.clone(), points.iter().map(|(_, v)| *v).collect()))
+            .collect(),
     }
 }
 

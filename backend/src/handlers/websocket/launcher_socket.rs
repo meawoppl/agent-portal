@@ -209,6 +209,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                                     // backoff.
                                     let _ = ws_sender
                                         .send(ServerToLauncher::LauncherRegisterAck {
+                                            capabilities: Vec::new(),
                                             success: false,
                                             fatal: false,
                                             launcher_id,
@@ -228,6 +229,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                                             None => {
                                                 let _ = ws_sender
                                                     .send(ServerToLauncher::LauncherRegisterAck {
+                                                        capabilities: Vec::new(),
                                                         success: false,
                                                         fatal: true,
                                                         launcher_id,
@@ -243,6 +245,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                                     } else {
                                         let _ = ws_sender
                                             .send(ServerToLauncher::LauncherRegisterAck {
+                                                capabilities: Vec::new(),
                                                 success: false,
                                                 fatal: true,
                                                 launcher_id,
@@ -260,6 +263,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                         Err(_) => {
                             let _ = ws_sender
                                 .send(ServerToLauncher::LauncherRegisterAck {
+                                    capabilities: Vec::new(),
                                     success: false,
                                     fatal: false,
                                     launcher_id,
@@ -276,6 +280,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                         None => {
                             let _ = ws_sender
                                 .send(ServerToLauncher::LauncherRegisterAck {
+                                    capabilities: Vec::new(),
                                     success: false,
                                     fatal: true,
                                     launcher_id,
@@ -289,6 +294,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                 } else {
                     let _ = ws_sender
                         .send(ServerToLauncher::LauncherRegisterAck {
+                            capabilities: Vec::new(),
                             success: false,
                             fatal: true,
                             launcher_id,
@@ -330,6 +336,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
         );
         let _ = ws_sender
             .send(ServerToLauncher::LauncherRegisterAck {
+                capabilities: Vec::new(),
                 success: false,
                 launcher_id,
                 fatal: true,
@@ -362,6 +369,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
     let register_result = app_state.session_manager.try_register_launcher(
         launcher_id,
         LauncherConnection {
+            system: None,
             sender: tx,
             launcher_name: launcher_name.clone(),
             hostname: hostname.clone(),
@@ -385,6 +393,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
             );
             let _ = ws_sender
                 .send(ServerToLauncher::LauncherRegisterAck {
+                    capabilities: Vec::new(),
                     success: false,
                     launcher_id,
                     fatal: true,
@@ -403,6 +412,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
     // Send RegisterAck
     let _ = ws_sender
         .send(ServerToLauncher::LauncherRegisterAck {
+            capabilities: vec![shared::SERVER_CAPABILITY_SYSTEM_STATS.to_string()],
             success: true,
             launcher_id,
             error: None,
@@ -650,11 +660,20 @@ fn handle_launcher_message(
             );
         }
         LauncherToServer::LauncherHeartbeat {
-            running_sessions, ..
+            running_sessions,
+            system,
+            ..
         } => {
             app_state
                 .session_manager
                 .update_launcher_running_sessions(launcher_id, running_sessions);
+            if let Some(sample) = system {
+                tracing::debug!(%launcher_id, cpu = sample.host_cpu_percent, "launcher heartbeat sample");
+                app_state
+                    .session_manager
+                    .update_launcher_system(launcher_id, sample);
+                crate::service_stats::push_to_user(app_state, user_id);
+            }
             // Echo the heartbeat so a launcher that supports it can detect a
             // half-open control socket and reconnect (#1366). Gated on the
             // capability so older launchers never receive an undecodable frame.
@@ -667,6 +686,15 @@ fn handle_launcher_message(
                     .send_to_launcher(&launcher_id, ServerToLauncher::LauncherHeartbeatAck);
             }
             reconcile_desired_sessions(app_state, launcher_id, user_id);
+        }
+        LauncherToServer::SystemStats { sample, .. } => {
+            tracing::debug!(%launcher_id, cpu = sample.host_cpu_percent, "launcher system sample");
+            if app_state
+                .session_manager
+                .update_launcher_system(launcher_id, sample)
+            {
+                crate::service_stats::push_to_user(app_state, user_id);
+            }
         }
         LauncherToServer::ProxyLog {
             session_id,

@@ -76,6 +76,18 @@ pub enum LauncherToServer {
         launcher_id: Uuid,
         running_sessions: Vec<Uuid>,
         uptime_secs: u64,
+        /// Resource reading of the launcher and its host. `None` from
+        /// launchers that predate the services monitor.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        system: Option<crate::SystemSample>,
+    },
+
+    /// Resource reading between heartbeats. Only sent to backends that
+    /// advertise [`crate::SERVER_CAPABILITY_SYSTEM_STATS`] in the register
+    /// ack, so an older backend never sees an undecodable frame.
+    SystemStats {
+        launcher_id: Uuid,
+        sample: crate::SystemSample,
     },
 
     /// Log output from a proxy process
@@ -239,6 +251,10 @@ pub enum ServerToLauncher {
         /// issue #1237.)
         #[serde(default)]
         fatal: bool,
+        /// What this backend accepts beyond the base protocol (see the
+        /// `SERVER_CAPABILITY_*` constants). Absent from older backends.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        capabilities: Vec<String>,
         /// Machine-readable rejection category when `fatal` is set.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reject_reason: Option<LauncherRejectReason>,

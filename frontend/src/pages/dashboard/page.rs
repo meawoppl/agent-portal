@@ -14,8 +14,7 @@ use super::types::{
     load_rail_position, save_header_collapsed, save_hidden_sessions, save_inactive_hidden,
 };
 use crate::components::{
-    ConfirmModal, ConfirmModalStyle, HelpOverlay, LaunchDialog, OnboardingTutorial,
-    TurnMetricsHeaderPill,
+    ConfirmModal, ConfirmModalStyle, HelpOverlay, LaunchDialog, OnboardingTutorial, ServiceMonitor,
 };
 use crate::hooks::{
     use_client_websocket, use_interrupt_hotkey, use_keyboard_nav, use_sessions, KeyboardNavConfig,
@@ -747,7 +746,7 @@ pub fn dashboard_page() -> Html {
             )}>
                 <h1>{ app_title.clone() }</h1>
                 <div class="header-actions">
-                    <TurnMetricsHeaderPill metrics={ws_hook.recent_turn_metrics.clone()} />
+                    <ServiceMonitor services={ws_hook.service_stats.clone()} cpu_history={ws_hook.service_cpu_history.clone()} />
                     <button
                         class={classes!("new-session-button", if ui_state.show_launch_dialog { "active" } else { "" })}
                         onclick={toggle_launch_dialog.clone()}

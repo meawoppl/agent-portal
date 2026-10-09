@@ -637,87 +637,159 @@
 /* Turn-metrics header pill — sparkline of the user's recent per-turn
    performance (tok/s, TTFT, max gap, cache hit). Sits next to the spend
    chip; renders nothing when the recent-turn buffer is empty. */
-.turn-metrics-pill {
+.service-monitor {
     position: relative;
     display: inline-flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.35rem 0.7rem;
+    gap: 0.6rem;
+    padding: 0.3rem 0.6rem;
     border-radius: 6px;
     background: rgba(122, 162, 247, 0.08);
-    border: 1px solid rgba(122, 162, 247, 0.25);
+    border: 1px solid rgba(122, 162, 247, 0.18);
     cursor: pointer;
-    transition: background 0.15s;
     user-select: none;
+    font-family: var(--font-mono, monospace);
+    font-size: 0.76rem;
 }
 
-.turn-metrics-pill:hover {
+.service-monitor:hover {
     background: rgba(122, 162, 247, 0.14);
 }
 
-.turn-metrics-pill .turn-metrics-pill-label {
+.service-monitor.empty {
+    cursor: default;
+}
+
+.service-monitor .service-monitor-label,
+.service-monitor .service-monitor-muted {
     color: var(--text-muted);
-    font-size: 0.78rem;
-    font-family: var(--font-mono, monospace);
     white-space: nowrap;
 }
 
-.turn-metrics-pill .sparkline {
+.service-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    white-space: nowrap;
+}
+
+.service-chip.stale,
+.service-monitor-panel tr.stale {
+    opacity: 0.45;
+}
+
+.service-chip .sparkline {
     display: block;
     flex-shrink: 0;
 }
 
-.turn-metrics-pill .turn-metrics-pill-value {
-    color: var(--accent, #7aa2f7);
-    font-size: 0.78rem;
+.service-chip-name {
+    color: var(--text-primary, #c0caf5);
     font-weight: 600;
-    white-space: nowrap;
 }
 
-.turn-metrics-pill .turn-metrics-pill-chevron {
+.service-chip-cpu::before {
+    content: "cpu ";
+    color: var(--text-muted);
+    font-weight: 400;
+}
+
+.service-chip-mem::before {
+    content: "ram ";
+    color: var(--text-muted);
+    font-weight: 400;
+}
+
+.service-chip-load::before {
+    content: "load ";
+    color: var(--text-muted);
+}
+
+.service-chip-cpu,
+.service-chip-mem,
+.service-monitor-panel td.calm,
+.service-monitor-panel td.busy,
+.service-monitor-panel td.hot {
+    font-weight: 600;
+}
+
+.service-chip-cpu.calm,
+.service-chip-mem.calm,
+.service-monitor-panel td.calm {
+    color: var(--success, #9ece6a);
+}
+
+.service-chip-cpu.busy,
+.service-chip-mem.busy,
+.service-monitor-panel td.busy {
+    color: var(--warning, #e0af68);
+}
+
+.service-chip-cpu.hot,
+.service-chip-mem.hot,
+.service-monitor-panel td.hot {
+    color: var(--error, #f7768e);
+}
+
+.service-monitor .service-monitor-chevron {
     color: var(--text-muted);
     font-size: 0.7rem;
     transition: transform 0.15s;
 }
 
-.turn-metrics-pill .turn-metrics-pill-chevron.open {
+.service-monitor .service-monitor-chevron.open {
     transform: rotate(180deg);
 }
 
-.turn-metrics-pill-menu {
+.service-monitor-panel {
     position: absolute;
-    top: calc(100% + 4px);
-    right: 0;
-    display: flex;
-    flex-direction: column;
-    min-width: 8rem;
-    padding: 0.25rem;
-    background: var(--bg-secondary, #1f2335);
-    border: 1px solid rgba(122, 162, 247, 0.3);
-    border-radius: 6px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-    z-index: 100;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 60;
+    width: max-content;
+    max-width: calc(100vw - 2rem);
+    overflow-x: auto;
+    padding: 0.6rem 0.75rem;
+    border-radius: 8px;
+    background: var(--bg-darker, #16161e);
+    border: 1px solid var(--border, #292e42);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    cursor: default;
 }
 
-.turn-metrics-pill-menu-item {
-    padding: 0.35rem 0.6rem;
-    background: transparent;
-    border: none;
-    color: var(--text-primary, #c0caf5);
-    font-size: 0.78rem;
-    font-family: inherit;
+.service-monitor-panel table {
+    border-collapse: collapse;
+    width: 100%;
+}
+
+.service-monitor-panel th,
+.service-monitor-panel td {
     text-align: left;
-    cursor: pointer;
-    border-radius: 4px;
-    transition: background 0.1s;
+    padding: 0.25rem 0.6rem 0.25rem 0;
+    white-space: nowrap;
+    vertical-align: baseline;
 }
 
-.turn-metrics-pill-menu-item:hover {
-    background: rgba(122, 162, 247, 0.15);
+.service-monitor-panel th {
+    color: var(--text-muted);
+    font-weight: 400;
+    border-bottom: 1px solid var(--border, #292e42);
 }
 
-.turn-metrics-pill-menu-item.active {
-    background: rgba(122, 162, 247, 0.22);
-    color: var(--accent, #7aa2f7);
-    font-weight: 600;
+.service-row-name {
+    display: flex;
+    gap: 0.4rem;
+    align-items: baseline;
+}
+
+.service-row-kind {
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+}
+
+.service-monitor-footnote {
+    margin-top: 0.5rem;
+    font-size: 0.68rem;
+    white-space: normal;
 }

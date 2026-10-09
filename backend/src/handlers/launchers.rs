@@ -747,6 +747,7 @@ mod tests {
     fn launcher_for(user_id: Uuid, hostname: &str) -> LauncherConnection {
         let (sender, _rx) = crate::handlers::websocket::conn_channel(64);
         LauncherConnection {
+            system: None,
             sender,
             launcher_name: format!("launcher-{}", hostname),
             hostname: hostname.to_string(),

@@ -145,6 +145,7 @@ mod tests {
         // not to a dead channel.
         std::mem::forget(rx);
         LauncherConnection {
+            system: None,
             sender,
             launcher_name: format!("launcher-{hostname}"),
             hostname: hostname.to_string(),

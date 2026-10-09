@@ -41,6 +41,11 @@ pub const LAUNCHER_CAPABILITY_RESTART: &str = "launcher.restart";
 /// acks to launchers that advertise this, so older launchers never see an
 /// undecodable frame (#1366).
 pub const LAUNCHER_CAPABILITY_HEARTBEAT_ACK: &str = "launcher.heartbeat_ack";
+/// Backend capability advertised in `LauncherRegisterAck`: the backend
+/// accepts `LauncherToServer::SystemStats` frames between heartbeats, so a
+/// launcher may report resource usage every few seconds instead of only on
+/// the 30 s heartbeat. Launchers never send the frame without seeing it.
+pub const SERVER_CAPABILITY_SYSTEM_STATS: &str = "server.system_stats";
 
 /// Default git-worktree branch shape for unnamed worktree launches:
 /// `session-<YYYYMMDD-HHMMSS>`. Single source of truth shared by the backend
@@ -165,9 +170,10 @@ pub mod local_frame;
 /// Consumer-specific views of the plugin manifest format.
 pub mod plugin_manifest;
 pub use api::{
-    AgentSessionInfo, AgentSessionsResponse, CodexPermissionInput, ErrorMessage, LaunchSpec,
-    ModelUsage, ModelUsageEntry, SendAgentMessageRequest, SendAgentMessageResponse,
-    SoundSettingsResponse, TurnMetrics, TurnMetricsResponse, WorktreeMode,
+    format_bytes_short, AgentSessionInfo, AgentSessionsResponse, CodexPermissionInput,
+    ErrorMessage, LaunchSpec, ModelUsage, ModelUsageEntry, SendAgentMessageRequest,
+    SendAgentMessageResponse, ServiceKind, ServiceStats, SoundSettingsResponse, SystemSample,
+    TurnMetrics, TurnMetricsResponse, WorktreeMode,
 };
 pub use local_frame::{LocalFrame, UserFrame, ERROR_MESSAGE_TYPE};
 

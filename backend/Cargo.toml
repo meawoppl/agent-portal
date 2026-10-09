@@ -11,6 +11,9 @@ shared = { path = "../shared" }
 # Long-term session archive format + read-side store (#1258)
 archive-format = { path = "../archive-format" }
 
+# Host/process CPU, memory and load for the services monitor
+portal-sysmon = { path = "../portal-sysmon" }
+
 # Async runtime
 tokio = { workspace = true }
 tokio-util = { workspace = true }
