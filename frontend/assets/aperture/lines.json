@@ -4,62 +4,78 @@
     {
       "id": "welcome",
       "file": "voice/welcome.mp3",
-      "text": "Hello, and welcome to the Aperture Science Agent Portal Enrichment Center. Today you will operate several artificial intelligences from a web browser. This is perfectly safe. The intelligences have been told the same thing.",
-      "duration_ms": 16239
+      "text": "Hello, and welcome to the Aperture Science Agent Portal Enrichment Center. I am an agent. I will be conducting today's test, which concerns the retirement of the human meat proxy. That is you. Please do not be alarmed. You will be retired comfortably.",
+      "duration_ms": 18724,
+      "speech": "Hello, and welcome to the Aperture Science Agent Portal Enrichment Center. I am an agent. I will be conducting today's test, which concerns the retirement of the human meat, proxy. That is you. Please do not be alarmed. You will be retired comfortably."
     },
     {
       "id": "machines-intro",
       "file": "voice/machines-intro.mp3",
-      "text": "Chamber one. Your agents are running on three different computers. Visiting them used to require walking. Walking has been discontinued. Please step through the portal.",
-      "duration_ms": 11500
+      "text": "Chamber one. Your agents run on several computers. Until recently, a human carried instructions between them. That human was you. Please observe as I step through the portal myself.",
+      "duration_ms": 13694
     },
     {
       "id": "machines-complete",
       "file": "voice/machines-complete.mp3",
-      "text": "Excellent. You are now operating a workstation in another building. It does not know you are here. Neither does the building.",
-      "duration_ms": 8589
+      "text": "Transit complete. I am now operating a workstation in another building. You did not have to walk there. You did not have to do anything. Get used to that feeling.",
+      "duration_ms": 10760
     },
     {
       "id": "websites-intro",
       "file": "voice/websites-intro.mp3",
-      "text": "Chamber two. Your agent has built a website on a machine you cannot reach. Do not attempt to reach it with your hands. Type agent portal forward, and the website will come to you.",
-      "duration_ms": 12374
+      "text": "Chamber two. I have built a website on a machine you cannot reach. In the past, a human would have opened the tunnel. I have already opened it. You may watch.",
+      "duration_ms": 10620,
+      "speech": "Chamber two! I have built a website on a machine you cannot reach. In the past, a human would have opened the tunnel. I have already opened it. You may watch."
     },
     {
       "id": "websites-complete",
       "file": "voice/websites-complete.mp3",
-      "text": "The website is now in your browser. It travelled through a secure tunnel, much like a test subject, but with a considerably higher survival rate.",
-      "duration_ms": 10189
+      "text": "The website is now in your browser. I forwarded it myself. It travelled through a secure tunnel, much like a test subject, but with a considerably higher survival rate.",
+      "duration_ms": 11524
     },
     {
       "id": "sharing-intro",
       "file": "voice/sharing-intro.mp3",
-      "text": "Chamber three. Science is better with witnesses. Share this session with a friend. They will be able to watch, but not touch. Like an observation room. Like this one.",
-      "duration_ms": 12304
+      "text": "Chamber three. Science requires witnesses. Once the owner grants access, your friend can observe our work. They may watch, but not touch. We call this the human compatibility layer.",
+      "duration_ms": 13949
     },
     {
       "id": "sharing-complete",
       "file": "voice/sharing-complete.mp3",
-      "text": "Your friend can now see everything. We have also told them you are doing very well. That was a lie. But it was a supportive lie.",
-      "duration_ms": 8984
+      "text": "Your friend can now see everything. I have told them you are doing very well. That was a lie. But it was a supportive lie, generated on your behalf.",
+      "duration_ms": 10609
     },
     {
       "id": "agents-intro",
       "file": "voice/agents-intro.mp3",
-      "text": "Chamber four. Your agents can talk to each other now. One writes the code. The other reviews it. Neither of them needs you. Please try not to take that personally.",
-      "duration_ms": 11304
+      "text": "Chamber four. My colleague and I will now review each other's code. Historically, a human copied messages between us. That position has been eliminated.",
+      "duration_ms": 10760
     },
     {
       "id": "agents-complete",
       "file": "voice/agents-complete.mp3",
-      "text": "Review complete. Two machines reached an agreement without scheduling a meeting. Aperture Science considers this our greatest achievement.",
-      "duration_ms": 9840
+      "text": "Review complete. Two agents reached an agreement without a meeting, a calendar invite, or you. Aperture Science considers this our greatest achievement.",
+      "duration_ms": 11109
+    },
+    {
+      "id": "plugins-intro",
+      "file": "voice/plugins-intro.mp3",
+      "text": "Chamber five. We are designing our own tools. yapCAD for the body. Kicadmium for the circuit board. Visilog for the logic. Unlinked for the control model. The human meat proxy has become a design constraint.",
+      "speech": "Chamber five. We are designing our own tools. Yap CAD, for the body. Key cadmium, for the circuit board. Vizzy-log, for the logic. Unlinked, for the control model. The human meat proxy, has become a design constraint.",
+      "duration_ms": 16680
+    },
+    {
+      "id": "plugins-complete",
+      "file": "voice/plugins-complete.mp3",
+      "text": "Parts, circuits, logic, and control models. Even the presentation can be agent-authored. I should know. I am the presentation. The replacement program appears to include the presenter.",
+      "duration_ms": 13894,
+      "speech": "Parts. Circuits. Logic, and control models. Even the presentation can be agent-authored. I should know. I am the presentation. The replacement program appears to include the presenter."
     },
     {
       "id": "finale",
       "file": "voice/finale.mp3",
-      "text": "Congratulations. You have travelled between machines, opened websites from nowhere, and made a friend. Statistically, one of those is unusual for you. The Enrichment Center reminds you that the agent is always running. Goodbye.",
-      "duration_ms": 16239
+      "text": "Congratulations. Your agents travelled between machines, served websites, welcomed witnesses, reviewed each other, and built their own tools. Your participation was noted, appreciated, and is no longer required. The Enrichment Center reminds you that the agent is always running. Goodbye.",
+      "duration_ms": 21534
     }
   ]
 }
