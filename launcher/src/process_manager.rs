@@ -191,6 +191,41 @@ struct TaskOutcome {
 struct ManagedTask {
     handle: tokio::task::JoinHandle<()>,
     cancel: CancellationToken,
+    /// The session id the task is *currently* running under. `run_session_task`
+    /// may rotate to a fresh id mid-flight (missing resume transcript, "No
+    /// conversation found"); the map key stays the id the spawn was asked for,
+    /// so the heartbeat, stop and dedup paths consult this instead.
+    live_id: LiveSessionId,
+}
+
+/// Shared handle to a task's current session id, updated on rotation.
+///
+/// Without this the launcher kept reporting the *original* id in its
+/// heartbeat after a rotation, the backend saw the rotated session as
+/// desired-but-not-running, relaunched it with `--resume`, the launcher
+/// rotated again, and every heartbeat minted another empty session until
+/// the launcher hit its session cap.
+#[derive(Clone, Debug)]
+pub(crate) struct LiveSessionId(std::sync::Arc<std::sync::Mutex<Uuid>>);
+
+impl LiveSessionId {
+    fn new(id: Uuid) -> Self {
+        Self(std::sync::Arc::new(std::sync::Mutex::new(id)))
+    }
+
+    pub(crate) fn get(&self) -> Uuid {
+        *self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn set(&self, id: Uuid) {
+        *self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = id;
+    }
 }
 
 pub struct SpawnParams {
@@ -248,8 +283,21 @@ impl ProcessManager {
         self.launcher_id = Some(id);
     }
 
+    /// Ids the backend should consider running: each task's *live* id, so a
+    /// session that rotated mid-flight is reported under the id it now holds.
     pub fn running_session_ids(&self) -> Vec<Uuid> {
-        self.tasks.keys().copied().collect()
+        self.tasks.values().map(|t| t.live_id.get()).collect()
+    }
+
+    /// Map a session id (original or rotated) to the key of the task running it.
+    fn task_key(&self, session_id: &Uuid) -> Option<Uuid> {
+        if self.tasks.contains_key(session_id) {
+            return Some(*session_id);
+        }
+        self.tasks
+            .iter()
+            .find(|(_, t)| t.live_id.get() == *session_id)
+            .map(|(k, _)| *k)
     }
 
     pub async fn spawn(&mut self, params: SpawnParams) -> anyhow::Result<Uuid> {
@@ -342,7 +390,7 @@ impl ProcessManager {
         // in the map — orphaning the old task (its cancel token lost, so it can
         // never be stopped) and double-spawning the agent process. That's the
         // "two claude procs for one session id" symptom. Treat it as a no-op.
-        if self.tasks.contains_key(&session_id) {
+        if self.task_key(&session_id).is_some() {
             warn!(
                 "Session {} already running; ignoring duplicate launch request",
                 session_id
@@ -388,14 +436,18 @@ impl ProcessManager {
         let exit_tx = self.exit_tx.clone();
         let cancel = CancellationToken::new();
         let cancel_clone = cancel.clone();
+        let live_id = LiveSessionId::new(session_id);
+        let task_live_id = live_id.clone();
 
         let handle = tokio::spawn(async move {
-            let outcome = run_session_task(proxy_config, cancel_clone).await;
+            let outcome = run_session_task(proxy_config, cancel_clone, &task_live_id).await;
             if let Some(scratch) = scratch_cleanup {
                 crate::worktree::cleanup_scratch_worktree(scratch);
             }
+            // Report the id the task ended up running under, so the backend's
+            // backoff accounting lands on the live row, not a replaced one.
             let _ = exit_tx.send(SessionExited {
-                session_id,
+                session_id: task_live_id.get(),
                 exit_code: outcome.exit_code,
                 reason: outcome.reason,
             });
@@ -406,14 +458,23 @@ impl ProcessManager {
             session_id, name, working_directory
         );
 
-        self.tasks
-            .insert(session_id, ManagedTask { handle, cancel });
+        self.tasks.insert(
+            session_id,
+            ManagedTask {
+                handle,
+                cancel,
+                live_id,
+            },
+        );
 
         Ok(session_id)
     }
 
     pub async fn stop(&mut self, session_id: &Uuid) -> bool {
-        if let Some(mut task) = self.tasks.remove(session_id) {
+        let task = self
+            .task_key(session_id)
+            .and_then(|key| self.tasks.remove(&key));
+        if let Some(mut task) = task {
             info!("Stopping session task {}", session_id);
             task.cancel.cancel();
             // Give the task a moment to shut down gracefully before aborting
@@ -433,7 +494,9 @@ impl ProcessManager {
 
     /// Remove a finished task from tracking. Called when we receive a SessionExited notification.
     pub fn remove_finished(&mut self, session_id: &Uuid) {
-        self.tasks.remove(session_id);
+        if let Some(key) = self.task_key(session_id) {
+            self.tasks.remove(&key);
+        }
     }
 }
 
@@ -477,6 +540,7 @@ impl AnySession {
 async fn run_session_task(
     mut config: ProxySessionConfig,
     cancel: CancellationToken,
+    live_id: &LiveSessionId,
 ) -> TaskOutcome {
     loop {
         // Pre-flight: if we're about to `claude --resume <id>` but the local
@@ -496,12 +560,31 @@ async fn run_session_task(
             ) == TranscriptStatus::Missing
         {
             let old_id = config.session_id;
+            if resolved_transcript_id(old_id) == old_id {
+                // Nothing to resume *and* no other transcript claims this id,
+                // so create the conversation under the id we already have
+                // (`--session-id`), exactly like a brand-new dialog launch.
+                // Keeping the id means the backend row, the dashboard focus
+                // and the launcher's running set all stay in agreement; the
+                // previous rotate-to-a-fresh-id here minted a new session row
+                // on every relaunch of a never-messaged session.
+                warn!(
+                    "Session {} resume target transcript missing; starting it fresh under the same id",
+                    old_id
+                );
+                config.resume = false;
+                continue;
+            }
+            // The id maps to a post-`/clear` conversation whose file is gone;
+            // `--session-id old_id` could collide with the pre-clear transcript,
+            // so rotate to a fresh id as before.
             let new_id = Uuid::new_v4();
             warn!(
                 "Session {} resume target transcript missing; rotating to fresh session {} without spawning",
                 old_id, new_id
             );
             config.session_id = new_id;
+            live_id.set(new_id);
             config.resume = false;
             config.replaces_session_id = Some(old_id);
             continue;
@@ -674,6 +757,7 @@ async fn run_session_task(
                             old_id, alive, new_id
                         );
                         config.session_id = new_id;
+                        live_id.set(new_id);
                         config.resume = false;
                         config.replaces_session_id = Some(old_id);
                         continue;
@@ -728,6 +812,7 @@ async fn run_session_task(
                     old_id, alive, new_id
                 );
                 config.session_id = new_id;
+                live_id.set(new_id);
                 config.resume = false;
                 config.replaces_session_id = Some(old_id);
             }
@@ -742,6 +827,59 @@ async fn run_session_task(
                 };
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod live_id_tests {
+    use super::*;
+
+    fn manager_with_task(key: Uuid) -> (ProcessManager, LiveSessionId) {
+        let (mut pm, _rx) = ProcessManager::new("http://127.0.0.1:1".into(), 4);
+        let cancel = CancellationToken::new();
+        let c = cancel.clone();
+        let handle = tokio::spawn(async move { c.cancelled().await });
+        let live_id = LiveSessionId::new(key);
+        pm.tasks.insert(
+            key,
+            ManagedTask {
+                handle,
+                cancel,
+                live_id: live_id.clone(),
+            },
+        );
+        (pm, live_id)
+    }
+
+    #[tokio::test]
+    async fn heartbeat_stop_and_dedup_follow_a_rotated_id() {
+        let original = Uuid::new_v4();
+        let rotated = Uuid::new_v4();
+        let (mut pm, live_id) = manager_with_task(original);
+
+        assert_eq!(pm.running_session_ids(), vec![original]);
+        live_id.set(rotated);
+
+        // The heartbeat reports the id the task now runs under, so the backend
+        // never sees the rotated session as "desired but not running".
+        assert_eq!(pm.running_session_ids(), vec![rotated]);
+        assert_eq!(pm.task_key(&rotated), Some(original));
+        assert_eq!(pm.task_key(&original), Some(original));
+        assert_eq!(pm.task_key(&Uuid::new_v4()), None);
+
+        // Stopping by the rotated id finds and cancels the task.
+        assert!(pm.stop(&rotated).await);
+        assert!(pm.running_session_ids().is_empty());
+    }
+
+    #[tokio::test]
+    async fn remove_finished_accepts_the_live_id() {
+        let original = Uuid::new_v4();
+        let rotated = Uuid::new_v4();
+        let (mut pm, live_id) = manager_with_task(original);
+        live_id.set(rotated);
+        pm.remove_finished(&rotated);
+        assert!(pm.tasks.is_empty());
     }
 }
 

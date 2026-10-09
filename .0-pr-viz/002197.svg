@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200" font-family="'Segoe UI','Noto Sans',sans-serif">
+  <rect width="2000" height="1200" fill="#16161e"/>
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2197 · Stop reconcile from minting a new session on every heartbeat</text>
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">A never-messaged session was resumed, rotated to a new id, and never reported as running.</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">Now the launcher reports the live id and starts empty sessions fresh under the same id.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="2"/>
+
+  <text x="105" y="235" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1090" y="235" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1140" stroke="#3d4666" stroke-width="2" stroke-dasharray="12 14"/>
+
+  <!-- BEFORE: the loop -->
+  <rect x="105" y="290" width="360" height="150" rx="8" fill="#1e202e" stroke="#7aa2f7" stroke-width="3"/>
+  <text x="129" y="340" font-size="26" fill="#7aa2f7">Heartbeat reconcile</text>
+  <text x="129" y="384" font-size="23" fill="#c0caf5">session not in running set</text>
+  <text x="129" y="418" font-size="23" fill="#c0caf5">LaunchSession resume = true</text>
+
+  <path d="M465 365H565" stroke="#565f89" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <rect x="565" y="290" width="380" height="150" rx="8" fill="#1e202e" stroke="#f7768e" stroke-width="3"/>
+  <text x="589" y="340" font-size="26" fill="#f7768e">Launcher pre-flight</text>
+  <text x="589" y="384" font-size="23" fill="#c0caf5">no transcript (never had a turn)</text>
+  <text x="589" y="418" font-size="23" fill="#c0caf5">rotate to a fresh id, spawn it</text>
+
+  <path d="M755 440V540" stroke="#565f89" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <rect x="565" y="540" width="380" height="150" rx="8" fill="#1e202e" stroke="#f7768e" stroke-width="3"/>
+  <text x="589" y="590" font-size="26" fill="#f7768e">Heartbeat lists old id only</text>
+  <text x="589" y="634" font-size="23" fill="#c0caf5">task map keyed by original id</text>
+  <text x="589" y="668" font-size="23" fill="#c0caf5">old row marked replaced</text>
+
+  <path d="M565 615H465" stroke="#565f89" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <rect x="105" y="540" width="360" height="150" rx="8" fill="#1e202e" stroke="#e0af68" stroke-width="3"/>
+  <text x="129" y="590" font-size="26" fill="#e0af68">New id is desired again</text>
+  <text x="129" y="634" font-size="23" fill="#c0caf5">not running, no backoff</text>
+  <text x="129" y="668" font-size="23" fill="#c0caf5">back to the top every 30 s</text>
+
+  <path d="M285 540V440" stroke="#565f89" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <rect x="105" y="760" width="840" height="120" rx="8" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+  <text x="129" y="805" font-size="24" fill="#f7768e">Observed</text>
+  <text x="129" y="845" font-size="23" fill="#c0caf5">a new empty jlg-sonnet row per heartbeat until At session limit (20/20)</text>
+
+  <text x="105" y="960" font-size="23" fill="#a9b1d6">Journal: "resume target transcript missing; rotating to fresh</text>
+  <text x="105" y="994" font-size="23" fill="#a9b1d6">session ... without spawning" 58 times in 36 hours.</text>
+
+  <!-- AFTER -->
+  <rect x="1090" y="290" width="360" height="150" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1114" y="340" font-size="26" fill="#9ece6a">Backend reconcile</text>
+  <text x="1114" y="384" font-size="23" fill="#c0caf5">input_seq == 0: nothing to resume</text>
+  <text x="1114" y="418" font-size="23" fill="#c0caf5">LaunchSession resume = false</text>
+
+  <path d="M1450 365H1550" stroke="#565f89" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <rect x="1550" y="290" width="380" height="150" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1574" y="340" font-size="26" fill="#9ece6a">Launcher starts it fresh</text>
+  <text x="1574" y="384" font-size="23" fill="#c0caf5">claude --session-id same-id</text>
+  <text x="1574" y="418" font-size="23" fill="#c0caf5">row, dashboard, heartbeat agree</text>
+
+  <rect x="1090" y="540" width="360" height="150" rx="8" fill="#1e202e" stroke="#7aa2f7" stroke-width="3"/>
+  <text x="1114" y="590" font-size="26" fill="#7aa2f7">Transcript missing</text>
+  <text x="1114" y="634" font-size="23" fill="#c0caf5">no post-clear mapping: reuse id</text>
+  <text x="1114" y="668" font-size="23" fill="#c0caf5">otherwise rotate as before</text>
+
+  <path d="M1450 615H1550" stroke="#565f89" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <rect x="1550" y="540" width="380" height="150" rx="8" fill="#1e202e" stroke="#7aa2f7" stroke-width="3"/>
+  <text x="1574" y="590" font-size="26" fill="#7aa2f7">Live id per task</text>
+  <text x="1574" y="634" font-size="23" fill="#c0caf5">heartbeat, stop, dedup, exit</text>
+  <text x="1574" y="668" font-size="23" fill="#c0caf5">all follow a rotated id</text>
+
+  <rect x="1090" y="760" width="840" height="120" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1114" y="805" font-size="24" fill="#9ece6a">Result</text>
+  <text x="1114" y="845" font-size="23" fill="#c0caf5">one row per session; a rotated session counts as running</text>
+
+  <text x="1090" y="960" font-size="23" fill="#a9b1d6">Tests: reconcile_resume_flag, live-id heartbeat/stop/dedup,</text>
+  <text x="1090" y="994" font-size="23" fill="#a9b1d6">remove_finished by live id; launcher 129 and backend 372 pass.</text>
+
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0 0L12 6L0 12Z" fill="#565f89"/>
+    </marker>
+  </defs>
+</svg>
