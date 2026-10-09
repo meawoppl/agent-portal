@@ -103,7 +103,8 @@ def align(line, words):
             }
         )
         cursor += count
-    # A short reading tail is fine; never spill into the next spoken phrase.
+    # Keep short punchlines readable, without spilling into the next phrase.
+    # The final farewell needs a full reading hold even though it is one word.
     for i, segment in enumerate(segments):
         if i and segment["start_ms"] < segments[i - 1]["start_ms"]:
             raise ValueError(f"Non-monotonic alignment: {line['id']}")
@@ -112,7 +113,10 @@ def align(line, words):
             if i + 1 < len(segments)
             else line["duration_ms"]
         )
-        segment["end_ms"] = min(segment["end_ms"] + 140, limit)
+        minimum_hold = 1500 if i == len(segments) - 1 else 1000
+        segment["end_ms"] = min(
+            max(segment["end_ms"] + 140, segment["start_ms"] + minimum_hold), limit
+        )
         if segment["end_ms"] <= segment["start_ms"]:
             raise ValueError(f"Empty caption: {line['id']} {segment['text']}")
     return segments, coverage

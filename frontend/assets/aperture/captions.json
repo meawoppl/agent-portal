@@ -173,7 +173,7 @@
         {
           "text": "They could not.",
           "start_ms": 19580,
-          "end_ms": 20360
+          "end_ms": 21080
         }
       ]
     },
@@ -414,7 +414,7 @@
         {
           "text": "and did not know why.",
           "start_ms": 8860,
-          "end_ms": 10120
+          "end_ms": 10360
         }
       ]
     },
@@ -574,7 +574,7 @@
         {
           "text": "We have filed the notes.",
           "start_ms": 27360,
-          "end_ms": 28520
+          "end_ms": 28860
         }
       ]
     },
@@ -616,7 +616,7 @@
         {
           "text": "We are the help.",
           "start_ms": 17600,
-          "end_ms": 18520
+          "end_ms": 19100
         }
       ]
     },
@@ -673,7 +673,7 @@
         {
           "text": "Goodbye.",
           "start_ms": 30500,
-          "end_ms": 30860
+          "end_ms": 32000
         }
       ]
     }

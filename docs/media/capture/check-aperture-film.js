@@ -120,6 +120,9 @@ const puppeteer = require(path.join(root, "node_modules/puppeteer-core"));
         );
       }
     }
+    const farewell = measured.lines.find((line) => line.id === "finale").segments.at(-1);
+    assert.equal(farewell.text, "Goodbye.");
+    assert.ok(farewell.end_ms - farewell.start_ms >= 1500, "farewell remains readable");
     await page.click("#restart");
     await page.waitForFunction(() => {
       const a = document.querySelector("audio");
