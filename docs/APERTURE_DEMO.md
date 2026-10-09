@@ -143,6 +143,9 @@ frontend so both the exhibit and orientation film use the same evidence.
   It has not been qualified for manufacture.
 
 These are screen recordings, not animated lookalikes of engineering software.
+Playback edits remove two board-loading pauses (1.2–2.0 and 4.4–5.2 seconds)
+and crop the Visilog view to retain its hierarchy and waveforms at a readable size.
+The original masters and tool results remain unchanged.
 The full-resolution masters and retained runs live under ignored
 `builds/aperture-evidence/`; compact playback copies are committed. The original
 voice/art/movie generation scripts are in `~/aperture-work` on the capture host.

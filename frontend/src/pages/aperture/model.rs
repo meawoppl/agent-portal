@@ -20,7 +20,7 @@ pub const LABELS: [&str; CHAMBER_COUNT] = [
     "Website transport",
     "Cooperative testing",
     "Agent collaboration",
-    "Replacement program",
+    "Replacement",
     "Circuit boards",
 ];
 pub const SLUGS: [&str; CHAMBER_COUNT] = [
