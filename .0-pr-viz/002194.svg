@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200" font-family="'Segoe UI','Noto Sans',sans-serif">
+  <rect width="2000" height="1200" fill="#16161e"/>
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2194 · Replace the header token-rate pill with a per-service CPU/RAM/load monitor</text>
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">The header pill plotted tok/s per model, which never said whether the portal was healthy.</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">Now every service samples itself, so the header shows CPU, RAM and load per running service.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="2"/>
+
+  <text x="105" y="235" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1090" y="235" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1140" stroke="#3d4666" stroke-width="2" stroke-dasharray="12 14"/>
+
+  <!-- BEFORE: per-turn metrics feed a trend pill -->
+  <rect x="105" y="290" width="360" height="150" rx="8" fill="#1e202e" stroke="#7aa2f7" stroke-width="3"/>
+  <text x="129" y="340" font-size="26" fill="#7aa2f7">Agent turn finishes</text>
+  <text x="129" y="384" font-size="23" fill="#c0caf5">TurnMetrics row per turn</text>
+  <text x="129" y="418" font-size="23" fill="#c0caf5">output_tokens, ttft, cache reads</text>
+
+  <path d="M465 365H565" stroke="#565f89" stroke-width="5"/>
+  <polygon points="565,365 542,352 542,378" fill="#565f89"/>
+
+  <rect x="570" y="290" width="360" height="150" rx="8" fill="#1e202e" stroke="#7aa2f7" stroke-width="3"/>
+  <text x="594" y="340" font-size="26" fill="#7aa2f7">ServerToClient::TurnMetrics</text>
+  <text x="594" y="384" font-size="23" fill="#c0caf5">fanned out to the user's dashboards</text>
+  <text x="594" y="418" font-size="23" fill="#c0caf5">kept in recent_turn_metrics (50)</text>
+
+  <path d="M750 440V540" stroke="#565f89" stroke-width="5"/>
+  <polygon points="750,540 737,517 763,517" fill="#565f89"/>
+
+  <rect x="470" y="545" width="460" height="190" rx="8" fill="#1e202e" stroke="#7aa2f7" stroke-width="3"/>
+  <text x="494" y="595" font-size="26" fill="#7aa2f7">TurnMetricsHeaderPill</text>
+  <text x="494" y="639" font-size="23" fill="#c0caf5">one sparkline for the newest (model, tier)</text>
+  <text x="494" y="673" font-size="23" fill="#c0caf5">SparklineMetric: TokPerSec, Ttft, MaxGap,</text>
+  <text x="494" y="707" font-size="23" fill="#c0caf5">CacheHit, Thinking, Subagent</text>
+
+  <rect x="105" y="800" width="825" height="190" rx="8" fill="#1e202e" stroke="#f7768e" stroke-width="3"/>
+  <text x="129" y="850" font-size="26" fill="#f7768e">What it could not answer</text>
+  <text x="129" y="894" font-size="23" fill="#c0caf5">Is the backend or a launcher host CPU-bound, out of RAM or overloaded?</text>
+  <text x="129" y="928" font-size="23" fill="#c0caf5">Nothing in the protocol carried a resource reading from any service.</text>
+  <text x="129" y="962" font-size="23" fill="#c0caf5">Between turns the pill went blank; a stuck session showed nothing.</text>
+
+  <!-- AFTER: each service samples itself; backend assembles the table -->
+  <rect x="1090" y="290" width="400" height="190" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1114" y="340" font-size="26" fill="#9ece6a">portal_sysmon::SystemMonitor</text>
+  <text x="1114" y="384" font-size="23" fill="#c0caf5">sample(): host CPU, process CPU,</text>
+  <text x="1114" y="418" font-size="23" fill="#c0caf5">RSS, RAM used/total, load 1/5/15</text>
+  <text x="1114" y="452" font-size="23" fill="#c0caf5">runs in the launcher and the backend</text>
+
+  <path d="M1490 385H1560" stroke="#9ece6a" stroke-width="5"/>
+  <polygon points="1560,385 1537,372 1537,398" fill="#9ece6a"/>
+
+  <rect x="1565" y="290" width="380" height="190" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1589" y="340" font-size="26" fill="#9ece6a">LauncherToServer</text>
+  <text x="1589" y="384" font-size="23" fill="#c0caf5">Heartbeat { system } every 30 s</text>
+  <text x="1589" y="418" font-size="23" fill="#c0caf5">SystemStats { sample } every 5 s</text>
+  <text x="1589" y="452" font-size="23" fill="#e0af68">if the ack lists server.system_stats</text>
+
+  <path d="M1755 480V545" stroke="#9ece6a" stroke-width="5"/>
+  <polygon points="1755,545 1742,522 1768,522" fill="#9ece6a"/>
+
+  <rect x="1090" y="550" width="855" height="190" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1114" y="600" font-size="26" fill="#9ece6a">backend service_stats + SessionManager</text>
+  <text x="1114" y="644" font-size="23" fill="#c0caf5">update_launcher_system stores the newest LauncherConnection.system</text>
+  <text x="1114" y="678" font-size="23" fill="#c0caf5">service_stats_for_user: backend_row first, then the user's own launchers</text>
+  <text x="1114" y="712" font-size="23" fill="#c0caf5">ServerToClient::ServiceStatsUpdate on connect, on report, every 5 s</text>
+
+  <path d="M1517 740V805" stroke="#9ece6a" stroke-width="5"/>
+  <polygon points="1517,805 1504,782 1530,782" fill="#9ece6a"/>
+
+  <rect x="1090" y="810" width="855" height="190" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1114" y="860" font-size="26" fill="#9ece6a">ServiceMonitor in the dashboard header</text>
+  <text x="1114" y="904" font-size="23" fill="#c0caf5">chip per service: host CPU, RAM share, load 1m, 60-point CPU sparkline</text>
+  <text x="1114" y="938" font-size="23" fill="#c0caf5">click: process CPU and RSS, RAM used/total, load 1/5/15, sessions, age</text>
+  <text x="1114" y="972" font-size="23" fill="#c0caf5">readings older than 90 s dim; mobile toolbar hides it like the old pill</text>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">Not covered: the Postgres container and other users' launchers; figures are whole-host samples every 5 s, not per-session attribution.</text>
+</svg>
