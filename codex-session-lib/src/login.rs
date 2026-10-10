@@ -13,7 +13,7 @@
 //!
 //! [`poll`]: CodexLoginSession::poll
 
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use codex_codes::{
@@ -78,9 +78,7 @@ impl CodexLoginSession {
     /// A poisoned mutex still yields its guarded state — poisoning is sticky,
     /// so discarding the guard would wedge the login as pending forever.
     pub fn poll(&self) -> AgentLoginOutcome {
-        self.outcome
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+        shared::sync::lock_recovering_poison(&self.outcome)
             .clone()
             .unwrap_or(AgentLoginOutcome {
                 done: false,
@@ -117,7 +115,7 @@ async fn watch(
     // Recover the guard on poisoning (sticky): dropping the update would
     // wedge the login, since no later poll could ever observe it.
     let set = |o: AgentLoginOutcome| {
-        *outcome.lock().unwrap_or_else(PoisonError::into_inner) = Some(o);
+        *shared::sync::lock_recovering_poison(&outcome) = Some(o);
     };
     let deadline = tokio::time::sleep(DEVICE_TIMEOUT);
     tokio::pin!(deadline);
