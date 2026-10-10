@@ -30,6 +30,7 @@ pub(super) struct SessionRailMenuProps {
     pub on_share: Callback<Uuid>,
     pub on_schedule: Callback<SessionInfo>,
     pub on_fork: Callback<SessionInfo>,
+    pub on_rename: Callback<SessionInfo>,
 }
 
 #[function_component(SessionRailMenu)]
@@ -96,6 +97,12 @@ fn render_menu_content(session: &SessionInfo, props: &SessionRailMenuProps) -> H
         let on_fork = props.on_fork.clone();
         let session = session.clone();
         move || on_fork.emit(session.clone())
+    });
+
+    let open_rename = close_then(props.on_close.clone(), {
+        let on_rename = props.on_rename.clone();
+        let session = session.clone();
+        move || on_rename.emit(session.clone())
     });
 
     let on_hide = close_then(props.on_close.clone(), {
@@ -240,6 +247,17 @@ fn render_menu_content(session: &SessionInfo, props: &SessionRailMenuProps) -> H
 
     let repo_option = repo_pr_submenu(session, props.on_close.clone());
 
+    let rename_option = if session.my_role.can_mutate() {
+        menu_option(
+            classes!("rename"),
+            "Rename Session…",
+            "Change the display name",
+            open_rename,
+        )
+    } else {
+        html! {}
+    };
+
     let share_option = if session.my_role == SessionRole::Owner {
         let on_share = close_then(props.on_close.clone(), {
             let on_share = props.on_share.clone();
@@ -312,6 +330,7 @@ fn render_menu_content(session: &SessionInfo, props: &SessionRailMenuProps) -> H
                 &short_id,
                 on_copy_id,
             ) }
+            { rename_option }
             { share_option }
             { fork_option }
             { schedule_option }

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- **Rename sessions.** The session pill menu has a "Rename Session…" option
+  (owners and editors) backed by `PATCH /api/sessions/{id}/name`. Only the
+  display name changes; a resumed session relaunches under the new name.
+
 - **Agent progress bars.** `agent-portal progress <value>` shows a live bar
   above the input box for long-running jobs (`42`, `42%`, or `3/12`; `--label`,
   `--id` for several at once, `--done` to remove). Bars are live-only, replayed
