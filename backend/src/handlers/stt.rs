@@ -44,11 +44,37 @@ pub async fn transcribe(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Json<TranscriptionResponse>, AppError> {
+    transcribe_audio(
+        &app_state,
+        user_id,
+        query.session_id,
+        query.language.as_deref(),
+        &headers,
+        body,
+    )
+    .await
+    .map(Json)
+}
+
+/// Transcribe one recording on behalf of `user_id`.
+///
+/// Shared by the portal-origin route above and the forward-origin passthrough
+/// (`/__portal/stt/transcribe` in `forward_proxy`), which authenticates through
+/// the forward cookie instead of the portal session but wants the identical
+/// contract: raw `audio/*` body in, `{"text"}` out, same caps and errors.
+pub(crate) async fn transcribe_audio(
+    app_state: &AppState,
+    user_id: Uuid,
+    session_id: Option<Uuid>,
+    language: Option<&str>,
+    headers: &HeaderMap,
+    body: Bytes,
+) -> Result<TranscriptionResponse, AppError> {
     let provider = app_state.stt.as_ref().ok_or(AppError::ServiceUnavailable(
         "Speech-to-text is not configured",
     ))?;
 
-    let content_type = request_content_type(&headers)?;
+    let content_type = request_content_type(headers)?;
     if !content_type.starts_with("audio/") {
         return Err(AppError::BadRequest("Content-Type must be an audio type"));
     }
@@ -71,9 +97,9 @@ pub async fn transcribe(
     // nobody reads. A session the user is *not* a member of contributes nothing
     // rather than erroring: the transcript is still useful, and this keeps the
     // endpoint from doubling as a membership oracle.
-    let keyterms = match query.session_id {
+    let keyterms = match session_id {
         Some(session_id) if provider.supports_keyterms() => {
-            keyterms_for_session(&app_state, user_id, session_id)?
+            keyterms_for_session(app_state, user_id, session_id)?
         }
         _ => Vec::new(),
     };
@@ -83,7 +109,7 @@ pub async fn transcribe(
         .transcribe(TranscribeRequest {
             audio: body,
             content_type,
-            language: query.language.as_deref(),
+            language,
             keyterms: &keyterms,
         })
         .await
@@ -106,7 +132,7 @@ pub async fn transcribe(
         transcript_chars = transcript.chars().count(),
     );
 
-    Ok(Json(TranscriptionResponse { text: transcript }))
+    Ok(TranscriptionResponse { text: transcript })
 }
 
 /// Keyterms for a session the user is a member of; empty otherwise.

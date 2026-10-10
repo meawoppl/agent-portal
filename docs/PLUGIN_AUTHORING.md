@@ -337,6 +337,36 @@ The backend enforces normal session reader/mutator permissions. Items keep the
 creator id and display name; Portal only shows contributor names in the compact
 chat panel when there is more than one contributor in the pending stack.
 
+### Surface voice transcription
+
+A forwarded surface can turn a recorded voice note into text with the Portal's
+speech-to-text provider by posting the recording to
+`POST /__portal/stt/transcribe` on the forward origin. The forward proxy
+intercepts it the same way as the edit stack: the `portal_fwd` cookie
+identifies the user, and the forward's own session supplies vocabulary hints,
+so there is no `session_id` parameter. The body is the raw recording as the
+browser produced it (`MediaRecorder` output is fine) with its `audio/*`
+Content-Type; an optional `language` query parameter carries a BCP-47 tag. The
+reply is `{"text": "…"}`.
+
+```js
+const blob = new Blob(chunks, { type: recorder.mimeType });
+const response = await fetch("/__portal/stt/transcribe?language=en-US", {
+  method: "POST",
+  headers: { "content-type": blob.type },
+  credentials: "same-origin",
+  body: blob,
+});
+const { text } = await response.json();
+```
+
+Responses: `401` stale forward cookie (reopen the forward from the session),
+`405` for anything but `POST`, `400` for a missing or non-audio Content-Type or
+an empty body, `413` over the server's per-recording cap, `503` when no speech
+provider is configured (fall back to the browser's Web Speech API if you have
+one), `502` when the provider failed. Portals older than this endpoint answer
+`404`, which a plugin should treat like `503`.
+
 The launcher owns the lifecycle:
 
 1. choose a free port;
