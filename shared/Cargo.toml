@@ -24,6 +24,7 @@ codex-codes = { workspace = true }
 # Typed WebSocket endpoints (core traits only — WASM-safe, no features needed)
 ws-bridge = { workspace = true }
 base64 = "0.22"
+url = "2.5"
 
 [lints]
 workspace = true
