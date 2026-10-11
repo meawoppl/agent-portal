@@ -65,6 +65,34 @@ pub struct NewUserIdentity {
     pub email: Option<String>,
 }
 
+#[derive(Debug, Queryable, Selectable, Clone)]
+#[diesel(table_name = crate::schema::portal_connections)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct PortalConnection {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub portal_origin: String,
+    pub instance_id: Uuid,
+    pub remote_user_id: Uuid,
+    pub remote_email: String,
+    pub label: String,
+    pub scope: String,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+}
+
+#[derive(Debug, Insertable, AsChangeset)]
+#[diesel(table_name = crate::schema::portal_connections)]
+pub struct NewPortalConnection {
+    pub user_id: Uuid,
+    pub portal_origin: String,
+    pub instance_id: Uuid,
+    pub remote_user_id: Uuid,
+    pub remote_email: String,
+    pub label: String,
+    pub scope: String,
+}
+
 /// WIRE-SHAPE WARNING: this model is `#[serde(flatten)]`-ed onto the
 /// `GET /api/sessions` response (`SessionWithRole` in `handlers/sessions.rs`),
 /// so **adding a column here silently adds a field to that endpoint** — and a

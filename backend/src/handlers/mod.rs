@@ -23,6 +23,7 @@ pub mod messages;
 pub mod mobile_links;
 pub mod peek_summary;
 pub mod plugins;
+pub mod portal_connections;
 pub mod privacy;
 pub mod profile;
 pub mod proxy_tokens;

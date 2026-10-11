@@ -426,6 +426,16 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
             "/api/settings/identities/{id}",
             axum::routing::delete(handlers::identities::unlink_identity),
         )
+        .route(
+            "/api/portal-connections",
+            get(handlers::portal_connections::list_portal_connections)
+                .post(handlers::portal_connections::upsert_portal_connection),
+        )
+        .route(
+            "/api/portal-connections/{id}",
+            axum::routing::patch(handlers::portal_connections::update_portal_connection)
+                .delete(handlers::portal_connections::delete_portal_connection),
+        )
         .route(AUTH_ME, get(handlers::auth::me))
         .route(AUTH_REFRESH, post(handlers::auth::refresh_token))
         .route(AUTH_TOKEN_LOGIN, post(handlers::auth::token_login))

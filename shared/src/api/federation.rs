@@ -31,6 +31,23 @@ impl TokenScope {
     pub fn permits(self, required: Self) -> bool {
         matches!(self, Self::Write) || required == Self::Read
     }
+
+    /// Storage spelling, identical to the wire spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Read => "read",
+            Self::Write => "write",
+        }
+    }
+
+    /// Inverse of [`Self::as_str`]; unknown values are `None`, never a default.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "read" => Some(Self::Read),
+            "write" => Some(Self::Write),
+            _ => None,
+        }
+    }
 }
 
 /// Admin policy for linked-client grants. Origins must be validated and

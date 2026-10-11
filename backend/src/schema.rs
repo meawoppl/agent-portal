@@ -81,6 +81,25 @@ diesel::table! {
 }
 
 diesel::table! {
+    portal_connections (id) {
+        id -> Uuid,
+        user_id -> Uuid,
+        #[max_length = 255]
+        portal_origin -> Varchar,
+        instance_id -> Uuid,
+        remote_user_id -> Uuid,
+        #[max_length = 255]
+        remote_email -> Varchar,
+        #[max_length = 64]
+        label -> Varchar,
+        #[max_length = 16]
+        scope -> Varchar,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     proxy_auth_tokens (id) {
         id -> Uuid,
         user_id -> Uuid,
@@ -169,16 +188,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    session_forwards (id) {
-        id -> Uuid,
-        session_id -> Uuid,
-        port -> Int4,
-        created_at -> Timestamp,
-        public -> Bool,
-    }
-}
-
-diesel::table! {
     session_edit_stack_items (id) {
         id -> Uuid,
         session_id -> Uuid,
@@ -194,6 +203,16 @@ diesel::table! {
         sent_at -> Nullable<Timestamp>,
         created_at -> Timestamp,
         updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    session_forwards (id) {
+        id -> Uuid,
+        session_id -> Uuid,
+        port -> Int4,
+        created_at -> Timestamp,
+        public -> Bool,
     }
 }
 
@@ -336,6 +355,7 @@ diesel::joinable!(messages -> sessions (session_id));
 diesel::joinable!(messages -> users (user_id));
 diesel::joinable!(pending_inputs -> sessions (session_id));
 diesel::joinable!(pending_permission_requests -> sessions (session_id));
+diesel::joinable!(portal_connections -> users (user_id));
 diesel::joinable!(proxy_auth_tokens -> sessions (session_id));
 diesel::joinable!(proxy_auth_tokens -> users (user_id));
 diesel::joinable!(push_subscriptions -> users (user_id));
@@ -360,6 +380,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     messages,
     pending_inputs,
     pending_permission_requests,
+    portal_connections,
     proxy_auth_tokens,
     push_subscriptions,
     scheduled_tasks,
