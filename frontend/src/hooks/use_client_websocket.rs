@@ -3,12 +3,12 @@
 #[path = "client_websocket_events.rs"]
 mod client_websocket_events;
 
+use crate::portal_client::SessionKey;
 use crate::utils::{self, calculate_backoff, parse_version, On401};
 use client_websocket_events::handle_server_message;
 use shared::api::TurnMetricsResponse;
 use shared::{AppConfig, ClientEndpoint, ServiceStats, TurnMetrics, WsEndpoint};
 use std::collections::HashMap;
-use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
@@ -33,10 +33,10 @@ pub struct UseClientWebSocket {
     /// Newest context-capable row per session, independent of the bounded
     /// trend ring. Context status must not disappear when another session is
     /// busy or emits a newer row without context metadata.
-    pub latest_session_metrics: HashMap<Uuid, TurnMetrics>,
+    pub latest_session_metrics: HashMap<SessionKey, TurnMetrics>,
     /// Per-session completion fraction of the agent's progress bars, pushed
     /// live by `ServerToClient::SessionProgress`; drives the rail pill fill.
-    pub session_progress: HashMap<Uuid, f32>,
+    pub session_progress: HashMap<SessionKey, f32>,
     /// Monotonic counter that ticks every time the backend broadcasts a
     /// `ServerToClient::LaunchSessionResult` frame (proxy registered, or
     /// the launch failed). Consumers can hang a `use_effect_with` on this

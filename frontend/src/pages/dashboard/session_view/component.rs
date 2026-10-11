@@ -14,7 +14,7 @@ use crate::components::{
     group_is_turn_terminator, group_messages, thinking_chip_starts, ForkDialog,
     MessageGroupRenderer,
 };
-use crate::portal_client::PortalClient;
+use crate::portal_client::{PortalClient, SessionKey};
 use crate::utils::{self, On401};
 use gloo::events::EventListener;
 use gloo::timers::callback::Timeout;
@@ -82,21 +82,23 @@ pub struct SessionViewProps {
     /// `PortalClient` context.
     pub portal: PortalClient,
     pub focused: bool,
-    pub on_awaiting_change: Callback<(Uuid, bool)>,
-    pub on_connected_change: Callback<(Uuid, bool)>,
-    pub on_message_sent: Callback<Uuid>,
+    pub on_awaiting_change: Callback<(SessionKey, bool)>,
+    pub on_connected_change: Callback<(SessionKey, bool)>,
+    pub on_message_sent: Callback<SessionKey>,
     #[allow(clippy::type_complexity)]
     pub on_branch_change: Callback<(
-        Uuid,
+        SessionKey,
         Option<String>,
         Option<String>,
         Option<String>,
         Vec<shared::PrRef>,
     )>,
     #[prop_or_default]
-    pub on_activity: Callback<(Uuid, ActivityTag, f64)>,
+    pub on_activity: Callback<(SessionKey, ActivityTag, f64)>,
+    /// `(sender, receiver, timestamp)`; an agent message never crosses
+    /// portals, so the sender is keyed on this session's connection.
     #[prop_or_default]
-    pub on_agent_message: Callback<(Uuid, Uuid, f64)>,
+    pub on_agent_message: Callback<(SessionKey, SessionKey, f64)>,
     #[prop_or_default]
     pub current_user_id: Option<String>,
     #[prop_or(0)]
@@ -568,6 +570,7 @@ impl Component for SessionView {
     fn create(ctx: &Context<Self>) -> Self {
         let link = ctx.link().clone();
         let session_id = ctx.props().session.id;
+        let session_key = Self::session_key(ctx);
         let agent_type = ctx.props().session.agent_type;
         let on_awaiting_change = ctx.props().on_awaiting_change.clone();
         let escape_link = ctx.link().clone();
@@ -630,7 +633,7 @@ impl Component for SessionView {
                 .await
             {
                 let is_awaiting = is_awaiting(data.messages.iter().map(|m| &m.content), agent_type);
-                on_awaiting_change.emit((session_id, is_awaiting));
+                on_awaiting_change.emit((session_key, is_awaiting));
 
                 last_message_time = data.messages.last().map(|m| m.created_at.clone());
 
@@ -796,8 +799,9 @@ impl Component for SessionView {
             SessionViewMsg::PermissionPendingChanged(pending) => {
                 self.has_pending_permission = pending;
                 if pending {
-                    let session_id = ctx.props().session.id;
-                    ctx.props().on_awaiting_change.emit((session_id, true));
+                    ctx.props()
+                        .on_awaiting_change
+                        .emit((Self::session_key(ctx), true));
                 } else {
                     ctx.link().send_message(SessionViewMsg::CheckAwaiting);
                 }
@@ -840,8 +844,9 @@ impl Component for SessionView {
                 // duplicate anything the backend already received.
                 self.flush_outbox();
                 self.drain_edit_stack_queue_if_idle(ctx);
-                let session_id = ctx.props().session.id;
-                ctx.props().on_connected_change.emit((session_id, true));
+                ctx.props()
+                    .on_connected_change
+                    .emit((Self::session_key(ctx), true));
                 true
             }
             SessionViewMsg::WebSocketError(err) => self.handle_ws_error(ctx, err),
@@ -855,17 +860,19 @@ impl Component for SessionView {
                     ctx.props().session.agent_type,
                 );
                 let is_awaiting = is_result_awaiting || self.has_pending_permission;
-                let session_id = ctx.props().session.id;
                 ctx.props()
                     .on_awaiting_change
-                    .emit((session_id, is_awaiting));
+                    .emit((Self::session_key(ctx), is_awaiting));
                 false
             }
             SessionViewMsg::BranchChanged(branch, pr_url, repo_url, open_prs) => {
-                let session_id = ctx.props().session.id;
-                ctx.props()
-                    .on_branch_change
-                    .emit((session_id, branch, pr_url, repo_url, open_prs));
+                ctx.props().on_branch_change.emit((
+                    Self::session_key(ctx),
+                    branch,
+                    pr_url,
+                    repo_url,
+                    open_prs,
+                ));
                 false
             }
             SessionViewMsg::TasksDispatcherRegistered(dispatcher) => {
@@ -1236,8 +1243,7 @@ impl Component for SessionView {
                 }
             }
             SessionViewMsg::MessageSent => {
-                let session_id = ctx.props().session.id;
-                ctx.props().on_message_sent.emit(session_id);
+                ctx.props().on_message_sent.emit(Self::session_key(ctx));
                 false
             }
             SessionViewMsg::Interrupt => {
@@ -1617,6 +1623,12 @@ impl Component for SessionView {
 
 // Helper methods extracted from the main impl
 impl SessionView {
+    /// This session's key on the portal hosting it; every callback the
+    /// dashboard files per-session state under carries it.
+    fn session_key(ctx: &Context<Self>) -> SessionKey {
+        ctx.props().portal.session_key(ctx.props().session.id)
+    }
+
     fn claude_login_callback(&self, ctx: &Context<Self>) -> Option<Callback<()>> {
         (ctx.props().session.agent_type == shared::AgentType::Claude
             && ctx.props().session.my_role == shared::SessionRole::Owner
@@ -1975,7 +1987,7 @@ impl SessionView {
         retain_newest_items_by_cost(&mut messages, MAX_MESSAGES_PER_SESSION, |message| {
             counts_toward_render_limit(&message.content)
         });
-        let session_id = ctx.props().session.id;
+        let session_key = Self::session_key(ctx);
         self.dispatch_tasks(TasksInbound::ClearForReplay);
         for msg in &messages {
             let tag = classify_output_msg_type(&msg.content);
@@ -1986,7 +1998,7 @@ impl SessionView {
             }
             let ts_ms = parse_iso_ms_utc(&msg.created_at);
             if ts_ms.is_finite() && !tag.is_suppressed() {
-                ctx.props().on_activity.emit((session_id, tag, ts_ms));
+                ctx.props().on_activity.emit((session_key, tag, ts_ms));
             }
         }
         self.messages = messages
@@ -2016,7 +2028,7 @@ impl SessionView {
         self.edit_stack_active = Some((item.id, client_msg_id));
         self.edit_stack_error = None;
         self.ephemeral_status = Some(format!("Sent edit-stack item: {}", item.title));
-        ctx.props().on_message_sent.emit(ctx.props().session.id);
+        ctx.props().on_message_sent.emit(Self::session_key(ctx));
         true
     }
 
@@ -2269,8 +2281,8 @@ impl SessionView {
         let tag = classify_output_msg_type(&output.content);
         if let Some(shared::MessageSource::Agent { session_id, .. }) = output.source() {
             ctx.props().on_agent_message.emit((
-                *session_id,
-                ctx.props().session.id,
+                ctx.props().portal.session_key(*session_id),
+                Self::session_key(ctx),
                 js_sys::Date::now(),
             ));
         }
@@ -2291,7 +2303,7 @@ impl SessionView {
         if !tag.is_suppressed() {
             ctx.props()
                 .on_activity
-                .emit((ctx.props().session.id, tag, activity_ts));
+                .emit((Self::session_key(ctx), tag, activity_ts));
         }
         reconcile_pending_sends(&mut self.pending_sends, tag, &output.content);
         if let Some((item_id, _)) = self.edit_stack_active {
@@ -2442,8 +2454,9 @@ impl SessionView {
         crate::audio::play_sound(crate::audio::SoundEvent::Error);
         self.ws_connected = false;
         self.ws_sender = None;
-        let session_id = ctx.props().session.id;
-        ctx.props().on_connected_change.emit((session_id, false));
+        ctx.props()
+            .on_connected_change
+            .emit((Self::session_key(ctx), false));
 
         const MAX_ATTEMPTS: u32 = 10;
         if self.reconnect_attempt < MAX_ATTEMPTS {

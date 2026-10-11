@@ -1,34 +1,36 @@
 //! Hook for managing session list with automatic polling.
 
-use crate::utils::{self, On401};
+use crate::pages::dashboard::PortalSession;
+use crate::portal_client::use_portal;
+use crate::utils::On401;
 use shared::api::SessionsResponse;
-use shared::SessionInfo;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
 /// Return value from the use_sessions hook.
 pub struct UseSessions {
     /// Current list of sessions
-    pub sessions: Vec<SessionInfo>,
+    pub sessions: Vec<PortalSession>,
     /// Whether sessions are currently being loaded (initial load only)
     pub loading: bool,
     /// Manually trigger a refresh
     pub refresh: Callback<()>,
     /// Update the session list directly (for local modifications)
-    pub set_sessions: Callback<Vec<SessionInfo>>,
+    pub set_sessions: Callback<Vec<PortalSession>>,
 }
 
 /// Hook for fetching and polling session list.
 ///
-/// Automatically fetches sessions on mount and polls every 5 seconds.
-/// Handles 401 responses by redirecting to logout.
+/// Automatically fetches sessions from the portal in context on mount and
+/// polls every 5 seconds. Handles 401 responses by redirecting to logout.
 ///
 /// # Returns
 /// * `UseSessions` - The current sessions, loading state, and control callbacks
 ///
 #[hook]
 pub fn use_sessions() -> UseSessions {
-    let sessions = use_state(Vec::<SessionInfo>::new);
+    let portal = use_portal();
+    let sessions = use_state(Vec::<PortalSession>::new);
     let loading = use_state(|| true);
     let refresh_trigger = use_state(|| 0u32);
 
@@ -40,12 +42,21 @@ pub fn use_sessions() -> UseSessions {
         Callback::from(move |set_loading: bool| {
             let sessions = sessions.clone();
             let loading = loading.clone();
+            let portal = portal.clone();
 
             spawn_local(async move {
                 // 401 means the session is invalid; the helper redirects to logout.
-                match utils::fetch_json::<SessionsResponse>("/api/sessions", On401::Logout).await {
+                match portal
+                    .fetch_json::<SessionsResponse>("/api/sessions", On401::Logout)
+                    .await
+                {
                     Ok(data) => {
-                        sessions.set(data.sessions);
+                        sessions.set(
+                            data.sessions
+                                .into_iter()
+                                .map(|info| PortalSession::new(portal.clone(), info))
+                                .collect(),
+                        );
                     }
                     Err(e) => {
                         log::error!("Failed to fetch sessions: {}", e);
@@ -101,7 +112,7 @@ pub fn use_sessions() -> UseSessions {
     // Direct setter for local modifications
     let set_sessions = {
         let sessions = sessions.clone();
-        Callback::from(move |new_sessions: Vec<SessionInfo>| {
+        Callback::from(move |new_sessions: Vec<PortalSession>| {
             sessions.set(new_sessions);
         })
     };

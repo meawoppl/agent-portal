@@ -1,7 +1,7 @@
+use crate::portal_client::SessionKey;
 use shared::{ServerToClient, ServiceStats, TurnMetrics};
 use std::collections::HashMap;
 use std::rc::Rc;
-use uuid::Uuid;
 use yew::{Reducible, UseReducerHandle, UseStateHandle};
 
 /// Cap for the dashboard's recent-turn ring buffer. Matches the server-side
@@ -28,13 +28,16 @@ pub const SERVICE_CPU_HISTORY_CAP: usize = 60;
 /// `dispatch` applies the action against live state, which is the whole point.
 /// It also makes the merge a pure function, so the invariant the old design
 /// could only assert in a doc comment is now a test.
+///
+/// This is the home portal's user channel, so every session id it reports is
+/// a home session and the per-session maps are keyed by [`SessionKey::home`].
 #[derive(Default, PartialEq)]
 pub(crate) struct ClientWsState {
     pub recent_turn_metrics: Vec<TurnMetrics>,
-    pub latest_session_metrics: HashMap<Uuid, TurnMetrics>,
+    pub latest_session_metrics: HashMap<SessionKey, TurnMetrics>,
     /// Rail-pill fill per session (`ServerToClient::SessionProgress`): the
     /// completion fraction of the agent's progress bars. Absent = no fill.
-    pub session_progress: HashMap<Uuid, f32>,
+    pub session_progress: HashMap<SessionKey, f32>,
     pub launch_event_counter: u32,
     pub launcher_event_counter: u32,
     /// Services monitor table from the newest
@@ -57,7 +60,7 @@ pub(crate) enum ClientWsAction {
     },
     /// One live `ServerToClient::SessionProgress` frame; `None` clears.
     SessionProgress {
-        session_id: Uuid,
+        session_id: SessionKey,
         fraction: Option<f32>,
     },
     /// Drop every pill fill (`ServerToClient::SessionProgressReset`), sent on
@@ -185,7 +188,7 @@ pub(crate) fn handle_server_message(
             fraction,
         } => {
             live.dispatch(ClientWsAction::SessionProgress {
-                session_id,
+                session_id: SessionKey::home(session_id),
                 fraction,
             });
         }
@@ -214,7 +217,7 @@ pub(crate) fn handle_server_message(
 }
 
 pub(crate) fn insert_latest_session_metric(
-    latest: &mut HashMap<Uuid, TurnMetrics>,
+    latest: &mut HashMap<SessionKey, TurnMetrics>,
     incoming: TurnMetrics,
 ) {
     // An agent/version that cannot report a context window must not erase the
@@ -222,11 +225,12 @@ pub(crate) fn insert_latest_session_metric(
     if incoming.context_fraction().is_none() {
         return;
     }
+    let key = SessionKey::home(incoming.session_id);
     let replace = latest
-        .get(&incoming.session_id)
+        .get(&key)
         .is_none_or(|existing| incoming.started_at >= existing.started_at);
     if replace {
-        latest.insert(incoming.session_id, incoming);
+        latest.insert(key, incoming);
     }
 }
 
@@ -316,10 +320,14 @@ mod tests {
         let state = state.reduce(ClientWsAction::TurnMetrics(Box::new(gauged(b, 300))));
 
         assert!(
-            state.latest_session_metrics.contains_key(&a),
+            state
+                .latest_session_metrics
+                .contains_key(&SessionKey::home(a)),
             "the quiet session kept its context gauge"
         );
-        assert!(state.latest_session_metrics.contains_key(&b));
+        assert!(state
+            .latest_session_metrics
+            .contains_key(&SessionKey::home(b)));
         assert_eq!(state.latest_session_metrics.len(), 2);
         assert_eq!(state.recent_turn_metrics.len(), 3, "trend ring accumulates");
     }
@@ -328,7 +336,10 @@ mod tests {
     /// erase another's, and `None` clears only its own.
     #[test]
     fn session_progress_is_kept_per_session_and_none_clears() {
-        let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
+        let (a, b) = (
+            SessionKey::home(Uuid::new_v4()),
+            SessionKey::home(Uuid::new_v4()),
+        );
         let state = Rc::new(ClientWsState::default());
         let state = state.reduce(ClientWsAction::SessionProgress {
             session_id: a,
@@ -351,7 +362,10 @@ mod tests {
     /// down: the reset wipes it, and only sessions still running are re-sent.
     #[test]
     fn reset_drops_fills_the_backend_no_longer_reports() {
-        let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
+        let (a, b) = (
+            SessionKey::home(Uuid::new_v4()),
+            SessionKey::home(Uuid::new_v4()),
+        );
         let state = Rc::new(ClientWsState::default());
         let state = state.reduce(ClientWsAction::SessionProgress {
             session_id: a,
@@ -396,11 +410,15 @@ mod tests {
             trend: vec![gauged(a, 100)],
             latest: vec![gauged(a, 100)],
         });
-        assert!(state.latest_session_metrics.contains_key(&a));
+        assert!(state
+            .latest_session_metrics
+            .contains_key(&SessionKey::home(a)));
 
         let state = state.reduce(ClientWsAction::TurnMetrics(Box::new(gauged(b, 200))));
         assert!(
-            state.latest_session_metrics.contains_key(&a),
+            state
+                .latest_session_metrics
+                .contains_key(&SessionKey::home(a)),
             "hydrated gauge survives the first live frame from another session"
         );
     }
@@ -470,7 +488,14 @@ mod tests {
         }
 
         assert!(ring.iter().all(|metric| metric.session_id != quiet));
-        assert_eq!(latest.get(&quiet).unwrap().started_at.timestamp(), 10);
+        assert_eq!(
+            latest
+                .get(&SessionKey::home(quiet))
+                .unwrap()
+                .started_at
+                .timestamp(),
+            10
+        );
     }
 
     #[test]
@@ -487,7 +512,14 @@ mod tests {
         unknown.session_id = session_id;
         insert_latest_session_metric(&mut latest, unknown);
 
-        assert_eq!(latest.get(&session_id).unwrap().started_at.timestamp(), 10);
+        assert_eq!(
+            latest
+                .get(&SessionKey::home(session_id))
+                .unwrap()
+                .started_at
+                .timestamp(),
+            10
+        );
     }
 }
 

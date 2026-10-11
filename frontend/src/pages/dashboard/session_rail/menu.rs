@@ -1,5 +1,6 @@
+use crate::pages::dashboard::PortalSession;
+use crate::portal_client::SessionKey;
 use shared::{SessionInfo, SessionRole};
-use uuid::Uuid;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::MouseEvent;
 use yew::prelude::*;
@@ -8,7 +9,7 @@ use super::{repo_pr_menu_hint, sorted_prs};
 
 #[derive(Properties, PartialEq)]
 pub(super) struct SessionRailMenuProps {
-    pub session: Option<SessionInfo>,
+    pub session: Option<PortalSession>,
     pub position: (i32, i32),
     pub is_hidden: bool,
     pub is_connected: bool,
@@ -22,14 +23,14 @@ pub(super) struct SessionRailMenuProps {
     pub on_set_stop_confirm: Callback<bool>,
     pub on_set_delete_confirm: Callback<bool>,
     pub on_set_copied_id: Callback<bool>,
-    pub on_stop: Callback<Uuid>,
-    pub on_toggle_hidden: Callback<Uuid>,
-    pub on_toggle_pause: Callback<(Uuid, bool)>,
-    pub on_leave: Callback<Uuid>,
-    pub on_delete: Callback<Uuid>,
-    pub on_share: Callback<Uuid>,
-    pub on_schedule: Callback<SessionInfo>,
-    pub on_fork: Callback<SessionInfo>,
+    pub on_stop: Callback<SessionKey>,
+    pub on_toggle_hidden: Callback<SessionKey>,
+    pub on_toggle_pause: Callback<(SessionKey, bool)>,
+    pub on_leave: Callback<SessionKey>,
+    pub on_delete: Callback<SessionKey>,
+    pub on_share: Callback<PortalSession>,
+    pub on_schedule: Callback<PortalSession>,
+    pub on_fork: Callback<PortalSession>,
 }
 
 #[function_component(SessionRailMenu)]
@@ -65,11 +66,12 @@ pub(super) fn session_rail_menu(props: &SessionRailMenuProps) -> Html {
     }
 }
 
-fn render_menu_content(session: &SessionInfo, props: &SessionRailMenuProps) -> Html {
+fn render_menu_content(entry: &PortalSession, props: &SessionRailMenuProps) -> Html {
+    let session = &entry.info;
     let is_hidden = props.is_hidden;
     let is_connected = props.is_connected;
     let is_paused = session.paused;
-    let session_id = session.id;
+    let session_key = entry.key;
 
     let on_stop = {
         let on_stop = props.on_stop.clone();
@@ -78,7 +80,7 @@ fn render_menu_content(session: &SessionInfo, props: &SessionRailMenuProps) -> H
         let confirming_stop = props.confirming_stop;
         Callback::from(move |_: MouseEvent| {
             if confirming_stop {
-                on_stop.emit(session_id);
+                on_stop.emit(session_key);
                 on_set_stop_confirm.emit(false);
                 on_close.emit(());
             } else {
@@ -89,28 +91,28 @@ fn render_menu_content(session: &SessionInfo, props: &SessionRailMenuProps) -> H
 
     let open_schedule = close_then(props.on_close.clone(), {
         let on_schedule = props.on_schedule.clone();
-        let session = session.clone();
-        move || on_schedule.emit(session.clone())
+        let entry = entry.clone();
+        move || on_schedule.emit(entry.clone())
     });
     let open_fork = close_then(props.on_close.clone(), {
         let on_fork = props.on_fork.clone();
-        let session = session.clone();
-        move || on_fork.emit(session.clone())
+        let entry = entry.clone();
+        move || on_fork.emit(entry.clone())
     });
 
     let on_hide = close_then(props.on_close.clone(), {
         let on_toggle_hidden = props.on_toggle_hidden.clone();
-        move || on_toggle_hidden.emit(session_id)
+        move || on_toggle_hidden.emit(session_key)
     });
 
     let on_toggle_pause = close_then(props.on_close.clone(), {
         let on_toggle_pause = props.on_toggle_pause.clone();
-        move || on_toggle_pause.emit((session_id, !is_paused))
+        move || on_toggle_pause.emit((session_key, !is_paused))
     });
 
     let on_leave = close_then(props.on_close.clone(), {
         let on_leave = props.on_leave.clone();
-        move || on_leave.emit(session_id)
+        move || on_leave.emit(session_key)
     });
 
     // Two-click confirm rather than a modal, matching Stop directly above.
@@ -124,7 +126,7 @@ fn render_menu_content(session: &SessionInfo, props: &SessionRailMenuProps) -> H
         let confirming_delete = props.confirming_delete;
         Callback::from(move |_: MouseEvent| {
             if confirming_delete {
-                on_delete.emit(session_id);
+                on_delete.emit(session_key);
                 on_set_delete_confirm.emit(false);
                 on_close.emit(());
             } else {
@@ -207,7 +209,7 @@ fn render_menu_content(session: &SessionInfo, props: &SessionRailMenuProps) -> H
                 return;
             };
             let clipboard = window.navigator().clipboard();
-            let id_str = session_id.to_string();
+            let id_str = session_key.id.to_string();
             let on_set_copied_id = on_set_copied_id.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 let _ = JsFuture::from(clipboard.write_text(&id_str)).await;
@@ -243,7 +245,8 @@ fn render_menu_content(session: &SessionInfo, props: &SessionRailMenuProps) -> H
     let share_option = if session.my_role == SessionRole::Owner {
         let on_share = close_then(props.on_close.clone(), {
             let on_share = props.on_share.clone();
-            move || on_share.emit(session_id)
+            let entry = entry.clone();
+            move || on_share.emit(entry.clone())
         });
         menu_option(
             classes!("share"),

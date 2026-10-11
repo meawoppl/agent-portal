@@ -1,8 +1,9 @@
 //! Shared types for the dashboard module
 
+use crate::portal_client::{ConnId, PortalClient, SessionKey};
 use crate::utils::{non_empty, storage_get, storage_set};
 use serde::Deserialize;
-use shared::ToolInput;
+use shared::{SessionInfo, ToolInput};
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
@@ -53,6 +54,26 @@ pub const HEADER_COLLAPSED_STORAGE_KEY: &str = "claude-portal-header-collapsed";
 /// muse sessions **once #1587 has landed**. Until then a muse turn still crowds
 /// the live view, though nothing is lost server-side.
 pub const MAX_MESSAGES_PER_SESSION: usize = 100;
+
+/// A session as the dashboard holds it: the row from its portal's
+/// `/api/sessions`, the portal it lives on, and the key every piece of client
+/// state about it is filed under.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PortalSession {
+    pub key: SessionKey,
+    pub portal: PortalClient,
+    pub info: SessionInfo,
+}
+
+impl PortalSession {
+    pub fn new(portal: PortalClient, info: SessionInfo) -> Self {
+        Self {
+            key: portal.session_key(info.id),
+            portal,
+            info,
+        }
+    }
+}
 
 /// Type alias for WebSocket sender.
 ///
@@ -231,27 +252,44 @@ pub fn save_rail_position(position: RailPosition) {
     storage_set(RAIL_ORIENTATION_STORAGE_KEY, position.as_str());
 }
 
-/// Load the last actively focused session from localStorage.
-pub fn load_last_active_session() -> Option<Uuid> {
-    storage_get(LAST_ACTIVE_SESSION_STORAGE_KEY).and_then(|value| Uuid::parse_str(&value).ok())
+/// Load the last actively focused session from localStorage. The stored value
+/// is a bare id, so it always names a home-portal session.
+pub fn load_last_active_session() -> Option<SessionKey> {
+    storage_get(LAST_ACTIVE_SESSION_STORAGE_KEY)
+        .and_then(|value| Uuid::parse_str(&value).ok())
+        .map(SessionKey::home)
 }
 
-/// Save the last actively focused session to localStorage.
-pub fn save_last_active_session(session_id: Uuid) {
-    storage_set(LAST_ACTIVE_SESSION_STORAGE_KEY, &session_id.to_string());
+/// Save the last actively focused session to localStorage. Only home sessions
+/// are persisted: the stored bare id cannot name another portal.
+pub fn save_last_active_session(session: SessionKey) {
+    if session.conn == ConnId::HOME {
+        storage_set(LAST_ACTIVE_SESSION_STORAGE_KEY, &session.id.to_string());
+    }
 }
 
-/// Load hidden session IDs from localStorage
-pub fn load_hidden_sessions() -> HashSet<Uuid> {
+/// Load hidden sessions from localStorage. The stored set holds bare ids, so
+/// every entry names a home-portal session.
+pub fn load_hidden_sessions() -> HashSet<SessionKey> {
     storage_get(HIDDEN_SESSIONS_STORAGE_KEY)
         .and_then(|json| serde_json::from_str::<Vec<String>>(&json).ok())
-        .map(|ids| ids.iter().filter_map(|s| Uuid::parse_str(s).ok()).collect())
+        .map(|ids| {
+            ids.iter()
+                .filter_map(|s| Uuid::parse_str(s).ok())
+                .map(SessionKey::home)
+                .collect()
+        })
         .unwrap_or_default()
 }
 
-/// Save hidden session IDs to localStorage
-pub fn save_hidden_sessions(hidden: &HashSet<Uuid>) {
-    let ids: Vec<String> = hidden.iter().map(|id| id.to_string()).collect();
+/// Save hidden sessions to localStorage. Only home sessions are persisted, for
+/// the same reason as [`save_last_active_session`].
+pub fn save_hidden_sessions(hidden: &HashSet<SessionKey>) {
+    let ids: Vec<String> = hidden
+        .iter()
+        .filter(|key| key.conn == ConnId::HOME)
+        .map(|key| key.id.to_string())
+        .collect();
     if let Ok(json) = serde_json::to_string(&ids) {
         storage_set(HIDDEN_SESSIONS_STORAGE_KEY, &json);
     }
