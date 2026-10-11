@@ -1,6 +1,6 @@
 //! WebSocket connection management for SessionView
 
-use crate::utils;
+use crate::portal_client::PortalClient;
 use futures_util::StreamExt;
 use shared::api::EditStackItem;
 use shared::{
@@ -92,13 +92,14 @@ fn report_ws_error(on_event: &Callback<WsEvent>, context: &str, err: impl std::f
 /// Connect to WebSocket and start receiving messages.
 /// Returns immediately, spawns async task to handle connection.
 pub fn connect_websocket(
+    portal: &PortalClient,
     session_id: Uuid,
     replay_after: Option<String>,
     resuming: bool,
     on_event: Callback<WsEvent>,
 ) {
+    let ws_endpoint = portal.ws_url(ClientEndpoint::PATH);
     spawn_local(async move {
-        let ws_endpoint = utils::ws_url(ClientEndpoint::PATH);
         match ws_bridge::yew_client::connect_to::<ClientEndpoint>(&ws_endpoint) {
             Ok(conn) => {
                 let (mut sender, mut receiver) = conn.split();

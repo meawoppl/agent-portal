@@ -14,10 +14,10 @@ use crate::components::{
     group_is_turn_terminator, group_messages, thinking_chip_starts, ForkDialog,
     MessageGroupRenderer,
 };
+use crate::portal_client::PortalClient;
 use crate::utils::{self, On401};
 use gloo::events::EventListener;
 use gloo::timers::callback::Timeout;
-use gloo_net::http::Request;
 use shared::api::{
     EditStackItem, EditStackResponse, ForwardInfo, PluginInventoryResponse, PortalPluginInfo,
     TurnMetricsResponse, UpdateEditStackItemRequest,
@@ -77,6 +77,10 @@ enum EditStackView {
 #[derive(Properties, PartialEq)]
 pub struct SessionViewProps {
     pub session: SessionInfo,
+    /// The portal hosting `session`; every session-scoped request and the
+    /// session socket resolve against it, and descendants inherit it as the
+    /// `PortalClient` context.
+    pub portal: PortalClient,
     pub focused: bool,
     pub on_awaiting_change: Callback<(Uuid, bool)>,
     pub on_connected_change: Callback<(Uuid, bool)>,
@@ -268,13 +272,14 @@ fn edit_stack_prompt_content(item: &EditStackItem) -> String {
     content
 }
 
-fn edit_stack_fetch(link: yew::html::Scope<SessionView>, session_id: Uuid) {
+fn edit_stack_fetch(ctx: &Context<SessionView>) {
+    let link = ctx.link().clone();
+    let portal = ctx.props().portal.clone();
+    let session_id = ctx.props().session.id;
     spawn_local(async move {
-        match utils::fetch_json::<EditStackResponse>(
-            &edit_stack_api_path(session_id),
-            On401::Ignore,
-        )
-        .await
+        match portal
+            .fetch_json::<EditStackResponse>(&edit_stack_api_path(session_id), On401::Ignore)
+            .await
         {
             Ok(data) => link.send_message(SessionViewMsg::EditStackLoaded(data.items)),
             Err(err) => link.send_message(SessionViewMsg::EditStackRequestFailed(format!(
@@ -284,10 +289,16 @@ fn edit_stack_fetch(link: yew::html::Scope<SessionView>, session_id: Uuid) {
     });
 }
 
-fn plugin_inventory_fetch(link: yew::html::Scope<SessionView>, session_id: Uuid) {
+fn plugin_inventory_fetch(ctx: &Context<SessionView>) {
+    let link = ctx.link().clone();
+    let portal = ctx.props().portal.clone();
+    let session_id = ctx.props().session.id;
     spawn_local(async move {
         let path = plugin_inventory_api_path(Some(session_id), None);
-        match utils::fetch_json::<PluginInventoryResponse>(&path, On401::Ignore).await {
+        match portal
+            .fetch_json::<PluginInventoryResponse>(&path, On401::Ignore)
+            .await
+        {
             Ok(data) => link.send_message(SessionViewMsg::PluginInventoryLoaded(data.plugins)),
             Err(err) => link.send_message(SessionViewMsg::PluginInventoryFailed(format!(
                 "Could not load plugins: {err}"
@@ -573,8 +584,8 @@ impl Component for SessionView {
             })
         });
 
-        edit_stack_fetch(ctx.link().clone(), session_id);
-        plugin_inventory_fetch(ctx.link().clone(), session_id);
+        edit_stack_fetch(ctx);
+        plugin_inventory_fetch(ctx);
 
         // Hydrate the per-turn metrics buffer in its own task, off the
         // history→WebSocket critical path (#1915): metrics only feed the
@@ -583,12 +594,14 @@ impl Component for SessionView {
         // for past turns; live broadcasts still populate the buffer.
         {
             let link = link.clone();
+            let portal = ctx.props().portal.clone();
             spawn_local(async move {
-                if let Ok(data) = utils::fetch_json::<TurnMetricsResponse>(
-                    &format!("/api/sessions/{}/turn-metrics", session_id),
-                    On401::Ignore,
-                )
-                .await
+                if let Ok(data) = portal
+                    .fetch_json::<TurnMetricsResponse>(
+                        &format!("/api/sessions/{}/turn-metrics", session_id),
+                        On401::Ignore,
+                    )
+                    .await
                 {
                     link.send_message(SessionViewMsg::LoadTurnMetrics(data.metrics));
                 }
@@ -598,6 +611,7 @@ impl Component for SessionView {
         // Fetch existing messages via REST, then connect WebSocket. History
         // must precede the socket: its newest timestamp becomes the
         // `replay_after` watermark that keeps the server replay to a delta.
+        let portal = ctx.props().portal.clone();
         spawn_local(async move {
             let mut last_message_time: Option<String> = None;
 
@@ -605,14 +619,15 @@ impl Component for SessionView {
             // local trim keeps (`shared::render_budget`, #1915) — no rows
             // fetched just to be discarded, no underfilled buffer when a turn
             // was dense with free-riding thinking-token markers.
-            if let Ok(data) = utils::fetch_json::<MessagesResponse>(
-                &format!(
-                    "/api/sessions/{}/messages?render_limit={}",
-                    session_id, MAX_MESSAGES_PER_SESSION
-                ),
-                On401::Ignore,
-            )
-            .await
+            if let Ok(data) = portal
+                .fetch_json::<MessagesResponse>(
+                    &format!(
+                        "/api/sessions/{}/messages?render_limit={}",
+                        session_id, MAX_MESSAGES_PER_SESSION
+                    ),
+                    On401::Ignore,
+                )
+                .await
             {
                 let is_awaiting = is_awaiting(data.messages.iter().map(|m| &m.content), agent_type);
                 on_awaiting_change.emit((session_id, is_awaiting));
@@ -630,7 +645,7 @@ impl Component for SessionView {
             let on_event = Callback::from(move |event: WsEvent| {
                 ws_link.send_message(SessionViewMsg::WsEvent(event));
             });
-            connect_websocket(session_id, last_message_time, false, on_event);
+            connect_websocket(&portal, session_id, last_message_time, false, on_event);
         });
 
         Self {
@@ -696,8 +711,8 @@ impl Component for SessionView {
             self.open_forward_on_load = false;
             self.pending_surface_restore = load_open_surface(ctx.props().session.id);
             self.surface_split_percent = load_split_percent(ctx.props().session.id);
-            edit_stack_fetch(ctx.link().clone(), ctx.props().session.id);
-            plugin_inventory_fetch(ctx.link().clone(), ctx.props().session.id);
+            edit_stack_fetch(ctx);
+            plugin_inventory_fetch(ctx);
         }
 
         // Detect interrupt signal change on the focused session. Textarea
@@ -955,7 +970,7 @@ impl Component for SessionView {
                     self.active_surface =
                         Some(SessionSurface::from_plugins(ctx.props().session.id, mode));
                     self.edit_stack_panel_open = false;
-                    plugin_inventory_fetch(ctx.link().clone(), ctx.props().session.id);
+                    plugin_inventory_fetch(ctx);
                 }
                 true
             }
@@ -996,7 +1011,7 @@ impl Component for SessionView {
                         mode,
                     ));
                     self.edit_stack_panel_open = true;
-                    edit_stack_fetch(ctx.link().clone(), ctx.props().session.id);
+                    edit_stack_fetch(ctx);
                 }
                 true
             }
@@ -1378,6 +1393,7 @@ impl Component for SessionView {
             plugins_open || suggested_plugin_count > 0 || self.plugin_error.is_some();
 
         html! {
+            <ContextProvider<PortalClient> context={ctx.props().portal.clone()}>
             <div class={classes!("session-view", ctx.props().focused.then_some("focused"))}>
                 <div class="session-view-header">
                     <span class="session-name">{ &ctx.props().session.session_name }</span>
@@ -1594,6 +1610,7 @@ impl Component for SessionView {
                     }
                 }
             </div>
+            </ContextProvider<PortalClient>>
         }
     }
 }
@@ -2052,11 +2069,10 @@ impl SessionView {
             status: Some("sent".to_string()),
             sent_client_msg_id: Some(client_msg_id),
         };
+        let portal = ctx.props().portal.clone();
         spawn_local(async move {
             let result = utils::send_json(
-                Request::patch(&utils::api_url(&edit_stack_item_api_path(
-                    session_id, item_id,
-                ))),
+                portal.patch(&edit_stack_item_api_path(session_id, item_id)),
                 &body,
             )
             .await;
@@ -2100,11 +2116,10 @@ impl SessionView {
             status: Some(status.to_string()),
             sent_client_msg_id: None,
         };
+        let portal = ctx.props().portal.clone();
         spawn_local(async move {
             let result = utils::send_json(
-                Request::patch(&utils::api_url(&edit_stack_item_api_path(
-                    session_id, item_id,
-                ))),
+                portal.patch(&edit_stack_item_api_path(session_id, item_id)),
                 &body,
             )
             .await;
@@ -2138,9 +2153,13 @@ impl SessionView {
         }
         let session_id = ctx.props().session.id;
         let link = ctx.link().clone();
+        let portal = ctx.props().portal.clone();
         spawn_local(async move {
-            let url = utils::api_url(&edit_stack_item_api_path(session_id, item_id));
-            match Request::delete(&url).send().await {
+            match portal
+                .delete(&edit_stack_item_api_path(session_id, item_id))
+                .send()
+                .await
+            {
                 Ok(response) if response.ok() => match response.json::<EditStackResponse>().await {
                     Ok(data) => link.send_message(SessionViewMsg::EditStackLoaded(data.items)),
                     Err(err) => link.send_message(SessionViewMsg::EditStackRequestFailed(format!(
@@ -2457,7 +2476,13 @@ impl SessionView {
         let on_event = Callback::from(move |event: WsEvent| {
             link.send_message(SessionViewMsg::WsEvent(event));
         });
-        connect_websocket(session_id, replay_after, true, on_event);
+        connect_websocket(
+            &ctx.props().portal,
+            session_id,
+            replay_after,
+            true,
+            on_event,
+        );
     }
 
     fn render_edit_stack_surface(&self, ctx: &Context<Self>, surface: SessionSurface) -> Html {

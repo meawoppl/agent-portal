@@ -3,6 +3,7 @@ mod components;
 mod health_timer;
 mod hooks;
 mod pages;
+mod portal_client;
 #[cfg(test)]
 pub mod test_fixtures;
 mod ui_theme;
@@ -18,6 +19,7 @@ use pages::{
     dashboard::DashboardPage, demo::DemoPage, history::HistoryBrowserPage,
     history::HistoryTranscriptPage, settings::SettingsPage, splash::SplashPage,
 };
+use portal_client::PortalClient;
 use yew::prelude::*;
 use yew_router::prelude::*;
 
@@ -82,10 +84,12 @@ fn switch(routes: Route) -> Html {
 #[function_component(App)]
 fn app() -> Html {
     html! {
-        <BrowserRouter>
-            <Switch<Route> render={switch} />
-            <HealthTimerReminder />
-        </BrowserRouter>
+        <ContextProvider<PortalClient> context={PortalClient::home()}>
+            <BrowserRouter>
+                <Switch<Route> render={switch} />
+                <HealthTimerReminder />
+            </BrowserRouter>
+        </ContextProvider<PortalClient>>
     }
 }
 

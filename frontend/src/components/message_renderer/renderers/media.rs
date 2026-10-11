@@ -5,6 +5,7 @@
 use super::lightbox_gesture::{LightboxGesture, LightboxView, Point};
 use crate::components::DismissibleBackdrop;
 use crate::hooks::use_escape_capture;
+use crate::portal_client::use_portal;
 use yew::prelude::*;
 
 const ALLOWED_IMAGE_MEDIA_TYPES: &[&str] = &[
@@ -82,6 +83,7 @@ fn viewport_center() -> Point {
 
 #[function_component(ImageViewer)]
 fn image_viewer(props: &ImageViewerProps) -> Html {
+    let src = use_portal().resolve(&props.src);
     let expanded = use_state(|| false);
     // The gesture (pointers, pinch baseline, current view) lives in a mut_ref,
     // not state: two fingers moving in one frame must each see the other's
@@ -252,7 +254,7 @@ fn image_viewer(props: &ImageViewerProps) -> Html {
     html! {
         <>
             <div class={classes!("tool-result-image", size_fallback)} onclick={on_thumb_click}>
-                <img src={props.src.clone()} alt="Tool result image" onerror={on_error} />
+                <img src={src.clone()} alt="Tool result image" onerror={on_error} />
             </div>
             if *expanded {
                 <DismissibleBackdrop class="image-lightbox" on_close={close_lightbox.clone()}>
@@ -271,7 +273,7 @@ fn image_viewer(props: &ImageViewerProps) -> Html {
                         <img
                             class={classes!(size_fallback)}
                             style={lightbox_view.style()}
-                            src={props.src.clone()}
+                            src={src.clone()}
                             alt="Full size image"
                             draggable="false"
                         />
@@ -285,7 +287,7 @@ fn image_viewer(props: &ImageViewerProps) -> Html {
                             </button>
                             <a
                                 class="image-lightbox-download"
-                                href={props.src.clone()}
+                                href={src.clone()}
                                 download={download_name}
                             >
                                 { "Download" }
@@ -372,6 +374,7 @@ struct VideoViewerProps {
 
 #[function_component(VideoViewer)]
 fn video_viewer(props: &VideoViewerProps) -> Html {
+    let src = use_portal().resolve(&props.src);
     let failed = use_state(|| false);
 
     if *failed {
@@ -391,7 +394,7 @@ fn video_viewer(props: &VideoViewerProps) -> Html {
             <video
                 controls=true
                 preload="metadata"
-                src={props.src.clone()}
+                src={src.clone()}
                 onerror={on_error}
             />
         </div>

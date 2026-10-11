@@ -22,6 +22,7 @@ use crate::hooks::{
 use crate::pages::admin::AdminPage;
 use crate::pages::history::{HistoryBrowserPage, HistoryTranscriptPage};
 use crate::pages::settings::SettingsPage;
+use crate::portal_client::use_portal;
 use crate::utils;
 use gloo::events::EventListener;
 use gloo_net::http::Request;
@@ -87,6 +88,7 @@ pub fn dashboard_page() -> Html {
     let loading = sessions_hook.loading;
 
     let ws_hook = use_client_websocket();
+    let portal = use_portal();
     let server_shutdown_reason = ws_hook.shutdown_reason.clone();
     let update_available = ws_hook.update_available.clone();
     let bootstrap = use_dashboard_bootstrap();
@@ -941,6 +943,7 @@ pub fn dashboard_page() -> Html {
                                         >
                                             <SessionView
                                                 session={session.clone()}
+                                                portal={portal.clone()}
                                                 focused={is_focused}
                                                 on_awaiting_change={on_awaiting_change.clone()}
                                                 on_connected_change={on_connected_change.clone()}

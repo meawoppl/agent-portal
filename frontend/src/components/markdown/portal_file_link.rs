@@ -22,10 +22,11 @@
 //! hover/status-bar preview, "copy link address", middle-click — even though
 //! the default action is prevented for ordinary clicks.
 
-use gloo_net::http::Request;
 use wasm_bindgen::JsCast;
 use web_sys::{Blob, BlobPropertyBag, HtmlAnchorElement, MouseEvent, Url};
 use yew::prelude::*;
+
+use crate::portal_client::use_portal;
 
 #[derive(Properties, PartialEq)]
 pub(super) struct PortalFileLinkProps {
@@ -98,6 +99,8 @@ fn filename_from_href(href: &str) -> String {
 pub(super) fn portal_file_link(props: &PortalFileLinkProps) -> Html {
     let error = use_state(|| Option::<String>::None);
     let busy = use_state(|| false);
+    let portal = use_portal();
+    let url = portal.resolve(&props.href);
 
     let onclick = {
         let href = props.href.clone();
@@ -114,13 +117,14 @@ pub(super) fn portal_file_link(props: &PortalFileLinkProps) -> Html {
             }
 
             let href = href.clone();
+            let request = portal.get(&href);
             let error = error.clone();
             let busy = busy.clone();
             busy.set(true);
             error.set(None);
 
             wasm_bindgen_futures::spawn_local(async move {
-                let outcome = match Request::get(&href).send().await {
+                let outcome = match request.send().await {
                     Err(err) => Err(format!("Download failed: {err}")),
                     Ok(response) if !response.ok() => {
                         Err(download_error_message(response.status()))
@@ -142,7 +146,7 @@ pub(super) fn portal_file_link(props: &PortalFileLinkProps) -> Html {
     html! {
         <>
             <a
-                href={props.href.clone()}
+                href={url}
                 title={props.title.clone()}
                 class="md-link portal-file-link"
                 {onclick}
