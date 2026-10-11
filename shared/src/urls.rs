@@ -126,9 +126,12 @@ pub const MAX_ORIGIN_LEN: usize = 255;
 /// `scheme://authority` with at most one trailing `/`, and the authority may
 /// not contain anything an origin can't.
 fn check_raw_envelope(input: &str) -> Result<(), OriginError> {
-    let (_, rest) = input
+    let (scheme, rest) = input
         .split_once("://")
         .ok_or(OriginError::UnsupportedScheme)?;
+    if !scheme.eq_ignore_ascii_case("https") && !scheme.eq_ignore_ascii_case("http") {
+        return Err(OriginError::UnsupportedScheme);
+    }
     let authority = rest.strip_suffix('/').unwrap_or(rest);
     if authority.is_empty() {
         return Err(OriginError::InvalidHost);
@@ -210,6 +213,8 @@ mod tests {
             ("https://1.2.3.4.:8443", InvalidHost),
             ("https://wo\nrk.example", NotAnOrigin),
             ("https:///work.example", NotAnOrigin),
+            ("ht\ntps://work.example", UnsupportedScheme),
+            ("ht tps://work.example", UnsupportedScheme),
         ] {
             assert_eq!(canonical_origin(input), Err(want), "{input}");
         }
