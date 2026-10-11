@@ -19,7 +19,9 @@ pub use session_manager::{
     LAUNCHER_LIVENESS_DEADLINE_SECS, LIVENESS_SWEEP_INTERVAL_SECS, PROGRESS_BAR_TTL,
     PROXY_CHANNEL_CAPACITY, PROXY_LIVENESS_DEADLINE_SECS, WEB_CLIENT_CHANNEL_CAPACITY,
 };
-pub(crate) use session_manager::{EnqueueInput, LauncherRpcError, LauncherRpcKind};
+pub(crate) use session_manager::{
+    CompactionGate, CompactionPhase, EnqueueInput, LauncherRpcError, LauncherRpcKind,
+};
 
 /// Mint a port-forward data-plane ticket (#1506). Re-exported so the proxy
 /// socket's `Register` handler can hand one to a capable proxy without

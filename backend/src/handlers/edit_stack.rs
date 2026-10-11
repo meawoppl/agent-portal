@@ -26,6 +26,9 @@ const MAX_EDIT_STACK_TITLE_CHARS: usize = 200;
 const MAX_EDIT_STACK_TEXT_CHARS: usize = 16_000;
 const MAX_EDIT_STACK_JSON_CHARS: usize = 64_000;
 const MAX_EDIT_STACK_IMAGE_CHARS: usize = 1_500_000;
+/// Context-window fraction at or above which a Claude session is compacted
+/// before the next queued item is dispatched into it.
+const EDIT_STACK_COMPACT_FRACTION: f64 = 0.5;
 
 pub async fn list_edit_stack(
     State(app_state): State<Arc<AppState>>,
@@ -156,6 +159,21 @@ pub(crate) fn try_send_next_pending_edit_stack_item(
         return Ok(false);
     };
 
+    use crate::handlers::websocket::CompactionGate;
+    match session_manager.edit_stack_compaction_gate(session_id) {
+        CompactionGate::Hold => return Ok(false),
+        CompactionGate::Proceed => {}
+        CompactionGate::Check => {
+            if let Some(fraction) = claude_context_fraction(&mut conn, session_id)? {
+                if fraction >= EDIT_STACK_COMPACT_FRACTION {
+                    drop(conn);
+                    request_compaction(db_pool, session_manager, session_key, session_id, fraction);
+                    return Ok(false);
+                }
+            }
+        }
+    }
+
     let Some(item) = enrich_items(&mut conn, vec![row.clone()])?
         .into_iter()
         .next()
@@ -228,6 +246,57 @@ pub(crate) fn try_send_next_pending_edit_stack_item(
     .execute(&mut conn)?;
     broadcast_edit_stack_items(db_pool, session_manager, session_key, session_id)?;
     Ok(false)
+}
+
+/// Context-window fraction of the session's latest turn, when that turn was a
+/// Claude turn with a known window. Other agents are never compacted here.
+fn claude_context_fraction(
+    conn: &mut crate::db::DbConnection,
+    session_id: Uuid,
+) -> Result<Option<f64>, AppError> {
+    use crate::models::TurnMetric;
+    use crate::schema::turn_metrics;
+
+    let latest: Option<TurnMetric> = turn_metrics::table
+        .filter(turn_metrics::session_id.eq(session_id))
+        .filter(turn_metrics::model_context_window.gt(0))
+        .order(turn_metrics::started_at.desc())
+        .select(TurnMetric::as_select())
+        .first(conn)
+        .optional()?;
+    Ok(latest
+        .filter(|metric| metric.agent_type == "claude")
+        .and_then(|metric| metric.into_wire().context_fraction()))
+}
+
+/// Send `/compact` ahead of the next queued item. The item stays pending; the
+/// compaction's turn results re-run dispatch (see `edit_stack_compaction.rs`).
+fn request_compaction(
+    db_pool: &crate::db::DbPool,
+    session_manager: &crate::handlers::websocket::SessionManager,
+    session_key: &str,
+    session_id: Uuid,
+    fraction: f64,
+) {
+    session_manager.edit_stack_compaction_requested(session_id);
+    let enqueue = session_manager.enqueue_input(
+        db_pool,
+        session_key,
+        session_id,
+        crate::handlers::websocket::EnqueueInput {
+            content: serde_json::Value::String("/compact".to_string()),
+            send_mode: None,
+            reasoning_effort: None,
+            client_msg_id: Some(Uuid::new_v4()),
+        },
+    );
+    info!(
+        "Edit-stack: compacting session {} at {:.0}% context before the next item (delivered={}, persisted={})",
+        session_id,
+        fraction * 100.0,
+        enqueue.delivered,
+        enqueue.persisted
+    );
 }
 
 pub(crate) fn broadcast_edit_stack_items(

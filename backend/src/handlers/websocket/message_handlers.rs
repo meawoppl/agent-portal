@@ -1,4 +1,4 @@
-use super::{ProxySender, SessionId, SessionManager};
+use super::{CompactionPhase, ProxySender, SessionId, SessionManager};
 use crate::db::DbPool;
 use diesel::prelude::*;
 use serde::Deserialize;
@@ -294,6 +294,11 @@ pub fn handle_claude_output(ctx: ClaudeOutputContext<'_>, frame: ClaudeOutputFra
     let normalized = normalize_output_content(content);
     let content = normalized.content;
     let releases_edit_stack = edit_stack_output_releases_next(agent_type.as_str(), &content);
+    if let Some(session_id) = db_session_id {
+        if agent_type == AgentType::Claude && is_claude_compaction_boundary(&content) {
+            session_manager.edit_stack_compaction_boundary(session_id);
+        }
+    }
 
     // Insert the message FIRST so the live broadcast's `meta` carries the
     // server-assigned `created_at` the historical-read path would surface
@@ -415,8 +420,17 @@ pub fn handle_claude_output(ctx: ClaudeOutputContext<'_>, frame: ClaudeOutputFra
     if releases_edit_stack {
         if let Some(session_id) = db_session_id {
             session_manager.mark_turn_finished(session_id);
+            let compaction = session_manager.edit_stack_compaction_turn_ended(session_id);
             if inserted_created_at.is_some() {
                 if let Some(key) = session_key.as_ref() {
+                    if compaction == Some(CompactionPhase::AwaitingReminder) {
+                        release_edit_stack_after_reminder_timeout(
+                            db_pool.clone(),
+                            session_manager.clone(),
+                            key.clone(),
+                            session_id,
+                        );
+                    }
                     if let Err(err) =
                         crate::handlers::edit_stack::try_send_next_pending_edit_stack_item(
                             db_pool,
@@ -434,6 +448,50 @@ pub fn handle_claude_output(ctx: ClaudeOutputContext<'_>, frame: ClaudeOutputFra
             }
         }
     }
+}
+
+/// How long to wait for the reminder turn the proxy injects after a
+/// compaction before dispatching the next edit-stack item anyway.
+const EDIT_STACK_REMINDER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+fn is_claude_compaction_boundary(content: &serde_json::Value) -> bool {
+    if content.get("type").and_then(|value| value.as_str()) != Some("system") {
+        return false;
+    }
+    serde_json::from_value::<shared::SystemMessage>(content.clone())
+        .is_ok_and(|sys| shared::is_compaction_boundary(&sys))
+}
+
+/// The edit-stack queue holds while the post-compaction reminder turn runs.
+/// If that turn never produces a result (injection failed), release the queue
+/// after a timeout instead of stalling it.
+fn release_edit_stack_after_reminder_timeout(
+    db_pool: DbPool,
+    session_manager: SessionManager,
+    session_key: SessionId,
+    session_id: Uuid,
+) {
+    tokio::spawn(async move {
+        tokio::time::sleep(EDIT_STACK_REMINDER_TIMEOUT).await;
+        if !session_manager.edit_stack_compaction_reminder_timed_out(session_id) {
+            return;
+        }
+        warn!(
+            "No reminder turn after compaction in session {}; releasing the edit stack",
+            session_id
+        );
+        if let Err(err) = crate::handlers::edit_stack::try_send_next_pending_edit_stack_item(
+            &db_pool,
+            &session_manager,
+            session_key.as_str(),
+            session_id,
+        ) {
+            warn!(
+                "Could not promote next edit-stack item after compaction for session {}: {:?}",
+                session_id, err
+            );
+        }
+    });
 }
 
 fn edit_stack_output_releases_next(agent_type: &str, content: &serde_json::Value) -> bool {
@@ -681,6 +739,22 @@ fn extract_portal_images(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn claude_compaction_boundary_is_detected() {
+        let boundary = serde_json::json!({
+            "type": "system",
+            "subtype": "compact_boundary",
+            "session_id": "s",
+            "uuid": "u",
+            "compact_metadata": {"trigger": "manual", "pre_tokens": 120000}
+        });
+        assert!(is_claude_compaction_boundary(&boundary));
+        let init = serde_json::json!({"type": "system", "subtype": "init", "session_id": "s"});
+        assert!(!is_claude_compaction_boundary(&init));
+        let result = serde_json::json!({"type": "result", "subtype": "success"});
+        assert!(!is_claude_compaction_boundary(&result));
+    }
 
     #[test]
     fn parse_send_mode_accepts_persisted_wire_values() {
