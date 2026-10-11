@@ -49,6 +49,8 @@ pub enum OriginError {
     NotAnOrigin,
     InvalidHost,
     InvalidPort,
+    /// Longer than [`MAX_ORIGIN_LEN`] once canonicalized.
+    TooLong,
 }
 
 impl std::fmt::Display for OriginError {
@@ -59,6 +61,7 @@ impl std::fmt::Display for OriginError {
             Self::NotAnOrigin => "origin must not contain a path, query, fragment or credentials",
             Self::InvalidHost => "origin host is not a valid hostname or IP address",
             Self::InvalidPort => "origin port is not a valid port number",
+            Self::TooLong => "origin is too long",
         })
     }
 }
@@ -74,11 +77,7 @@ impl std::fmt::Display for OriginError {
 /// parts means the caller passed a URL where an identity was expected.
 pub fn canonical_origin(input: &str) -> Result<String, OriginError> {
     let input = input.trim();
-    // WHATWG parsing accepts `*` in a domain, but an entry containing one is
-    // a pattern, never a single origin.
-    if input.contains('*') {
-        return Err(OriginError::InvalidHost);
-    }
+    check_raw_envelope(input)?;
     let url = url::Url::parse(input).map_err(|err| match err {
         url::ParseError::RelativeUrlWithoutBase => OriginError::UnsupportedScheme,
         url::ParseError::InvalidPort => OriginError::InvalidPort,
@@ -97,7 +96,9 @@ pub fn canonical_origin(input: &str) -> Result<String, OriginError> {
     }
     let host = url.host().ok_or(OriginError::InvalidHost)?;
     let loopback = match &host {
-        url::Host::Domain(domain) if domain.ends_with('.') => return Err(OriginError::InvalidHost),
+        url::Host::Domain(domain) if domain.ends_with('.') || domain.contains('*') => {
+            return Err(OriginError::InvalidHost)
+        }
         url::Host::Domain(domain) => *domain == "localhost",
         url::Host::Ipv4(addr) => addr.is_loopback(),
         url::Host::Ipv6(addr) => addr.is_loopback(),
@@ -105,7 +106,52 @@ pub fn canonical_origin(input: &str) -> Result<String, OriginError> {
     if url.scheme() == "http" && !loopback {
         return Err(OriginError::Insecure);
     }
-    Ok(url.origin().ascii_serialization())
+    let origin = url.origin().ascii_serialization();
+    if origin.len() > MAX_ORIGIN_LEN {
+        return Err(OriginError::TooLong);
+    }
+    Ok(origin)
+}
+
+/// Longest canonical origin accepted; matches the `VARCHAR(255)` columns
+/// that store one.
+pub const MAX_ORIGIN_LEN: usize = 255;
+
+/// Validate the input as written, before WHATWG parsing normalizes it.
+///
+/// The parser repairs plenty of malformed input — `https:host` gains its
+/// slashes, `%2a` decodes to `*`, `/a/..` collapses to `/`, an empty `@`
+/// userinfo vanishes, an IPv4 trailing dot is dropped — so checking only the
+/// parsed URL would accept strings that are not origins. The input must be
+/// `scheme://authority` with at most one trailing `/`, and the authority may
+/// not contain anything an origin can't.
+fn check_raw_envelope(input: &str) -> Result<(), OriginError> {
+    let (_, rest) = input
+        .split_once("://")
+        .ok_or(OriginError::UnsupportedScheme)?;
+    let authority = rest.strip_suffix('/').unwrap_or(rest);
+    if authority.is_empty() {
+        return Err(OriginError::InvalidHost);
+    }
+    if authority
+        .chars()
+        .any(|c| matches!(c, '/' | '\\' | '?' | '#' | '@') || c.is_whitespace() || c.is_control())
+    {
+        return Err(OriginError::NotAnOrigin);
+    }
+    // `%` would let an encoded character through normalization; `*` makes the
+    // entry a pattern rather than one origin.
+    if authority.contains(['%', '*']) {
+        return Err(OriginError::InvalidHost);
+    }
+    let host = match authority.rfind(':') {
+        Some(colon) if !authority[colon..].contains(']') => &authority[..colon],
+        _ => authority,
+    };
+    if host.ends_with('.') {
+        return Err(OriginError::InvalidHost);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -153,6 +199,17 @@ mod tests {
             ("https://[zz::1]", InvalidHost),
             ("https://txcl.io:70000", InvalidPort),
             ("https://txcl.io:+443", InvalidPort),
+            // Inputs the WHATWG parser would silently repair into an origin.
+            ("https://%2a.work.example", InvalidHost),
+            ("https://w%6Frk.example", InvalidHost),
+            ("https://work.example/a/..", NotAnOrigin),
+            ("https://@work.example", NotAnOrigin),
+            ("https:work.example", UnsupportedScheme),
+            ("https:/work.example", UnsupportedScheme),
+            ("https://1.2.3.4.", InvalidHost),
+            ("https://1.2.3.4.:8443", InvalidHost),
+            ("https://wo\nrk.example", NotAnOrigin),
+            ("https:///work.example", NotAnOrigin),
         ] {
             assert_eq!(canonical_origin(input), Err(want), "{input}");
         }
@@ -219,5 +276,18 @@ mod tests {
         for url in ["wss://portal.example/a?x=1", "ws://localhost:3000/a?x=1"] {
             assert_eq!(http_to_ws(&ws_to_http(url)), url);
         }
+    }
+
+    #[test]
+    fn canonical_origin_is_bounded_for_storage() {
+        let label = "a".repeat(60);
+        let host = [label.as_str(); 5].join(".");
+        let at_limit = format!("https://{}", &host[..MAX_ORIGIN_LEN - "https://".len()]);
+        assert_eq!(
+            canonical_origin(&at_limit).map(|o| o.len()),
+            Ok(MAX_ORIGIN_LEN)
+        );
+        let over = format!("https://{host}:8443");
+        assert_eq!(canonical_origin(&over), Err(OriginError::TooLong));
     }
 }
