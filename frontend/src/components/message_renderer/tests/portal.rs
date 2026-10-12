@@ -3,7 +3,7 @@
 
 use super::super::grouping::{GroupCategory, MessageGroup};
 use super::fixtures::{
-    assistant_with_tool_use, classify_category, group_for_tests, portal_text_message, rendered,
+    assistant_with_tool_use, classify_category, group_for_tests, portal_text_message,
 };
 
 #[test]
@@ -91,86 +91,55 @@ fn connection_cycle_round_trips_as_its_own_variant() {
     }
 }
 
-/// An idle session reconnects on a loop, so these arrive as a run of
-/// near-identical one-liners. The run must collapse to a single summary.
-#[test]
-fn a_run_of_reconnects_collapses_to_one_line() {
-    use super::super::group_renderer::{reconnect_notice_run, render_reconnect_notice_run};
-
-    let cycles: Vec<_> = ["38s", "38s", "38s", "36s"]
-        .iter()
-        .map(|d| {
-            rendered(
-                shared::PortalMessage::with_content(vec![shared::PortalContent::ConnectionCycle {
-                    duration: Some((*d).to_string()),
-                }])
-                .to_json()
-                .to_string(),
-            )
-        })
-        .collect();
-
-    let notices = reconnect_notice_run(&cycles).expect("all members are connection cycles");
-    assert_eq!(notices.len(), 4);
-    // Renders at all, and as one node rather than four.
-    let _ = render_reconnect_notice_run(&notices);
-
-    // A group carrying anything else must not collapse.
-    let mut mixed = cycles.clone();
-    mixed.push(rendered(
-        shared::PortalMessage::text("hello".into())
-            .to_json()
-            .to_string(),
-    ));
-    assert!(reconnect_notice_run(&mixed).is_none());
+fn connection_cycle(duration: &str) -> String {
+    shared::PortalMessage::with_content(vec![shared::PortalContent::ConnectionCycle {
+        duration: Some(duration.to_string()),
+    }])
+    .to_json()
+    .to_string()
 }
 
-/// Historical reconnect notices were persisted as full markdown text cards.
-/// They should also collapse so old inactive sessions get quieter as soon as
-/// the frontend updates.
-#[test]
-fn historical_reconnect_text_cards_collapse_to_one_line() {
-    use super::super::group_renderer::{reconnect_notice_run, render_reconnect_notice_run};
-
-    let cards: Vec<_> = ["4s", "37s", "41s"]
-        .iter()
-        .map(|d| {
-            rendered(
-                shared::PortalMessage::text(format!(
-                    "**Proxy reconnected** after {d} (unexpected disconnect)\n  disconnected at 2026-09-30T09:11:23Z (UTC)\n  reconnected  at 2026-09-30T09:11:28Z (UTC) — `ttb-fsm-test`"
-                ))
-                .to_json()
-                .to_string(),
-            )
-        })
-        .collect();
-
-    let notices = reconnect_notice_run(&cards).expect("all members are reconnect text cards");
-    assert_eq!(notices.len(), 3);
-    let _ = render_reconnect_notice_run(&notices);
+fn commands_changed() -> String {
+    serde_json::json!({
+        "type": "system",
+        "subtype": "commands_changed",
+        "session_id": "01890000-0000-7000-8000-000000000001",
+        "uuid": "01890000-0000-7000-8000-000000000002"
+    })
+    .to_string()
 }
 
+/// Reconnects and the `commands_changed` marker Claude re-sends after each
+/// one are transport churn: an idle session used to fill with alternating
+/// rows of both. Typed and historical prose notices are both hidden.
 #[test]
-fn typed_and_historical_reconnect_cards_collapse_together() {
-    use super::super::group_renderer::reconnect_notice_run;
-
+fn reconnect_notices_and_commands_changed_are_hidden() {
     let messages = vec![
-        rendered(
-            shared::PortalMessage::with_content(vec![shared::PortalContent::ConnectionCycle {
-                duration: Some("35s".to_string()),
-            }])
-            .to_json()
-            .to_string(),
-        ),
-        rendered(
-            shared::PortalMessage::text(
-                "**Proxy reconnected** after 4s (unexpected disconnect)".into(),
-            )
-            .to_json()
-            .to_string(),
-        ),
+        connection_cycle("38s"),
+        commands_changed(),
+        shared::PortalMessage::text(
+            "**Proxy reconnected** after 4s (unexpected disconnect)\n  reconnected at 2026-09-30T09:11:28Z (UTC)".into(),
+        )
+        .to_json()
+        .to_string(),
+        commands_changed(),
     ];
+    assert!(group_for_tests(&messages).is_empty());
+}
 
-    let notices = reconnect_notice_run(&messages).expect("all members are reconnect notices");
-    assert_eq!(notices.len(), 2);
+/// Hidden frames must not split the run around them.
+#[test]
+fn hidden_frames_do_not_split_a_portal_run() {
+    let messages = vec![
+        portal_text_message("first"),
+        connection_cycle("3s"),
+        commands_changed(),
+        portal_text_message("second"),
+    ];
+    let groups = group_for_tests(&messages);
+    assert_eq!(groups.len(), 1);
+    match &groups[0] {
+        MessageGroup::IdentityGroup { messages, .. } => assert_eq!(messages.len(), 2),
+        other => panic!("expected one Portal group, got {other:?}"),
+    }
 }

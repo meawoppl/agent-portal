@@ -238,8 +238,6 @@ pub struct SessionState<'a, A: Agent> {
     pub reminder_pending: Arc<AtomicBool>,
     /// When the last disconnect occurred (for reporting reconnect duration)
     pub disconnected_at: Option<Instant>,
-    /// Wall-clock UTC paired with `disconnected_at` for the reconnect text
-    pub disconnected_at_utc: Option<chrono::DateTime<chrono::Utc>>,
     /// Whether the last disconnect was a graceful server shutdown
     pub last_disconnect_graceful: bool,
     /// Consecutive replay failures on the same pending messages
@@ -268,7 +266,6 @@ impl<'a, A: Agent> SessionState<'a, A> {
                 config.prime_portal_reminder_on_first_input,
             )),
             disconnected_at: None,
-            disconnected_at_utc: None,
             last_disconnect_graceful: false,
             replay_failures: 0,
         })
@@ -367,13 +364,11 @@ struct ConnectionState {
 /// what kind of outage this is; later calls just keep waiting.
 fn note_disconnect(
     disconnected_at: &mut Option<Instant>,
-    disconnected_at_utc: &mut Option<chrono::DateTime<chrono::Utc>>,
     last_disconnect_graceful: &mut bool,
     graceful: bool,
 ) {
     if disconnected_at.is_none() {
         *disconnected_at = Some(Instant::now());
-        *disconnected_at_utc = Some(chrono::Utc::now());
         *last_disconnect_graceful = graceful;
     }
 }
@@ -410,7 +405,6 @@ pub async fn run_connection_loop<A: Agent>(
             ConnectionResult::Disconnected(duration) => {
                 note_disconnect(
                     &mut session.disconnected_at,
-                    &mut session.disconnected_at_utc,
                     &mut session.last_disconnect_graceful,
                     false,
                 );
@@ -430,7 +424,6 @@ pub async fn run_connection_loop<A: Agent>(
             ConnectionResult::ServerShutdown(delay) => {
                 note_disconnect(
                     &mut session.disconnected_at,
-                    &mut session.disconnected_at_utc,
                     &mut session.last_disconnect_graceful,
                     true,
                 );
@@ -551,83 +544,20 @@ async fn run_single_connection<A: Agent>(session: &mut SessionState<'_, A>) -> C
         }
     }
 
-    // Send a portal message with session details
-    {
-        let hostname = hostname_or_unknown();
-
-        // A reconnect the server announced. `first_connection` is never one.
-        let expected_cycle = !session.first_connection && session.last_disconnect_graceful;
-        let reconnect_duration = session.disconnected_at.map(|t| {
-            let secs = t.elapsed().as_secs();
-            if secs < 60 {
-                format!("{}s", secs)
-            } else {
-                format!("{}m {}s", secs / 60, secs % 60)
-            }
-        });
-
-        let status_line = if session.first_connection {
-            "**Session started**".to_string()
-        } else {
-            let duration_str = session
-                .disconnected_at
-                .map(|t| {
-                    let secs = t.elapsed().as_secs();
-                    if secs < 60 {
-                        format!("{}s", secs)
-                    } else {
-                        format!("{}m {}s", secs / 60, secs % 60)
-                    }
-                })
-                .unwrap_or_default();
-            let reason = if session.last_disconnect_graceful {
-                "server restart"
-            } else {
-                "unexpected disconnect"
-            };
-            let now_utc = chrono::Utc::now();
-            let header = if duration_str.is_empty() {
-                format!("**Proxy reconnected** ({})", reason)
-            } else {
-                format!("**Proxy reconnected** after {} ({})", duration_str, reason)
-            };
-            match session.disconnected_at_utc {
-                Some(disc_utc) => format!(
-                    "{}\n  disconnected at {} (UTC)\n  reconnected  at {} (UTC)",
-                    header,
-                    disc_utc.format("%Y-%m-%dT%H:%M:%SZ"),
-                    now_utc.format("%Y-%m-%dT%H:%M:%SZ"),
-                ),
-                None => format!(
-                    "{}\n  reconnected at {} (UTC)",
-                    header,
-                    now_utc.format("%Y-%m-%dT%H:%M:%SZ"),
-                ),
-            }
-        };
-
-        // An expected cycle — the backend told us it was restarting — is
-        // routine and gets a one-line seam chip instead of a full card with
-        // host, cwd and agent id. An unexpected drop keeps the card: that one
-        // is worth interrupting the reader for.
-        let portal_content = if expected_cycle {
-            shared::PortalMessage::with_content(vec![shared::PortalContent::ConnectionCycle {
-                duration: reconnect_duration,
-            }])
-            .to_json()
-        } else {
-            let short_id = shared::short_uuid(&session.config.session_id);
-            let text = format!(
-                "{} — `{}` on `{}` in `{}` ({} `{}…`)",
-                status_line,
-                session.config.session_name,
-                hostname,
-                session.config.working_directory,
-                config_with_branch.agent_type,
-                short_id,
-            );
-            shared::PortalMessage::text(text).to_json()
-        };
+    // Announce the session once. Reconnects are routine transport churn and
+    // only go to the log — posting them filled idle transcripts with walls of
+    // "reconnected" lines.
+    if session.first_connection {
+        let short_id = shared::short_uuid(&session.config.session_id);
+        let text = format!(
+            "**Session started** — `{}` on `{}` in `{}` ({} `{}…`)",
+            session.config.session_name,
+            hostname_or_unknown(),
+            session.config.working_directory,
+            config_with_branch.agent_type,
+            short_id,
+        );
+        let portal_content = shared::PortalMessage::text(text).to_json();
         let seq = {
             let mut buf = session.output_buffer.lock().await;
             buf.push(portal_content.clone())
@@ -641,12 +571,18 @@ async fn run_single_connection<A: Agent>(session: &mut SessionState<'_, A>) -> C
             error!("Failed to send connection portal message");
             return ConnectionResult::Disconnected(Duration::ZERO);
         }
-    }
-
-    if !session.first_connection {
-        info!("Connection restored");
+    } else {
+        let after = session
+            .disconnected_at
+            .map(|t| format!(" after {}s", t.elapsed().as_secs()))
+            .unwrap_or_default();
+        let reason = if session.last_disconnect_graceful {
+            "server restart"
+        } else {
+            "unexpected disconnect"
+        };
+        info!("Connection restored{after} ({reason})");
         session.disconnected_at = None;
-        session.disconnected_at_utc = None;
     }
 
     // Run the message loop - split connection for concurrent read/write
@@ -1466,15 +1402,15 @@ mod tests {
     /// backoff was being reported to the user as an "unexpected disconnect".
     #[test]
     fn retries_during_a_restart_do_not_relabel_a_graceful_outage() {
-        let (mut at, mut at_utc, mut graceful) = (None, None, false);
+        let (mut at, mut graceful) = (None, false);
 
-        note_disconnect(&mut at, &mut at_utc, &mut graceful, true);
+        note_disconnect(&mut at, &mut graceful, true);
         assert!(graceful, "the server told us it was restarting");
         let first_seen = at;
 
         // 35 seconds of failed reconnect attempts, each reporting Disconnected.
         for _ in 0..8 {
-            note_disconnect(&mut at, &mut at_utc, &mut graceful, false);
+            note_disconnect(&mut at, &mut graceful, false);
         }
 
         assert!(graceful, "retries must not turn a restart into a surprise");
@@ -1482,11 +1418,11 @@ mod tests {
     }
 
     /// The converse still has to work: a genuinely unexpected drop stays
-    /// unexpected, and keeps the louder card.
+    /// unexpected.
     #[test]
     fn an_unannounced_drop_stays_unexpected() {
-        let (mut at, mut at_utc, mut graceful) = (None, None, false);
-        note_disconnect(&mut at, &mut at_utc, &mut graceful, false);
+        let (mut at, mut graceful) = (None, false);
+        note_disconnect(&mut at, &mut graceful, false);
         assert!(!graceful);
         assert!(at.is_some());
     }

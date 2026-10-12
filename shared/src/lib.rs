@@ -1105,13 +1105,8 @@ pub enum PortalContent {
         #[serde(default = "default_continuation_reason")]
         reason: String,
     },
-    /// A proxy reconnect, as a typed event rather than a prose line.
-    ///
-    /// Emitted only for an **expected** cycle (the backend told us it was
-    /// restarting). A genuinely unexpected drop stays a full `Text` card,
-    /// because that one is worth interrupting the reader for; a planned
-    /// redeploy is routine and should cost a single line. The frontend renders
-    /// this as a compact seam chip.
+    /// A proxy reconnect. No longer emitted — reconnects are only logged — but
+    /// kept so stored transcripts still deserialize; the frontend hides it.
     #[serde(rename = "connection_cycle")]
     ConnectionCycle {
         /// Human-readable outage length, e.g. `"35s"`. `None` when the proxy
