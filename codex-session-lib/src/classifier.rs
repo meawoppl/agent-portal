@@ -106,6 +106,13 @@ fn classify_notification(notif: Notification) -> Vec<AgentOutput> {
             vec![AgentOutput::Visible(event)]
         }
 
+        // Guardian (Codex's auto-approval reviewer) emits a warning for every
+        // action it approves at medium+ risk. Those are routine — only surface
+        // warnings that aren't plain approvals (denials, limits, etc.).
+        Notification::GuardianWarning(p) if is_guardian_approval(&p.message) => {
+            vec![AgentOutput::Noop]
+        }
+
         Notification::GuardianWarning(p) => {
             let message = if p.message.is_empty() {
                 "(no message)".to_string()
@@ -134,6 +141,10 @@ fn classify_notification(notif: Notification) -> Vec<AgentOutput> {
         // nothing.
         _ => vec![AgentOutput::Noop],
     }
+}
+
+fn is_guardian_approval(message: &str) -> bool {
+    message.starts_with("Automatic approval review approved")
 }
 
 fn classify_request(request_id: String, request: ServerRequest) -> Vec<AgentOutput> {
@@ -342,6 +353,29 @@ mod tests {
             }
             other => panic!("expected Visible, got {other:?}"),
         }
+    }
+
+    fn guardian_warning(message: &str) -> ServerMessage {
+        let notif: codex_codes::GuardianWarningNotification =
+            serde_json::from_value(json!({ "message": message, "threadId": "t" })).unwrap();
+        ServerMessage::Notification(Notification::GuardianWarning(notif))
+    }
+
+    #[test]
+    fn guardian_approval_warning_is_noop() {
+        let out = classify(guardian_warning(
+            "Automatic approval review approved (risk: medium, authorization: high): reads a file.",
+        ));
+        assert_eq!(out, vec![AgentOutput::Noop]);
+    }
+
+    #[test]
+    fn guardian_non_approval_warning_is_visible() {
+        let out = classify(guardian_warning(
+            "Automatic approval review denied (risk: high): deletes the repo.",
+        ));
+        assert_eq!(out.len(), 1);
+        assert!(matches!(&out[0], AgentOutput::Visible(_)));
     }
 
     #[test]
