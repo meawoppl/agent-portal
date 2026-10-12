@@ -68,6 +68,9 @@ pub struct InputBarProps {
     /// Composer contents streamed as an opaque secret drop. The callback only
     /// carries the upload id and byte count; secret bytes stay on upload frames.
     pub on_secret_drop: Callback<(String, u64, Option<ReasoningEffort>)>,
+    /// An upload the bar refused or could not read; the parent shows it in
+    /// the transcript, since the bar's progress strip only clears.
+    pub on_upload_error: Callback<String>,
     /// Fires once per submit (text or upload) so the parent can bump its
     /// per-session "I sent something" bookkeeping.
     pub on_message_sent: Callback<()>,
@@ -904,6 +907,17 @@ impl InputBar {
     fn start_upload(&mut self, ctx: &Context<Self>, files: Vec<web_sys::File>) {
         self.send_mode_dropdown_open = false;
         self.drag_hover = false;
+        // A pasted image can arrive as an empty `File` (the clipboard had not
+        // finished populating it). Refuse before clearing the composer, so the
+        // user keeps their text and the agent is never told about a 0-byte
+        // file.
+        if let Some(empty) = files.iter().find(|f| f.size() == 0.0) {
+            ctx.props().on_upload_error.emit(format!(
+                "{} is empty. Try pasting or attaching it again",
+                empty.name()
+            ));
+            return;
+        }
         self.upload_progress = Some(0.0);
         self.upload_files = files.iter().map(|f| (f.name(), f.size() as u64)).collect();
 
@@ -919,6 +933,7 @@ impl InputBar {
         let link = ctx.link().clone();
         let on_send_frame = ctx.props().on_send_frame.clone();
         let on_upload_prompt = ctx.props().on_upload_prompt.clone();
+        let on_upload_error = ctx.props().on_upload_error.clone();
         let reasoning_effort = self.reasoning_effort;
 
         spawn_local(async move {
@@ -928,7 +943,6 @@ impl InputBar {
 
             for (file_idx, file) in files.iter().enumerate() {
                 let file_name = file.name();
-                let file_size = file.size() as u64;
                 let content_type = file.type_();
 
                 let array_buffer =
@@ -944,6 +958,18 @@ impl InputBar {
                     };
                 let uint8_array = js_sys::Uint8Array::new(&array_buffer);
                 let bytes = uint8_array.to_vec();
+                // `File::size()` was non-zero above, but the read can still
+                // come back empty if the browser revoked the file meanwhile.
+                if bytes.is_empty() {
+                    on_upload_error.emit(format!(
+                        "{file_name} could not be read. Try pasting or attaching it again"
+                    ));
+                    link.send_message(InputBarMsg::FileUploadError(file_name));
+                    return;
+                }
+                // Declare what was actually read, not `File::size()`, so the
+                // receiver's completeness check compares like with like.
+                let file_size = bytes.len() as u64;
 
                 let total_chunks = bytes.len().div_ceil(UPLOAD_CHUNK_SIZE).max(1) as u32;
                 let upload_id = Uuid::new_v4().to_string();

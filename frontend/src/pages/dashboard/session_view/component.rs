@@ -377,6 +377,8 @@ pub enum SessionViewMsg {
         upload_ids: Vec<String>,
         reasoning_effort: Option<ReasoningEffort>,
     },
+    /// InputBar refused or could not read an upload; nothing was sent.
+    UploadError(String),
     SecretDrop {
         upload_id: String,
         file_size: u64,
@@ -409,8 +411,8 @@ pub enum SessionViewMsg {
     SurfaceResizeTo(f64),
     SurfaceResizeEnd,
     EscapeSurface,
-    /// The upload-commit wait expired (old proxy or very slow link):
-    /// dispatch the held prompt anyway — pre-transactional behavior.
+    /// The upload-commit wait expired: report the failure and drop the held
+    /// prompt rather than announce a file the host never confirmed.
     UploadCommitTimeout,
     /// InputBar reports that a submission landed — bumps the parent's
     /// `on_message_sent` prop.
@@ -447,9 +449,8 @@ struct PendingUploadPrompt {
     remaining: std::collections::HashSet<String>,
     content: String,
     reasoning_effort: Option<ReasoningEffort>,
-    /// Compat fallback: proxies that predate upload acks never send
-    /// `FileUploadResult`, so fire the prompt anyway after this window
-    /// (pre-transactional behavior). Cancelled by drop.
+    /// Fails the held prompt if the host never confirms every upload within
+    /// this window. Cancelled by drop.
     _timeout: Timeout,
 }
 
@@ -901,12 +902,39 @@ impl Component for SessionView {
                     true
                 }
                 other => {
-                    if let Some(ref sender) = self.ws_sender {
-                        send_message(sender, other);
+                    match &self.ws_sender {
+                        Some(sender) => {
+                            send_message(sender, other);
+                        }
+                        // Upload frames are not queued like agent input. A new
+                        // session's composer is usable before its socket
+                        // connects, so without this the frames were dropped and
+                        // the held prompt later announced a file that never
+                        // arrived. Record a failure so the prompt is refused.
+                        None => {
+                            if let ClientToServer::FileUploadStart(fields) = other {
+                                self.early_upload_results.insert(
+                                    fields.upload_id.clone(),
+                                    shared::FileUploadResultFields {
+                                        upload_id: fields.upload_id,
+                                        success: false,
+                                        error: Some(
+                                            "the session is not connected yet; try again once it connects"
+                                                .to_string(),
+                                        ),
+                                        path: None,
+                                    },
+                                );
+                            }
+                        }
                     }
                     false
                 }
             },
+            SessionViewMsg::UploadError(err) => {
+                self.push_upload_error(&err);
+                true
+            }
             SessionViewMsg::UploadPrompt {
                 content,
                 upload_ids,
@@ -1225,18 +1253,14 @@ impl Component for SessionView {
                     return true;
                 }
                 if let Some(pending) = self.pending_upload_prompt.take() {
-                    // Old proxy (no upload acks) or a very slow link: fall
-                    // back to pre-transactional behavior instead of eating
-                    // the prompt.
+                    // Never tell the agent about a file the host has not
+                    // confirmed writing: that is how a lost upload turned
+                    // into a prompt pointing at a missing file.
                     log::warn!(
-                        "Upload commit ack timed out ({} outstanding); sending prompt anyway",
+                        "Upload commit ack timed out ({} outstanding); prompt not sent",
                         pending.remaining.len()
                     );
-                    self.dispatch_agent_input(
-                        serde_json::Value::String(pending.content),
-                        None,
-                        pending.reasoning_effort,
-                    );
+                    self.push_upload_error("the agent host did not confirm the upload in time");
                     true
                 } else {
                     false
@@ -2808,6 +2832,7 @@ impl SessionView {
                 }
             },
         );
+        let on_upload_error = link.callback(SessionViewMsg::UploadError);
         let on_message_sent = link.callback(|_| SessionViewMsg::MessageSent);
         html! {
             <InputBar
@@ -2820,6 +2845,7 @@ impl SessionView {
                 {on_send_frame}
                 {on_upload_prompt}
                 {on_secret_drop}
+                {on_upload_error}
                 {on_message_sent}
             />
         }

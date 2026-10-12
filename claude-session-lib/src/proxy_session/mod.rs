@@ -1275,6 +1275,16 @@ async fn handle_file_upload(upload_event: FileUploadEvent, state: &mut Connectio
 
                 let filename = recv_state.filename.clone();
                 let received_bytes = recv_state.received_bytes;
+                // Every chunk arrived, but an empty or short file must not be
+                // committed and reported as delivered.
+                if received_bytes == 0 || received_bytes != recv_state.total_size {
+                    let reason = format!(
+                        "received {received_bytes} of {} declared bytes",
+                        recv_state.total_size
+                    );
+                    fail_upload(state, upload_id, reason).await;
+                    return;
+                }
                 let final_path = recv_state.final_path.clone();
                 let temp_path = recv_state.temp_path.clone();
                 if let Err(e) = tokio::fs::rename(&temp_path, &final_path).await {
