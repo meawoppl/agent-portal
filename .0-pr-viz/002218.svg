@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
 <rect width="2000" height="1200" fill="#1a1b26"/>
-<text x="55" y="52" font-family="Arial, sans-serif" font-size="24" font-weight="normal" fill="#a9b1d6">PR #2213 · Import existing Codex conversations into Portal</text>
+<text x="55" y="52" font-family="Arial, sans-serif" font-size="24" font-weight="normal" fill="#a9b1d6">PR #2218 · Import existing Codex conversations into Portal</text>
 <text x="55" y="105" font-family="Arial, sans-serif" font-size="34" font-weight="normal" fill="#e6e9f5">Saved Codex conversations become paused Portal sessions with their native context.</text>
 <text x="55" y="148" font-family="Arial, sans-serif" font-size="34" font-weight="normal" fill="#e6e9f5">Native APIs preserve continuity; retries do not duplicate sessions or history.</text>
 <path d="M 55 175 H 1945" stroke="#3d4666"/><path d="M 1000 190 V 1140" stroke="#565f89" stroke-dasharray="8 8"/>
