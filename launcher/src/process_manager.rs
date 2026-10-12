@@ -666,11 +666,14 @@ async fn run_session_task(
         } else {
             None
         };
-        config.prime_portal_reminder_on_first_input = should_prime_portal_reminder_on_first_input(
-            config.agent_type,
-            config.resume,
-            codex_thread_id.as_deref(),
-        );
+        // A fork carries the source conversation, which already holds the
+        // reminder, so its first input must not deliver a second copy.
+        config.prime_portal_reminder_on_first_input = config.fork_from_session_id.is_none()
+            && should_prime_portal_reminder_on_first_input(
+                config.agent_type,
+                config.resume,
+                codex_thread_id.as_deref(),
+            );
         let mut codex_require_resume = false;
         if config.agent_type == shared::AgentType::Codex && config.resume {
             let imports: HashMap<Uuid, String> =
