@@ -8,7 +8,7 @@ use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 use yew_router::prelude::*;
 
-use shared::api::{HistoryManifest, HistoryMessageLine};
+use shared::api::{HistoryManifest, HistoryMessageLine, RestoreSessionResponse};
 
 use super::fetch::{self, fetch_json, Load};
 use super::media_rewrite::rewrite_media_urls;
@@ -23,12 +23,124 @@ pub struct HistoryTranscriptProps {
     /// place instead of navigating. `None` keeps the standalone route's link.
     #[prop_or_default]
     pub on_back: Option<Callback<()>>,
+    /// The signed-in user. Restore is owner-only, so the button shows only
+    /// when this matches the archived session's owner.
+    #[prop_or_default]
+    pub current_user_id: Option<Uuid>,
+    /// Open a restored (or still-live) session in the dashboard. Without it
+    /// the page reports the result in place.
+    #[prop_or_default]
+    pub on_restored: Option<Callback<Uuid>>,
+}
+
+#[derive(Clone, PartialEq)]
+enum RestoreState {
+    Idle,
+    Working,
+    Done(RestoreSessionResponse),
+    Failed(String),
+}
+
+async fn post_restore(user: &str, session: &str) -> Result<RestoreSessionResponse, String> {
+    let path = format!("/api/history/sessions/{user}/{session}/restore");
+    let response = gloo_net::http::Request::post(&path)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if response.ok() {
+        response.json().await.map_err(|e| e.to_string())
+    } else {
+        Err(crate::utils::error_body(response).await)
+    }
+}
+
+/// Owner-only "Restore session" control: a new paused session that continues
+/// the original agent conversation (see `backend::handlers::session_restore`).
+fn restore_control(
+    manifest: &Load<HistoryManifest>,
+    props: &HistoryTranscriptProps,
+    restore: &UseStateHandle<RestoreState>,
+) -> Html {
+    let Some(Ok(m)) = manifest else {
+        return html! {};
+    };
+    let is_owner = props
+        .current_user_id
+        .is_some_and(|id| id.to_string() == m.user_id);
+    let restorable = matches!(
+        shared::AgentType::from_str(&m.agent_type),
+        Ok(shared::AgentType::Claude | shared::AgentType::Codex)
+    );
+    if !is_owner || !restorable {
+        return html! {};
+    }
+    let onclick = {
+        let restore = restore.clone();
+        let on_restored = props.on_restored.clone();
+        let (user, session) = (props.user.clone(), props.session.clone());
+        Callback::from(move |_: MouseEvent| {
+            if *restore == RestoreState::Working {
+                return;
+            }
+            restore.set(RestoreState::Working);
+            let restore = restore.clone();
+            let on_restored = on_restored.clone();
+            let (user, session) = (user.clone(), session.clone());
+            spawn_local(async move {
+                match post_restore(&user, &session).await {
+                    Ok(done) => {
+                        if let Some(on_restored) = on_restored {
+                            on_restored.emit(done.session_id);
+                        }
+                        restore.set(RestoreState::Done(done));
+                    }
+                    Err(e) => restore.set(RestoreState::Failed(e)),
+                }
+            });
+        })
+    };
+    let status = match &**restore {
+        RestoreState::Idle => html! {
+            <span class="history-restore-note">
+                { "Continues the original conversation on the computer it ran on. Starts paused." }
+            </span>
+        },
+        RestoreState::Working => {
+            html! { <span class="history-restore-note">{ "Restoring…" }</span> }
+        }
+        RestoreState::Done(done) => {
+            let text = if done.already_live {
+                "This session is still open in the dashboard."
+            } else if done.already_restored {
+                "Already restored; it is in the dashboard."
+            } else {
+                "Restored. Open it in the dashboard and press Resume."
+            };
+            html! { <span class="history-restore-note">{ text }</span> }
+        }
+        RestoreState::Failed(e) => html! {
+            <span class="history-restore-error" role="alert">{ format!("Could not restore: {e}") }</span>
+        },
+    };
+    html! {
+        <div class="history-restore">
+            <button
+                class="history-restore-button"
+                disabled={**restore == RestoreState::Working}
+                {onclick}
+            >
+                { "Restore session" }
+            </button>
+            { status }
+        </div>
+    }
 }
 
 #[function_component(HistoryTranscriptPage)]
 pub fn history_transcript_page(props: &HistoryTranscriptProps) -> Html {
     let manifest = use_state(|| None as Load<HistoryManifest>);
     let messages = use_state(|| None as Load<Vec<HistoryMessageLine>>);
+    let restore = use_state(|| RestoreState::Idle);
 
     {
         let manifest = manifest.clone();
@@ -80,6 +192,7 @@ pub fn history_transcript_page(props: &HistoryTranscriptProps) -> Html {
                 }
             </nav>
             { header_card(&manifest) }
+            { restore_control(&manifest, props, &restore) }
             { transcript_body(&messages, &props.user, &props.session, agent_type, session_id) }
         </div>
     }

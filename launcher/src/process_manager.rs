@@ -139,6 +139,70 @@ pub(crate) fn bind_imported_codex_thread(session_id: Uuid, thread_id: &str) -> a
     update_codex_thread_map(session_id, thread_id, true)
 }
 
+/// Sidecar map of sessions restored from the history archive:
+/// `restored session id -> archived source session id`. Marks sessions whose
+/// whole point is to continue an existing native conversation, so a resume
+/// must fail rather than quietly start a fresh one.
+fn restored_sessions_path() -> PathBuf {
+    session_lib::paths::config_dir().join("restored_sessions.json")
+}
+
+fn is_restored_session(session_id: Uuid) -> bool {
+    load_sidecar_map::<Uuid>(&restored_sessions_path()).contains_key(&session_id)
+}
+
+/// Bind an archived session's native conversation to `session_id`.
+///
+/// The archived session no longer exists in Portal, but its Claude transcript
+/// or Codex thread usually survives on this host (deleting a session never
+/// touches native state). Point the new session at it: Claude via the
+/// conversation sidecar (`--resume` follows it), Codex by moving the thread
+/// binding. Idempotent, so a retried restore succeeds.
+pub(crate) fn bind_restored_session(
+    agent_type: shared::AgentType,
+    source_session_id: Uuid,
+    session_id: Uuid,
+    working_directory: &Path,
+) -> anyhow::Result<()> {
+    match agent_type {
+        shared::AgentType::Claude => {
+            // A repeat restore finds the binding already made.
+            let conversation = load_claude_conversation_id(session_id)
+                .unwrap_or_else(|| resolved_transcript_id(source_session_id));
+            if claude_transcript_status(working_directory, conversation)
+                == TranscriptStatus::Missing
+            {
+                anyhow::bail!("This session's Claude conversation is no longer on this computer");
+            }
+            let mut map = load_claude_conversations();
+            map.insert(session_id, conversation);
+            save_sidecar_map(&claude_conversations_path(), &map)?;
+        }
+        shared::AgentType::Codex => {
+            let _guard = CODEX_MAP_LOCK
+                .lock()
+                .map_err(|_| anyhow::anyhow!("Codex session map lock poisoned"))?;
+            let path = codex_threads_path();
+            let mut map: HashMap<Uuid, String> = load_sidecar_map(&path);
+            let thread = match map.get(&session_id) {
+                Some(thread) => thread.clone(),
+                None => map.remove(&source_session_id).ok_or_else(|| {
+                    anyhow::anyhow!("This session's Codex thread is no longer on this computer")
+                })?,
+            };
+            map.insert(session_id, thread);
+            save_codex_map_atomically(&path, &map)?;
+        }
+        shared::AgentType::Muse | shared::AgentType::Antigravity => {
+            anyhow::bail!("Only Claude and Codex sessions can be restored")
+        }
+    }
+    let mut restored: HashMap<Uuid, Uuid> = load_sidecar_map(&restored_sessions_path());
+    restored.insert(session_id, source_session_id);
+    save_sidecar_map(&restored_sessions_path(), &restored)?;
+    Ok(())
+}
+
 fn load_codex_thread_id(session_id: Uuid) -> Option<String> {
     load_codex_threads().get(&session_id).cloned()
 }
@@ -452,6 +516,27 @@ impl ProcessManager {
             None => (Uuid::new_v4(), false),
         };
 
+        // A restored session exists only to continue its native conversation.
+        // Refuse to launch it fresh if that conversation has since vanished,
+        // instead of the usual quiet fallback to a new one.
+        if resume && is_restored_session(session_id) {
+            let present = match params.agent_type {
+                shared::AgentType::Claude => {
+                    claude_transcript_status(
+                        Path::new(&working_directory),
+                        resolved_transcript_id(session_id),
+                    ) != TranscriptStatus::Missing
+                }
+                shared::AgentType::Codex => load_codex_thread_id(session_id).is_some(),
+                shared::AgentType::Muse | shared::AgentType::Antigravity => false,
+            };
+            if !present {
+                anyhow::bail!(
+                    "Cannot resume restored session: its native conversation is no longer on this computer"
+                );
+            }
+        }
+
         // Dedup guard: never spawn a second task for a session that's already
         // running. A reconcile/launch race (the backend's running/pending sets
         // are eventually consistent) could otherwise overwrite the `ManagedTask`
@@ -681,7 +766,7 @@ async fn run_session_task(
             let imported = imports.get(&config.session_id);
             config.prime_portal_reminder_on_first_input |=
                 imported == codex_thread_id.as_ref() && codex_thread_id.is_some();
-            codex_require_resume = imported.is_some();
+            codex_require_resume = imported.is_some() || is_restored_session(config.session_id);
         }
 
         // The portal's established dangerous-permissions wire format is the

@@ -427,6 +427,19 @@ pub fn dashboard_page() -> Html {
         let ui_state = ui_state.clone();
         Callback::from(move |_| ui_state.dispatch(DashboardUiAction::CloseHistorySession))
     };
+    // A restore from the history overlay lands on the restored session.
+    let on_history_restored = {
+        let ui_state = ui_state.clone();
+        let session_state = session_state.clone();
+        let refresh = sessions_hook.refresh.clone();
+        Callback::from(move |session_id: Uuid| {
+            refresh.emit(());
+            ui_state.dispatch(DashboardUiAction::CloseHistory);
+            session_state.dispatch(DashboardSessionAction::FocusAndActivate(SessionKey::home(
+                session_id,
+            )));
+        })
+    };
 
     let close_settings = {
         let ui_state = ui_state.clone();
@@ -1146,6 +1159,8 @@ pub fn dashboard_page() -> Html {
                             {user}
                             {session}
                             on_back={close_history_session.clone()}
+                            {current_user_id}
+                            on_restored={on_history_restored.clone()}
                         />
                     } else {
                         <HistoryBrowserPage

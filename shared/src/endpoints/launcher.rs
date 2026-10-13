@@ -118,6 +118,12 @@ pub enum LauncherToServer {
         request_id: Uuid,
         result: Result<crate::api::PreparedSessionImport, String>,
     },
+    /// The archived session's native conversation is bound to the new
+    /// session id, or why it could not be.
+    PrepareSessionRestoreResult {
+        request_id: Uuid,
+        result: Result<(), String>,
+    },
 
     /// Directory listing response
     ListDirectoriesResult {
@@ -343,6 +349,16 @@ pub enum ServerToLauncher {
         agent_type: AgentType,
         session_id: Uuid,
         request: crate::api::ImportSessionRequest,
+    },
+    /// Restore an archived (deleted) session: check that its native agent
+    /// conversation still exists on this launcher and bind it to the new
+    /// `session_id`, so resuming the new session continues that conversation.
+    PrepareSessionRestore {
+        request_id: Uuid,
+        agent_type: AgentType,
+        source_session_id: Uuid,
+        session_id: Uuid,
+        working_directory: String,
     },
 
     /// Request directory listing

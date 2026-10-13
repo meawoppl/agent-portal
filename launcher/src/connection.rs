@@ -123,6 +123,7 @@ pub async fn run_launcher_loop(
                         shared::LAUNCHER_CAPABILITY_SCRATCH_WORKTREE.to_string(),
                         shared::LAUNCHER_CAPABILITY_FORK_SESSION.to_string(),
                         shared::LAUNCHER_CAPABILITY_IMPORT_CODEX.to_string(),
+                        shared::LAUNCHER_CAPABILITY_RESTORE_SESSION.to_string(),
                         shared::LAUNCHER_CAPABILITY_RESTART.to_string(),
                         shared::LAUNCHER_CAPABILITY_HEARTBEAT_ACK.to_string(),
                     ],
@@ -837,6 +838,38 @@ async fn handle_message(
                     warn!("Failed to send session import result");
                 }
             });
+        }
+        ServerToLauncher::PrepareSessionRestore {
+            request_id,
+            agent_type,
+            source_session_id,
+            session_id,
+            working_directory,
+        } => {
+            let result = crate::path_policy::ensure_existing_dir_under_home(&working_directory)
+                .and_then(|dir| {
+                    crate::process_manager::bind_restored_session(
+                        agent_type,
+                        source_session_id,
+                        session_id,
+                        &dir,
+                    )
+                })
+                .map_err(|e| format!("{e:#}"));
+            match &result {
+                Ok(()) => info!(
+                    "Restored session {} from archived {}",
+                    session_id, source_session_id
+                ),
+                Err(e) => warn!("Restore of {} failed: {}", source_session_id, e),
+            }
+            if ws_sender
+                .send(LauncherToServer::PrepareSessionRestoreResult { request_id, result })
+                .await
+                .is_err()
+            {
+                warn!("Failed to send session restore result");
+            }
         }
         ServerToLauncher::ListDirectories { request_id, path } => {
             let response = list_directory(&path, request_id);

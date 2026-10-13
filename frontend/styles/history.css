@@ -156,6 +156,42 @@
     font-size: 0.78rem;
 }
 
+/* --- Restore control (owner-only, under the manifest card) --- */
+.history-root .history-restore {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    margin: -0.75rem 0 1.5rem;
+}
+
+.history-root .history-restore-button {
+    background: var(--accent, #7aa2f7);
+    color: var(--bg-darker, #16161e);
+    border: 0;
+    border-radius: 6px;
+    padding: 0.4rem 0.9rem;
+    font: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.history-root .history-restore-button:disabled {
+    opacity: 0.6;
+    cursor: progress;
+}
+
+.history-root .history-restore-note {
+    color: var(--text-dim, #7f849c);
+    font-size: 0.82rem;
+}
+
+.history-root .history-restore-error {
+    color: var(--error, #f7768e);
+    font-size: 0.82rem;
+}
+
 /* --- Manifest header card --- */
 .history-root .history-manifest-card {
     background: var(--bg-darker, #16161e);

@@ -33,6 +33,9 @@ pub const LAUNCHER_CAPABILITY_SCRATCH_WORKTREE: &str = "launch.scratch_worktree"
 pub const LAUNCHER_CAPABILITY_FORK_SESSION: &str = "launch.fork_session";
 /// Codex discovery/import using the native app-server API.
 pub const LAUNCHER_CAPABILITY_IMPORT_CODEX: &str = "session.import_codex_v1";
+/// Restoring an archived Claude/Codex session by re-binding its native
+/// conversation (`ServerToLauncher::PrepareSessionRestore`).
+pub const LAUNCHER_CAPABILITY_RESTORE_SESSION: &str = "session.restore_v1";
 
 /// Launcher capability advertised by versions that honor
 /// `ServerToLauncher::Restart` (restart the process without updating the binary).

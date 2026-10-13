@@ -338,6 +338,10 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
             get(handlers::history::get_history_messages),
         )
         .route(
+            "/api/history/sessions/{user}/{session}/restore",
+            post(handlers::session_restore::restore_session),
+        )
+        .route(
             "/api/history/media/{user}/{session}/{media_id}",
             get(handlers::history::get_history_media),
         )
