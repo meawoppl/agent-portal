@@ -29,6 +29,8 @@ pub enum Route {
     Home,
     #[at("/dashboard")]
     Dashboard,
+    #[at("/aperture")]
+    Aperture,
     #[at("/demo")]
     Demo,
     #[at("/settings")]
@@ -70,6 +72,7 @@ fn switch(routes: Route) -> Html {
         Route::Home => html! { <SplashPage /> },
         Route::Dashboard => html! { <DashboardPage /> },
         Route::Demo => html! { <DemoPage /> },
+        Route::Aperture => html! { <pages::aperture::AperturePage /> },
         Route::Settings => html! { <SettingsRoute /> },
         Route::History => html! { <HistoryBrowserPage /> },
         Route::HistorySession { user, session } => html! {
