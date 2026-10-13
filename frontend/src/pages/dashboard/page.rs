@@ -751,6 +751,45 @@ pub fn dashboard_page() -> Html {
         });
     }
 
+    // Mobile picker: live sessions first, then paused/stopped/hidden ones in
+    // their own group at the bottom. Stopping a session pauses it, so
+    // `effective_hidden_sessions` (hidden ∪ paused) covers all three.
+    let (mobile_live, mobile_dormant): (Vec<&PortalSession>, Vec<&PortalSession>) = active_sessions
+        .iter()
+        .partition(|entry| !effective_hidden_sessions.contains(&entry.key));
+    let mobile_option = |entry: &&PortalSession| {
+        let session = &entry.info;
+        let connection = if session.paused {
+            "paused"
+        } else if effective_hidden_sessions.contains(&entry.key) {
+            "hidden"
+        } else if session_state.connected_sessions.contains(&entry.key) {
+            "connected"
+        } else {
+            session.status.as_str()
+        };
+        let location = if session.hostname.is_empty() {
+            session.working_directory.as_str()
+        } else {
+            session.hostname.as_str()
+        };
+        html! {
+            <option value={entry.key.to_string()}>
+                { format!("{} — {} ({connection})", session.session_name, location) }
+            </option>
+        }
+    };
+    let mobile_options = html! {
+        <>
+            { for mobile_live.iter().map(mobile_option) }
+            if !mobile_dormant.is_empty() {
+                <optgroup label="Paused, stopped & hidden — selecting resumes">
+                    { for mobile_dormant.iter().map(mobile_option) }
+                </optgroup>
+            }
+        </>
+    };
+
     html! {
         <div class="focus-flow-container" onkeydown={keyboard_nav.on_keydown.clone()} tabindex="0">
             // Update-available banner (post-reconnect, server version advanced)
@@ -904,13 +943,25 @@ pub fn dashboard_page() -> Html {
                                 value={session_state.focused_id.map(|key| key.to_string()).unwrap_or_default()}
                                 onchange={{
                                     let sessions = active_sessions.clone();
+                                    let hidden = session_state.hidden_sessions.clone();
                                     let on_select = focus.on_select_session.clone();
                                     let on_clear = focus.on_clear_selection.clone();
+                                    let on_toggle_pause = on_toggle_pause.clone();
+                                    let on_toggle_hidden = on_toggle_hidden.clone();
                                     Callback::from(move |event: Event| {
                                         let value = event.target_unchecked_into::<HtmlSelectElement>().value();
                                         if value.is_empty() {
                                             on_clear.emit(());
                                         } else if let Some(index) = sessions.iter().position(|session| session.key.to_string() == value) {
+                                            // Picking a dormant session brings it back: resume
+                                            // a paused/stopped one (which also unhides it),
+                                            // or just unhide a hidden one.
+                                            let entry = &sessions[index];
+                                            if entry.info.paused {
+                                                on_toggle_pause.emit((entry.key, false));
+                                            } else if hidden.contains(&entry.key) {
+                                                on_toggle_hidden.emit(entry.key);
+                                            }
                                             on_select.emit(index);
                                         }
                                     })
@@ -918,26 +969,7 @@ pub fn dashboard_page() -> Html {
                                 aria-label="Select a session to open"
                             >
                                 <option value="">{ "Select a session…" }</option>
-                                { for active_sessions.iter().map(|entry| {
-                                    let session = &entry.info;
-                                    let connection = if session.paused {
-                                        "paused"
-                                    } else if session_state.connected_sessions.contains(&entry.key) {
-                                        "connected"
-                                    } else {
-                                        session.status.as_str()
-                                    };
-                                    let location = if session.hostname.is_empty() {
-                                        session.working_directory.as_str()
-                                    } else {
-                                        session.hostname.as_str()
-                                    };
-                                    html! {
-                                        <option value={entry.key.to_string()}>
-                                            { format!("{} — {} ({connection})", session.session_name, location) }
-                                        </option>
-                                    }
-                                }) }
+                                { mobile_options }
                             </select>
                             if session_state.focused_id.is_none() {
                                 <p>{ "Select a session to load its history and connect to its live stream." }</p>
