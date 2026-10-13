@@ -80,6 +80,11 @@ pub fn history_transcript_page(props: &HistoryTranscriptProps) -> Html {
                 }
             </nav>
             { header_card(&manifest) }
+            if let Some(Ok(m)) = &*manifest {
+              if m.session_id == props.session && m.user_id == props.user {
+                <super::restore::HistoryRestore key={format!("{}:{}", props.user, props.session)} manifest={m.clone()} />
+              }
+            }
             { transcript_body(&messages, &props.user, &props.session, agent_type, session_id) }
         </div>
     }

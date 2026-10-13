@@ -323,6 +323,11 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
                 app_state.max_audio_mb as usize * 1024 * 1024,
             )),
         )
+        .route(
+            "/api/history/sessions/{user}/{session}/restore",
+            get(handlers::history_restore::restore_status)
+                .post(handlers::history_restore::restore_history),
+        )
         // Session-history browser over the long-term archive. Visibility
         // (owner / shared / admin) is enforced in each handler.
         .route(

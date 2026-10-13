@@ -139,7 +139,7 @@ pub(crate) fn bind_imported_codex_thread(session_id: Uuid, thread_id: &str) -> a
     update_codex_thread_map(session_id, thread_id, true)
 }
 
-fn load_codex_thread_id(session_id: Uuid) -> Option<String> {
+pub(crate) fn load_codex_thread_id(session_id: Uuid) -> Option<String> {
     load_codex_threads().get(&session_id).cloned()
 }
 
@@ -170,7 +170,7 @@ fn load_claude_conversation_id(session_id: Uuid) -> Option<Uuid> {
 /// Thin wrapper that feeds the sidecar into the shared rule the argv builder
 /// uses, so a gate and the spawn it guards can never check different files —
 /// see [`claude_session_lib::claude_transcript_id`] for why that matters.
-fn resolved_transcript_id(session_id: Uuid) -> Uuid {
+pub(crate) fn resolved_transcript_id(session_id: Uuid) -> Uuid {
     claude_transcript_id(session_id, load_claude_conversation_id(session_id))
 }
 
@@ -297,6 +297,7 @@ impl LiveSessionId {
 }
 
 pub struct SpawnParams {
+    pub history_restore: Option<shared::api::HistoryRestoreLaunch>,
     pub auth_token: String,
     pub working_directory: String,
     pub session_name: Option<String>,
@@ -368,7 +369,7 @@ impl ProcessManager {
             .map(|(k, _)| *k)
     }
 
-    pub async fn spawn(&mut self, params: SpawnParams) -> anyhow::Result<Uuid> {
+    pub async fn spawn(&mut self, mut params: SpawnParams) -> anyhow::Result<Uuid> {
         // Enforce the concurrency cap. Each session is a long-lived Claude CLI
         // process consuming memory, CPU, and a WebSocket connection. Without a
         // limit, a burst of launch requests could starve the host of resources
@@ -447,7 +448,7 @@ impl ProcessManager {
         // session (#1405). `None` (older backend) keeps the historical
         // "any id means resume" behavior. No id at all is always a fresh
         // session with a random id.
-        let (session_id, resume) = match params.resume_session_id {
+        let (session_id, mut resume) = match params.resume_session_id {
             Some(id) => (id, params.resume.unwrap_or(true)),
             None => (Uuid::new_v4(), false),
         };
@@ -473,7 +474,27 @@ impl ProcessManager {
 
         let git_branch = get_git_branch(&working_directory);
 
+        if let Some(restore) = &params.history_restore {
+            if restore.mode == shared::api::HistoryRestoreMode::Native {
+                let has_native = match params.agent_type {
+                    shared::AgentType::Codex => load_codex_thread_id(session_id).is_some(),
+                    shared::AgentType::Claude => {
+                        load_claude_conversation_id(session_id).is_some()
+                            || claude_transcript_status(&base_dir, session_id)
+                                == TranscriptStatus::Present
+                    }
+                    _ => false,
+                };
+                if has_native {
+                    resume = true;
+                } else {
+                    resume = false;
+                    params.fork_from_session_id = Some(restore.source_session_id);
+                }
+            }
+        }
         let proxy_config = ProxySessionConfig {
+            history_restore: params.history_restore,
             backend_url: self.backend_url.clone(),
             session_id,
             session_name: name.clone(),
@@ -610,6 +631,33 @@ async fn run_session_task(
     cancel: CancellationToken,
     live_id: &LiveSessionId,
 ) -> TaskOutcome {
+    // A native-state probe can start a temporary app-server. Keep it inside
+    // the per-session task so slow probes never stall launcher heartbeats or
+    // other sessions, and a pause can cancel a pending probe immediately.
+    if let Some(restore) = config
+        .history_restore
+        .as_ref()
+        .filter(|r| r.mode == shared::api::HistoryRestoreMode::Native && !config.resume)
+    {
+        let result = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return TaskOutcome {
+                exit_code: Some(0),
+                reason: SessionExitReason::Stopped,
+            },
+            result = tokio::time::timeout(
+                std::time::Duration::from_secs(90),
+                crate::history_restore::check(config.agent_type, &config.working_directory, restore),
+            ) => result.map_err(|_| anyhow::anyhow!("Native restore check timed out")).and_then(|r| r),
+        };
+        if let Err(error) = result {
+            error!("Native restore preflight failed: {error:#}");
+            return TaskOutcome {
+                exit_code: Some(1),
+                reason: SessionExitReason::ResumeTargetMissing,
+            };
+        }
+    }
     loop {
         // Pre-flight: if we're about to `claude --resume <id>` but the local
         // transcript is gone, claude exits near-instantly and reconcile would
@@ -627,6 +675,19 @@ async fn run_session_task(
                 resolved_transcript_id(config.session_id),
             ) == TranscriptStatus::Missing
         {
+            if config
+                .history_restore
+                .as_ref()
+                .is_some_and(|r| r.mode == shared::api::HistoryRestoreMode::Native)
+            {
+                error!(
+                    "Native restored conversation is missing; refusing to start an empty session"
+                );
+                return TaskOutcome {
+                    exit_code: Some(1),
+                    reason: SessionExitReason::ResumeTargetMissing,
+                };
+            }
             let old_id = config.session_id;
             if resolved_transcript_id(old_id) == old_id {
                 // Nothing to resume *and* no other transcript claims this id,
@@ -674,14 +735,18 @@ async fn run_session_task(
                 config.resume,
                 codex_thread_id.as_deref(),
             );
-        let mut codex_require_resume = false;
+        let mut codex_require_resume = config.resume
+            && config
+                .history_restore
+                .as_ref()
+                .is_some_and(|r| r.mode == shared::api::HistoryRestoreMode::Native);
         if config.agent_type == shared::AgentType::Codex && config.resume {
             let imports: HashMap<Uuid, String> =
                 load_sidecar_map(&codex_threads_path().with_file_name("codex_imports.json"));
             let imported = imports.get(&config.session_id);
             config.prime_portal_reminder_on_first_input |=
                 imported == codex_thread_id.as_ref() && codex_thread_id.is_some();
-            codex_require_resume = imported.is_some();
+            codex_require_resume |= imported.is_some();
         }
 
         // The portal's established dangerous-permissions wire format is the
@@ -713,6 +778,10 @@ async fn run_session_task(
         let plugin_skill_reminder = plugin_skill.reminder;
 
         let session_config = SessionConfig {
+            recovery_context: config
+                .history_restore
+                .as_ref()
+                .and_then(|r| r.context.clone()),
             session_id: config.session_id,
             working_directory: PathBuf::from(&config.working_directory),
             session_name: config.session_name.clone(),
@@ -823,7 +892,8 @@ async fn run_session_task(
                     // the conversation we actually resumed, or a stale pre-clear
                     // file reading `Present` suppresses the rotation and we
                     // crash-loop on exactly the case this exists to break.
-                    if config.resume
+                    if config.history_restore.is_none()
+                        && config.resume
                         && config.agent_type == shared::AgentType::Claude
                         && claude_transcript_status(
                             std::path::Path::new(&config.working_directory),
@@ -875,6 +945,13 @@ async fn run_session_task(
                 return TaskOutcome {
                     exit_code: Some(1),
                     reason: SessionExitReason::RegistrationRejected,
+                };
+            }
+            Ok(LoopResult::SessionNotFound) if config.history_restore.is_some() => {
+                error!("Restored native conversation was not found; preserving the restored session ID");
+                return TaskOutcome {
+                    exit_code: Some(1),
+                    reason: SessionExitReason::ResumeTargetMissing,
                 };
             }
             Ok(LoopResult::SessionNotFound) => {

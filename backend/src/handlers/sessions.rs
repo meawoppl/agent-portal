@@ -333,14 +333,25 @@ pub async fn resume_session(
     let launcher_id = resolve_resume_launcher(&app_state, &session)
         .ok_or(AppError::NotFound("Launcher not connected"))?;
 
+    if session.history_restore.is_some()
+        && !app_state
+            .session_manager
+            .launcher_supports_capability(launcher_id, shared::LAUNCHER_CAPABILITY_HISTORY_RESTORE)
+    {
+        return Err(AppError::BadRequest(
+            "Update this launcher to resume a session restored from History",
+        ));
+    }
     let auth_token = crate::handlers::launchers::mint_launch_token(&app_state, session.user_id)?;
     let request_id = Uuid::new_v4();
     let claude_args = jsonb_string_vec(&session.claude_args);
     let agent_type = shared::AgentType::parse_or_default(&session.agent_type);
 
+    let history_restore = crate::handlers::history_restore::launch_recipe(&session)?;
     crate::db::session_lifecycle::resume(&mut conn, session_id)?;
 
     let launch_msg = shared::ServerToLauncher::LaunchSession {
+        history_restore,
         request_id,
         user_id: session.user_id,
         auth_token,
@@ -660,6 +671,7 @@ mod tests {
             .and_hms_opt(12, 0, 0)
             .unwrap();
         Session {
+            history_restore: None,
             id: Uuid::nil(),
             user_id: Uuid::nil(),
             session_name: "session".to_string(),

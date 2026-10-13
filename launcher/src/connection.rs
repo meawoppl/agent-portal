@@ -123,6 +123,7 @@ pub async fn run_launcher_loop(
                         shared::LAUNCHER_CAPABILITY_SCRATCH_WORKTREE.to_string(),
                         shared::LAUNCHER_CAPABILITY_FORK_SESSION.to_string(),
                         shared::LAUNCHER_CAPABILITY_IMPORT_CODEX.to_string(),
+                        shared::LAUNCHER_CAPABILITY_HISTORY_RESTORE.to_string(),
                         shared::LAUNCHER_CAPABILITY_RESTART.to_string(),
                         shared::LAUNCHER_CAPABILITY_HEARTBEAT_ACK.to_string(),
                     ],
@@ -673,6 +674,7 @@ async fn handle_message(
 ) {
     match msg {
         ServerToLauncher::LaunchSession {
+            history_restore,
             request_id,
             auth_token,
             working_directory,
@@ -708,6 +710,7 @@ async fn handle_message(
 
             let result = process_manager
                 .spawn(SpawnParams {
+                    history_restore,
                     auth_token,
                     working_directory: working_directory.clone(),
                     session_name: session_name.clone(),
@@ -813,6 +816,37 @@ async fn handle_message(
                 {
                     warn!("Failed to send external sessions result");
                 }
+            });
+        }
+        ServerToLauncher::CheckHistoryRestore {
+            request_id,
+            agent_type,
+            working_directory,
+            restore,
+        } => {
+            let sender = import_reply_tx.clone();
+            let running = process_manager
+                .running_session_ids()
+                .contains(&restore.source_session_id);
+            tokio::spawn(async move {
+                let result = if running && restore.mode == shared::api::HistoryRestoreMode::Native {
+                    Err("Original conversation is still running on this host. Stop it before restoring native state.".to_string())
+                } else {
+                    tokio::select! {
+                        _ = sender.closed() => return,
+                        result = tokio::time::timeout(
+                            std::time::Duration::from_secs(90),
+                            crate::history_restore::check(agent_type, &working_directory, &restore),
+                        ) => result,
+                    }
+                    .map_err(|_| {
+                        "Restore check timed out; reconnect the host and retry".to_string()
+                    })
+                    .and_then(|r| r.map_err(|e| format!("{e:#}")))
+                };
+                let _ = sender
+                    .send(LauncherToServer::CheckHistoryRestoreResult { request_id, result })
+                    .await;
             });
         }
         ServerToLauncher::PrepareSessionImport {

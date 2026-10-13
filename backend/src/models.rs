@@ -160,6 +160,8 @@ pub struct Session {
     /// Most recent accepted input sent into this session. Unlike
     /// `last_activity`, agent output does not advance this timestamp.
     pub last_messaged_at: NaiveDateTime,
+    #[serde(skip)]
+    pub history_restore: Option<serde_json::Value>,
 }
 
 /// Insertable session that specifies the ID (so we can use Claude's session ID)

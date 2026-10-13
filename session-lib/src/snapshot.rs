@@ -10,6 +10,10 @@ use crate::buffer::BufferedOutput;
 /// Configuration for creating a session
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SessionConfig {
+    /// Archived reference context. Folded into the first real input after a
+    /// process start, never sent as a turn of its own or rearmed by /clear.
+    #[serde(default)]
+    pub recovery_context: Option<String>,
     /// Unique session identifier
     pub session_id: Uuid,
     /// Working directory for the Claude session
@@ -161,6 +165,7 @@ mod tests {
 
     fn sample_config() -> SessionConfig {
         SessionConfig {
+            recovery_context: None,
             session_id: Uuid::new_v4(),
             working_directory: PathBuf::from("/tmp/test"),
             session_name: "test-session".to_string(),

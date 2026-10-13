@@ -743,7 +743,8 @@ fn handle_launcher_message(
         }
         LauncherToServer::ProbeAgentsResult { request_id, .. }
         | LauncherToServer::ExternalSessionsResult { request_id, .. }
-        | LauncherToServer::PrepareSessionImportResult { request_id, .. } => {
+        | LauncherToServer::PrepareSessionImportResult { request_id, .. }
+        | LauncherToServer::CheckHistoryRestoreResult { request_id, .. } => {
             app_state.session_manager.complete_launcher_request(
                 super::LauncherRpcKind::Agent,
                 request_id,
@@ -826,6 +827,7 @@ fn handle_launcher_message(
             match crate::handlers::launchers::mint_launch_token(app_state, user_id) {
                 Ok(auth_token) => {
                     let launch_msg = ServerToLauncher::LaunchSession {
+                        history_restore: None,
                         request_id,
                         user_id,
                         auth_token,
@@ -1109,6 +1111,26 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
     let now = chrono::Utc::now().naive_utc();
 
     for session in desired {
+        if session.history_restore.is_some()
+            && !app_state.session_manager.launcher_supports_capability(
+                launcher_id,
+                shared::LAUNCHER_CAPABILITY_HISTORY_RESTORE,
+            )
+        {
+            continue;
+        }
+        let history_restore = match crate::handlers::history_restore::launch_recipe(&session) {
+            Ok(recipe) => recipe,
+            Err(error) => {
+                warn!(
+                    "{}: session {}: {:?}",
+                    crate::markers::HISTORY_RESTORE_INVALID,
+                    session.id,
+                    error
+                );
+                continue;
+            }
+        };
         // Skip sessions the launcher last reported as running. The launch lease
         // below (not the in-memory pending set) is the authoritative guard for
         // the in-flight window.
@@ -1201,6 +1223,7 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
         );
 
         let launch_msg = ServerToLauncher::LaunchSession {
+            history_restore,
             request_id,
             user_id,
             auth_token,

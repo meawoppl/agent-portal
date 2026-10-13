@@ -417,6 +417,7 @@ async fn main() -> Result<()> {
 
     // Build session config
     let session_config = ProxySessionConfig {
+        history_restore: None,
         claude_conversation_id_sink: None,
         // Auto-display needs the launcher's upload credentials; a standalone
         // proxy simply doesn't display images the agent reads.
@@ -833,6 +834,7 @@ async fn create_claude_session(config: &ProxySessionConfig) -> Result<ClaudeSess
     });
 
     let claude_config = SessionConfig {
+        recovery_context: None,
         session_id: config.session_id,
         working_directory: PathBuf::from(&config.working_directory),
         session_name: config.session_name.clone(),

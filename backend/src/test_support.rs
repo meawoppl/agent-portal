@@ -193,3 +193,12 @@ pub fn insert_session(conn: &mut PgConnection, user_id: Uuid, session_name: &str
         .get_result::<Session>(conn)
         .expect("insert test session")
 }
+
+/// Complete a simulated History preflight for router integration tests.
+pub fn reply_history_restore(state: &AppState, request_id: Uuid, result: Result<String, String>) {
+    state.session_manager.complete_launcher_request(
+        crate::handlers::websocket::LauncherRpcKind::Agent,
+        request_id,
+        shared::LauncherToServer::CheckHistoryRestoreResult { request_id, result },
+    );
+}

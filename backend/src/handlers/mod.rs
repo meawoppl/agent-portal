@@ -12,6 +12,7 @@ pub mod forward_proxy;
 pub mod forwards;
 pub mod helpers;
 pub mod history;
+pub mod history_restore;
 pub mod identities;
 pub mod images;
 mod launcher_rpc;

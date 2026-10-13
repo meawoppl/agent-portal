@@ -59,6 +59,7 @@ pub type ClaudeConversationIdSink = Arc<dyn Fn(uuid::Uuid) + Send + Sync>;
 /// Configuration for a proxy session
 #[derive(Clone)]
 pub struct ProxySessionConfig {
+    pub history_restore: Option<shared::api::HistoryRestoreLaunch>,
     pub backend_url: String,
     pub session_id: Uuid,
     pub session_name: String,

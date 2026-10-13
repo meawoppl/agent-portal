@@ -114,6 +114,10 @@ pub enum LauncherToServer {
         request_id: Uuid,
         result: Result<crate::api::ExternalSessionList, String>,
     },
+    CheckHistoryRestoreResult {
+        request_id: Uuid,
+        result: Result<String, String>,
+    },
     PrepareSessionImportResult {
         request_id: Uuid,
         result: Result<crate::api::PreparedSessionImport, String>,
@@ -272,6 +276,8 @@ pub enum ServerToLauncher {
 
     /// Request to launch a new proxy instance
     LaunchSession {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        history_restore: Option<crate::api::HistoryRestoreLaunch>,
         request_id: Uuid,
         user_id: Uuid,
         auth_token: String,
@@ -337,6 +343,12 @@ pub enum ServerToLauncher {
         request_id: Uuid,
         agent_type: AgentType,
         query: crate::api::ExternalSessionQuery,
+    },
+    CheckHistoryRestore {
+        request_id: Uuid,
+        agent_type: AgentType,
+        working_directory: String,
+        restore: crate::api::HistoryRestoreLaunch,
     },
     PrepareSessionImport {
         request_id: Uuid,

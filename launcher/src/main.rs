@@ -5,6 +5,7 @@
 mod config;
 mod connection;
 mod forward;
+mod history_restore;
 mod imports;
 mod login_registry;
 mod media;

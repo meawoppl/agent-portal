@@ -31,6 +31,9 @@ pub const LAUNCHER_CAPABILITY_SCRATCH_WORKTREE: &str = "launch.scratch_worktree"
 /// Launcher capability advertised by versions that can resolve local agent
 /// state and fork a session on the source host.
 pub const LAUNCHER_CAPABILITY_FORK_SESSION: &str = "launch.fork_session";
+/// History recovery preflight and durable native/context launch recipes.
+pub const LAUNCHER_CAPABILITY_HISTORY_RESTORE: &str = "session.history_restore_v1";
+
 /// Codex discovery/import using the native app-server API.
 pub const LAUNCHER_CAPABILITY_IMPORT_CODEX: &str = "session.import_codex_v1";
 
