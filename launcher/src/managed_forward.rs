@@ -241,6 +241,7 @@ pub(crate) async fn run_script(
 /// launcher shutdown kill the whole tree; dropping Child alone only kills its leader.
 struct Process {
     child: Child,
+    #[cfg(unix)]
     group: u32,
 }
 impl Drop for Process {
@@ -340,7 +341,11 @@ async fn serve(root: PathBuf, recipe: Recipe, credentials: Credentials) -> Resul
         let started = tokio::time::Instant::now();
         let result: Result<()> = async {
             let child = child_command(&recipe, child_port).stdout(log.try_clone()?).stderr(log).spawn()?;
-            let mut process = Process { group: child.id().context("spawned service has no PID")?, child };
+            let mut process = Process {
+                #[cfg(unix)]
+                group: child.id().context("spawned service has no PID")?,
+                child,
+            };
             let health = format!("http://127.0.0.1:{child_port}{}", recipe.health_path);
             let deadline = started + Duration::from_secs(30);
             loop {
