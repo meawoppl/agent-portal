@@ -82,7 +82,7 @@ impl<'a> PluginProcess<'a> {
         expand_command(command, &values)
     }
 
-    fn command(&self, command: &str) -> Result<Command> {
+    pub(super) fn command(&self, command: &str) -> Result<Command> {
         let runtime = self.runtime;
         prepare_plugin_home(&runtime.root)?;
         let mut cmd = Command::new("sh");
@@ -99,6 +99,9 @@ impl<'a> PluginProcess<'a> {
 /// the leader still count.
 #[cfg(unix)]
 pub(super) fn surface_alive(state: &SurfaceState) -> bool {
+    if let Some(generation) = state.managed {
+        return crate::managed_forward::registered(&state.session_id, generation);
+    }
     let Some(pid) = state.pid else {
         return false;
     };
@@ -113,6 +116,9 @@ pub(super) fn surface_alive(state: &SurfaceState) -> bool {
 
 #[cfg(not(unix))]
 pub(super) fn surface_alive(state: &SurfaceState) -> bool {
+    if let Some(generation) = state.managed {
+        return crate::managed_forward::registered(&state.session_id, generation);
+    }
     state.pid.is_some()
 }
 

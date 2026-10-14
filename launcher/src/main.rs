@@ -7,6 +7,7 @@ mod connection;
 mod forward;
 mod imports;
 mod login_registry;
+mod managed_forward;
 mod media;
 mod message;
 mod pastebin;
@@ -155,8 +156,16 @@ enum Command {
     /// replacing any current forward; `forward list` shows it; `forward close`
     /// revokes it.
     Forward {
-        /// A port number, `list`, or `close`.
+        /// A port number, `run`, `list`, or `close`.
         target: String,
+        /// Executable start script for `forward run`; receives PORTAL_PORT and PORT.
+        script: Option<std::path::PathBuf>,
+        /// HTTP readiness path for a managed service.
+        #[arg(long, default_value = "/")]
+        health_path: String,
+        /// Script arguments after --; {port} expands to the allocated service port.
+        #[arg(last = true)]
+        args: Vec<String>,
     },
     /// Install and run local Portal plugins.
     Plugin {
@@ -466,6 +475,26 @@ mod path_tests {
     use std::os::unix::fs::PermissionsExt;
 
     #[test]
+    fn managed_forward_cli_accepts_script_health_path_and_literal_arguments() {
+        let parsed = Args::try_parse_from([
+            "agent-portal",
+            "forward",
+            "run",
+            "./serve.sh",
+            "--health-path",
+            "/healthz",
+            "--",
+            "--port",
+            "{port}",
+        ])
+        .unwrap();
+        assert!(
+            matches!(parsed.command, Some(super::Command::Forward {target, script:Some(_), health_path, args}) if target == "run" && health_path == "/healthz" && args == ["--port", "{port}"])
+        );
+        assert!(Args::try_parse_from(["agent-portal", "forward", "3000"]).is_ok());
+    }
+
+    #[test]
     fn non_executable_file_is_not_resolvable() {
         let dir = std::env::temp_dir().join(format!("ap-exec-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -596,8 +625,17 @@ async fn main() -> anyhow::Result<()> {
             return progress::run(value.as_deref(), label.as_deref(), max, id.as_deref(), done)
                 .await;
         }
-        Some(Command::Forward { target }) => {
+        Some(Command::Forward {
+            target,
+            script,
+            health_path,
+            args,
+        }) => {
+            if target != "run" && (script.is_some() || !args.is_empty() || health_path != "/") {
+                anyhow::bail!("script, arguments and health-path require `forward run`");
+            }
             return match target.as_str() {
+                "run" => managed_forward::run_script(&script.ok_or_else(|| anyhow::anyhow!("usage: agent-portal forward run ./start.sh [--health-path /healthz] -- [args including {{port}}]"))?, args, health_path).await,
                 "list" => forward::list().await,
                 "connections" => forward::connections().await,
                 "close" => forward::close().await,

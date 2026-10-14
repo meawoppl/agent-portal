@@ -61,6 +61,8 @@ pub(crate) struct SurfaceState {
     /// group. Records written before surfaces got their own group lack this.
     #[serde(default)]
     process_group: bool,
+    #[serde(default)]
+    managed: Option<uuid::Uuid>,
     command: String,
     cwd: String,
     session_id: String,
@@ -744,14 +746,86 @@ pub fn doctor(name: &str) -> Result<()> {
 }
 
 pub async fn open(name: &str) -> Result<()> {
-    let state = start(name).await?;
-    eprintln!("Opened {} on 127.0.0.1:{}", state.plugin, state.port);
-    crate::forward::open(state.port).await
+    start_managed(name).await.map(|_| ())
+}
+
+async fn start_managed(name: &str) -> Result<SurfaceState> {
+    let runtime = load_runtime(name)?;
+    ensure_enabled(name, &runtime.installed)?;
+    let (backend, token) = crate::message::api_base()?;
+    let session_id =
+        crate::message::current_session_id(&reqwest::Client::new(), &backend, &token).await?;
+    let cwd = std::env::current_dir()?;
+    let surface = runtime
+        .manifest
+        .surface
+        .as_ref()
+        .ok_or_else(|| anyhow!("plugin has no surface"))?;
+    let start = surface
+        .start
+        .as_deref()
+        .ok_or_else(|| anyhow!("plugin has no surface start command"))?;
+    let process = PluginProcess::new(&runtime);
+    // Leave {port} unexpanded until the launcher allocates a child port.
+    let command = process.expand(
+        start,
+        Some(&[
+            ("session_id", session_id.clone()),
+            ("cwd", cwd.display().to_string()),
+        ]),
+    );
+    let prepared = process.command(&command)?;
+    let env = prepared
+        .get_envs()
+        .filter_map(|(k, v)| {
+            v.map(|v| {
+                (
+                    k.to_string_lossy().into_owned(),
+                    v.to_string_lossy().into_owned(),
+                )
+            })
+        })
+        .collect();
+    if let Some(old) = surface_state(&runtime)? {
+        if old.managed.is_none() {
+            halt_surface(&runtime, &old)?;
+        }
+    }
+    let status = crate::managed_forward::register(crate::managed_forward::Recipe {
+        plugin: Some(name.into()),
+        session: session_id.parse()?,
+        generation: uuid::Uuid::new_v4(),
+        cwd: runtime.root.clone(),
+        program: PathBuf::from("sh"),
+        args: vec!["-c".into(), command.clone()],
+        env,
+        health_path: surface.health_path.clone().unwrap_or_else(|| "/".into()),
+        backend,
+    })
+    .await?;
+    let state = SurfaceState {
+        plugin: name.into(),
+        port: status.port,
+        pid: None,
+        process_group: false,
+        managed: Some(status.generation),
+        command,
+        cwd: cwd.display().to_string(),
+        session_id,
+        health_path: surface.health_path.clone(),
+        started_at: chrono::Utc::now(),
+    };
+    write_surface_state(&runtime, &state)?;
+    println!("{}", status.url.unwrap_or_default());
+    Ok(state)
 }
 
 pub async fn start(name: &str) -> Result<SurfaceState> {
     let runtime = load_runtime(name)?;
     ensure_enabled(name, &runtime.installed)?;
+    if surface_state(&runtime)?.is_some_and(|s| s.managed.is_some()) {
+        return start_managed(name).await;
+    }
     let cwd = std::env::current_dir().context("could not determine current directory")?;
     let (state, reused) = start_surface(&runtime, &cwd, &current_session_id()).await?;
     if reused {
@@ -767,6 +841,9 @@ pub async fn restart(name: &str) -> Result<SurfaceState> {
     ensure_enabled(name, &runtime.installed)?;
     if let Some(state) = surface_state(&runtime)? {
         halt_surface(&runtime, &state)?;
+        if state.managed.is_some() {
+            return start_managed(name).await;
+        }
     }
     start(name).await
 }
@@ -828,6 +905,7 @@ async fn start_surface(
         port,
         pid: Some(pid),
         process_group: cfg!(unix),
+        managed: None,
         command,
         cwd: cwd.display().to_string(),
         session_id: session_id.to_string(),
@@ -890,8 +968,13 @@ async fn surface_status(runtime: &PluginRuntime) -> Result<SurfaceStatusJson> {
         Some(record) if surface_healthy(record).await => SurfaceHealth::Healthy,
         Some(_) => SurfaceHealth::Unhealthy,
     };
-    let log_tail = if surface.is_some() || surface_log_path(runtime).exists() {
-        log_tail(&surface_log_path(runtime), SURFACE_LOG_TAIL_LINES)
+    let log_path = surface
+        .as_ref()
+        .filter(|s| s.managed.is_some())
+        .and_then(|s| crate::managed_forward::log_path(&s.session_id))
+        .unwrap_or_else(|| surface_log_path(runtime));
+    let log_tail = if surface.is_some() || log_path.exists() {
+        log_tail(&log_path, SURFACE_LOG_TAIL_LINES)
     } else {
         Vec::new()
     };
@@ -918,6 +1001,11 @@ pub fn stop(name: &str) -> Result<()> {
 /// Stop a recorded surface: run the manifest `stop` command if declared, then
 /// make sure the whole process tree is gone before dropping the record.
 fn halt_surface(runtime: &PluginRuntime, state: &SurfaceState) -> Result<()> {
+    if let Some(generation) = state.managed {
+        crate::managed_forward::remove_owned(state.session_id.parse()?, generation)?;
+        let _ = std::fs::remove_file(surface_state_path(runtime));
+        return Ok(());
+    }
     if let Some(stop) = runtime
         .manifest
         .surface
@@ -943,6 +1031,9 @@ fn halt_surface(runtime: &PluginRuntime, state: &SurfaceState) -> Result<()> {
 /// Best-effort surface stop ahead of a remove/reinstall, so the binary is not
 /// deleted out from under a live server.
 fn halt_surface_quietly(runtime: &PluginRuntime) {
+    if let Err(err) = crate::managed_forward::remove_plugin(&runtime.name) {
+        eprintln!("warning: failed to unregister managed plugin services: {err:#}");
+    }
     if let Ok(Some(state)) = surface_state(runtime) {
         if let Err(err) = halt_surface(runtime, &state) {
             eprintln!(
@@ -1493,6 +1584,7 @@ mod tests {
             port: 0,
             pid: Some(pid),
             process_group: true,
+            managed: None,
             command: String::new(),
             cwd: String::new(),
             session_id: String::new(),

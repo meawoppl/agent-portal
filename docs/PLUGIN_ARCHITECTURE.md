@@ -561,11 +561,17 @@ It is written to:
 $AGENT_PORTAL_PLUGIN_ROOT/kicad-pcb/.portal/state/surfaces/surface.json
 ```
 
-`agent-portal plugin start` reuses that process when the health check still
-passes. Stale state is discarded and the surface is started again. `status
---json` reports the same state with a `healthy` flag; `stop` runs
-`[surface].stop` when declared, otherwise it terminates the stored pid on
-platforms where the launcher can do so. Do not store this lifecycle state in the
+`agent-portal plugin open` persists a launcher-owned service recipe, allocates a
+stable relay port, and injects a child port into the manifest's foreground start
+command. The daemon restarts failed children and restores recipes on startup;
+the session process does not own their lifetime. Managed surface records carry
+a generation ID instead of a PID. `stop` unregisters only that generation.
+
+For direct local startup, `agent-portal plugin start` reuses the process when
+the health check still passes. Stale state is discarded and the surface is
+started again. `status --json` reports the same state with a `healthy` flag;
+for unmanaged surfaces, `stop` runs `[surface].stop` when declared, otherwise
+it terminates the stored process group. Do not store this lifecycle state in the
 backend database until a frontend or API needs cross-device visibility beyond
 the existing forward status.
 

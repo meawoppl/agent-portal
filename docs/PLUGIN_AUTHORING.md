@@ -337,13 +337,23 @@ The backend enforces normal session reader/mutator permissions. Items keep the
 creator id and display name; Portal only shows contributor names in the compact
 chat panel when there is more than one contributor in the pending stack.
 
+`plugin open` registers the manifest start command with the launcher daemon's
+managed-service supervisor. It persists the command, working directory and plugin
+environment, substitutes `{port}` when spawning each child, and keeps the public
+forward on a stable relay port. The start command must keep the server in the
+foreground; do not daemonize or start a second systemd/launchd service from it.
+The launcher restores the recipe after a daemon restart and restarts exited or
+repeatedly unhealthy children with bounded backoff. Agent session restarts do not
+own or kill these children. See [managed forwards](PORT_FORWARDING.md#cli-launchersrcforwardrs-mirroring-launchersrcmessagers)
+for the generic script interface, logs and recovery limits.
+
 The launcher owns the lifecycle:
 
-1. choose a free port;
+1. reserve a stable forwarding port and allocate a child port;
 2. expand placeholders in `[surface].start`;
 3. start the process;
-4. wait for `health_path` or TCP readiness;
-5. register the port with the existing forwarder;
+4. wait for a successful HTTP response at `health_path` (default `/`);
+5. register the relay port with the existing forwarder;
 6. open the session pane.
 
 Use `agent-portal plugin status <name> --json` to inspect the stored process,
@@ -352,6 +362,11 @@ port, health, and surface metadata. Runtime state lives in:
 ```text
 .portal/state/surfaces/surface.json
 ```
+
+Managed records have a `managed` generation ID and no child PID. `plugin stop`
+unregisters that generation, so a stale plugin record cannot stop a replacement
+service. `plugin start` alone retains direct local startup for use without a
+session; a surface opened through Portal remains launcher-managed.
 
 ## Commands
 

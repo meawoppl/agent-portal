@@ -82,6 +82,14 @@ pub async fn run_launcher_loop(
     mut exit_rx: mpsc::UnboundedReceiver<SessionExited>,
 ) -> anyhow::Result<()> {
     process_manager.set_launcher_id(launcher_id);
+    // Service ownership outlives any session and backend reconnect. Aborting
+    // this task on launcher shutdown drops its children and relay listeners.
+    let services = tokio::spawn(async {
+        if let Err(err) = crate::managed_forward::supervise().await {
+            warn!(error = %err, "managed-service supervisor stopped");
+        }
+    });
+    let _services = crate::managed_forward::Task(services);
     let mut backoff = Duration::from_secs(1);
     let mut parked_backoff = PARKED_BACKOFF_START;
     // The reason whose instruction was last shown; re-emit when it changes so
