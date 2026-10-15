@@ -40,6 +40,28 @@ diesel::table! {
 }
 
 diesel::table! {
+    linked_client_enrollments (device_code_hash) {
+        #[max_length = 64]
+        device_code_hash -> Varchar,
+        #[max_length = 32]
+        user_code -> Varchar,
+        #[max_length = 255]
+        client_origin -> Varchar,
+        #[max_length = 16]
+        requested_scope -> Varchar,
+        #[max_length = 128]
+        device_label -> Nullable<Varchar>,
+        created_at -> Timestamp,
+        expires_at -> Timestamp,
+        #[max_length = 16]
+        status -> Varchar,
+        user_id -> Nullable<Uuid>,
+        #[max_length = 32]
+        denial_reason -> Nullable<Varchar>,
+    }
+}
+
+diesel::table! {
     linked_client_grants (id) {
         id -> Uuid,
         user_id -> Uuid,
@@ -385,6 +407,7 @@ diesel::joinable!(custom_subdomains -> sessions (session_id));
 diesel::joinable!(custom_subdomains -> users (created_by));
 diesel::joinable!(deleted_session_costs -> users (user_id));
 diesel::joinable!(forward_subdomains -> sessions (session_id));
+diesel::joinable!(linked_client_enrollments -> users (user_id));
 diesel::joinable!(linked_client_grants -> users (user_id));
 diesel::joinable!(messages -> sessions (session_id));
 diesel::joinable!(messages -> users (user_id));
@@ -413,6 +436,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     deleted_session_costs,
     federation_policy,
     forward_subdomains,
+    linked_client_enrollments,
     linked_client_grants,
     messages,
     pending_inputs,

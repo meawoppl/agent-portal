@@ -133,6 +133,10 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
     // NAT without draining the burst during a slow browser approval (#1047).
     let auth_device_poll_routes = Router::new()
         .route(AUTH_DEVICE_POLL, post(handlers::device_flow::device_poll))
+        .route(
+            "/api/auth/linked/poll",
+            post(handlers::federation::enrollment::poll),
+        )
         .layer(rate_limit(2, 30)?)
         .with_state(app_state.clone());
 
@@ -158,6 +162,15 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
             post(handlers::device_flow::device_approve),
         )
         .route(AUTH_DEVICE_DENY, post(handlers::device_flow::device_deny))
+        .route(
+            "/api/auth/linked",
+            get(handlers::federation::enrollment::approval)
+                .post(handlers::federation::enrollment::decide),
+        )
+        .route(
+            "/api/auth/linked/code",
+            post(handlers::federation::enrollment::start),
+        )
         .layer(rate_limit(2, 20)?)
         .with_state(app_state.clone());
 
@@ -360,6 +373,19 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
         .route(
             "/api/metrics/turns",
             get(handlers::turn_metrics::list_aggregated_turn_metrics),
+        )
+        // Linked credentials remain confined to their approved grant.
+        .route(
+            "/api/linked-grants",
+            get(handlers::federation::credentials::list),
+        )
+        .route(
+            "/api/linked-grants/refresh",
+            post(handlers::federation::credentials::refresh),
+        )
+        .route(
+            "/api/linked-grants/{id}",
+            axum::routing::delete(handlers::federation::credentials::revoke),
         )
         // Proxy token management endpoints
         .route(

@@ -184,6 +184,9 @@ fn route_scope(method: &Method, route: &str) -> Option<TokenScope> {
             "PATCH" | "DELETE",
             "/api/sessions/{id}/edit-stack/{item_id}" | "/api/scheduled-tasks/{id}",
         ) => Some(Write),
+        ("POST", "/api/linked-grants/refresh") | ("DELETE", "/api/linked-grants/{id}") => {
+            Some(Read)
+        }
         ("DELETE", "/api/sessions/{id}" | "/api/sessions/{id}/forwards") => Some(Write),
         // WS bearer upgrades deliberately remain disabled until one-use tickets
         // land. No enrollment or credential-minting routes are enabled here.
@@ -280,3 +283,6 @@ pub mod policy;
 
 #[cfg(test)]
 static TEST_POLICY_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+pub mod credentials;
+pub mod enrollment;
