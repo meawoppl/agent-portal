@@ -246,9 +246,30 @@ pub async fn linked_scope_gate(
     match result {
         Ok(auth) => {
             req.extensions_mut().insert(auth);
-            next.run(req).await
+            let mut response = next.run(req).await;
+            // Even a private browser cache is shared by accounts using the
+            // same URL. Every linked read must reach the live grant gate.
+            response.headers_mut().insert(
+                axum::http::header::CACHE_CONTROL,
+                axum::http::HeaderValue::from_static("private, no-store"),
+            );
+            response
         }
-        Err(error) => error.into_response(),
+        Err(error) => {
+            let mut response = error.into_response();
+            // This gate wraps CORS (and forwarded hosts). Its public error
+            // responses must remain readable cross-origin, so a revoked
+            // credential appears as 401/403 rather than a network failure.
+            response.headers_mut().insert(
+                axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN,
+                axum::http::HeaderValue::from_static("*"),
+            );
+            response.headers_mut().insert(
+                axum::http::header::CACHE_CONTROL,
+                axum::http::HeaderValue::from_static("no-store"),
+            );
+            response
+        }
     }
 }
 
