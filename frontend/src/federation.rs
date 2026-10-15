@@ -197,15 +197,30 @@ pub struct ProviderProps {
 #[function_component(FederationProvider)]
 pub fn provider(props: &ProviderProps) -> Html {
     let state = use_reducer(FederationState::default);
+    let bootstrap_error = use_state(String::new);
+    let retry = use_state(|| 0u64);
     {
         let state = state.clone();
-        use_effect_with((), move |_| {
+        let bootstrap_error = bootstrap_error.clone();
+        use_effect_with(*retry, move |_| {
+            bootstrap_error.set(String::new());
             let cancelled = Rc::new(std::cell::Cell::new(false));
             let guard = cancelled.clone();
             spawn_local(async move {
-                let me = utils::fetch_json::<MeResponse>("/api/auth/me", On401::Ignore)
-                    .await
-                    .ok();
+                // An unavailable identity endpoint is not an anonymous
+                // identity. Do not mount a cookie-authorized dashboard without
+                // the account binding after a transient bootstrap failure.
+                let me = match utils::fetch_json::<MeResponse>("/api/auth/me", On401::Ignore).await
+                {
+                    Ok(me) => Some(me),
+                    Err(utils::FetchError::Status(401)) => None,
+                    Err(error) => {
+                        if !guard.get() {
+                            bootstrap_error.set(format!("Cannot load account: {error}"));
+                        }
+                        return;
+                    }
+                };
                 let mut rows = Vec::new();
                 if let Some(me) = &me {
                     let home = PortalClient::home_for(me.id);
@@ -271,7 +286,16 @@ pub fn provider(props: &ProviderProps) -> Html {
         });
     }
     if state.loading {
-        return html! { <div class="loading">{"Loading account…"}</div> };
+        let retry_load = {
+            let retry = retry.clone();
+            Callback::from(move |_| retry.set(*retry + 1))
+        };
+        return html! { <div class="loading">
+            if bootstrap_error.is_empty() { {"Loading account…"} } else {
+                <p role="alert">{&*bootstrap_error}</p>
+                <button onclick={retry_load}>{"Retry"}</button>
+            }
+        </div> };
     }
     let home = state.home.clone();
     html! { <ContextProvider<Federation> context={state}>
