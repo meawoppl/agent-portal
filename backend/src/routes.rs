@@ -8,7 +8,10 @@ use axum::{
 };
 use governor::clock::QuantaInstant;
 use governor::middleware::NoOpMiddleware;
-use shared::{api::HealthResponse, WsEndpoint};
+use shared::{
+    api::{HealthResponse, FEDERATION_DISCOVERY_PATH},
+    WsEndpoint,
+};
 use std::sync::Arc;
 use tower_cookies::CookieManagerLayer;
 use tower_governor::governor::GovernorConfigBuilder;
@@ -181,6 +184,10 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
                     version: shared::VERSION.to_string(),
                 })
             }),
+        )
+        .route(
+            FEDERATION_DISCOVERY_PATH,
+            get(handlers::federation_discovery::discovery),
         )
         // Native mobile app-link association files. These must be served at
         // exact well-known paths, before the SPA fallback below.

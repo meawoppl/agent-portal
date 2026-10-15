@@ -7,6 +7,7 @@ pub mod device_flow;
 pub mod downloads;
 pub mod edit_stack;
 pub mod federation;
+pub mod federation_discovery;
 pub mod files;
 pub(crate) mod forward_client;
 pub mod forward_proxy;

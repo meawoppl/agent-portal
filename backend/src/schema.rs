@@ -123,6 +123,14 @@ diesel::table! {
 }
 
 diesel::table! {
+    portal_instance (singleton) {
+        singleton -> Bool,
+        instance_id -> Uuid,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     proxy_auth_tokens (id) {
         id -> Uuid,
         user_id -> Uuid,
@@ -410,6 +418,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     pending_inputs,
     pending_permission_requests,
     portal_connections,
+    portal_instance,
     proxy_auth_tokens,
     push_subscriptions,
     scheduled_tasks,

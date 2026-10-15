@@ -15,6 +15,13 @@ pub const CAP_SCOPED_MEDIA_URLS: &str = "scoped_media_urls";
 pub const AUTH_MODE_LINKED_DEVICE_FLOW: &str = "linked_device_flow";
 pub const AUTH_MODE_WS_TICKET: &str = "ws_ticket";
 
+/// `GET` this path for a [`FederationDiscoveryResponse`]; unauthenticated.
+pub const FEDERATION_DISCOVERY_PATH: &str = "/api/federation/discovery";
+
+/// The federation protocol versions this build speaks. A client and portal
+/// interoperate only where their ranges overlap.
+pub const FEDERATION_PROTOCOL: FederationProtocolRange = FederationProtocolRange { min: 1, max: 1 };
+
 /// Grant ceiling, not a session role. Write includes read but never elevates
 /// viewer membership or permits minting a broader credential. Required on the
 /// wire: a missing/unknown scope must not silently acquire write access.
@@ -73,6 +80,18 @@ pub enum FederationPolicy {
 pub struct FederationProtocolRange {
     pub min: u32,
     pub max: u32,
+}
+
+impl FederationProtocolRange {
+    /// The highest version both ranges include, or `None` when they don't
+    /// overlap or either range is inverted.
+    pub fn highest_common(&self, other: &Self) -> Option<u32> {
+        if self.min > self.max || other.min > other.max {
+            return None;
+        }
+        let high = self.max.min(other.max);
+        (high >= self.min.max(other.min)).then_some(high)
+    }
 }
 
 /// Discovery data. Advertise only capabilities actually implemented/enabled.
@@ -242,6 +261,16 @@ mod tests {
             "client_origin": "https://home.example", "scope": "write"
         }))
         .is_err());
+    }
+
+    #[test]
+    fn protocol_ranges_negotiate_the_highest_shared_version() {
+        let r = |min, max| FederationProtocolRange { min, max };
+        assert_eq!(r(1, 3).highest_common(&r(2, 5)), Some(3));
+        assert_eq!(r(1, 1).highest_common(&FEDERATION_PROTOCOL), Some(1));
+        assert_eq!(r(2, 3).highest_common(&r(4, 5)), None);
+        assert_eq!(r(3, 1).highest_common(&r(1, 5)), None);
+        assert_eq!(r(1, 5).highest_common(&r(4, 2)), None);
     }
 
     #[test]
