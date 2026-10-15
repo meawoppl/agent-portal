@@ -65,7 +65,8 @@ leftovers=$(psql_admin "SELECT string_agg(datname, ' ') FROM pg_database
   WHERE datname IN ('agent_portal_restore', 'agent_portal_previous')")
 if [[ -n $leftovers ]] || archive_sh 'test -e /data/archive/.restore-old'; then
   echo "Artifacts from an earlier restore remain (${leftovers:-archive .restore-old})." >&2
-  echo "Finish or undo that restore first; see docs/SELF_HOSTING.md. Nothing was changed." >&2
+  echo "Finish or undo that restore first; see 'If a restore stops part-way' in" >&2
+  echo "docs/SELF_HOSTING.md. Nothing was changed." >&2
   exit 1
 fi
 archive_sh 'rm -rf /data/archive/.restore-new'
@@ -96,6 +97,13 @@ if ! archive_sh 'set -e; mkdir /data/archive/.restore-new
   echo "The archive did not extract; the live data was not touched." >&2
   exit 1
 fi
+
+# The version serving the current data is what recovery must restart. After a
+# rollback edit, .env already selects the backup's older version, and booting
+# that image on the previous (newer) schema is exactly what restore prevents.
+running_image=$(id=$(docker compose ps -q portal) && [[ -n $id ]] &&
+  docker inspect -f '{{.Config.Image}}' "$id") || running_image=
+running_version=${running_image:+${running_image##*:}}
 
 # --- Point of no return: everything below runs with the portal stopped. ---
 docker compose stop portal
@@ -142,7 +150,15 @@ EOF
   else
     echo "  docker compose run --rm --no-deps -T --entrypoint sh portal -c 'rm -rf /data/archive/.restore-new'" >&2
   fi
+  # The previous data needs the image that was serving it, not the backup's.
+  if [[ -z $running_version ]]; then
+    echo "  # The portal was not running when restore started, so its version is unknown." >&2
+    echo "  # Set PORTAL_VERSION in .env to the version that last served this data first." >&2
+  elif [[ $running_version != "$current_version" ]]; then
+    echo "  sed -i \"s/^PORTAL_VERSION=.*/PORTAL_VERSION='$running_version'/\" .env" >&2
+  fi
   echo "  docker compose up -d" >&2
+  echo "See 'If a restore stops part-way' in docs/SELF_HOSTING.md." >&2
   exit 1
 }
 trap recovery ERR

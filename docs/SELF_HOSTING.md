@@ -113,6 +113,38 @@ Test a restore on a scratch host before you need one: install as above with
 the backed-up `.env`, `docker compose up -d`, copy the backup in, run
 `restore.sh`.
 
+### If a restore stops part-way
+
+Once the portal is stopped for the swap, `restore.sh` keeps the previous data
+until the restarted portal reports healthy. If anything fails after that
+point, it leaves the portal stopped and prints the exact commands that put the
+previous data back for the state the swap reached. Run them in order from
+`deploy/`. Nothing is undone automatically.
+
+The previous data must come back under the image that was serving it. After a
+rollback, `.env` already selects the backup's older `PORTAL_VERSION`, so the
+printed steps reset it to the version that was running before the restore.
+If the portal wasn't running when the restore started, its version is unknown:
+set `PORTAL_VERSION` in `.env` to the version that last served this data
+yourself before `docker compose up -d`.
+
+If you no longer have that output, the leftovers tell you where it stopped.
+`restore.sh` refuses to run again until they are cleared:
+
+| Leftover | Meaning |
+|---|---|
+| `agent_portal_restore` database | The restored copy, not yet swapped in. Drop it. |
+| `agent_portal_previous` database | The previous data, already renamed aside. Drop the current `agent_portal` and rename this one back. |
+| `/data/archive/.restore-new` | The staged archive, not yet swapped in. Delete it. |
+| `/data/archive/.restore-old` without `.restore-old-complete` | Only part of the previous archive was moved aside; the rest is still in place. Move its contents back to `/data/archive`. Don't delete anything at the top level. |
+| `/data/archive/.restore-old` with `.restore-old-complete` | All of the previous archive is inside it. Delete everything else at the top level, then move its contents back. |
+
+List the databases with
+`docker compose exec -T db psql -U agent_portal -d postgres -c '\l'` and the
+archive with
+`docker compose run --rm --no-deps -T --entrypoint sh portal -c 'ls -la /data/archive'`.
+Use the same commands `restore.sh` prints for each case.
+
 ## Upgrading
 
 ```bash
