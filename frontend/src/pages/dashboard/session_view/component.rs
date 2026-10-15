@@ -2810,6 +2810,7 @@ impl SessionView {
             },
         );
         let on_send_frame = link.callback(SessionViewMsg::SendFrame);
+        let on_queued = link.callback(SessionViewMsg::EditStackLoaded);
         let on_upload_prompt = link.callback(
             |(content, upload_ids, reasoning_effort): (
                 String,
@@ -2842,6 +2843,7 @@ impl SessionView {
                 stt_enabled={ctx.props().stt_enabled}
                 {on_register}
                 {on_send_text}
+                {on_queued}
                 {on_send_frame}
                 {on_upload_prompt}
                 {on_secret_drop}
