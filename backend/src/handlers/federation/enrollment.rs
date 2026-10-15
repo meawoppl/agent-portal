@@ -38,8 +38,8 @@ struct Enrollment {
     client_origin: String,
     requested_scope: String,
     device_label: Option<String>,
-    #[allow(dead_code)]
-    created_at: chrono::NaiveDateTime,
+    #[diesel(column_name = created_at)]
+    _created_at: chrono::NaiveDateTime,
     expires_at: chrono::NaiveDateTime,
     status: String,
     user_id: Option<Uuid>,
@@ -268,7 +268,7 @@ pub async fn approval(
     cookies.signed(&state.cookie_key).add(cookie);
     let escape = crate::handlers::helpers::escape_html_text;
     let page = format!(
-        r#"<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Link a portal</title></head><body><main><h1>Link a portal</h1><p>Signed in as <strong>{}</strong>.</p><p>Allow <strong>{}</strong> to access this account with <strong>{}</strong> permission?</p><p>Device: {}</p><p>The linked portal can read your sessions{}. Only approve a portal you trust. Its operator controls the code that holds this credential.</p><form method="post"><input type="hidden" name="user_code" value="{}"><input type="hidden" name="csrf" value="{}"><button name="decision" value="approve">Approve</button> <button name="decision" value="deny">Deny</button></form></main></body></html>"#,
+        r#"<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Link a portal</title></head><body><main><h1>Link a portal</h1><p>Signed in as <strong>{}</strong>.</p><p>Allow <strong>{}</strong> to access this account with the requested <strong>{}</strong> permission?</p><p>Device: {}</p><p>The linked portal can read your sessions{}. Only approve a portal you trust. Its operator controls the code that holds this credential.</p><form method="post"><input type="hidden" name="user_code" value="{}"><input type="hidden" name="csrf" value="{}"><button name="decision" value="approve">Approve</button> <button name="decision" value="deny">Deny</button></form></main></body></html>"#,
         escape(&user.email),
         escape(&row.client_origin),
         scope.as_str(),
@@ -403,6 +403,52 @@ mod tests {
         assert!(!valid_code("LP-<script>bad"));
         assert!(valid_code("LP-012345ABCDEF"));
     }
+    #[tokio::test]
+    async fn unauthenticated_enrollment_routes_are_rate_limited() {
+        use axum::{
+            body::Body,
+            http::{Request, StatusCode},
+        };
+        use tower::ServiceExt;
+        let Some(pool) = crate::test_support::shared_pool() else {
+            return;
+        };
+        let state = Arc::new(crate::test_support::test_app_state(pool));
+        let app = crate::routes::build_router(state).unwrap();
+        for (path, burst, ip) in [
+            ("/api/auth/linked/code", 10, "192.0.2.71"),
+            ("/api/auth/linked/poll", 30, "192.0.2.72"),
+        ] {
+            // Invalid JSON reaches the same route limiter without creating rows.
+            for _ in 0..burst {
+                let response = app
+                    .clone()
+                    .oneshot(
+                        Request::post(path)
+                            .header("x-forwarded-for", ip)
+                            .header("content-type", "application/json")
+                            .body(Body::from("{}"))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+            }
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::post(path)
+                        .header("x-forwarded-for", ip)
+                        .header("content-type", "application/json")
+                        .body(Body::from("{}"))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        }
+    }
+
     #[tokio::test]
     async fn consent_consumption_rotation_and_revoke_keep_the_grant_binding() {
         let _guard = super::super::TEST_POLICY_LOCK.lock().await;
@@ -579,6 +625,32 @@ mod tests {
             super::super::authenticate(&state, &mut conn, &token, &headers("https://home.example"))
                 .unwrap();
         assert!(auth.authorize(&state, TokenScope::Write).is_err());
+        // Sleeping past the access lifetime does not require a new enrollment.
+        // The expired token remains forbidden for all ordinary access.
+        diesel::update(proxy_auth_tokens::table.find(auth.token_id))
+            .set(
+                proxy_auth_tokens::expires_at
+                    .eq(chrono::Utc::now().naive_utc() - chrono::Duration::seconds(1)),
+            )
+            .execute(&mut conn)
+            .unwrap();
+        assert!(super::super::authenticate(
+            &state,
+            &mut conn,
+            &token,
+            &headers("https://home.example")
+        )
+        .is_err());
+        assert!(auth.authorize(&state, TokenScope::Read).is_err());
+        let recovered = super::super::authenticate_for_refresh(
+            &state,
+            &mut conn,
+            &token,
+            &headers("https://home.example"),
+            true,
+        )
+        .unwrap();
+        assert_eq!(recovered.token_id, auth.token_id);
         let Json(rotated) =
             credentials::refresh(State(state.clone()), Some(axum::Extension(auth.clone())))
                 .await

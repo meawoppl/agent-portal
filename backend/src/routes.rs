@@ -125,6 +125,10 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
     // user-visible work and should not be spammed.
     let auth_device_code_routes = Router::new()
         .route(AUTH_DEVICE_CODE, post(handlers::device_flow::device_code))
+        .route(
+            "/api/auth/linked/code",
+            post(handlers::federation::enrollment::start),
+        )
         .layer(rate_limit(6, 10)?)
         .with_state(app_state.clone());
 
@@ -166,10 +170,6 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
             "/api/auth/linked",
             get(handlers::federation::enrollment::approval)
                 .post(handlers::federation::enrollment::decide),
-        )
-        .route(
-            "/api/auth/linked/code",
-            post(handlers::federation::enrollment::start),
         )
         .layer(rate_limit(2, 20)?)
         .with_state(app_state.clone());

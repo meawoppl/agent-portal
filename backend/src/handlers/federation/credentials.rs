@@ -103,7 +103,7 @@ pub async fn refresh(
             .find(auth.token_id)
             .for_update()
             .first::<ProxyAuthToken>(conn)?;
-        let live = super::validate_row(conn, &old)?;
+        let live = super::validate_row_for_refresh(conn, &old, true)?;
         if live.grant_id != auth.grant_id || live.user_id != auth.user_id {
             return Err(AppError::Forbidden);
         }
