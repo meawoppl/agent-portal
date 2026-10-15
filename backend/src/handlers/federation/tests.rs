@@ -201,29 +201,27 @@ async fn router_applies_scope_before_handlers_and_live_revocation() {
             .body(Body::empty())
             .unwrap()
     };
-    assert_eq!(
-        app.clone()
-            .oneshot(request("GET", "/api/sessions", "portal.example"))
-            .await
-            .unwrap()
-            .status(),
-        StatusCode::OK
-    );
+    let response = app
+        .clone()
+        .oneshot(request("GET", "/api/sessions", "portal.example"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["cache-control"], "private, no-store");
     for (method, path) in [
         ("GET", "/api/portal-connections"),
         ("POST", "/api/proxy-tokens"),
         ("GET", "/ws/client"),
         ("GET", "/not-an-api"),
     ] {
-        assert_eq!(
-            app.clone()
-                .oneshot(request(method, path, "portal.example"))
-                .await
-                .unwrap()
-                .status(),
-            StatusCode::FORBIDDEN,
-            "{path}"
-        );
+        let response = app
+            .clone()
+            .oneshot(request(method, path, "portal.example"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "{path}");
+        assert_eq!(response.headers()["access-control-allow-origin"], "*");
+        assert_eq!(response.headers()["cache-control"], "no-store");
     }
     let stop = format!("/api/sessions/{}/stop", session.id);
     assert_eq!(
