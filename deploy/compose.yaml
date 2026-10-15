@@ -72,8 +72,8 @@ services:
     networks: [edge]
 
 networks:
-  # No route out of `internal` to the host: Postgres is reachable only by the
-  # portal container.
+  # `internal` has no published ports and no external route; Caddy is not on
+  # it, so Postgres is isolated from the edge (the Docker host stays trusted).
   internal:
     internal: true
   edge: {}

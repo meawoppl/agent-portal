@@ -8,7 +8,7 @@ Everything lives in [`deploy/`](../deploy):
 
 | File | Purpose |
 |---|---|
-| `compose.yaml` | The stack. Postgres has no route to the host; only Caddy publishes ports (80, 443). |
+| `compose.yaml` | The stack. Only Caddy publishes ports (80, 443); Postgres has no published port and is isolated from the edge network. |
 | `Caddyfile` | HTTPS + reverse proxy (WebSockets included) to the portal. |
 | `setup.sh` | Writes `deploy/.env`: generates secrets, asks for domain and login provider. |
 | `backup.sh` / `restore.sh` | Database + session-archive backup and restore. |
@@ -77,31 +77,40 @@ without any of it. See the environment table in the main README for details.
 - **Port forwarding** — `PORTAL_FORWARD_DOMAIN` needs a wildcard DNS record and
   a wildcard certificate, which Caddy can only obtain via a DNS-01 plugin. See
   [PORT_FORWARDING.md](PORT_FORWARDING.md).
-- **S3 session archive** — the stack stores the archive on the `archive`
-  volume; set `PORTAL_SESSION_ARCHIVE_BACKEND=s3` and the `S3` variables to use
-  a bucket instead.
+
+The session archive lives on the stack's `archive` volume, and `backup.sh` /
+`restore.sh` cover it. An S3 archive needs a Compose override and its own
+bucket backups; this stack and its scripts support the local archive only.
 
 ## Backups
 
 ```bash
 cd deploy
-./backup.sh           # → deploy/backups/<timestamp>/{db.dump,archive.tar.gz}
+./backup.sh           # → deploy/backups/<timestamp>-<id>/
 ```
 
-Runs while the portal is up. Copy `deploy/backups/` and `deploy/.env` off the
-host on a schedule (e.g. a nightly cron running `backup.sh` then `rsync`).
+Runs while the portal is up. Each backup holds the database dump, the archive,
+the portal version it was taken from and checksums; it is private to your
+user and only appears once complete. Copy `deploy/backups/` and `deploy/.env`
+off the host on a schedule (e.g. a nightly cron running `backup.sh` then
+`rsync`).
 
 ## Restore
 
 ```bash
 cd deploy
-./restore.sh backups/<timestamp>
+./restore.sh backups/<name>
 ```
 
-Stops the portal, replaces the database and archive with the backup, and
-starts everything again. Restore needs the **same `.env`** the backup was taken
-with. Test a restore on a scratch host before you need one: install as above
-with the backed-up `.env`, `docker compose up -d`, copy the backup in, run
+Verifies the backup's checksums, dump and archive, and refuses unless `.env`
+selects the **same `PORTAL_VERSION`** the backup was taken from. It then
+restores the dump into a scratch database and stages the archive; only when
+both succeed does it stop the portal, swap the new data in, and start it again.
+A bad backup leaves the running portal untouched. Restore also needs the
+**same secrets** in `.env` the backup was taken with.
+
+Test a restore on a scratch host before you need one: install as above with
+the backed-up `.env`, `docker compose up -d`, copy the backup in, run
 `restore.sh`.
 
 ## Upgrading
@@ -109,7 +118,7 @@ with the backed-up `.env`, `docker compose up -d`, copy the backup in, run
 ```bash
 cd deploy
 ./backup.sh
-sed -i 's/^PORTAL_VERSION=.*/PORTAL_VERSION=<new version>/' .env
+sed -i "s/^PORTAL_VERSION=.*/PORTAL_VERSION='<new version>'/" .env
 docker compose pull portal && docker compose up -d
 ```
 
@@ -120,10 +129,19 @@ version, so keep the portal reasonably current.
 ## Rolling back
 
 Migrations only move forward, so an older image may not run against a schema a
-newer one has migrated. To roll back, restore the backup you took before
-upgrading (`restore.sh`), then set `PORTAL_VERSION` back and
-`docker compose up -d`. Sessions and messages created since that backup are
-lost.
+newer one has migrated. To roll back, select the old image first, then
+restore the backup you took before upgrading:
+
+```bash
+cd deploy
+sed -i "s/^PORTAL_VERSION=.*/PORTAL_VERSION='<old version>'/" .env
+docker compose pull portal
+./restore.sh backups/<pre-upgrade backup>
+```
+
+`restore.sh` refuses a backup whose version doesn't match `.env`, so the newer
+image never boots against the restored schema. Sessions and messages created
+since that backup are lost.
 
 ## Troubleshooting
 
