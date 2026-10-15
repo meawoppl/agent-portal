@@ -672,3 +672,16 @@ Credential responses disable caching. Do not enable query-string logging for
 `/ws/client` in a reverse proxy: the ticket is short-lived, but is still a secret
 until consumed. Forwarded-app handoffs remain unavailable to linked credentials;
 clients should open the session on its native portal instead.
+
+### Browser account binding
+
+Session-scoped `PortalClient` REST requests carry `X-Portal-Account`, and home
+WebSocket upgrades carry `?account=<uuid>`. Both only narrow the authenticated
+cookie identity: a mismatch is rejected. This prevents a background tab from
+reconnecting or replaying input as another account after a cookie switch.
+Tickets already bind linked sockets to their grant's user; combining a ticket
+and account hint is rejected. Legacy clients without a hint retain cookie auth.
+
+Home settings and other legacy `utils`/raw-request call sites do not yet carry
+this binding. Do not assume a new mutation is protected merely because it is
+home-only; use `PortalClient` for account-bound requests.

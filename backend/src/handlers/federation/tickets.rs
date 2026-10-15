@@ -312,6 +312,81 @@ mod tests {
             .unwrap();
     }
     #[tokio::test]
+    async fn home_websocket_account_binding_rejects_switched_cookie() {
+        use tower_cookies::{Cookie, Cookies};
+        let Some(pool) = crate::test_support::shared_pool() else {
+            return;
+        };
+        let state = Arc::new(crate::test_support::test_app_state(pool.clone()));
+        let mut conn = pool.get().unwrap();
+        let first = crate::test_support::insert_user(&mut conn, "ws-account-first");
+        let second = crate::test_support::insert_user(&mut conn, "ws-account-second");
+        let cookie = |user: uuid::Uuid| {
+            let cookies = Cookies::default();
+            cookies.signed(&state.cookie_key).add(Cookie::new(
+                shared::protocol::SESSION_COOKIE_NAME,
+                user.to_string(),
+            ));
+            format!(
+                "{}={}",
+                shared::protocol::SESSION_COOKIE_NAME,
+                cookies
+                    .get(shared::protocol::SESSION_COOKIE_NAME)
+                    .unwrap()
+                    .value()
+            )
+        };
+        let app = crate::routes::build_router(state.clone()).unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .await
+            .unwrap();
+        });
+        let request = |query: &str, user: Option<uuid::Uuid>| {
+            let mut request = format!("ws://{addr}/ws/client{query}")
+                .into_client_request()
+                .unwrap();
+            if let Some(user) = user {
+                request
+                    .headers_mut()
+                    .insert(header::COOKIE, cookie(user).parse().unwrap());
+            }
+            request
+        };
+        for query in [String::new(), format!("?account={}", first.id)] {
+            let (mut socket, _) = connect_async(request(&query, Some(first.id)))
+                .await
+                .unwrap();
+            socket.close(None).await.unwrap();
+        }
+        for query in [format!("?account={}", first.id), "?account=invalid".into()] {
+            let error = connect_async(request(&query, Some(second.id)))
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(error, tokio_tungstenite::tungstenite::Error::Http(response) if response.status() == axum::http::StatusCode::FORBIDDEN)
+            );
+        }
+        assert!(
+            connect_async(request(&format!("?account={}", first.id), None))
+                .await
+                .is_err()
+        );
+        assert!(connect_async(request(
+            &format!("?account={}&ticket=not-a-ticket", first.id),
+            Some(first.id)
+        ))
+        .await
+        .is_err());
+        server.abort();
+    }
+
+    #[tokio::test]
     async fn http_consent_rotates_and_revokes_a_scoped_bearer() {
         use shared::api::{
             DeviceCodeResponse, DeviceFlowPollRequest, FederationPolicy,

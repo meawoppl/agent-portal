@@ -26,6 +26,16 @@ pub struct Connection {
     pub synced_id: Option<Uuid>,
     pub client: Option<PortalClient>,
     pub status: String,
+    pub live_status: Option<String>,
+}
+
+impl Connection {
+    pub fn display_status(&self) -> String {
+        match &self.live_status {
+            Some(live) => format!("{} · {live}", self.status),
+            None => self.status.clone(),
+        }
+    }
 }
 
 #[derive(Clone, PartialEq)]
@@ -62,6 +72,7 @@ pub enum FederationAction {
     Remove(ConnId),
     Deactivate(ConnId, String),
     Status(ConnId, String),
+    LiveStatus(ConnId, Option<String>),
 }
 
 impl Reducible for FederationState {
@@ -114,6 +125,7 @@ impl Reducible for FederationState {
                     synced_id,
                     client,
                     status,
+                    live_status: None,
                 };
                 if let Some(index) = existing {
                     state.rows[index] = row;
@@ -125,9 +137,15 @@ impl Reducible for FederationState {
                 if let Some(row) = state.rows.iter_mut().find(|row| row.id == id) {
                     row.client = None;
                     row.status = status;
+                    row.live_status = None;
                 }
             }
             FederationAction::Remove(id) => state.rows.retain(|row| row.id != id),
+            FederationAction::LiveStatus(id, status) => {
+                if let Some(row) = state.rows.iter_mut().find(|row| row.id == id) {
+                    row.live_status = status;
+                }
+            }
             FederationAction::Status(id, status) => {
                 if let Some(row) = state.rows.iter_mut().find(|row| row.id == id) {
                     row.status = status;
@@ -210,6 +228,7 @@ pub fn provider(props: &ProviderProps) -> Html {
                                 synced_id: Some(c.id),
                                 client: None,
                                 status: "Authorize this device to connect".into(),
+                                live_status: None,
                             })
                             .collect();
                     }
@@ -238,7 +257,7 @@ pub fn provider(props: &ProviderProps) -> Html {
                                 utils::fetch_json::<MeResponse>("/api/auth/me", On401::Ignore)
                                     .await
                                     .map(|me| me.id != account)
-                                    .unwrap_or(true);
+                                    .unwrap_or(false);
                             if changed {
                                 if let Some(w) = web_sys::window() {
                                     let _ = w.location().reload();

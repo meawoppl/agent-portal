@@ -36,3 +36,7 @@ access linked credentials, so only use a home portal whose operator you trust.
 
 For deployment and protocol details, see [the federation design](design/FEDERATION_DISCUSSION.md)
 and [authentication flows](AUTH_FLOWS.md).
+
+Account-qualified browser preferences start fresh on upgrade. Legacy hidden
+session and last-active keys are not imported, because their owning account
+cannot be established safely.

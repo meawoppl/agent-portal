@@ -29,8 +29,8 @@ pub const SERVICE_CPU_HISTORY_CAP: usize = 60;
 /// It also makes the merge a pure function, so the invariant the old design
 /// could only assert in a doc comment is now a test.
 ///
-/// This is the home portal's user channel, so every session id it reports is
-/// a home session and the per-session maps are keyed by [`SessionKey::home`].
+/// Each user-channel callback supplies its connection identity. Session maps
+/// retain it; home-wide service statistics and trends remain home-only.
 #[derive(Default, PartialEq)]
 pub(crate) struct ClientWsState {
     pub recent_turn_metrics: Vec<TurnMetrics>,

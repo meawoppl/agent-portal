@@ -887,17 +887,23 @@ impl Component for SessionView {
                 self.ws_sender = Some(sender);
                 self.reconnect_attempt = 0;
                 self.reconnect_timer = None;
-                // Flush inputs typed while the socket was down. Only frames
-                // never handed to the transport are resent, so this can't
-                // duplicate anything the backend already received.
+                // Home replay uses backend message-id deduplication. Linked
+                // authority never automatically replays unresolved mutations.
                 if ctx.props().portal.is_linked() {
                     // Never replay uncertain remote mutations on reconnect.
                     // Preserve their visible delivery warning for user review.
-                    for (id, _) in self.outbox.unresolved() {
+                    for (id, transmitted) in self.outbox.delivery_states() {
                         self.outbox.resolve(id);
-                        update_pending_send_delivery(&mut self.pending_sends, id,
+                        update_pending_send_delivery(
+                            &mut self.pending_sends,
+                            id,
                             shared::InputDeliveryStage::Failed,
-                            Some("Delivery uncertain after reconnect; check the transcript before retrying"));
+                            Some(if transmitted {
+                                "Delivery uncertain after reconnect; check the transcript before retrying"
+                            } else {
+                                "Not sent; retry when connected"
+                            }),
+                        );
                     }
                 } else {
                     self.flush_outbox();

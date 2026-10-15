@@ -3,7 +3,7 @@
 #[path = "client_websocket_events.rs"]
 mod client_websocket_events;
 
-use crate::federation::Federation;
+use crate::federation::{Federation, FederationAction};
 use crate::portal_client::{use_portal, ConnId, SessionKey};
 use crate::utils::{calculate_backoff, parse_version, On401};
 use client_websocket_events::handle_server_message;
@@ -93,20 +93,56 @@ pub fn use_client_websocket() -> UseClientWebSocket {
     if let Some(registry) = &registry {
         portals.extend(registry.rows.iter().filter_map(|r| r.client.clone()));
     }
+    let tasks = use_mut_ref(
+        HashMap::<
+            ConnId,
+            (
+                crate::portal_client::PortalClient,
+                futures_util::future::AbortHandle,
+            ),
+        >::new,
+    );
     {
+        let tasks = tasks.clone();
+        use_effect_with((), move |_| {
+            move || {
+                for (_, (_, abort)) in tasks.borrow_mut().drain() {
+                    abort.abort();
+                }
+            }
+        });
+    }
+    {
+        let tasks = tasks.clone();
+        let registry = registry.clone();
         let shutdown_reason = shutdown_reason.clone();
         let update_available = update_available.clone();
         let live = live.clone();
         use_effect_with(portals.clone(), move |portals| {
-            let mut aborts = Vec::new();
+            // A new linked account must not restart unrelated sockets or
+            // reset home server-version tracking.
+            tasks.borrow_mut().retain(|_, (client, abort)| {
+                if portals.contains(client) {
+                    true
+                } else {
+                    abort.abort();
+                    false
+                }
+            });
             for portal in portals.clone() {
+                if tasks.borrow().contains_key(&portal.conn()) {
+                    continue;
+                }
+                let registry = registry.clone();
                 let (shutdown_reason, update_available, live) = (
                     shutdown_reason.clone(),
                     update_available.clone(),
                     live.clone(),
                 );
                 let (abort, registration) = futures_util::future::AbortHandle::new_pair();
-                aborts.push(abort);
+                tasks
+                    .borrow_mut()
+                    .insert(portal.conn(), (portal.clone(), abort));
                 spawn_local(async move {
                     let _ = futures_util::future::Abortable::new(
                         async move {
@@ -132,6 +168,12 @@ pub fn use_client_websocket() -> UseClientWebSocket {
                             let mut attempt = 0;
                             let mut known_version: Option<String> = None;
                             loop {
+                                if portal.is_linked() {
+                                    live.dispatch(client_websocket_events::ClientWsAction::SessionProgressReset(portal.conn()));
+                                    if let Some(registry) = &registry {
+                                        registry.dispatch(FederationAction::LiveStatus(portal.conn(), Some("Connecting live updates".into())));
+                                    }
+                                }
                                 match portal.socket_url().await {
                                     Ok(endpoint) => match ws_bridge::yew_client::connect_to::<
                                         ClientEndpoint,
@@ -139,7 +181,6 @@ pub fn use_client_websocket() -> UseClientWebSocket {
                                         &endpoint
                                     ) {
                                         Ok(conn) => {
-                                            attempt = 0;
                                             if portal.conn() == ConnId::HOME {
                                                 shutdown_reason.set(None);
                                                 if let Ok(config) = portal
@@ -163,14 +204,19 @@ pub fn use_client_websocket() -> UseClientWebSocket {
                                                 }
                                             }
                                             let (_sender, mut receiver) = conn.split();
+                                            let mut announced = false;
                                             while let Some(result) = receiver.recv().await {
                                                 match result {
-                                                    Ok(msg) => handle_server_message(
-                                                        portal.conn(),
-                                                        msg,
-                                                        &shutdown_reason,
-                                                        &live,
-                                                    ),
+                                                    Ok(msg) => {
+                                                        if !announced {
+                                                            announced = true;
+                                                            attempt = 0;
+                                                            if let Some(registry) = &registry {
+                                                                registry.dispatch(FederationAction::LiveStatus(portal.conn(), None));
+                                                            }
+                                                        }
+                                                        handle_server_message(portal.conn(), msg, &shutdown_reason, &live);
+                                                    },
                                                     Err(_) => break,
                                                 }
                                             }
@@ -185,7 +231,17 @@ pub fn use_client_websocket() -> UseClientWebSocket {
                                         portal.origin()
                                     ),
                                 }
+                                if portal.is_linked() {
+                                    live.dispatch(client_websocket_events::ClientWsAction::SessionProgressReset(portal.conn()));
+                                    if let Some(registry) = &registry {
+                                        registry.dispatch(FederationAction::LiveStatus(portal.conn(), Some("Reconnecting live updates".into())));
+                                    }
+                                }
                                 if attempt >= 10 {
+                                    if let Some(registry) = &registry {
+                                        registry.dispatch(FederationAction::LiveStatus(portal.conn(), Some("Live updates unavailable; unlink and authorize again".into())));
+                                    }
+                                    live.dispatch(client_websocket_events::ClientWsAction::SessionProgressReset(portal.conn()));
                                     break;
                                 }
                                 let delay = calculate_backoff(attempt);
@@ -198,13 +254,8 @@ pub fn use_client_websocket() -> UseClientWebSocket {
                     .await;
                 });
             }
-            // Abort drops socket halves, pending fetches and reconnect timers.
-            // Removing a connection must never leave an old task dispatching.
-            move || {
-                for abort in aborts {
-                    abort.abort();
-                }
-            }
+            // Per-connection removal above and unmount cleanup own aborts.
+            || {}
         });
     }
     let current: std::collections::HashSet<_> = portals.iter().map(|p| p.conn()).collect();

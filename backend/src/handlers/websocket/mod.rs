@@ -100,6 +100,8 @@ pub async fn handle_launcher_websocket(
 #[derive(serde::Deserialize)]
 pub struct ClientSocketQuery {
     ticket: Option<String>,
+    /// Narrows cookie authority for a browser view; never authenticates it.
+    account: Option<String>,
 }
 
 pub async fn handle_web_client_websocket(
@@ -110,7 +112,7 @@ pub async fn handle_web_client_websocket(
     Query(query): Query<ClientSocketQuery>,
 ) -> Response {
     if let Some(ticket) = query.ticket {
-        if headers.contains_key(axum::http::header::AUTHORIZATION) {
+        if query.account.is_some() || headers.contains_key(axum::http::header::AUTHORIZATION) {
             return StatusCode::BAD_REQUEST.into_response();
         }
         return match crate::handlers::federation::tickets::consume(&app_state, &ticket, &headers) {
@@ -135,6 +137,17 @@ pub async fn handle_web_client_websocket(
             return StatusCode::UNAUTHORIZED.into_response();
         }
     };
+
+    // Bind every home reconnect to the account that rendered the view.
+    // A cookie changed in another tab must not authorize queued input as
+    // a different user, even when both users can edit the same session.
+    if query
+        .account
+        .as_deref()
+        .is_some_and(|expected| expected.parse::<uuid::Uuid>().ok() != Some(user_id))
+    {
+        return StatusCode::FORBIDDEN.into_response();
+    }
 
     info!("Authenticated WebSocket upgrade for user: {}", user_id);
     ws.on_upgrade(move |socket| {

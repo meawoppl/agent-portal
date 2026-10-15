@@ -17,9 +17,22 @@ use std::rc::Rc;
 use gloo_net::http::{Request, RequestBuilder};
 use serde::de::DeserializeOwned;
 use uuid::Uuid;
+use wasm_bindgen::JsCast;
 use yew::prelude::*;
 
 use crate::utils::{self, FetchError, On401};
+
+/// Cancel a fetch stream even if its consuming view disappears mid-read.
+struct MediaReader(web_sys::ReadableStreamDefaultReader);
+impl Drop for MediaReader {
+    fn drop(&mut self) {
+        let cancelled = self.0.cancel();
+        wasm_bindgen_futures::spawn_local(async move {
+            let _ = wasm_bindgen_futures::JsFuture::from(cancelled).await;
+        });
+        self.0.release_lock();
+    }
+}
 
 /// Which connection — the home portal, or one linked account on another
 /// portal — a session was loaded through. Session ids are only unique within
@@ -181,12 +194,34 @@ impl PortalClient {
             .headers()
             .get("content-type")
             .unwrap_or_else(|| "application/octet-stream".into());
-        let bytes = response.binary().await.map_err(|e| e.to_string())?;
-        if bytes.len() > MAX_BYTES {
-            return Err("Media exceeds the 100 MB browser limit".into());
+        // Enforce the cap while reading, including chunked responses. Do
+        // not buffer an unbounded body before checking its size.
+        let body = response.body().ok_or("Media response has no body")?;
+        let reader = MediaReader(body.get_reader().unchecked_into());
+        let parts = js_sys::Array::new();
+        let mut total = 0usize;
+        loop {
+            let value = wasm_bindgen_futures::JsFuture::from(reader.0.read())
+                .await
+                .map_err(|_| "Media stream failed".to_string())?;
+            let done = js_sys::Reflect::get(&value, &"done".into())
+                .map_err(|_| "Invalid media stream".to_string())?
+                .as_bool()
+                .unwrap_or(false);
+            if done {
+                break;
+            }
+            let chunk = js_sys::Reflect::get(&value, &"value".into())
+                .map_err(|_| "Invalid media chunk".to_string())?;
+            let bytes = chunk
+                .dyn_into::<js_sys::Uint8Array>()
+                .map_err(|_| "Invalid media bytes".to_string())?;
+            total = total.saturating_add(bytes.length() as usize);
+            if total > MAX_BYTES {
+                return Err("Media exceeds the 100 MB browser limit".into());
+            }
+            parts.push(&bytes);
         }
-        let array = js_sys::Uint8Array::from(bytes.as_slice());
-        let parts = js_sys::Array::of1(array.as_ref());
         let options = web_sys::BlobPropertyBag::new();
         options.set_type(&mime);
         web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &options)
@@ -212,7 +247,10 @@ impl PortalClient {
             return Err(FetchError::Status(403));
         }
         let Some(credentials) = &self.linked else {
-            return Ok(self.ws_url("/ws/client"));
+            return Ok(match self.home_user {
+                Some(user) => format!("{}?account={user}", self.ws_url("/ws/client")),
+                None => self.ws_url("/ws/client"),
+            });
         };
         let discovery = crate::federation::discover(&self.origin)
             .await

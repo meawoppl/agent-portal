@@ -193,6 +193,17 @@ pub fn linked_portals() -> Html {
                                     || grant.scope != pending.scope
                                     || grant.revoked_at.is_some()
                                 {
+                                    // A rejected approval must not orphan usable authority.
+                                    // Never follow a server-supplied origin with its token.
+                                    let _ = Request::delete(&format!(
+                                        "{}/api/linked-grants/{}",
+                                        pending.origin, grant.id
+                                    ))
+                                    .credentials(RequestCredentials::Omit)
+                                    .redirect(RequestRedirect::Error)
+                                    .header("Authorization", &format!("Bearer {access_token}"))
+                                    .send()
+                                    .await;
                                     error.set("The approval did not match the requested portal, instance, origin or scope".into());
                                     pending_state.set(None);
                                     return;
@@ -306,7 +317,7 @@ pub fn linked_portals() -> Html {
                     });
                 });
                 html! { <article class="linked-portal-card">
-                    <strong>{&row.origin}</strong><p>{&row.email}</p><p>{&row.status}</p>
+                    <strong>{&row.origin}</strong><p>{&row.email}</p><p>{row.display_status()}</p>
                     <button onclick={remove}>{if row.client.is_some() {"Revoke and unlink"} else {"Remove saved connection"}}</button>
                 </article> }
             }) }

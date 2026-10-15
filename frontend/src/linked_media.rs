@@ -31,28 +31,36 @@ pub fn use_media_url(reference: &str) -> Result<Option<String>, String> {
         let resolved = resolved.clone();
         let path = path.clone();
         use_effect_with(key.clone(), move |key| {
+            let (abort, registration) = futures_util::future::AbortHandle::new_pair();
             let cancelled = Rc::new(Cell::new(false));
             let allocated = Rc::new(RefCell::new(None::<String>));
             if let Some(path) = path {
                 let (cancelled, allocated, key) =
                     (cancelled.clone(), allocated.clone(), key.clone());
                 spawn_local(async move {
-                    let result = key.0.media_blob(&path).await;
-                    if cancelled.get() {
-                        return;
-                    }
-                    let url = result.and_then(|blob| {
-                        web_sys::Url::create_object_url_with_blob(&blob)
-                            .map_err(|_| "Cannot create media URL".to_string())
-                    });
-                    if let Ok(url) = &url {
-                        *allocated.borrow_mut() = Some(url.clone());
-                    }
-                    resolved.set(Some((key, url)));
+                    let _ = futures_util::future::Abortable::new(
+                        async move {
+                            let result = key.0.media_blob(&path).await;
+                            if cancelled.get() {
+                                return;
+                            }
+                            let url = result.and_then(|blob| {
+                                web_sys::Url::create_object_url_with_blob(&blob)
+                                    .map_err(|_| "Cannot create media URL".to_string())
+                            });
+                            if let Ok(url) = &url {
+                                *allocated.borrow_mut() = Some(url.clone());
+                            }
+                            resolved.set(Some((key, url)));
+                        },
+                        registration,
+                    )
+                    .await;
                 });
             }
             move || {
                 cancelled.set(true);
+                abort.abort();
                 if let Some(url) = allocated.borrow_mut().take() {
                     let _ = web_sys::Url::revoke_object_url(&url);
                 }

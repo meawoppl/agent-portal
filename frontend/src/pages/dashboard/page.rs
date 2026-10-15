@@ -834,7 +834,7 @@ pub fn dashboard_page() -> Html {
                 if !registry.rows.is_empty() {
                     <aside class="linked-connections" aria-label="Linked portal connections">
                         { for registry.rows.iter().map(|row| html! {
-                            <div class="linked-connection-status"><strong>{&row.origin}</strong>{" · "}{&row.email}{" — "}{&row.status}</div>
+                            <div class="linked-connection-status"><strong>{&row.origin}</strong>{" · "}{&row.email}{" — "}{row.display_status()}</div>
                         }) }
                     </aside>
                 }
