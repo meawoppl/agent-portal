@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200" font-family="sans-serif">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-size="24" fill="#565f89">FEDERATION / SOCKET AUTHORIZATION / PR 2233</text>
+<text x="55" y="100" font-size="34" fill="#e6e9f5">A browser socket gets one narrow ticket, never a long-lived</text>
+<text x="55" y="140" font-size="34" fill="#e6e9f5">access token in its URL. Authority remains live after upgrade.</text>
+<line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666"/>
+<line x1="1000" y1="190" x2="1000" y2="1140" stroke="#565f89" stroke-dasharray="12 14"/>
+<text x="105" y="235" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1090" y="235" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="105" y="280" width="840" height="180" rx="8" fill="#1e202e" stroke="#f7768e"/>
+<text x="129" y="325" font-size="26" fill="#f7768e">Linked REST scope is enforced</text>
+<text x="129" y="368" font-size="23" fill="#a9b1d6">Browser sockets cannot attach a bearer header.</text>
+<text x="129" y="406" font-size="23" fill="#a9b1d6">Linked WS upgrades remain disabled.</text>
+<line x1="525" y1="460" x2="525" y2="510" stroke="#565f89" stroke-width="3"/>
+<rect x="105" y="510" width="840" height="180" rx="8" fill="#1e202e" stroke="#f7768e"/>
+<text x="129" y="555" font-size="26" fill="#f7768e">Upgrade-only checks are insufficient</text>
+<text x="129" y="598" font-size="23" fill="#a9b1d6">A live socket can outlast its credential or grant.</text>
+<text x="129" y="636" font-size="23" fill="#a9b1d6">Revocation must affect queued messages too.</text>
+<line x1="525" y1="690" x2="525" y2="740" stroke="#565f89" stroke-width="3"/>
+<rect x="105" y="740" width="840" height="180" rx="8" fill="#1e202e" stroke="#f7768e"/>
+<text x="129" y="785" font-size="26" fill="#f7768e">Discovery advertises no linked access</text>
+<text x="129" y="828" font-size="23" fill="#a9b1d6">The client cannot start until the full server</text>
+<text x="129" y="866" font-size="23" fill="#a9b1d6">authorization boundary is available.</text>
+<rect x="1055" y="280" width="840" height="180" rx="8" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="325" font-size="26" fill="#9ece6a">Exchange bearer for a 30-second ticket</text>
+<text x="1079" y="368" font-size="23" fill="#a9b1d6">Bind account, origin, grant, token and scope.</text>
+<text x="1079" y="406" font-size="23" fill="#a9b1d6">Store a hash; consume atomically exactly once.</text>
+<line x1="1475" y1="460" x2="1475" y2="510" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="510" width="840" height="180" rx="8" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="555" font-size="26" fill="#9ece6a">Recheck every inbound and outbound frame</text>
+<text x="1079" y="598" font-size="23" fill="#a9b1d6">Existing session roles still apply.</text>
+<text x="1079" y="636" font-size="23" fill="#a9b1d6">Idle sockets recheck every five seconds.</text>
+<line x1="1475" y1="690" x2="1475" y2="740" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="740" width="840" height="180" rx="8" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="785" font-size="26" fill="#9ece6a">Advertise the implemented capability set</text>
+<text x="1079" y="828" font-size="23" fill="#a9b1d6">Enrollment + write scope + ticket socket auth.</text>
+<text x="1079" y="866" font-size="23" fill="#a9b1d6">Admin policy stays off until explicitly enabled.</text>
+<text x="55" y="1172" font-size="22" fill="#e0af68">Real socket tests: invalid-ticket fallback, replay, read-only mutation, revocation; concurrent consume probe.</text>
+</svg>
