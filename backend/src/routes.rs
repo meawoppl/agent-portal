@@ -186,7 +186,7 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
         )
         .route(
             FEDERATION_DISCOVERY_PATH,
-            get(handlers::federation::discovery),
+            get(handlers::federation_discovery::discovery),
         )
         // Native mobile app-link association files. These must be served at
         // exact well-known paths, before the SPA fallback below.
