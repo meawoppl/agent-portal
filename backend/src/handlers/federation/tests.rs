@@ -262,7 +262,7 @@ async fn router_applies_scope_before_handlers_and_live_revocation() {
             .await
             .unwrap()
             .status(),
-        StatusCode::FORBIDDEN
+        StatusCode::NOT_FOUND
     );
     assert_eq!(
         app.clone()

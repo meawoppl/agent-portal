@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200" font-family="sans-serif">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-size="24" fill="#565f89">PR #2229 · Enforce grant-bound scopes for linked portal credentials</text>
+<text x="55" y="100" font-size="34" fill="#e6e9f5">Legacy token verification returns a user, with no linked-client authorization ceiling.</text>
+<text x="55" y="140" font-size="34" fill="#e6e9f5">Linked credentials now keep their grant and scope; unknown routes deny them.</text>
+<line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666"/>
+<line x1="1000" y1="190" x2="1000" y2="1140" stroke="#565f89" stroke-dasharray="12 14"/>
+<text x="105" y="235" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1090" y="235" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="105" y="280" width="840" height="180" rx="8" fill="#1e202e" stroke="#f7768e"/>
+<text x="129" y="325" font-size="26" fill="#f7768e">verify_and_get_user</text>
+<text x="129" y="368" font-size="23" fill="#a9b1d6">JWT + token row -&gt; user_id and email</text>
+<text x="129" y="406" font-size="23" fill="#a9b1d6">No grant, scope or client-origin context.</text>
+<line x1="525" y1="460" x2="525" y2="510" stroke="#565f89" stroke-width="3"/>
+<rect x="105" y="510" width="840" height="180" rx="8" fill="#1e202e" stroke="#f7768e"/>
+<text x="129" y="555" font-size="26" fill="#f7768e">Legacy renewal and forward handoff</text>
+<text x="129" y="598" font-size="23" fill="#a9b1d6">Both confer credentials without a linked scope.</text>
+<text x="129" y="636" font-size="23" fill="#a9b1d6">They cannot safely accept a restricted grant.</text>
+<line x1="525" y1="690" x2="525" y2="740" stroke="#565f89" stroke-width="3"/>
+<rect x="105" y="740" width="840" height="180" rx="8" fill="#1e202e" stroke="#f7768e"/>
+<text x="129" y="785" font-size="26" fill="#f7768e">Web-client socket</text>
+<text x="129" y="828" font-size="23" fill="#a9b1d6">Authenticated user retained for the connection.</text>
+<text x="129" y="866" font-size="23" fill="#a9b1d6">No linked-token revocation or scope checks.</text>
+<rect x="1055" y="280" width="840" height="180" rx="8" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="325" font-size="26" fill="#9ece6a">linked_client_grants + LinkedAuth</text>
+<text x="1079" y="368" font-size="23" fill="#a9b1d6">Opaque ap_link_ bearer; token hash stored in DB.</text>
+<text x="1079" y="406" font-size="23" fill="#a9b1d6">Token, grant, origin, expiry and live policy checked.</text>
+<line x1="1475" y1="460" x2="1475" y2="510" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="510" width="840" height="180" rx="8" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="555" font-size="26" fill="#9ece6a">linked_scope_gate</text>
+<text x="1079" y="598" font-size="23" fill="#a9b1d6">Explicit method + route allowlist; default deny.</text>
+<text x="1079" y="636" font-size="23" fill="#a9b1d6">Legacy renewal and forward-host access blocked.</text>
+<line x1="1475" y1="690" x2="1475" y2="740" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="740" width="840" height="180" rx="8" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="785" font-size="26" fill="#9ece6a">Web-client scope enforcement</text>
+<text x="1079" y="828" font-size="23" fill="#a9b1d6">Read and write checked before each frame.</text>
+<text x="1079" y="866" font-size="23" fill="#a9b1d6">Idle sockets recheck authority every five seconds.</text>
+<text x="55" y="1172" font-size="22" fill="#e0af68">Policy starts off. No linked credentials are issued; linked WS entry stays disabled until one-use tickets land.</text>
+</svg>
