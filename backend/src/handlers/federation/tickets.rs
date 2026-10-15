@@ -472,6 +472,19 @@ mod tests {
             .headers_mut()
             .insert(header::ORIGIN, home.parse().unwrap());
         let (mut socket, _) = connect_async(request).await.unwrap();
+        // Exercise expiry recovery through the real scope middleware, not
+        // just the refresh handler: normal access must still reject the token.
+        diesel::update(
+            proxy_auth_tokens::table
+                .filter(proxy_auth_tokens::token_hash.eq(crate::jwt::hash_token(&token))),
+        )
+        .set(
+            proxy_auth_tokens::expires_at
+                .eq(chrono::Utc::now().naive_utc() - chrono::Duration::seconds(1)),
+        )
+        .execute(&mut conn)
+        .unwrap();
+        assert_eq!(sessions(token.clone()).await.unwrap().status(), 401);
         let refresh = client
             .post(format!("{remote}/api/linked-grants/refresh"))
             .header("origin", home)
