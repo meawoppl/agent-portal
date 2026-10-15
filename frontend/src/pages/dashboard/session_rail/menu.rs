@@ -162,7 +162,7 @@ fn render_menu_content(entry: &PortalSession, props: &SessionRailMenuProps) -> H
         )
     };
 
-    let pause_option = if session.my_role != SessionRole::Viewer {
+    let pause_option = if entry.portal.can_write() && session.my_role != SessionRole::Viewer {
         let (pause_label, pause_hint) = if is_paused {
             ("Resume Session", "Restart from saved session")
         } else {
@@ -178,29 +178,31 @@ fn render_menu_content(entry: &PortalSession, props: &SessionRailMenuProps) -> H
         html! {}
     };
 
-    let stop_option =
-        if is_paused || (is_connected && session.status == shared::SessionStatus::Active) {
-            let (stop_label, stop_hint) = if props.confirming_stop {
-                let hint = if is_paused {
-                    "This will remove the saved launcher entry"
-                } else {
-                    "This will terminate the process"
-                };
-                ("Click again to confirm", hint)
-            } else if is_paused {
-                ("Stop Session", "Remove saved launcher entry")
+    let stop_option = if entry.portal.can_write()
+        && session.my_role.can_mutate()
+        && (is_paused || (is_connected && session.status == shared::SessionStatus::Active))
+    {
+        let (stop_label, stop_hint) = if props.confirming_stop {
+            let hint = if is_paused {
+                "This will remove the saved launcher entry"
             } else {
-                ("Stop Session", "Terminate process")
+                "This will terminate the process"
             };
-            menu_option(
-                classes!("stop", props.confirming_stop.then_some("confirming")),
-                stop_label,
-                stop_hint,
-                on_stop,
-            )
+            ("Click again to confirm", hint)
+        } else if is_paused {
+            ("Stop Session", "Remove saved launcher entry")
         } else {
-            html! {}
+            ("Stop Session", "Terminate process")
         };
+        menu_option(
+            classes!("stop", props.confirming_stop.then_some("confirming")),
+            stop_label,
+            stop_hint,
+            on_stop,
+        )
+    } else {
+        html! {}
+    };
 
     let on_copy_id = {
         let on_set_copied_id = props.on_set_copied_id.clone();
@@ -229,7 +231,7 @@ fn render_menu_content(entry: &PortalSession, props: &SessionRailMenuProps) -> H
     };
     let short_id = shared::short_uuid(&session.id);
 
-    let leave_option = if session.my_role != SessionRole::Owner {
+    let leave_option = if !entry.portal.is_linked() && session.my_role != SessionRole::Owner {
         menu_option(
             classes!("leave"),
             "Leave Session",
@@ -242,7 +244,7 @@ fn render_menu_content(entry: &PortalSession, props: &SessionRailMenuProps) -> H
 
     let repo_option = repo_pr_submenu(session, props.on_close.clone());
 
-    let share_option = if session.my_role == SessionRole::Owner {
+    let share_option = if !entry.portal.is_linked() && session.my_role == SessionRole::Owner {
         let on_share = close_then(props.on_close.clone(), {
             let on_share = props.on_share.clone();
             let entry = entry.clone();
@@ -258,7 +260,7 @@ fn render_menu_content(entry: &PortalSession, props: &SessionRailMenuProps) -> H
         html! {}
     };
 
-    let delete_option = if session.my_role == SessionRole::Owner {
+    let delete_option = if !entry.portal.is_linked() && session.my_role == SessionRole::Owner {
         // The armed hint carries what the confirm modal used to: with archiving
         // on this is a dashboard tidy-up, with it off the transcript is gone.
         let (delete_label, delete_hint) = if props.confirming_delete {
@@ -281,7 +283,7 @@ fn render_menu_content(entry: &PortalSession, props: &SessionRailMenuProps) -> H
         html! {}
     };
 
-    let schedule_option = if session.my_role == SessionRole::Owner {
+    let schedule_option = if entry.portal.can_write() && session.my_role == SessionRole::Owner {
         menu_option(
             classes!("schedule"),
             "Schedule Task",
@@ -291,7 +293,8 @@ fn render_menu_content(entry: &PortalSession, props: &SessionRailMenuProps) -> H
     } else {
         html! {}
     };
-    let fork_option = if session.my_role == SessionRole::Owner
+    let fork_option = if entry.portal.can_write()
+        && session.my_role == SessionRole::Owner
         && session.launcher_id.is_some()
         && !matches!(
             session.agent_type,

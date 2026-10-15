@@ -1,4 +1,4 @@
-use crate::portal_client::SessionKey;
+use crate::portal_client::{ConnId, SessionKey};
 use shared::{ServerToClient, ServiceStats, TurnMetrics};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -53,6 +53,8 @@ pub(crate) enum ClientWsAction {
     ServiceStats(Vec<ServiceStats>),
     /// One live `ServerToClient::TurnMetrics` frame.
     TurnMetrics(Box<TurnMetrics>),
+    LinkedMetrics(ConnId, Box<TurnMetrics>),
+    LinkedHydrate(ConnId, Vec<TurnMetrics>),
     /// One-shot REST seed: trend rows plus the per-session latest rows.
     Hydrate {
         trend: Vec<TurnMetrics>,
@@ -66,7 +68,7 @@ pub(crate) enum ClientWsAction {
     /// Drop every pill fill (`ServerToClient::SessionProgressReset`), sent on
     /// each (re)connect ahead of the live values so a fill learned before a
     /// drop can't outlive its bar.
-    SessionProgressReset,
+    SessionProgressReset(ConnId),
     LaunchEvent,
     LauncherEvent,
 }
@@ -108,6 +110,14 @@ impl Reducible for ClientWsState {
                     .retain(|id, _| services.iter().any(|s| &s.id == id));
                 next.service_stats = services;
             }
+            ClientWsAction::LinkedMetrics(conn, metrics) => {
+                insert_latest_for(conn, &mut next.latest_session_metrics, *metrics);
+            }
+            ClientWsAction::LinkedHydrate(conn, metrics) => {
+                for metric in metrics {
+                    insert_latest_for(conn, &mut next.latest_session_metrics, metric);
+                }
+            }
             ClientWsAction::TurnMetrics(metrics) => {
                 next.recent_turn_metrics = insert_recent_metric(
                     next.recent_turn_metrics,
@@ -143,7 +153,9 @@ impl Reducible for ClientWsState {
                     next.session_progress.remove(&session_id);
                 }
             },
-            ClientWsAction::SessionProgressReset => next.session_progress.clear(),
+            ClientWsAction::SessionProgressReset(conn) => {
+                next.session_progress.retain(|key, _| key.conn != conn)
+            }
             ClientWsAction::LaunchEvent => {
                 next.launch_event_counter = next.launch_event_counter.wrapping_add(1);
             }
@@ -156,6 +168,7 @@ impl Reducible for ClientWsState {
 }
 
 pub(crate) fn handle_server_message(
+    conn: ConnId,
     msg: ServerToClient,
     shutdown_reason: &UseStateHandle<Option<String>>,
     live: &UseReducerHandle<ClientWsState>,
@@ -175,25 +188,36 @@ pub(crate) fn handle_server_message(
                 reason,
                 reconnect_delay_ms
             );
-            shutdown_reason.set(Some(reason));
+            if conn == ConnId::HOME {
+                shutdown_reason.set(Some(reason));
+            }
         }
         ServerToClient::TurnMetrics(metrics) => {
-            live.dispatch(ClientWsAction::TurnMetrics(metrics));
+            live.dispatch(if conn == ConnId::HOME {
+                ClientWsAction::TurnMetrics(metrics)
+            } else {
+                ClientWsAction::LinkedMetrics(conn, metrics)
+            });
         }
         ServerToClient::ServiceStatsUpdate { services } => {
-            live.dispatch(ClientWsAction::ServiceStats(services));
+            if conn == ConnId::HOME {
+                live.dispatch(ClientWsAction::ServiceStats(services));
+            }
         }
         ServerToClient::SessionProgress {
             session_id,
             fraction,
         } => {
             live.dispatch(ClientWsAction::SessionProgress {
-                session_id: SessionKey::home(session_id),
+                session_id: SessionKey {
+                    conn,
+                    id: session_id,
+                },
                 fraction,
             });
         }
         ServerToClient::SessionProgressReset => {
-            live.dispatch(ClientWsAction::SessionProgressReset);
+            live.dispatch(ClientWsAction::SessionProgressReset(conn));
         }
         ServerToClient::LaunchSessionResult { success, error, .. } => {
             // Push signal from the backend that the launcher finished registering
@@ -207,7 +231,7 @@ pub(crate) fn handle_server_message(
             }
             live.dispatch(ClientWsAction::LaunchEvent);
         }
-        ServerToClient::LaunchersChanged => {
+        ServerToClient::LaunchersChanged if conn == ConnId::HOME => {
             // A launcher connected, dropped, or was evicted: tick so open
             // launcher lists refetch at the moment the change is visible.
             live.dispatch(ClientWsAction::LauncherEvent);
@@ -220,12 +244,23 @@ pub(crate) fn insert_latest_session_metric(
     latest: &mut HashMap<SessionKey, TurnMetrics>,
     incoming: TurnMetrics,
 ) {
+    insert_latest_for(ConnId::HOME, latest, incoming);
+}
+
+fn insert_latest_for(
+    conn: ConnId,
+    latest: &mut HashMap<SessionKey, TurnMetrics>,
+    incoming: TurnMetrics,
+) {
     // An agent/version that cannot report a context window must not erase the
     // last usable gauge. The bounded trend ring still retains that raw turn.
     if incoming.context_fraction().is_none() {
         return;
     }
-    let key = SessionKey::home(incoming.session_id);
+    let key = SessionKey {
+        conn,
+        id: incoming.session_id,
+    };
     let replace = latest
         .get(&key)
         .is_none_or(|existing| incoming.started_at >= existing.started_at);
@@ -310,6 +345,34 @@ mod tests {
     /// value and collapsed it to a single entry — session A's context bar
     /// vanishing the moment session B reported a turn.
     #[test]
+    fn linked_progress_reset_and_metrics_cannot_overwrite_home() {
+        let id = Uuid::new_v4();
+        let linked = ConnId::linked(1);
+        let home_key = SessionKey::home(id);
+        let foreign_key = SessionKey { conn: linked, id };
+        let state = Rc::new(ClientWsState::default())
+            .reduce(ClientWsAction::SessionProgress {
+                session_id: home_key,
+                fraction: Some(0.2),
+            })
+            .reduce(ClientWsAction::SessionProgress {
+                session_id: foreign_key,
+                fraction: Some(0.8),
+            })
+            .reduce(ClientWsAction::SessionProgressReset(linked));
+        assert_eq!(state.session_progress.get(&home_key), Some(&0.2));
+        assert!(!state.session_progress.contains_key(&foreign_key));
+        let state = state
+            .reduce(ClientWsAction::TurnMetrics(Box::new(gauged(id, 100))))
+            .reduce(ClientWsAction::LinkedMetrics(
+                linked,
+                Box::new(gauged(id, 200)),
+            ));
+        assert_eq!(state.latest_session_metrics.len(), 2);
+        assert_eq!(state.recent_turn_metrics.len(), 1);
+    }
+
+    #[test]
     fn a_busy_session_does_not_evict_another_sessions_gauge() {
         let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
         let state = Rc::new(ClientWsState::default());
@@ -376,7 +439,7 @@ mod tests {
             fraction: Some(0.5),
         });
 
-        let state = state.reduce(ClientWsAction::SessionProgressReset);
+        let state = state.reduce(ClientWsAction::SessionProgressReset(ConnId::HOME));
         let state = state.reduce(ClientWsAction::SessionProgress {
             session_id: b,
             fraction: Some(0.5),

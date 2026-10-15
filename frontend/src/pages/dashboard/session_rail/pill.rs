@@ -176,6 +176,9 @@ pub(super) fn session_pill(props: &SessionPillProps) -> Html {
                 { view.connection_symbol }
             </span>
             <span class="pill-name" title={view.repo_title.clone()}>
+                if props.session.portal.is_linked() {
+                    <span class="pill-portal" title={format!("{} · {}", props.session.portal.origin(), props.session.portal.account_label().unwrap_or(""))}>{props.session.portal.origin()}</span>
+                }
                 <span class="pill-session-name" title={session.session_name.clone()}>
                     { view.session_name }
                 </span>

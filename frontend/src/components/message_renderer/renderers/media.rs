@@ -5,7 +5,7 @@
 use super::lightbox_gesture::{LightboxGesture, LightboxView, Point};
 use crate::components::DismissibleBackdrop;
 use crate::hooks::use_escape_capture;
-use crate::portal_client::use_portal;
+use crate::linked_media::use_media_url;
 use yew::prelude::*;
 
 const ALLOWED_IMAGE_MEDIA_TYPES: &[&str] = &[
@@ -83,7 +83,7 @@ fn viewport_center() -> Point {
 
 #[function_component(ImageViewer)]
 fn image_viewer(props: &ImageViewerProps) -> Html {
-    let src = use_portal().resolve(&props.src);
+    let media_url = use_media_url(&props.src);
     let expanded = use_state(|| false);
     // The gesture (pointers, pinch baseline, current view) lives in a mut_ref,
     // not state: two fingers moving in one frame must each see the other's
@@ -113,6 +113,11 @@ fn image_viewer(props: &ImageViewerProps) -> Html {
         use_escape_capture(*expanded, Callback::from(move |()| expanded.set(false)));
     }
 
+    let src = match media_url {
+        Ok(Some(url)) => url,
+        Ok(None) => return html! { <div class="media-loading">{"Loading media…"}</div> },
+        Err(_) => return render_media_expired(props.filename.as_deref(), "media"),
+    };
     if *failed {
         return render_media_expired(props.filename.as_deref(), "image");
     }
@@ -374,9 +379,14 @@ struct VideoViewerProps {
 
 #[function_component(VideoViewer)]
 fn video_viewer(props: &VideoViewerProps) -> Html {
-    let src = use_portal().resolve(&props.src);
+    let media_url = use_media_url(&props.src);
     let failed = use_state(|| false);
 
+    let src = match media_url {
+        Ok(Some(url)) => url,
+        Ok(None) => return html! { <div class="media-loading">{"Loading media…"}</div> },
+        Err(_) => return render_media_expired(props.filename.as_deref(), "media"),
+    };
     if *failed {
         return render_media_expired(props.filename.as_deref(), "video");
     }

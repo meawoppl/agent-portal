@@ -58,7 +58,7 @@ use super::state::{
 };
 use super::tasks_panel::{derive_task_events, TasksInbound, TasksPanel};
 use super::types::{PendingPermission, WsSender, MAX_MESSAGES_PER_SESSION};
-use super::websocket::{connect_websocket, send_message, WsEvent};
+use super::websocket::{connect_websocket, send_message, SocketLifetime, WsEvent};
 use crate::pages::dashboard::types::{MessageData, MessagesResponse};
 use crate::pages::settings::agent_login::AgentLoginModal;
 use crate::utils::calculate_backoff;
@@ -313,15 +313,18 @@ fn plugin_notice_storage_key(session_id: Uuid) -> String {
     format!("{PLUGIN_NOTICE_STORAGE_PREFIX}{session_id}")
 }
 
-fn load_plugin_notice_expanded(session_id: Uuid) -> bool {
-    utils::storage_get(&plugin_notice_storage_key(session_id)).as_deref() == Some("true")
+fn load_plugin_notice_expanded(session_id: Uuid, portal: &PortalClient) -> bool {
+    let Some(key) = portal.storage_key(&plugin_notice_storage_key(session_id)) else {
+        return false;
+    };
+    utils::storage_get(&key).as_deref() == Some("true")
 }
 
-fn save_plugin_notice_expanded(session_id: Uuid, expanded: bool) {
-    utils::storage_set(
-        &plugin_notice_storage_key(session_id),
-        if expanded { "true" } else { "false" },
-    );
+fn save_plugin_notice_expanded(session_id: Uuid, expanded: bool, portal: &PortalClient) {
+    let Some(key) = portal.storage_key(&plugin_notice_storage_key(session_id)) else {
+        return;
+    };
+    utils::storage_set(&key, if expanded { "true" } else { "false" });
 }
 
 /// Messages for the SessionView component
@@ -462,6 +465,7 @@ struct PendingSecretDrop {
 }
 
 pub struct SessionView {
+    socket_lifetime: SocketLifetime,
     messages: Vec<RenderedMessage>,
     ws_connected: bool,
     ws_sender: Option<WsSender>,
@@ -569,6 +573,7 @@ impl Component for SessionView {
     type Properties = SessionViewProps;
 
     fn create(ctx: &Context<Self>) -> Self {
+        let socket_lifetime = SocketLifetime::default();
         let link = ctx.link().clone();
         let session_id = ctx.props().session.id;
         let session_key = Self::session_key(ctx);
@@ -616,7 +621,8 @@ impl Component for SessionView {
         // must precede the socket: its newest timestamp becomes the
         // `replay_after` watermark that keeps the server replay to a delta.
         let portal = ctx.props().portal.clone();
-        spawn_local(async move {
+        let lifetime = socket_lifetime.clone();
+        socket_lifetime.spawn(async move {
             let mut last_message_time: Option<String> = None;
 
             // `render_limit` sizes the page server-side to exactly what the
@@ -649,10 +655,18 @@ impl Component for SessionView {
             let on_event = Callback::from(move |event: WsEvent| {
                 ws_link.send_message(SessionViewMsg::WsEvent(event));
             });
-            connect_websocket(&portal, session_id, last_message_time, false, on_event);
+            connect_websocket(
+                &lifetime,
+                &portal,
+                session_id,
+                last_message_time,
+                false,
+                on_event,
+            );
         });
 
         Self {
+            socket_lifetime,
             messages: vec![],
             ws_connected: false,
             ws_sender: None,
@@ -680,18 +694,18 @@ impl Component for SessionView {
             muse_live_turn: MuseLiveTurn::default(),
             forwards_refresh: 0,
             open_forward_on_load: false,
-            pending_surface_restore: load_open_surface(session_id),
+            pending_surface_restore: load_open_surface(session_id, &ctx.props().portal),
             active_surface: None,
             plugins: Vec::new(),
             plugin_error: None,
-            plugin_notice_expanded: load_plugin_notice_expanded(session_id),
+            plugin_notice_expanded: load_plugin_notice_expanded(session_id, &ctx.props().portal),
             edit_stack_items: Vec::new(),
             edit_stack_active: None,
             edit_stack_send_all: false,
             edit_stack_error: None,
             edit_stack_panel_open: false,
             edit_stack_view: EditStackView::Pending,
-            surface_split_percent: load_split_percent(session_id),
+            surface_split_percent: load_split_percent(session_id, &ctx.props().portal),
             body_ref: NodeRef::default(),
             resize_listeners: Vec::new(),
             surface_escape_listener,
@@ -705,7 +719,8 @@ impl Component for SessionView {
             self.active_surface = None;
             self.plugins.clear();
             self.plugin_error = None;
-            self.plugin_notice_expanded = load_plugin_notice_expanded(ctx.props().session.id);
+            self.plugin_notice_expanded =
+                load_plugin_notice_expanded(ctx.props().session.id, &ctx.props().portal);
             self.edit_stack_items.clear();
             self.edit_stack_active = None;
             self.edit_stack_send_all = false;
@@ -713,8 +728,10 @@ impl Component for SessionView {
             self.edit_stack_panel_open = false;
             self.edit_stack_view = EditStackView::Pending;
             self.open_forward_on_load = false;
-            self.pending_surface_restore = load_open_surface(ctx.props().session.id);
-            self.surface_split_percent = load_split_percent(ctx.props().session.id);
+            self.pending_surface_restore =
+                load_open_surface(ctx.props().session.id, &ctx.props().portal);
+            self.surface_split_percent =
+                load_split_percent(ctx.props().session.id, &ctx.props().portal);
             edit_stack_fetch(ctx);
             plugin_inventory_fetch(ctx);
         }
@@ -770,6 +787,36 @@ impl Component for SessionView {
     }
 
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
+        let writable = ctx.props().portal.can_write() && ctx.props().session.my_role.can_mutate();
+        if !writable
+            && matches!(
+                &msg,
+                SessionViewMsg::PermissionAnswered(..)
+                    | SessionViewMsg::SendText(..)
+                    | SessionViewMsg::SendFrame(..)
+                    | SessionViewMsg::UploadPrompt { .. }
+                    | SessionViewMsg::SecretDrop { .. }
+                    | SessionViewMsg::Interrupt
+                    | SessionViewMsg::SendNextEditStackItem
+                    | SessionViewMsg::SendEditStackItem(..)
+                    | SessionViewMsg::SendAllEditStack
+                    | SessionViewMsg::DismissEditStackItem(..)
+                    | SessionViewMsg::ScheduleLimitContinuation(..)
+                    | SessionViewMsg::ShowForkDialog
+            )
+        {
+            return false;
+        }
+        if ctx.props().portal.is_linked()
+            && matches!(
+                &msg,
+                SessionViewMsg::OpenForwardSurface(..)
+                    | SessionViewMsg::ShowClaudeLogin
+                    | SessionViewMsg::TogglePluginsPanel
+            )
+        {
+            return false;
+        }
         match msg {
             SessionViewMsg::WsEvent(event) => self.handle_ws_event(ctx, event),
             SessionViewMsg::ShowForkDialog => {
@@ -843,7 +890,18 @@ impl Component for SessionView {
                 // Flush inputs typed while the socket was down. Only frames
                 // never handed to the transport are resent, so this can't
                 // duplicate anything the backend already received.
-                self.flush_outbox();
+                if ctx.props().portal.is_linked() {
+                    // Never replay uncertain remote mutations on reconnect.
+                    // Preserve their visible delivery warning for user review.
+                    for (id, _) in self.outbox.unresolved() {
+                        self.outbox.resolve(id);
+                        update_pending_send_delivery(&mut self.pending_sends, id,
+                            shared::InputDeliveryStage::Failed,
+                            Some("Delivery uncertain after reconnect; check the transcript before retrying"));
+                    }
+                } else {
+                    self.flush_outbox();
+                }
                 self.drain_edit_stack_queue_if_idle(ctx);
                 ctx.props()
                     .on_connected_change
@@ -953,7 +1011,7 @@ impl Component for SessionView {
                     if same_forward {
                         surface.update_forward(forward);
                         surface.collapsed = !surface.collapsed;
-                        save_open_surface(surface);
+                        save_open_surface(surface, &ctx.props().portal);
                         return true;
                     }
                 }
@@ -963,7 +1021,7 @@ impl Component for SessionView {
                     SessionSurfaceMode::Split
                 };
                 let surface = SessionSurface::from_forward(ctx.props().session.id, forward, mode);
-                save_open_surface(&surface);
+                save_open_surface(&surface, &ctx.props().portal);
                 self.edit_stack_panel_open = false;
                 self.active_surface = Some(surface);
                 true
@@ -1023,7 +1081,11 @@ impl Component for SessionView {
             }
             SessionViewMsg::TogglePluginNotice => {
                 self.plugin_notice_expanded = !self.plugin_notice_expanded;
-                save_plugin_notice_expanded(ctx.props().session.id, self.plugin_notice_expanded);
+                save_plugin_notice_expanded(
+                    ctx.props().session.id,
+                    self.plugin_notice_expanded,
+                    &ctx.props().portal,
+                );
                 true
             }
             SessionViewMsg::ToggleEditStackPanel => {
@@ -1107,7 +1169,7 @@ impl Component for SessionView {
                             forward.clone(),
                             mode,
                         );
-                        save_open_surface(&surface);
+                        save_open_surface(&surface, &ctx.props().portal);
                         self.edit_stack_panel_open = false;
                         self.pending_surface_restore = None;
                         self.active_surface = Some(surface);
@@ -1121,7 +1183,7 @@ impl Component for SessionView {
                             self.active_surface = Some(surface);
                             return true;
                         }
-                        clear_open_surface(ctx.props().session.id);
+                        clear_open_surface(ctx.props().session.id, &ctx.props().portal);
                     }
                 }
                 let Some(surface) = self.active_surface.as_mut() else {
@@ -1138,7 +1200,7 @@ impl Component for SessionView {
                     return false;
                 }
                 self.active_surface = None;
-                clear_open_surface(ctx.props().session.id);
+                clear_open_surface(ctx.props().session.id, &ctx.props().portal);
                 true
             }
             SessionViewMsg::CloseSurface => {
@@ -1151,7 +1213,7 @@ impl Component for SessionView {
                 if was_transient {
                     self.edit_stack_panel_open = false;
                 } else {
-                    clear_open_surface(ctx.props().session.id);
+                    clear_open_surface(ctx.props().session.id, &ctx.props().portal);
                 }
                 self.resize_listeners.clear();
                 true
@@ -1161,7 +1223,7 @@ impl Component for SessionView {
                     return false;
                 };
                 surface.collapsed = !surface.collapsed;
-                save_open_surface(surface);
+                save_open_surface(surface, &ctx.props().portal);
                 true
             }
             SessionViewMsg::ToggleSurfaceMode => {
@@ -1172,7 +1234,7 @@ impl Component for SessionView {
                     SessionSurfaceMode::Split => SessionSurfaceMode::Fullscreen,
                     SessionSurfaceMode::Fullscreen => SessionSurfaceMode::Split,
                 };
-                save_open_surface(surface);
+                save_open_surface(surface, &ctx.props().portal);
                 true
             }
             SessionViewMsg::SurfaceResizeStart(event) => {
@@ -1226,7 +1288,11 @@ impl Component for SessionView {
             }
             SessionViewMsg::SurfaceResizeEnd => {
                 self.resize_listeners.clear();
-                save_split_percent(ctx.props().session.id, self.surface_split_percent);
+                save_split_percent(
+                    ctx.props().session.id,
+                    self.surface_split_percent,
+                    &ctx.props().portal,
+                );
                 true
             }
             SessionViewMsg::EscapeSurface => {
@@ -1235,14 +1301,14 @@ impl Component for SessionView {
                 };
                 if surface.mode == SessionSurfaceMode::Fullscreen {
                     surface.mode = SessionSurfaceMode::Split;
-                    save_open_surface(surface);
+                    save_open_surface(surface, &ctx.props().portal);
                 } else {
                     let was_transient = surface.is_work_queue() || surface.is_plugins();
                     self.active_surface = None;
                     if was_transient {
                         self.edit_stack_panel_open = false;
                     } else {
-                        clear_open_surface(ctx.props().session.id);
+                        clear_open_surface(ctx.props().session.id, &ctx.props().portal);
                     }
                 }
                 true
@@ -1323,6 +1389,10 @@ impl Component for SessionView {
                 true
             }
         }
+    }
+
+    fn destroy(&mut self, _ctx: &Context<Self>) {
+        self.socket_lifetime.close();
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
@@ -1425,6 +1495,12 @@ impl Component for SessionView {
         html! {
             <ContextProvider<PortalClient> context={ctx.props().portal.clone()}>
             <div class={classes!("session-view", ctx.props().focused.then_some("focused"))}>
+                if ctx.props().portal.is_linked() {
+                    <div class="linked-session-origin">
+                        <span class="linked-account-label">{format!("{} · {}", ctx.props().portal.origin(), ctx.props().portal.account_label().unwrap_or("Linked account"))}</span>
+                        <a href={ctx.props().portal.url(&format!("/dashboard?session={}", ctx.props().session.id))} target="_blank" rel="noopener noreferrer">{"Open on portal"}</a>
+                    </div>
+                }
                 <div class="session-view-header">
                     <span class="session-name">{ &ctx.props().session.session_name }</span>
                     // Which model this session is running — claude's transcript
@@ -1459,6 +1535,7 @@ impl Component for SessionView {
                         aria-controls="session-plugins"
                         aria-expanded={plugins_open.to_string()}
                         onclick={ctx.link().callback(|_| SessionViewMsg::TogglePluginsPanel)}
+                        disabled={ctx.props().portal.is_linked()}
                     >
                         {
                             if plugin_count_label > 0 {
@@ -1468,13 +1545,13 @@ impl Component for SessionView {
                             }
                         }
                     </button>
-                    <ForwardChips
+                    if !ctx.props().portal.is_linked() { <ForwardChips
                         session_id={ctx.props().session.id}
                         is_owner={is_forward_owner}
                         refresh={self.forwards_refresh}
                         on_open={ctx.link().callback(SessionViewMsg::OpenForwardSurface)}
                         on_loaded={ctx.link().callback(SessionViewMsg::ForwardsLoaded)}
-                    />
+                    /> }
                     <button
                         type="button"
                         class={classes!(
@@ -1498,7 +1575,7 @@ impl Component for SessionView {
                         }
                     </button>
                     <span class={status_class}>{ ctx.props().session.status.as_str() }</span>
-                    if ctx.props().session.my_role == shared::SessionRole::Owner
+                    if ctx.props().portal.can_write() && ctx.props().session.my_role == shared::SessionRole::Owner
                         && ctx.props().session.launcher_id.is_some()
                         && !matches!(
                             ctx.props().session.agent_type,
@@ -1654,7 +1731,8 @@ impl SessionView {
     }
 
     fn claude_login_callback(&self, ctx: &Context<Self>) -> Option<Callback<()>> {
-        (ctx.props().session.agent_type == shared::AgentType::Claude
+        (!ctx.props().portal.is_linked()
+            && ctx.props().session.agent_type == shared::AgentType::Claude
             && ctx.props().session.my_role == shared::SessionRole::Owner
             && ctx.props().session.launcher_id.is_some())
         .then(|| ctx.link().callback(|_| SessionViewMsg::ShowClaudeLogin))
@@ -2514,6 +2592,7 @@ impl SessionView {
             link.send_message(SessionViewMsg::WsEvent(event));
         });
         connect_websocket(
+            &self.socket_lifetime,
             &ctx.props().portal,
             session_id,
             replay_after,
@@ -2649,7 +2728,7 @@ impl SessionView {
                         <button
                             type="button"
                             class="edit-stack-action"
-                            disabled={pending.is_empty() || busy}
+                            disabled={pending.is_empty() || busy || !ctx.props().portal.can_write()}
                             onclick={send_next}
                         >
                             { "Send next" }
@@ -2657,7 +2736,7 @@ impl SessionView {
                         <button
                             type="button"
                             class="edit-stack-action primary"
-                            disabled={pending.is_empty() || busy}
+                            disabled={pending.is_empty() || busy || !ctx.props().portal.can_write()}
                             onclick={send_all}
                         >
                             { if self.edit_stack_send_all { "Sending…" } else { "Send all" } }
@@ -2751,7 +2830,7 @@ impl SessionView {
                                         <button
                                             type="button"
                                             class="edit-stack-icon-action"
-                                            disabled={busy || is_active}
+                                            disabled={busy || is_active || !ctx.props().portal.can_write()}
                                             onclick={send_one}
                                             title="Send this item"
                                         >
@@ -2762,6 +2841,7 @@ impl SessionView {
                                         type="button"
                                         class="edit-stack-icon-action"
                                         onclick={dismiss}
+                                        disabled={!ctx.props().portal.can_write()}
                                         title={ if item.status == "pending" { "Dismiss this item" } else { "Remove this item" } }
                                     >
                                         { if item.status == "pending" { "Dismiss" } else { "Remove" } }
@@ -2776,6 +2856,9 @@ impl SessionView {
     }
 
     fn render_permission_handler(&self, ctx: &Context<Self>) -> Html {
+        if !ctx.props().portal.can_write() || !ctx.props().session.my_role.can_mutate() {
+            return html! {};
+        }
         let link = ctx.link();
         let on_register = link.callback(SessionViewMsg::PermissionDispatcherRegistered);
         let on_pending_changed = link.callback(SessionViewMsg::PermissionPendingChanged);
@@ -2802,6 +2885,9 @@ impl SessionView {
     }
 
     fn render_input_bar(&self, ctx: &Context<Self>) -> Html {
+        if !ctx.props().portal.can_write() || !ctx.props().session.my_role.can_mutate() {
+            return html! { <div class="linked-read-only">{"Read-only connection — commands and permission responses are disabled"}</div> };
+        }
         let link = ctx.link();
         let on_register = link.callback(SessionViewMsg::InputBarDispatcherRegistered);
         let on_send_text = link.callback(

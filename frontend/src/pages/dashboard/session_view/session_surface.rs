@@ -140,38 +140,55 @@ impl ForwardSurfaceMemory {
     }
 }
 
-pub fn load_open_surface(session_id: Uuid) -> Option<ForwardSurfaceMemory> {
-    let raw = utils::storage_get(&open_storage_key(session_id))?;
+pub fn load_open_surface(
+    session_id: Uuid,
+    portal: &crate::portal_client::PortalClient,
+) -> Option<ForwardSurfaceMemory> {
+    let key = portal.storage_key(&open_storage_key(session_id))?;
+    let raw = utils::storage_get(&key)?;
     serde_json::from_str(&raw).ok()
 }
 
-pub fn save_open_surface(surface: &SessionSurface) {
+pub fn save_open_surface(surface: &SessionSurface, portal: &crate::portal_client::PortalClient) {
+    let Some(key) = portal.storage_key(&open_storage_key(surface.session_id)) else {
+        return;
+    };
     let Some(memory) = surface.memory() else {
         return;
     };
     if let Ok(raw) = serde_json::to_string(&memory) {
-        utils::storage_set(&open_storage_key(surface.session_id), &raw);
+        utils::storage_set(&key, &raw);
     }
 }
 
-pub fn clear_open_surface(session_id: Uuid) {
-    utils::storage_remove(&open_storage_key(session_id));
+pub fn clear_open_surface(session_id: Uuid, portal: &crate::portal_client::PortalClient) {
+    if let Some(key) = portal.storage_key(&open_storage_key(session_id)) {
+        utils::storage_remove(&key);
+    }
 }
 
 pub fn clamp_split_percent(value: f64) -> f64 {
     value.clamp(MIN_SPLIT_PERCENT, MAX_SPLIT_PERCENT)
 }
 
-pub fn load_split_percent(session_id: Uuid) -> f64 {
-    let key = split_storage_key(session_id);
+pub fn load_split_percent(session_id: Uuid, portal: &crate::portal_client::PortalClient) -> f64 {
+    let Some(key) = portal.storage_key(&split_storage_key(session_id)) else {
+        return DEFAULT_SPLIT_PERCENT;
+    };
     utils::storage_get(&key)
         .and_then(|value| value.parse::<f64>().ok())
         .map(clamp_split_percent)
         .unwrap_or(DEFAULT_SPLIT_PERCENT)
 }
 
-pub fn save_split_percent(session_id: Uuid, value: f64) {
-    let key = split_storage_key(session_id);
+pub fn save_split_percent(
+    session_id: Uuid,
+    value: f64,
+    portal: &crate::portal_client::PortalClient,
+) {
+    let Some(key) = portal.storage_key(&split_storage_key(session_id)) else {
+        return;
+    };
     utils::storage_set(&key, &format!("{:.1}", clamp_split_percent(value)));
 }
 

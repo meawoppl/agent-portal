@@ -33,7 +33,6 @@ impl ConnId {
     pub const HOME: Self = Self(0);
 
     /// A non-home connection, for tests that need two portals side by side.
-    #[cfg(test)]
     pub(crate) const fn linked(n: u32) -> Self {
         Self(n)
     }
@@ -69,6 +68,9 @@ impl std::fmt::Display for SessionKey {
 pub struct PortalClient {
     origin: Rc<str>,
     conn: ConnId,
+    linked: Option<crate::linked_credentials::LinkedCredentials>,
+    available: bool,
+    home_user: Option<Uuid>,
 }
 
 impl PortalClient {
@@ -77,6 +79,9 @@ impl PortalClient {
         Self {
             origin: utils::get_base_url().into(),
             conn: ConnId::HOME,
+            linked: None,
+            available: true,
+            home_user: None,
         }
     }
 
@@ -86,6 +91,183 @@ impl PortalClient {
         Self {
             origin: origin.into(),
             conn,
+            linked: None,
+            available: true,
+            home_user: None,
+        }
+    }
+
+    fn unavailable() -> Self {
+        Self {
+            origin: "".into(),
+            conn: ConnId::HOME,
+            linked: None,
+            available: false,
+            home_user: None,
+        }
+    }
+
+    pub(crate) fn linked(
+        origin: &str,
+        conn: ConnId,
+        credentials: crate::linked_credentials::LinkedCredentials,
+    ) -> Result<Self, String> {
+        let origin = shared::urls::canonical_origin(origin).map_err(|e| e.to_string())?;
+        if conn == ConnId::HOME {
+            return Err("A linked connection cannot use the home identity".into());
+        }
+        Ok(Self {
+            origin: origin.into(),
+            conn,
+            linked: Some(credentials),
+            available: true,
+            home_user: None,
+        })
+    }
+
+    pub fn home_for(user: Uuid) -> Self {
+        Self {
+            home_user: Some(user),
+            ..Self::home()
+        }
+    }
+
+    pub fn storage_key(&self, suffix: &str) -> Option<String> {
+        self.account_id()
+            .map(|user| format!("portal:{}:{}:{suffix}", self.origin, user))
+    }
+
+    pub fn is_linked(&self) -> bool {
+        self.linked.is_some()
+    }
+    pub fn origin(&self) -> &str {
+        &self.origin
+    }
+    pub fn account_id(&self) -> Option<Uuid> {
+        self.linked.as_ref().map(|c| c.user_id).or(self.home_user)
+    }
+    pub fn account_label(&self) -> Option<&str> {
+        self.linked.as_ref().map(|c| c.email.as_str())
+    }
+    pub fn can_write(&self) -> bool {
+        self.available
+            && self
+                .linked
+                .as_ref()
+                .is_none_or(|c| c.scope == shared::api::TokenScope::Write)
+    }
+
+    pub async fn media_blob(&self, path: &str) -> Result<web_sys::Blob, String> {
+        if let Some(credentials) = &self.linked {
+            credentials
+                .refresh_if_needed(&self.origin)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        let response = self.get(path).send().await.map_err(|e| e.to_string())?;
+        if !response.ok() {
+            return Err(format!("Media unavailable (HTTP {})", response.status()));
+        }
+        const MAX_BYTES: usize = 100 * 1024 * 1024;
+        if response
+            .headers()
+            .get("content-length")
+            .and_then(|v| v.parse::<usize>().ok())
+            .is_some_and(|n| n > MAX_BYTES)
+        {
+            return Err("Media exceeds the 100 MB browser limit".into());
+        }
+        let mime = response
+            .headers()
+            .get("content-type")
+            .unwrap_or_else(|| "application/octet-stream".into());
+        let bytes = response.binary().await.map_err(|e| e.to_string())?;
+        if bytes.len() > MAX_BYTES {
+            return Err("Media exceeds the 100 MB browser limit".into());
+        }
+        let array = js_sys::Uint8Array::from(bytes.as_slice());
+        let parts = js_sys::Array::of1(array.as_ref());
+        let options = web_sys::BlobPropertyBag::new();
+        options.set_type(&mime);
+        web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &options)
+            .map_err(|_| "Cannot decode media".into())
+    }
+
+    pub async fn revoke_link(&self) -> Result<(), FetchError> {
+        let credentials = self.linked.as_ref().ok_or(FetchError::Status(403))?;
+        credentials.refresh_if_needed(&self.origin).await?;
+        let response = self
+            .delete(&format!("/api/linked-grants/{}", credentials.grant_id))
+            .send()
+            .await
+            .map_err(|e| FetchError::Network(e.to_string()))?;
+        if response.status() != 204 {
+            return Err(FetchError::Status(response.status()));
+        }
+        Ok(())
+    }
+
+    pub async fn socket_url(&self) -> Result<String, FetchError> {
+        if !self.available {
+            return Err(FetchError::Status(403));
+        }
+        let Some(credentials) = &self.linked else {
+            return Ok(self.ws_url("/ws/client"));
+        };
+        let discovery = crate::federation::discover(&self.origin)
+            .await
+            .map_err(FetchError::Network)?;
+        if discovery.instance_id != credentials.instance_id {
+            return Err(FetchError::Decode(
+                "The remote portal instance changed; authorize it again".into(),
+            ));
+        }
+        credentials.refresh_if_needed(&self.origin).await?;
+        let request = shared::api::WsTicketRequest {
+            client_origin: credentials.client_origin.clone(),
+        };
+        let response = self
+            .post("/api/ws-ticket")
+            .json(&request)
+            .map_err(|e| FetchError::Decode(e.to_string()))?
+            .send()
+            .await
+            .map_err(|e| FetchError::Network(e.to_string()))?;
+        if !response.ok() {
+            return Err(FetchError::Status(response.status()));
+        }
+        let ticket: shared::api::WsTicketResponse = response
+            .json()
+            .await
+            .map_err(|e| FetchError::Decode(e.to_string()))?;
+        // Tickets are opaque URL-safe hex in protocol v1; reject URL syntax.
+        if ticket.ticket.len() != 64 || !ticket.ticket.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(FetchError::Decode("Invalid socket ticket".into()));
+        }
+        Ok(format!(
+            "{}?ticket={}",
+            self.ws_url("/ws/client"),
+            ticket.ticket
+        ))
+    }
+
+    fn request(&self, path: &str, make: fn(&str) -> RequestBuilder) -> RequestBuilder {
+        let valid = self.available && valid_path(path);
+        let request = make(&self.url(path)).redirect(web_sys::RequestRedirect::Error);
+        if let Some(credentials) = &self.linked {
+            let request = request.credentials(web_sys::RequestCredentials::Omit);
+            if valid {
+                request.header(
+                    "Authorization",
+                    &format!("Bearer {}", credentials.secret.borrow().value),
+                )
+            } else {
+                request
+            }
+        } else if let Some(user) = self.home_user {
+            request.header("X-Portal-Account", &user.to_string())
+        } else {
+            request
         }
     }
 
@@ -103,6 +285,9 @@ impl PortalClient {
 
     /// Absolute HTTP URL for an absolute `path` on this portal.
     pub fn url(&self, path: &str) -> String {
+        if !self.available || !valid_path(path) {
+            return "about:blank".into();
+        }
         format!("{}{}", self.origin, path)
     }
 
@@ -123,19 +308,19 @@ impl PortalClient {
     }
 
     pub fn get(&self, path: &str) -> RequestBuilder {
-        Request::get(&self.url(path))
+        self.request(path, Request::get)
     }
 
     pub fn post(&self, path: &str) -> RequestBuilder {
-        Request::post(&self.url(path))
+        self.request(path, Request::post)
     }
 
     pub fn patch(&self, path: &str) -> RequestBuilder {
-        Request::patch(&self.url(path))
+        self.request(path, Request::patch)
     }
 
     pub fn delete(&self, path: &str) -> RequestBuilder {
-        Request::delete(&self.url(path))
+        self.request(path, Request::delete)
     }
 
     /// GET `path` on this portal and decode the JSON response. The 401 policy
@@ -147,6 +332,9 @@ impl PortalClient {
         path: &str,
         on_401: On401,
     ) -> Result<T, FetchError> {
+        if let Some(credentials) = &self.linked {
+            credentials.refresh_if_needed(&self.origin).await?;
+        }
         let response = self
             .get(path)
             .send()
@@ -168,10 +356,10 @@ impl PortalClient {
 
 /// The portal in scope for a function component. The app root always
 /// provides one; a component rendered outside it (an isolated test render)
-/// gets the home portal.
+/// gets an unavailable client that cannot send requests.
 #[hook]
 pub fn use_portal() -> PortalClient {
-    use_context::<PortalClient>().unwrap_or_else(PortalClient::home)
+    use_context::<PortalClient>().unwrap_or_else(PortalClient::unavailable)
 }
 
 /// The portal in scope for a struct component; see [`use_portal`].
@@ -179,7 +367,15 @@ pub fn portal_from_context<C: Component>(ctx: &Context<C>) -> PortalClient {
     ctx.link()
         .context::<PortalClient>(Callback::noop())
         .map(|(portal, _handle)| portal)
-        .unwrap_or_else(PortalClient::home)
+        .unwrap_or_else(PortalClient::unavailable)
+}
+
+fn valid_path(path: &str) -> bool {
+    path.starts_with('/')
+        && !path.starts_with("//")
+        && !path
+            .bytes()
+            .any(|b| b == b'\\' || b == b'#' || b.is_ascii_control() || b.is_ascii_whitespace())
 }
 
 #[cfg(test)]
@@ -188,6 +384,44 @@ mod tests {
 
     fn portal(origin: &str) -> PortalClient {
         PortalClient::at(origin, ConnId::HOME)
+    }
+
+    #[test]
+    fn invalid_request_targets_never_become_credential_destinations() {
+        let p = portal("https://home.example");
+        for path in [
+            "https://evil.example/api/sessions",
+            "//evil.example/api/sessions",
+            "/\\evil.example",
+            "/api/sessions#fragment",
+            "/api/\nsessions",
+        ] {
+            assert_eq!(p.url(path), "about:blank");
+        }
+        assert_eq!(
+            PortalClient::unavailable().url("/api/sessions"),
+            "about:blank"
+        );
+    }
+
+    #[test]
+    fn saved_state_is_qualified_by_origin_and_account() {
+        let user = Uuid::new_v4();
+        let a = PortalClient {
+            home_user: Some(user),
+            ..portal("https://a.example")
+        };
+        let b = PortalClient {
+            home_user: Some(user),
+            ..portal("https://b.example")
+        };
+        let c = PortalClient {
+            home_user: Some(Uuid::new_v4()),
+            ..portal("https://a.example")
+        };
+        assert_ne!(a.storage_key("history"), b.storage_key("history"));
+        assert_ne!(a.storage_key("history"), c.storage_key("history"));
+        assert_eq!(portal("https://a.example").storage_key("history"), None);
     }
 
     #[test]

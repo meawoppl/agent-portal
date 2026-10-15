@@ -1,7 +1,10 @@
 pub mod audio;
 mod components;
+mod federation;
 mod health_timer;
 mod hooks;
+mod linked_credentials;
+mod linked_media;
 mod pages;
 mod portal_client;
 #[cfg(test)]
@@ -19,7 +22,6 @@ use pages::{
     dashboard::DashboardPage, demo::DemoPage, history::HistoryBrowserPage,
     history::HistoryTranscriptPage, settings::SettingsPage, splash::SplashPage,
 };
-use portal_client::PortalClient;
 use yew::prelude::*;
 use yew_router::prelude::*;
 
@@ -84,12 +86,12 @@ fn switch(routes: Route) -> Html {
 #[function_component(App)]
 fn app() -> Html {
     html! {
-        <ContextProvider<PortalClient> context={PortalClient::home()}>
+        <federation::FederationProvider>
             <BrowserRouter>
                 <Switch<Route> render={switch} />
                 <HealthTimerReminder />
             </BrowserRouter>
-        </ContextProvider<PortalClient>>
+        </federation::FederationProvider>
     }
 }
 

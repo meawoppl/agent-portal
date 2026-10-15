@@ -3,9 +3,7 @@
 use crate::portal_client::PortalClient;
 use futures_util::StreamExt;
 use shared::api::EditStackItem;
-use shared::{
-    ClientEndpoint, ClientToServer, InputDeliveryStage, ServerToClient, TurnMetrics, WsEndpoint,
-};
+use shared::{ClientEndpoint, ClientToServer, InputDeliveryStage, ServerToClient, TurnMetrics};
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 use yew::Callback;
@@ -91,15 +89,50 @@ fn report_ws_error(on_event: &Callback<WsEvent>, context: &str, err: impl std::f
 
 /// Connect to WebSocket and start receiving messages.
 /// Returns immediately, spawns async task to handle connection.
+/// All async work for a view is cancelled when that view is destroyed. A
+/// removed/replaced linked account must not leave an authorized socket alive.
+#[derive(Clone, Default)]
+pub(super) struct SocketLifetime {
+    closed: std::rc::Rc<std::cell::Cell<bool>>,
+    aborts: std::rc::Rc<std::cell::RefCell<Vec<futures_util::future::AbortHandle>>>,
+}
+impl SocketLifetime {
+    pub fn spawn(&self, future: impl std::future::Future<Output = ()> + 'static) {
+        if self.closed.get() {
+            return;
+        }
+        let (abort, registration) = futures_util::future::AbortHandle::new_pair();
+        self.aborts.borrow_mut().push(abort);
+        spawn_local(async move {
+            let _ = futures_util::future::Abortable::new(future, registration).await;
+        });
+    }
+    pub fn close(&self) {
+        self.closed.set(true);
+        for abort in self.aborts.borrow_mut().drain(..) {
+            abort.abort();
+        }
+    }
+}
+
 pub fn connect_websocket(
+    lifetime: &SocketLifetime,
     portal: &PortalClient,
     session_id: Uuid,
     replay_after: Option<String>,
     resuming: bool,
     on_event: Callback<WsEvent>,
 ) {
-    let ws_endpoint = portal.ws_url(ClientEndpoint::PATH);
-    spawn_local(async move {
+    let portal = portal.clone();
+    let send_lifetime = lifetime.clone();
+    lifetime.spawn(async move {
+        let ws_endpoint = match portal.socket_url().await {
+            Ok(url) => url,
+            Err(error) => {
+                on_event.emit(WsEvent::Error(format!("Portal connection failed: {error}")));
+                return;
+            }
+        };
         match ws_bridge::yew_client::connect_to::<ClientEndpoint>(&ws_endpoint) {
             Ok(conn) => {
                 let (mut sender, mut receiver) = conn.split();
@@ -141,7 +174,7 @@ pub fn connect_websocket(
                 on_event.emit(WsEvent::Connected(queue_tx));
 
                 let on_event_for_send = on_event.clone();
-                spawn_local(async move {
+                send_lifetime.spawn(async move {
                     while let Some(msg) = queue_rx.next().await {
                         if let Err(e) = sender.send(msg).await {
                             report_ws_error(&on_event_for_send, "WebSocket send error", e);

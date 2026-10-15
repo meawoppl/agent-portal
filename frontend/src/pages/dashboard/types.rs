@@ -254,24 +254,37 @@ pub fn save_rail_position(position: RailPosition) {
 
 /// Load the last actively focused session from localStorage. The stored value
 /// is a bare id, so it always names a home-portal session.
-pub fn load_last_active_session() -> Option<SessionKey> {
-    storage_get(LAST_ACTIVE_SESSION_STORAGE_KEY)
+pub fn load_last_active_session(user: Option<Uuid>) -> Option<SessionKey> {
+    let key = crate::portal_client::PortalClient::home_for(user?)
+        .storage_key(LAST_ACTIVE_SESSION_STORAGE_KEY)?;
+    storage_get(&key)
         .and_then(|value| Uuid::parse_str(&value).ok())
         .map(SessionKey::home)
 }
 
 /// Save the last actively focused session to localStorage. Only home sessions
 /// are persisted: the stored bare id cannot name another portal.
-pub fn save_last_active_session(session: SessionKey) {
+pub fn save_last_active_session(session: SessionKey, user: Option<Uuid>) {
+    let Some(key) = user.and_then(|user| {
+        crate::portal_client::PortalClient::home_for(user)
+            .storage_key(LAST_ACTIVE_SESSION_STORAGE_KEY)
+    }) else {
+        return;
+    };
     if session.conn == ConnId::HOME {
-        storage_set(LAST_ACTIVE_SESSION_STORAGE_KEY, &session.id.to_string());
+        storage_set(&key, &session.id.to_string());
     }
 }
 
 /// Load hidden sessions from localStorage. The stored set holds bare ids, so
 /// every entry names a home-portal session.
-pub fn load_hidden_sessions() -> HashSet<SessionKey> {
-    storage_get(HIDDEN_SESSIONS_STORAGE_KEY)
+pub fn load_hidden_sessions(user: Option<Uuid>) -> HashSet<SessionKey> {
+    let Some(key) = user.and_then(|user| {
+        crate::portal_client::PortalClient::home_for(user).storage_key(HIDDEN_SESSIONS_STORAGE_KEY)
+    }) else {
+        return HashSet::new();
+    };
+    storage_get(&key)
         .and_then(|json| serde_json::from_str::<Vec<String>>(&json).ok())
         .map(|ids| {
             ids.iter()
@@ -284,14 +297,19 @@ pub fn load_hidden_sessions() -> HashSet<SessionKey> {
 
 /// Save hidden sessions to localStorage. Only home sessions are persisted, for
 /// the same reason as [`save_last_active_session`].
-pub fn save_hidden_sessions(hidden: &HashSet<SessionKey>) {
+pub fn save_hidden_sessions(hidden: &HashSet<SessionKey>, user: Option<Uuid>) {
+    let Some(key) = user.and_then(|user| {
+        crate::portal_client::PortalClient::home_for(user).storage_key(HIDDEN_SESSIONS_STORAGE_KEY)
+    }) else {
+        return;
+    };
     let ids: Vec<String> = hidden
         .iter()
         .filter(|key| key.conn == ConnId::HOME)
         .map(|key| key.id.to_string())
         .collect();
     if let Ok(json) = serde_json::to_string(&ids) {
-        storage_set(HIDDEN_SESSIONS_STORAGE_KEY, &json);
+        storage_set(&key, &json);
     }
 }
 

@@ -18,7 +18,7 @@ use super::vim::{self, VimState};
 use crate::components::build_upload_message;
 use crate::components::VoiceInput;
 use crate::pages::dashboard::load_vim_mode;
-use crate::portal_client::{portal_from_context, SessionKey};
+use crate::portal_client::{portal_from_context, PortalClient, SessionKey};
 use crate::utils::format_file_size;
 use gloo::timers::callback::Timeout;
 use shared::api::{CreateEditStackRequest, EditStackItem, EditStackItemInput, EditStackResponse};
@@ -126,27 +126,26 @@ fn reasoning_effort_from_str(value: &str) -> Option<ReasoningEffort> {
     }
 }
 
-fn load_reasoning_effort(session_id: Uuid) -> Option<ReasoningEffort> {
+fn load_reasoning_effort(session_id: Uuid, portal: &PortalClient) -> Option<ReasoningEffort> {
+    let key = portal.storage_key(&reasoning_effort_key(session_id))?;
     gloo::utils::window()
         .local_storage()
         .ok()
         .flatten()
-        .and_then(|storage| {
-            storage
-                .get_item(&reasoning_effort_key(session_id))
-                .ok()
-                .flatten()
-        })
+        .and_then(|storage| storage.get_item(&key).ok().flatten())
         .and_then(|value| reasoning_effort_from_str(&value))
 }
 
-fn save_reasoning_effort(session_id: Uuid, effort: Option<ReasoningEffort>) {
+fn save_reasoning_effort(session_id: Uuid, effort: Option<ReasoningEffort>, portal: &PortalClient) {
+    let Some(key) = portal.storage_key(&reasoning_effort_key(session_id)) else {
+        return;
+    };
     if let Ok(Some(storage)) = gloo::utils::window().local_storage() {
         // Keep this preference scoped to the session. A browser-global value
         // made every newly launched session inherit whichever concrete effort
         // was selected elsewhere (often XHigh), instead of starting on Auto.
         let value = effort.map_or("auto", |effort| effort.as_str());
-        let _ = storage.set_item(&reasoning_effort_key(session_id), value);
+        let _ = storage.set_item(&key, value);
     }
 }
 
@@ -295,7 +294,10 @@ impl Component for InputBar {
         Self {
             input_ref: NodeRef::default(),
             input_text: String::new(),
-            command_history: CommandHistory::for_session(ctx.props().session_id),
+            command_history: CommandHistory::for_session(
+                ctx.props().session_id,
+                &portal_from_context(ctx),
+            ),
             send_mode_dropdown_open: false,
             queue_pending: None,
             queue_notice: None,
@@ -308,7 +310,10 @@ impl Component for InputBar {
             is_recording: false,
             interim_transcription: None,
             pending_suggestion: None,
-            reasoning_effort: load_reasoning_effort(ctx.props().session_id),
+            reasoning_effort: load_reasoning_effort(
+                ctx.props().session_id,
+                &portal_from_context(ctx),
+            ),
             voice_button_ref: NodeRef::default(),
             was_focused: ctx.props().focused,
             was_ws_connected: ctx.props().ws_connected,
@@ -493,7 +498,7 @@ impl Component for InputBar {
             }
             InputBarMsg::SetReasoningEffort(effort) => {
                 self.reasoning_effort = effort;
-                save_reasoning_effort(ctx.props().session_id, effort);
+                save_reasoning_effort(ctx.props().session_id, effort, &portal_from_context(ctx));
                 true
             }
             InputBarMsg::HistoryUp => {
@@ -899,6 +904,14 @@ impl InputBar {
     /// typed `(text, mode)` event up to the parent — which packages it into
     /// `ClientToServer::ClaudeInput` and emits the optimistic local echo.
     fn dispatch_text_send(&mut self, ctx: &Context<Self>, mode: SendMode) -> bool {
+        if portal_from_context(ctx).is_linked() && !ctx.props().ws_connected {
+            self.queue_notice = Some((
+                true,
+                "Remote connection is offline. Your draft is preserved; reconnect before sending."
+                    .into(),
+            ));
+            return true;
+        }
         let input = self.get_input_text().trim().to_string();
         if input.is_empty() {
             return false;

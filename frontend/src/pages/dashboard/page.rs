@@ -105,7 +105,9 @@ pub fn dashboard_page() -> Html {
     let loading = sessions_hook.loading;
 
     let ws_hook = use_client_websocket();
+    let federation = use_context::<crate::federation::Federation>();
     let home_portal = use_portal();
+    let home_user = home_portal.account_id();
     let server_shutdown_reason = ws_hook.shutdown_reason.clone();
     let update_available = ws_hook.update_available.clone();
     let bootstrap = use_dashboard_bootstrap();
@@ -150,7 +152,8 @@ pub fn dashboard_page() -> Html {
     // index — see `session_order` / issue #1094. The display index is derived
     // from this each render, so a reordered poll never bounces focus onto a
     // different session.
-    let session_state = use_reducer_eq(|| DashboardSessionState::new(load_hidden_sessions()));
+    let session_state =
+        use_reducer_eq(|| DashboardSessionState::new(load_hidden_sessions(home_user)));
     // Activity buffer: mutations don't trigger page re-renders.
     // SessionRail reads this on its own 100 ms tick instead.
     let activity_timestamps = use_memo((), |_| ActivityRef::default());
@@ -200,9 +203,19 @@ pub fn dashboard_page() -> Html {
         // visible top-to-bottom rail (grouped when the pref is on). The rail's
         // host headers are inserted purely visually and carry no display index.
         if ui_state.group_by_host {
-            sorted.sort_by(session_order::session_display_cmp_grouped);
+            sorted.sort_by(|a, b| {
+                a.key
+                    .conn
+                    .cmp(&b.key.conn)
+                    .then_with(|| session_order::session_display_cmp_grouped(a, b))
+            });
         } else {
-            sorted.sort_by(session_order::session_display_cmp);
+            sorted.sort_by(|a, b| {
+                a.key
+                    .conn
+                    .cmp(&b.key.conn)
+                    .then_with(|| session_order::session_display_cmp(a, b))
+            });
         }
         sorted
     };
@@ -238,9 +251,12 @@ pub fn dashboard_page() -> Html {
     {
         let session_state = session_state.clone();
         let portals = distinct_portals(home_portal.clone(), &sessions);
-        use_effect_with(loading, move |is_loading| {
-            if !*is_loading {
-                for portal in portals {
+        let loaded_connections = sessions_hook.loaded_connections.clone();
+        use_effect_with((portals.clone(), loaded_connections), move |(_, loaded)| {
+            let cancelled = std::rc::Rc::new(std::cell::Cell::new(false));
+            {
+                for portal in portals.into_iter().filter(|p| loaded.contains(&p.conn())) {
+                    let cancelled = cancelled.clone();
                     let session_state = session_state.clone();
                     spawn_local(async move {
                         if let Ok(data) = portal
@@ -250,6 +266,9 @@ pub fn dashboard_page() -> Html {
                             )
                             .await
                         {
+                            if cancelled.get() {
+                                return;
+                            }
                             for session in data.sessions {
                                 if session.awaiting_permission {
                                     session_state.dispatch(DashboardSessionAction::SetAwaiting {
@@ -262,7 +281,7 @@ pub fn dashboard_page() -> Html {
                     });
                 }
             }
-            || ()
+            move || cancelled.set(true)
         });
     }
 
@@ -359,7 +378,7 @@ pub fn dashboard_page() -> Html {
             } else {
                 set.remove(&session_id);
             }
-            save_hidden_sessions(&set);
+            save_hidden_sessions(&set, home_user);
             session_state.dispatch(DashboardSessionAction::SetHidden { session_id, hidden });
         })
     };
@@ -482,7 +501,7 @@ pub fn dashboard_page() -> Html {
                 };
                 let refresh = refresh.clone();
                 let ui_state = ui_state.clone();
-                let user_id = current_user_id;
+                let user_id = portal.account_id();
                 spawn_local(async move {
                     if let Some(user_id) = user_id {
                         let path = format!("/api/sessions/{}/members/{}", key.id, user_id);
@@ -575,6 +594,9 @@ pub fn dashboard_page() -> Html {
             let Some(portal) = find_session(&sessions, key).map(|s| s.portal.clone()) else {
                 return;
             };
+            if !portal.can_write() {
+                return;
+            }
             spawn_local(async move {
                 let path = format!("/api/sessions/{}/stop", key.id);
                 match portal.post(&path).send().await {
@@ -600,6 +622,9 @@ pub fn dashboard_page() -> Html {
             let Some(portal) = find_session(&sessions, session_id).map(|s| s.portal.clone()) else {
                 return;
             };
+            if !portal.can_write() {
+                return;
+            }
             let refresh = refresh.clone();
             let session_state = session_state.clone();
             spawn_local(async move {
@@ -613,7 +638,7 @@ pub fn dashboard_page() -> Html {
                         } else {
                             set.remove(&session_id);
                         }
-                        save_hidden_sessions(&set);
+                        save_hidden_sessions(&set, home_user);
                         session_state.dispatch(DashboardSessionAction::SetHidden {
                             session_id,
                             hidden: pause,
@@ -788,7 +813,7 @@ pub fn dashboard_page() -> Html {
         };
         html! {
             <option value={entry.key.to_string()}>
-                { format!("{} — {} ({connection})", session.session_name, location) }
+                { format!("{} — {} ({connection}){}", session.session_name, location, if entry.portal.is_linked() { format!(" · {} · {}", entry.portal.origin(), entry.portal.account_label().unwrap_or("")) } else { String::new() }) }
             </option>
         }
     };
@@ -805,6 +830,16 @@ pub fn dashboard_page() -> Html {
 
     html! {
         <div class="focus-flow-container" onkeydown={keyboard_nav.on_keydown.clone()} tabindex="0">
+            if let Some(registry) = &federation {
+                if !registry.rows.is_empty() {
+                    <aside class="linked-connections" aria-label="Linked portal connections">
+                        { for registry.rows.iter().map(|row| html! {
+                            <div class="linked-connection-status"><strong>{&row.origin}</strong>{" · "}{&row.email}{" — "}{&row.status}</div>
+                        }) }
+                    </aside>
+                }
+            }
+
             // Update-available banner (post-reconnect, server version advanced)
             // takes precedence over the transient shutdown banner.
             {
@@ -1046,7 +1081,7 @@ pub fn dashboard_page() -> Html {
                                                 on_branch_change={on_branch_change.clone()}
                                                 on_activity={on_activity.clone()}
                                                 on_agent_message={on_agent_message.clone()}
-                                                current_user_id={current_user_id.map(|id| id.to_string())}
+                                                current_user_id={session.portal.account_id().map(|id| id.to_string())}
                                                 interrupt_signal={focus.interrupt_signal}
                                                 jump_to_latest_signal={focus.jump_to_latest_signal}
                                                 stt_enabled={stt_enabled}

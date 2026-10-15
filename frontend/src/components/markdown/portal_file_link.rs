@@ -100,7 +100,13 @@ pub(super) fn portal_file_link(props: &PortalFileLinkProps) -> Html {
     let error = use_state(|| Option::<String>::None);
     let busy = use_state(|| false);
     let portal = use_portal();
-    let url = portal.resolve(&props.href);
+    // Modified clicks open the owning portal explicitly; they must not
+    // silently download using a different account's ambient remote cookie.
+    let url = if portal.is_linked() {
+        portal.url("/dashboard")
+    } else {
+        portal.resolve(&props.href)
+    };
 
     let onclick = {
         let href = props.href.clone();

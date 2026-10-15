@@ -6,6 +6,7 @@ mod appearance_panel;
 mod forwarding_panel;
 mod health_timer_panel;
 mod launchers_panel;
+mod linked_portals;
 mod notifications_panel;
 mod performance_panel;
 mod profile_panel;
@@ -32,6 +33,7 @@ use yew::prelude::*;
 #[derive(Clone, Copy, PartialEq)]
 enum SettingsTab {
     Account,
+    LinkedPortals,
     Computers,
     Sessions,
     Tokens,
@@ -78,6 +80,7 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
         Callback::from(move |_: MouseEvent| active_tab.set(tab))
     };
     let on_account_tab = make_tab_handler(SettingsTab::Account);
+    let on_linked_tab = make_tab_handler(SettingsTab::LinkedPortals);
     let on_computers_tab = make_tab_handler(SettingsTab::Computers);
     let on_sessions_tab = make_tab_handler(SettingsTab::Sessions);
     let on_tokens_tab = make_tab_handler(SettingsTab::Tokens);
@@ -107,6 +110,7 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
             </header>
 
             <nav class="settings-tabs">
+                <button class={classes!("tab-button", (*active_tab == SettingsTab::LinkedPortals).then_some("active"))} onclick={on_linked_tab}>{"Linked portals"}</button>
                 <button
                     class={classes!("tab-button", (*active_tab == SettingsTab::Account).then_some("active"))}
                     onclick={on_account_tab}
@@ -180,6 +184,7 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
             </nav>
 
             <main class="settings-content">
+                if *active_tab == SettingsTab::LinkedPortals { <linked_portals::LinkedPortals /> }
                 if *active_tab == SettingsTab::Account {
                     <AccountPanel />
                 }

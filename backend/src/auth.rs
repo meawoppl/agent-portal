@@ -91,7 +91,7 @@ fn load_bearer_user(
 /// valid browser cookie. In dev mode with no bearer, returns the test user
 /// without checking cookies. Disabled users are rejected in every path so a ban
 /// takes effect for existing browser sessions and mobile tokens immediately.
-pub fn extract_user(
+fn extract_user_unbound(
     app_state: &AppState,
     headers: Option<&HeaderMap>,
     cookies: &Cookies,
@@ -111,6 +111,25 @@ pub fn extract_user(
 
     let user = load_cookie_user(app_state, &mut conn, cookies)?;
     reject_disabled_user(user)
+}
+
+/// A rendered view may bind requests to the account that created it. This
+/// prevents another tab changing the login cookie from redirecting an old
+/// view's mutation into the newly signed-in account. The header only narrows
+/// authority; it never authenticates a user.
+pub fn extract_user(
+    app_state: &AppState,
+    headers: Option<&HeaderMap>,
+    cookies: &Cookies,
+) -> Result<User, AppError> {
+    let user = extract_user_unbound(app_state, headers, cookies)?;
+    if let Some(expected) = headers.and_then(|h| h.get("X-Portal-Account")) {
+        let expected = expected.to_str().ok().and_then(|s| Uuid::parse_str(s).ok());
+        if expected != Some(user.id) {
+            return Err(AppError::Forbidden);
+        }
+    }
+    Ok(user)
 }
 
 /// Extract the authenticated user's ID from the session cookie.
@@ -262,6 +281,38 @@ mod tests {
 
         let got = extract_user(&app_state, None, &cookies).expect("cookie auth");
         assert_eq!(got.id, user.id);
+    }
+
+    #[test]
+    fn stale_account_binding_cannot_follow_a_changed_cookie() {
+        let Some(pool) = crate::test_support::shared_pool() else {
+            return;
+        };
+        let state = crate::test_support::test_app_state(pool);
+        let mut conn = state.conn().unwrap();
+        let old = insert_user(&mut conn, false);
+        let new = insert_user(&mut conn, false);
+        let mut headers = HeaderMap::new();
+        headers.insert("X-Portal-Account", old.id.to_string().parse().unwrap());
+        assert_eq!(
+            extract_user(&state, Some(&headers), &signed_cookie(&state, old.id))
+                .unwrap()
+                .id,
+            old.id
+        );
+        assert!(matches!(
+            extract_user(&state, Some(&headers), &signed_cookie(&state, new.id)),
+            Err(AppError::Forbidden)
+        ));
+        for invalid in ["", "not-an-account"] {
+            headers.insert("X-Portal-Account", invalid.parse().unwrap());
+            assert!(matches!(
+                extract_user(&state, Some(&headers), &signed_cookie(&state, old.id)),
+                Err(AppError::Forbidden)
+            ));
+        }
+        // The binding is a ceiling, never a replacement for authentication.
+        assert!(extract_user(&state, Some(&headers), &Cookies::default()).is_err());
     }
 
     #[test]

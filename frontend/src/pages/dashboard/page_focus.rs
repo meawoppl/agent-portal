@@ -40,6 +40,7 @@ pub(super) fn use_dashboard_focus(
     mobile_session_selector: bool,
     session_state: UseReducerHandle<DashboardSessionState>,
 ) -> DashboardFocus {
+    let home_user = crate::portal_client::use_portal().account_id();
     // Derive the focused display index from the focused session id against the
     // current sorted order. The rail, keyboard nav, and focus render all
     // consume this derived index.
@@ -147,12 +148,15 @@ pub(super) fn use_dashboard_focus(
                     } else {
                         let visible =
                             |session: &&PortalSession| !hidden_sessions.contains(&session.key);
-                        let saved_focus = load_last_active_session().and_then(|saved_id| {
-                            sessions
-                                .iter()
-                                .find(|s| s.key == saved_id && !hidden_sessions.contains(&s.key))
-                                .map(|s| s.key)
-                        });
+                        let saved_focus =
+                            load_last_active_session(home_user).and_then(|saved_id| {
+                                sessions
+                                    .iter()
+                                    .find(|s| {
+                                        s.key == saved_id && !hidden_sessions.contains(&s.key)
+                                    })
+                                    .map(|s| s.key)
+                            });
                         // Prefer the last active session from this browser, then
                         // fall back to the first non-hidden session by id (then
                         // the first session if all are hidden).
@@ -165,7 +169,7 @@ pub(super) fn use_dashboard_focus(
                         });
 
                         if let Some(id) = focus_id {
-                            save_last_active_session(id);
+                            save_last_active_session(id, home_user);
                         }
 
                         session_state.dispatch(DashboardSessionAction::InitializeFocus {
@@ -256,7 +260,7 @@ pub(super) fn use_dashboard_focus(
         let focused_id = session_state.focused_id;
         use_effect_with(focused_id, move |focused_id| {
             if let Some(id) = focused_id {
-                save_last_active_session(*id);
+                save_last_active_session(*id, home_user);
             }
             || ()
         });
@@ -284,7 +288,7 @@ pub(super) fn use_dashboard_focus(
             crate::audio::ensure_audio_context();
             crate::audio::play_sound(crate::audio::SoundEvent::SessionSwap);
             if let Some(session) = active_sessions.get(index) {
-                save_last_active_session(session.key);
+                save_last_active_session(session.key, home_user);
                 session_state.dispatch(if mobile_session_selector {
                     DashboardSessionAction::FocusExclusively(session.key)
                 } else {
