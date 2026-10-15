@@ -652,6 +652,9 @@ only its own grant and cannot list grants, manage policy, or mint legacy tokens.
 All linked requests require an Origin matching the grant, live policy and an
 enabled account, in addition to the existing session-role checks. Origin is a
 browser constraint, not proof of native-client identity.
+Direct native-shell origins such as `tauri://localhost` are not accepted by
+this browser-linking contract; native federation needs a separately defined
+client-origin and consent flow.
 
 For a browser socket, `POST /api/ws-ticket` exchanges the linked bearer for a
 30-second, one-use opaque ticket. Connect to `/ws/client?ticket=...` with the same
