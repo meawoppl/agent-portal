@@ -68,9 +68,10 @@ fn denial(policy: &FederationPolicy, origin: &str, scope: TokenScope) -> Option<
 }
 fn no_store(response: impl IntoResponse) -> Response {
     let mut response = response.into_response();
-    response
-        .headers_mut()
-        .insert(header::CACHE_CONTROL, "private, no-store".parse().unwrap());
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("private, no-store"),
+    );
     response
 }
 
@@ -283,13 +284,14 @@ pub async fn approval(
     let mut response = no_store(Html(page));
     response.headers_mut().insert(
         header::CONTENT_SECURITY_POLICY,
-        "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
-            .parse()
-            .unwrap(),
+        axum::http::HeaderValue::from_static(
+            "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+        ),
     );
-    response
-        .headers_mut()
-        .insert(header::REFERRER_POLICY, "no-referrer".parse().unwrap());
+    response.headers_mut().insert(
+        header::REFERRER_POLICY,
+        axum::http::HeaderValue::from_static("no-referrer"),
+    );
     Ok(response)
 }
 
