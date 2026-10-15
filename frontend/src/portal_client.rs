@@ -32,7 +32,7 @@ pub struct ConnId(u32);
 impl ConnId {
     pub const HOME: Self = Self(0);
 
-    /// A non-home connection, for tests that need two portals side by side.
+    /// A fresh non-home connection allocated by the device-local registry.
     pub(crate) const fn linked(n: u32) -> Self {
         Self(n)
     }

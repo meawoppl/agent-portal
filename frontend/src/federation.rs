@@ -54,7 +54,7 @@ pub enum FederationAction {
     Add {
         origin: String,
         instance: Uuid,
-        grant: LinkedClientGrant,
+        grant: Box<LinkedClientGrant>,
         token: String,
         expiry: String,
         synced_id: Option<Uuid>,
@@ -98,7 +98,7 @@ impl Reducible for FederationState {
                 state.next_id += 1;
                 let user_id = grant.user_id;
                 let email = grant.user_email.clone();
-                let result = LinkedCredentials::new(grant, instance, token, &expiry)
+                let result = LinkedCredentials::new(*grant, instance, token, &expiry)
                     .map_err(|e| e.to_string())
                     .and_then(|c| PortalClient::linked(&origin, id, c));
                 let (client, status) = match result {

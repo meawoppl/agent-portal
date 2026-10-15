@@ -240,7 +240,7 @@ pub fn linked_portals() -> Html {
                                 registry.dispatch(FederationAction::Add {
                                     origin: portal_origin,
                                     instance: instance_id,
-                                    grant: *grant,
+                                    grant,
                                     token: access_token,
                                     expiry: expires_at,
                                     synced_id,
