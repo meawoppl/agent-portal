@@ -33,7 +33,7 @@
 <line x1="1475" y1="690" x2="1475" y2="740" stroke="#565f89" stroke-width="3"/>
 <rect x="1055" y="740" width="840" height="180" rx="8" fill="#1e202e" stroke="#9ece6a"/>
 <text x="1079" y="785" font-size="26" fill="#9ece6a">Web-client scope enforcement</text>
-<text x="1079" y="828" font-size="23" fill="#a9b1d6">Read and write checked before each frame.</text>
-<text x="1079" y="866" font-size="23" fill="#a9b1d6">Idle sockets recheck authority every five seconds.</text>
+<text x="1079" y="828" font-size="23" fill="#a9b1d6">Each incoming command checks live authority.</text>
+<text x="1079" y="866" font-size="23" fill="#a9b1d6">Output and idle checks: two-second window.</text>
 <text x="55" y="1172" font-size="22" fill="#e0af68">Policy starts off. No linked credentials are issued; linked WS entry stays disabled until one-use tickets land.</text>
 </svg>
