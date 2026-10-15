@@ -31,6 +31,7 @@ pub(super) struct SessionRailMenuProps {
     pub on_share: Callback<PortalSession>,
     pub on_schedule: Callback<PortalSession>,
     pub on_fork: Callback<PortalSession>,
+    pub on_rename: Callback<PortalSession>,
 }
 
 #[function_component(SessionRailMenu)]
@@ -242,6 +243,22 @@ fn render_menu_content(entry: &PortalSession, props: &SessionRailMenuProps) -> H
 
     let repo_option = repo_pr_submenu(session, props.on_close.clone());
 
+    let rename_option = if matches!(session.my_role, SessionRole::Owner | SessionRole::Editor) {
+        let on_rename = close_then(props.on_close.clone(), {
+            let on_rename = props.on_rename.clone();
+            let entry = entry.clone();
+            move || on_rename.emit(entry.clone())
+        });
+        menu_option(
+            classes!("rename"),
+            "Rename session",
+            "Change display name",
+            on_rename,
+        )
+    } else {
+        html! {}
+    };
+
     let share_option = if session.my_role == SessionRole::Owner {
         let on_share = close_then(props.on_close.clone(), {
             let on_share = props.on_share.clone();
@@ -315,6 +332,7 @@ fn render_menu_content(entry: &PortalSession, props: &SessionRailMenuProps) -> H
                 &short_id,
                 on_copy_id,
             ) }
+            { rename_option }
             { share_option }
             { fork_option }
             { schedule_option }

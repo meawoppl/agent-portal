@@ -21,6 +21,7 @@ pub mod muse_renderer;
 mod onboarding_tutorial;
 pub mod plugin_discovery;
 mod proxy_token_setup;
+mod rename_session;
 mod schedule_dialog;
 mod service_monitor;
 mod session_import;
@@ -47,6 +48,7 @@ pub use message_renderer::{
 pub use model_select::ModelSelect;
 pub use onboarding_tutorial::OnboardingTutorial;
 pub use proxy_token_setup::ProxyTokenSetup;
+pub use rename_session::{RenameSessionDialog, SessionName};
 pub use schedule_dialog::ScheduleDialog;
 pub use service_monitor::ServiceMonitor;
 pub use share_dialog::ShareDialog;

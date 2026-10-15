@@ -73,6 +73,8 @@ Open **http://localhost:3000/** — dev mode logs you in as
 - **Keyboard-first.** `Ctrl/Cmd+K` enters nav mode — jump between sessions,
   `w` to hop to the next one waiting on you, scroll transcripts without leaving
   the keyboard. Press `?` for the full list.
+- **Rename sessions.** Owners and editors can change a session's display name
+  from its title or session menu, including while it is paused.
 - **History.** Finished sessions stay browsable and searchable as an overlay,
   including transcripts restored from long-term archive.
 

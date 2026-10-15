@@ -3,7 +3,7 @@ use axum::{
     http::{header, HeaderValue},
     middleware::Next,
     response::Response,
-    routing::{get, post, put},
+    routing::{get, patch, post, put},
     Json, Router,
 };
 use governor::clock::QuantaInstant;
@@ -223,6 +223,10 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
         .route(
             "/api/sessions/{id}",
             get(handlers::sessions::get_session).delete(handlers::sessions::delete_session),
+        )
+        .route(
+            "/api/sessions/{id}/name",
+            patch(handlers::sessions::rename_session),
         )
         .route(
             "/api/sessions/{id}/stop",

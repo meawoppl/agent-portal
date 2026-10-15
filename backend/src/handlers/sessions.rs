@@ -86,6 +86,39 @@ pub async fn list_sessions(
     }))
 }
 
+/// Change only the durable Portal display name; running agents keep their IDs
+/// and processes. Registration intentionally preserves this database-owned name.
+pub async fn rename_session(
+    State(app_state): State<Arc<AppState>>,
+    CurrentUserId(user_id): CurrentUserId,
+    Path(session_id): Path<Uuid>,
+    Json(request): Json<shared::api::RenameSessionRequest>,
+) -> Result<Json<shared::api::RenameSessionResponse>, AppError> {
+    use crate::schema::sessions;
+    let mut conn = app_state.conn()?;
+    let session =
+        crate::handlers::session_access::verify_session_mutator(&mut conn, session_id, user_id)?;
+    let name =
+        shared::api::validate_session_name(&request.session_name).map_err(AppError::BadRequest)?;
+    if session.session_name != name {
+        let changed = diesel::update(sessions::table.find(session_id))
+            .set((
+                sessions::session_name.eq(name),
+                // A metadata-only rename must reach the next archive, including
+                // close-before-next-message. Leave activity/order timestamps alone.
+                sessions::archived_at.eq(None::<chrono::NaiveDateTime>),
+            ))
+            .execute(&mut conn)?;
+        if changed == 0 {
+            return Err(AppError::NotFound("Session not found"));
+        }
+    }
+    Ok(Json(shared::api::RenameSessionResponse {
+        session_id,
+        session_name: name.to_string(),
+    }))
+}
+
 pub async fn resolve_proxy_session(
     State(app_state): State<Arc<AppState>>,
     Json(req): Json<ResolveProxySessionRequest>,

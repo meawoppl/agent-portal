@@ -262,6 +262,18 @@
         display: none;
     }
 
+    .session-view-header .session-name-button {
+        display: inline-flex;
+    }
+
+    .session-view-header .session-name-label {
+        display: none;
+    }
+
+    .session-view-header .session-rename-label {
+        display: inline;
+    }
+
     .session-view-header .session-hostname {
         display: none;
     }

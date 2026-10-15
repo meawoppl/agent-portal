@@ -85,6 +85,7 @@ pub struct SessionViewProps {
     pub on_awaiting_change: Callback<(SessionKey, bool)>,
     pub on_connected_change: Callback<(SessionKey, bool)>,
     pub on_message_sent: Callback<SessionKey>,
+    pub on_renamed: Callback<()>,
     #[allow(clippy::type_complexity)]
     pub on_branch_change: Callback<(
         SessionKey,
@@ -1426,7 +1427,7 @@ impl Component for SessionView {
             <ContextProvider<PortalClient> context={ctx.props().portal.clone()}>
             <div class={classes!("session-view", ctx.props().focused.then_some("focused"))}>
                 <div class="session-view-header">
-                    <span class="session-name">{ &ctx.props().session.session_name }</span>
+                    <crate::components::SessionName key={Self::session_key(ctx).to_string()} session={ctx.props().session.clone()} on_renamed={ctx.props().on_renamed.clone()} />
                     // Which model this session is running — claude's transcript
                     // badges carry it per-message, but codex and muse wire
                     // events don't, so the header is the one place it reads

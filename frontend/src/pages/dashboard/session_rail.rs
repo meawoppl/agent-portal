@@ -4,7 +4,7 @@
 //! parent page onclick closes it, toggle button uses stop_propagation.
 
 use super::types::PortalSession;
-use crate::components::{ForkDialog, ScheduleDialog, ShareDialog};
+use crate::components::{ForkDialog, RenameSessionDialog, ScheduleDialog, ShareDialog};
 use crate::portal_client::{PortalClient, SessionKey};
 use gloo::events::EventListener;
 use gloo::timers::callback::Interval;
@@ -267,6 +267,8 @@ pub struct SessionRailProps {
     #[prop_or_default]
     pub archive_enabled: bool,
     pub on_select: Callback<usize>,
+    #[prop_or_default]
+    pub on_renamed: Callback<()>,
     pub on_leave: Callback<SessionKey>,
     pub on_delete: Callback<SessionKey>,
     pub on_toggle_hidden: Callback<SessionKey>,
@@ -297,6 +299,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
     let share_session = use_state(|| None::<PortalSession>);
     let schedule_session = use_state(|| None::<PortalSession>);
     let fork_session = use_state(|| None::<PortalSession>);
+    let rename_session = use_state(|| None::<PortalSession>);
 
     // Independent 100 ms tick that drives sparkline redraws.
     // Accumulation happens externally via ActivityRef mutations; this timer
@@ -449,6 +452,11 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
     let on_fork = {
         let fork_session = fork_session.clone();
         Callback::from(move |session| fork_session.set(Some(session)))
+    };
+
+    let on_rename = {
+        let rename_session = rename_session.clone();
+        Callback::from(move |session| rename_session.set(Some(session)))
     };
 
     let on_toggle_pill_menu = {
@@ -618,7 +626,18 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                 on_share={on_share}
                 on_schedule={on_schedule}
                 on_fork={on_fork}
+                on_rename={on_rename}
             />
+            {
+                if let Some(ref session) = *rename_session {
+                    let rename_session = rename_session.clone();
+                    let on_close = Callback::from(move |_| rename_session.set(None));
+                    on_session_portal(
+                        &session.portal,
+                        html! { <RenameSessionDialog key={session.key.to_string()} session_id={session.info.id} current_name={session.info.session_name.clone()} {on_close} on_renamed={props.on_renamed.clone()} /> },
+                    )
+                } else { html! {} }
+            }
             {
                 if let Some(ref session) = *share_session {
                     let share_session = share_session.clone();
