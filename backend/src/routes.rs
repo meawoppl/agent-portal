@@ -520,6 +520,11 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
             post(handlers::launchers::install_agent),
         )
         // Admin dashboard routes (admin-only)
+        .route(
+            "/api/admin/federation-policy",
+            get(handlers::federation::policy::get_policy)
+                .put(handlers::federation::policy::set_policy),
+        )
         .route("/api/admin/stats", get(handlers::admin::get_stats))
         .route("/api/admin/users", get(handlers::admin::list_users))
         .route(

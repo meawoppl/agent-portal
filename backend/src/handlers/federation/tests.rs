@@ -62,6 +62,7 @@ fn policy_caps_and_exact_origins_fail_closed() {
 
 #[test]
 fn linked_credentials_keep_their_ceiling_and_cannot_become_legacy_tokens() {
+    let _guard = super::TEST_POLICY_LOCK.blocking_lock();
     let Some(pool) = crate::test_support::shared_pool() else {
         return;
     };
@@ -144,6 +145,7 @@ fn linked_credentials_keep_their_ceiling_and_cannot_become_legacy_tokens() {
 /// available at the gate and a linked bearer must not fall back to dev login.
 #[tokio::test]
 async fn router_applies_scope_before_handlers_and_live_revocation() {
+    let _guard = super::TEST_POLICY_LOCK.lock().await;
     use axum::{
         body::Body,
         http::{Request, StatusCode},
