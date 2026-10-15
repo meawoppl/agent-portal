@@ -288,9 +288,12 @@ pub async fn approval(
             "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
         ),
     );
+    // no-referrer makes browser form POSTs send Origin: null. Keep a
+    // same-origin referrer so the CSRF origin check works, without leaking
+    // the approval URL to another site.
     response.headers_mut().insert(
         header::REFERRER_POLICY,
-        axum::http::HeaderValue::from_static("no-referrer"),
+        axum::http::HeaderValue::from_static("same-origin"),
     );
     Ok(response)
 }
@@ -498,6 +501,7 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(page.status(), StatusCode::OK);
+        assert_eq!(page.headers()[header::REFERRER_POLICY], "same-origin");
         let nonce = cookies
             .signed(&state.cookie_key)
             .get(CSRF_COOKIE)
