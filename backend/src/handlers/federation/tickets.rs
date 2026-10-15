@@ -21,8 +21,8 @@ use uuid::Uuid;
 #[derive(Queryable, Selectable)]
 #[diesel(table_name = tickets)]
 struct Ticket {
-    #[allow(dead_code)]
-    ticket_hash: String,
+    #[diesel(column_name = ticket_hash)]
+    _ticket_hash: String,
     token_id: Uuid,
     grant_id: Uuid,
     user_id: Uuid,
@@ -87,35 +87,33 @@ pub fn consume(
     if secret.len() != 64 || !secret.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err(AppError::Unauthorized);
     }
+    let mut conn = state.conn()?;
+    // Commit the atomic claim before checking its bindings. Even an invalid
+    // presentation burns the ticket; a caller must acquire a fresh one.
+    let ticket = diesel::delete(tickets::table.find(crate::jwt::hash_token(secret)))
+        .get_result::<Ticket>(&mut conn)
+        .optional()?
+        .ok_or(AppError::Unauthorized)?;
     let origin = headers
         .get(header::ORIGIN)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| shared::urls::canonical_origin(v).ok())
         .ok_or(AppError::Forbidden)?;
-    let mut conn = state.conn()?;
-    conn.transaction::<_, AppError, _>(|conn| {
-        // DELETE RETURNING is the atomic claim: two upgrades cannot both win.
-        // Any failed validation rolls back, but cannot grant any authority.
-        let ticket = diesel::delete(tickets::table.find(crate::jwt::hash_token(secret)))
-            .get_result::<Ticket>(conn)
-            .optional()?
-            .ok_or(AppError::Unauthorized)?;
-        if ticket.expires_at <= chrono::Utc::now().naive_utc() || ticket.client_origin != origin {
-            return Err(AppError::Forbidden);
-        }
-        let token = proxy_auth_tokens::table
-            .find(ticket.token_id)
-            .first::<ProxyAuthToken>(conn)?;
-        let auth = super::validate_row(conn, &token)?;
-        if auth.user_id != ticket.user_id
-            || auth.grant_id != ticket.grant_id
-            || auth.client_origin != ticket.client_origin
-            || Some(auth.scope) != TokenScope::parse(&ticket.scope)
-        {
-            return Err(AppError::Forbidden);
-        }
-        Ok(auth)
-    })
+    if ticket.expires_at <= chrono::Utc::now().naive_utc() || ticket.client_origin != origin {
+        return Err(AppError::Forbidden);
+    }
+    let token = proxy_auth_tokens::table
+        .find(ticket.token_id)
+        .first::<ProxyAuthToken>(&mut conn)?;
+    let auth = super::validate_row(&mut conn, &token)?;
+    if auth.user_id != ticket.user_id
+        || auth.grant_id != ticket.grant_id
+        || auth.client_origin != ticket.client_origin
+        || Some(auth.scope) != TokenScope::parse(&ticket.scope)
+    {
+        return Err(AppError::Forbidden);
+    }
+    Ok(auth)
 }
 
 #[cfg(test)]
@@ -203,6 +201,8 @@ mod tests {
         .is_err());
         let ticket = mint(state.clone(), auth.clone()).await;
         assert!(consume(&state, &ticket.ticket, &headers("https://evil.example")).is_err());
+        assert!(consume(&state, &ticket.ticket, &headers("https://home.example")).is_err());
+        let ticket = mint(state.clone(), auth.clone()).await;
         let barrier = Arc::new(std::sync::Barrier::new(2));
         let contender = || {
             let state = state.clone();

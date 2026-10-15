@@ -644,7 +644,7 @@ an opaque access token plus the remote instance/account/grant identifiers.
 Accounts on different portals are never linked by matching email addresses.
 
 Codes expire after ten minutes, grants after thirty days and tokens after one
-hour. `POST /api/linked-grants/refresh` rotates a live linked bearer within its
+hour. `POST /api/linked-grants/refresh` rotates an unrevoked linked bearer (including an expired access token) within its
 original grant, invalidating the old token without increasing scope or extending
 grant expiry. Native users list grants with `GET /api/linked-grants` and revoke
 owned grants with `DELETE /api/linked-grants/{id}`. A linked bearer can revoke
@@ -655,11 +655,13 @@ browser constraint, not proof of native-client identity.
 
 For a browser socket, `POST /api/ws-ticket` exchanges the linked bearer for a
 30-second, one-use opaque ticket. Connect to `/ws/client?ticket=...` with the same
-Origin. The server atomically consumes the ticket, rechecks token/grant/policy,
+Origin. The server atomically consumes the ticket, even on a failed presentation, then
+rechecks token/grant/policy,
 and retains the authorization ceiling throughout the socket's life. Invalid
-tickets never fall back to cookie or development-mode authentication. Every
-outbound/inbound message rechecks authorization; idle sockets recheck every five
-seconds. Token rotation invalidates existing sockets bound to the old token, so
+tickets never fall back to cookie or development-mode authentication. Every incoming command rechecks authorization. Outbound frames reuse a
+per-socket success for at most two seconds; an idle timer also forces validation
+every two seconds. Revocation of outbound access therefore has a bounded window
+subject to runtime scheduling. Token rotation invalidates existing sockets bound to the old token, so
 a client must acquire a new ticket and reconnect after refresh.
 
 Only hashes of access tokens, device secrets and socket tickets are persisted.
