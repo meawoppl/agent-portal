@@ -3,7 +3,10 @@
 
 use axum::{extract::State, Json};
 use diesel::prelude::*;
-use shared::api::{FederationDiscoveryResponse, FEDERATION_PROTOCOL};
+use shared::api::{
+    FederationDiscoveryResponse, AUTH_MODE_LINKED_DEVICE_FLOW, AUTH_MODE_WS_TICKET,
+    CAP_LINKED_CLIENT_ENROLLMENT, CAP_LINKED_CLIENT_WRITE, CAP_WS_TICKET, FEDERATION_PROTOCOL,
+};
 use std::sync::Arc;
 
 use crate::errors::AppError;
@@ -26,7 +29,14 @@ pub async fn discovery(
     Ok(Json(FederationDiscoveryResponse {
         instance_id,
         protocol: FEDERATION_PROTOCOL,
-        capabilities: Vec::new(),
-        auth_modes: Vec::new(),
+        capabilities: vec![
+            CAP_LINKED_CLIENT_ENROLLMENT.into(),
+            CAP_LINKED_CLIENT_WRITE.into(),
+            CAP_WS_TICKET.into(),
+        ],
+        auth_modes: vec![
+            AUTH_MODE_LINKED_DEVICE_FLOW.into(),
+            AUTH_MODE_WS_TICKET.into(),
+        ],
     }))
 }

@@ -375,6 +375,7 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
             get(handlers::turn_metrics::list_aggregated_turn_metrics),
         )
         // Linked credentials remain confined to their approved grant.
+        .route("/api/ws-ticket", post(handlers::federation::tickets::issue))
         .route(
             "/api/linked-grants",
             get(handlers::federation::credentials::list),

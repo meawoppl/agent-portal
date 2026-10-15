@@ -122,3 +122,5 @@ archive-format = { path = "../archive-format", features = ["test-support"] }
 ws-bridge = { workspace = true, features = ["native-client"] }
 uuid = { workspace = true }
 tempfile = "3"
+# Exercise real browser-Origin ticket handshakes (ws-bridge's client cannot set headers).
+tokio-tungstenite = "0.28"

@@ -78,6 +78,21 @@ diesel::table! {
 }
 
 diesel::table! {
+    linked_ws_tickets (ticket_hash) {
+        #[max_length = 64]
+        ticket_hash -> Varchar,
+        token_id -> Uuid,
+        grant_id -> Uuid,
+        user_id -> Uuid,
+        #[max_length = 255]
+        client_origin -> Varchar,
+        #[max_length = 16]
+        scope -> Varchar,
+        expires_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     messages (id) {
         id -> Uuid,
         session_id -> Uuid,
@@ -409,6 +424,9 @@ diesel::joinable!(deleted_session_costs -> users (user_id));
 diesel::joinable!(forward_subdomains -> sessions (session_id));
 diesel::joinable!(linked_client_enrollments -> users (user_id));
 diesel::joinable!(linked_client_grants -> users (user_id));
+diesel::joinable!(linked_ws_tickets -> linked_client_grants (grant_id));
+diesel::joinable!(linked_ws_tickets -> proxy_auth_tokens (token_id));
+diesel::joinable!(linked_ws_tickets -> users (user_id));
 diesel::joinable!(messages -> sessions (session_id));
 diesel::joinable!(messages -> users (user_id));
 diesel::joinable!(pending_inputs -> sessions (session_id));
@@ -438,6 +456,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     forward_subdomains,
     linked_client_enrollments,
     linked_client_grants,
+    linked_ws_tickets,
     messages,
     pending_inputs,
     pending_permission_requests,

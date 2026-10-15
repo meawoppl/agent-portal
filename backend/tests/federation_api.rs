@@ -61,8 +61,18 @@ async fn discovery_is_public_stable_and_advertises_nothing_unenforced() {
         "a client on another origin must be able to read discovery"
     );
     assert_eq!(first.protocol, FEDERATION_PROTOCOL);
-    assert!(first.capabilities.is_empty());
-    assert!(first.auth_modes.is_empty());
+    assert!(first
+        .capabilities
+        .contains(&shared::api::CAP_LINKED_CLIENT_ENROLLMENT.into()));
+    assert!(first
+        .capabilities
+        .contains(&shared::api::CAP_WS_TICKET.into()));
+    assert!(first
+        .auth_modes
+        .contains(&shared::api::AUTH_MODE_WS_TICKET.into()));
+    assert!(!first
+        .capabilities
+        .contains(&shared::api::CAP_SCOPED_MEDIA_URLS.into()));
 
     let (second, _) = discover(state).await;
     assert_eq!(first.instance_id, second.instance_id);

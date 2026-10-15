@@ -627,3 +627,43 @@ GET  /api/auth/device/error     → Error page
 | `ALLOWED_EMAIL_DOMAIN` | Optional | Restrict to email domain |
 | `ALLOWED_EMAILS` | Optional | Restrict to specific emails |
 | `--dev-mode` (CLI flag) | Development | Enable dev mode (not an env var) |
+
+### Linked portals (federation)
+
+Linked portal credentials are separate from CLI/mobile JWTs. Administrators set
+`GET/PUT /api/admin/federation-policy` to `off` (the default), an origin allowlist,
+or `any`, with an explicit maximum `read` or `write` scope. Discovery advertises
+implemented capabilities, not permission to bypass that policy.
+
+A client on the approved home origin requests `/api/auth/linked/code` with its
+origin and requested scope. The user approves on the **remote portal**, using
+its native login cookie. The approval page names the account, requesting origin,
+device and scope; a signed CSRF cookie and same-origin POST protect the decision.
+The client polls `/api/auth/linked/poll`. Approval can be consumed once, yielding
+an opaque access token plus the remote instance/account/grant identifiers.
+Accounts on different portals are never linked by matching email addresses.
+
+Codes expire after ten minutes, grants after thirty days and tokens after one
+hour. `POST /api/linked-grants/refresh` rotates a live linked bearer within its
+original grant, invalidating the old token without increasing scope or extending
+grant expiry. Native users list grants with `GET /api/linked-grants` and revoke
+owned grants with `DELETE /api/linked-grants/{id}`. A linked bearer can revoke
+only its own grant and cannot list grants, manage policy, or mint legacy tokens.
+All linked requests require an Origin matching the grant, live policy and an
+enabled account, in addition to the existing session-role checks. Origin is a
+browser constraint, not proof of native-client identity.
+
+For a browser socket, `POST /api/ws-ticket` exchanges the linked bearer for a
+30-second, one-use opaque ticket. Connect to `/ws/client?ticket=...` with the same
+Origin. The server atomically consumes the ticket, rechecks token/grant/policy,
+and retains the authorization ceiling throughout the socket's life. Invalid
+tickets never fall back to cookie or development-mode authentication. Every
+outbound/inbound message rechecks authorization; idle sockets recheck every five
+seconds. Token rotation invalidates existing sockets bound to the old token, so
+a client must acquire a new ticket and reconnect after refresh.
+
+Only hashes of access tokens, device secrets and socket tickets are persisted.
+Credential responses disable caching. Do not enable query-string logging for
+`/ws/client` in a reverse proxy: the ticket is short-lived, but is still a secret
+until consumed. Forwarded-app handoffs remain unavailable to linked credentials;
+clients should open the session on its native portal instead.
