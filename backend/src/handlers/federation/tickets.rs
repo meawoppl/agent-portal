@@ -311,4 +311,215 @@ mod tests {
             .execute(&mut conn)
             .unwrap();
     }
+    #[tokio::test]
+    async fn http_consent_rotates_and_revokes_a_scoped_bearer() {
+        use shared::api::{
+            DeviceCodeResponse, DeviceFlowPollRequest, FederationPolicy,
+            LinkedClientEnrollmentRequest, LinkedClientPollResponse, LinkedClientRefreshResponse,
+        };
+        use tower_cookies::{Cookie, Cookies};
+        let _guard = super::super::TEST_POLICY_LOCK.lock().await;
+        let Some(pool) = crate::test_support::shared_pool() else {
+            return;
+        };
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut app_state = crate::test_support::test_app_state(pool.clone());
+        app_state.public_url = format!("http://{addr}");
+        let state = Arc::new(app_state);
+        let remote = &state.public_url;
+        let home = "https://home.example";
+        let mut conn = pool.get().unwrap();
+        let user = crate::test_support::insert_user(&mut conn, "http-consent");
+        diesel::update(federation_policy::table)
+            .set(
+                federation_policy::policy.eq(serde_json::to_value(FederationPolicy::Any {
+                    max_scope: TokenScope::Write,
+                })
+                .unwrap()),
+            )
+            .execute(&mut conn)
+            .unwrap();
+        let cookies = Cookies::default();
+        cookies.signed(&state.cookie_key).add(Cookie::new(
+            shared::protocol::SESSION_COOKIE_NAME,
+            user.id.to_string(),
+        ));
+        let login_cookie = format!(
+            "{}={}",
+            shared::protocol::SESSION_COOKIE_NAME,
+            cookies
+                .get(shared::protocol::SESSION_COOKIE_NAME)
+                .unwrap()
+                .value()
+        );
+        let app = crate::routes::build_router(state.clone()).unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .await
+            .unwrap();
+        });
+        let client = reqwest::Client::new();
+        let start = client
+            .post(format!("{remote}/api/auth/linked/code"))
+            .header("origin", home)
+            .json(&LinkedClientEnrollmentRequest {
+                client_origin: home.into(),
+                requested_scope: TokenScope::Read,
+                device_label: Some("HTTP test".into()),
+            })
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(start.status(), 200);
+        assert_eq!(
+            start.headers().get("cache-control").unwrap(),
+            "private, no-store"
+        );
+        assert!(start.headers().contains_key("access-control-allow-origin"));
+        let code: DeviceCodeResponse = start.json().await.unwrap();
+        let approval = client
+            .get(&code.verification_uri)
+            .header("cookie", &login_cookie)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(approval.status(), 200);
+        let csrf_cookie = approval
+            .headers()
+            .get_all("set-cookie")
+            .iter()
+            .map(|h| h.to_str().unwrap().split(';').next().unwrap().to_string())
+            .find(|h| h.starts_with("linked_approval_csrf="))
+            .unwrap();
+        let page = approval.text().await.unwrap();
+        let nonce = page
+            .split("name=\"csrf\" value=\"")
+            .nth(1)
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap();
+        let approval = client
+            .post(format!("{remote}/api/auth/linked"))
+            .header("origin", remote)
+            .header("cookie", format!("{login_cookie}; {csrf_cookie}"))
+            .form(&[
+                ("user_code", code.user_code.as_str()),
+                ("csrf", nonce),
+                ("decision", "approve"),
+            ])
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(approval.status(), 200);
+        let polled = client
+            .post(format!("{remote}/api/auth/linked/poll"))
+            .header("origin", home)
+            .json(&DeviceFlowPollRequest {
+                device_code: code.device_code,
+            })
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(polled.status(), 200);
+        let (token, grant) = match polled.json::<LinkedClientPollResponse>().await.unwrap() {
+            LinkedClientPollResponse::Complete {
+                access_token,
+                grant,
+                ..
+            } => (access_token, grant),
+            _ => panic!("approved enrollment must complete"),
+        };
+        let sessions = |token: String| {
+            client
+                .get(format!("{remote}/api/sessions"))
+                .header("origin", home)
+                .bearer_auth(token)
+                .send()
+        };
+        assert_eq!(sessions(token.clone()).await.unwrap().status(), 200);
+        assert_eq!(
+            client
+                .post(format!("{remote}/api/sessions/{}/stop", Uuid::new_v4()))
+                .header("origin", home)
+                .bearer_auth(&token)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            403
+        );
+        let ticket = client
+            .post(format!("{remote}/api/ws-ticket"))
+            .header("origin", home)
+            .bearer_auth(&token)
+            .json(&WsTicketRequest {
+                client_origin: home.into(),
+            })
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(ticket.status(), 200);
+        let ticket: WsTicketResponse = ticket.json().await.unwrap();
+        let mut request = format!("ws://{addr}/ws/client?ticket={}", ticket.ticket)
+            .into_client_request()
+            .unwrap();
+        request
+            .headers_mut()
+            .insert(header::ORIGIN, home.parse().unwrap());
+        let (mut socket, _) = connect_async(request).await.unwrap();
+        let refresh = client
+            .post(format!("{remote}/api/linked-grants/refresh"))
+            .header("origin", home)
+            .bearer_auth(&token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(refresh.status(), 200);
+        let refreshed: LinkedClientRefreshResponse = refresh.json().await.unwrap();
+        assert_eq!(sessions(token).await.unwrap().status(), 401);
+        assert_eq!(
+            sessions(refreshed.access_token.clone())
+                .await
+                .unwrap()
+                .status(),
+            200
+        );
+        tokio::time::timeout(std::time::Duration::from_secs(7), async {
+            while let Some(Ok(frame)) = socket.next().await {
+                if frame.is_close() {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("rotation closes the old socket");
+        assert_eq!(
+            client
+                .delete(format!("{remote}/api/linked-grants/{}", grant.id))
+                .header("origin", home)
+                .bearer_auth(&refreshed.access_token)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            204
+        );
+        assert_eq!(
+            sessions(refreshed.access_token).await.unwrap().status(),
+            401
+        );
+        server.abort();
+        diesel::update(federation_policy::table)
+            .set(federation_policy::policy.eq(serde_json::to_value(FederationPolicy::Off).unwrap()))
+            .execute(&mut conn)
+            .unwrap();
+        diesel::delete(users::table.find(user.id))
+            .execute(&mut conn)
+            .unwrap();
+    }
 }
