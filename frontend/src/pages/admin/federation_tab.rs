@@ -64,15 +64,6 @@ enum Mode {
     Allowlist,
     Any,
 }
-impl Mode {
-    fn value(self) -> &'static str {
-        match self {
-            Self::Off => "off",
-            Self::Allowlist => "allowlist",
-            Self::Any => "any",
-        }
-    }
-}
 
 fn make_policy(mode: Mode, scope: TokenScope, text: &str) -> Result<FederationPolicy, String> {
     match mode {
@@ -218,10 +209,10 @@ fn editor(props: &EditorProps) -> Html {
         <div class="section-stack">
             <fieldset disabled={*busy}>
                 <label for="federation-mode">{"Access policy"}</label>
-                <select id="federation-mode" value={mode.value()} onchange={on_mode}>
-                    <option value="off">{"Off"}</option>
-                    <option value="allowlist">{"Only listed portals"}</option>
-                    <option value="any">{"Any portal, with user approval"}</option>
+                <select id="federation-mode" onchange={on_mode}>
+                    <option value="off" selected={*mode == Mode::Off}>{"Off"}</option>
+                    <option value="allowlist" selected={*mode == Mode::Allowlist}>{"Only listed portals"}</option>
+                    <option value="any" selected={*mode == Mode::Any}>{"Any portal, with user approval"}</option>
                 </select>
                 if *mode == Mode::Allowlist {
                     <label for="federation-origins">{"Allowed portal origins (one per line)"}</label>
@@ -229,9 +220,9 @@ fn editor(props: &EditorProps) -> Html {
                 }
                 if *mode != Mode::Off {
                     <label for="federation-scope">{"Maximum permission users may approve"}</label>
-                    <select id="federation-scope" value={scope.as_str()} onchange={on_scope}>
-                        <option value="read">{"Read only"}</option>
-                        <option value="write">{"Read and send commands"}</option>
+                    <select id="federation-scope" onchange={on_scope}>
+                        <option value="read" selected={*scope == TokenScope::Read}>{"Read only"}</option>
+                        <option value="write" selected={*scope == TokenScope::Write}>{"Read and send commands"}</option>
                     </select>
                     <p class="section-description">{"Session permissions still apply. A viewer cannot become an editor through a linked portal."}</p>
                 } else {
