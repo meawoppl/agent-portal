@@ -15,6 +15,37 @@ use std::sync::Arc;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
+const LINKED_RECHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Only outbound reads may reuse successful authorization. Incoming commands
+/// always validate freshly, and the idle timer forces validation even under load.
+#[derive(Default)]
+struct OutboundAuthorization {
+    last_success: Option<std::time::Instant>,
+}
+
+impl OutboundAuthorization {
+    fn check<E>(
+        &mut self,
+        now: std::time::Instant,
+        force: bool,
+        validate: impl FnOnce() -> Result<(), E>,
+    ) -> Result<(), E> {
+        if !force
+            && self
+                .last_success
+                .is_some_and(|last| now.duration_since(last) < LINKED_RECHECK_INTERVAL)
+        {
+            return Ok(());
+        }
+        // Never retain a success across a failed forced check.
+        self.last_success = None;
+        validate()?;
+        self.last_success = Some(now);
+        Ok(())
+    }
+}
+
 pub async fn handle_web_client_socket(
     socket: WebSocket,
     app_state: Arc<AppState>,
@@ -49,18 +80,19 @@ pub async fn handle_web_client_socket(
         initial_replay_limit,
     };
 
-    // Revalidate before every read/write, not just upgrade. An idle socket is
-    // also closed promptly after revocation; queued frames are never delivered
-    // under stale authority. Cookie clients retain their existing behavior.
-    let mut recheck = tokio::time::interval(std::time::Duration::from_secs(5));
+    // Streaming output shares a two-second authorization window per socket;
+    // every incoming command still checks live authority. Forced idle checks
+    // close revoked sockets even when no traffic is flowing.
+    let mut outbound_auth = OutboundAuthorization::default();
+    let mut recheck = tokio::time::interval(LINKED_RECHECK_INTERVAL);
     loop {
         tokio::select! {
             _ = recheck.tick(), if linked.is_some() => {
-                if linked.as_ref().is_some_and(|auth| auth.authorize(&app_state, shared::api::TokenScope::Read).is_err()) { break; }
+                if linked.as_ref().is_some_and(|auth| outbound_auth.check(std::time::Instant::now(), true, || auth.authorize(&app_state, shared::api::TokenScope::Read)).is_err()) { break; }
             }
             msg = rx.recv() => {
                 let Some(msg) = msg else { break; };
-                if linked.as_ref().is_some_and(|auth| auth.authorize(&app_state, shared::api::TokenScope::Read).is_err()) { break; }
+                if linked.as_ref().is_some_and(|auth| outbound_auth.check(std::time::Instant::now(), false, || auth.authorize(&app_state, shared::api::TokenScope::Read)).is_err()) { break; }
                 if ws_sender.send(msg).await.is_err() { break; }
             }
             result = ws_receiver.recv() => {
@@ -541,5 +573,42 @@ fn handle_web_input(
             "Failed to send to session '{}', session not found in SessionManager (input queued)",
             key
         );
+    }
+}
+
+#[cfg(test)]
+mod outbound_authorization_tests {
+    use super::*;
+
+    #[test]
+    fn streaming_reuses_success_but_expiry_and_idle_force_validation() {
+        let mut cache = OutboundAuthorization::default();
+        let start = std::time::Instant::now();
+        let calls = std::cell::Cell::new(0);
+        let validate = || {
+            calls.set(calls.get() + 1);
+            Ok::<_, ()>(())
+        };
+        for _ in 0..1000 {
+            cache.check(start, false, validate).unwrap();
+        }
+        assert_eq!(calls.get(), 1);
+        cache
+            .check(start + LINKED_RECHECK_INTERVAL, false, validate)
+            .unwrap();
+        assert_eq!(calls.get(), 2);
+        cache
+            .check(start + LINKED_RECHECK_INTERVAL, true, validate)
+            .unwrap();
+        assert_eq!(calls.get(), 3);
+    }
+
+    #[test]
+    fn failed_forced_check_invalidates_previous_success() {
+        let mut cache = OutboundAuthorization::default();
+        let now = std::time::Instant::now();
+        cache.check(now, false, || Ok::<_, ()>(())).unwrap();
+        assert!(cache.check(now, true, || Err(())).is_err());
+        assert!(cache.check(now, false, || Err(())).is_err());
     }
 }
