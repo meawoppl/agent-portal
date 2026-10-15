@@ -320,6 +320,9 @@ pub struct ProxyAuthToken {
     /// Session whose proxy holds this token, if it is a launch token. Used to
     /// revoke the token when that session terminates.
     pub session_id: Option<Uuid>,
+    /// Present only for linked clients; legacy verification must reject these rows.
+    pub scope: Option<String>,
+    pub linked_grant_id: Option<Uuid>,
 }
 
 #[derive(Debug, Insertable)]

@@ -116,6 +116,7 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
     // The forward-host gate is the outermost layer; the main `app_state`
     // binding is consumed by `.with_state` below.
     let app_state_for_forward_gate = app_state.clone();
+    let app_state_for_linked_gate = app_state.clone();
 
     // Rate-limited device-code creation. Keep this strict: creating a code is
     // user-visible work and should not be spammed.
@@ -565,6 +566,11 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
         .layer(axum::middleware::from_fn_with_state(
             app_state_for_forward_gate,
             handlers::forward_proxy::forward_host_gate,
+        ))
+        // Outermost auth ceiling also covers forward hosts and SPA fallbacks.
+        .layer(axum::middleware::from_fn_with_state(
+            app_state_for_linked_gate,
+            handlers::federation::linked_scope_gate,
         )))
 }
 

@@ -112,6 +112,6 @@ pub async fn handle_web_client_websocket(
 
     info!("Authenticated WebSocket upgrade for user: {}", user_id);
     ws.on_upgrade(move |socket| {
-        web_client_socket::handle_web_client_socket(socket, app_state, user_id)
+        web_client_socket::handle_web_client_socket(socket, app_state, user_id, None)
     })
 }

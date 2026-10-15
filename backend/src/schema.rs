@@ -25,10 +25,33 @@ diesel::table! {
 }
 
 diesel::table! {
+    federation_policy (singleton) {
+        singleton -> Bool,
+        policy -> Jsonb,
+    }
+}
+
+diesel::table! {
     forward_subdomains (label) {
         label -> Text,
         session_id -> Uuid,
         created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    linked_client_grants (id) {
+        id -> Uuid,
+        user_id -> Uuid,
+        #[max_length = 255]
+        client_origin -> Varchar,
+        #[max_length = 16]
+        scope -> Varchar,
+        #[max_length = 128]
+        device_label -> Nullable<Varchar>,
+        created_at -> Timestamp,
+        expires_at -> Timestamp,
+        revoked_at -> Nullable<Timestamp>,
     }
 }
 
@@ -112,6 +135,9 @@ diesel::table! {
         expires_at -> Nullable<Timestamp>,
         revoked -> Bool,
         session_id -> Nullable<Uuid>,
+        #[max_length = 16]
+        scope -> Nullable<Varchar>,
+        linked_grant_id -> Nullable<Uuid>,
     }
 }
 
@@ -351,6 +377,7 @@ diesel::joinable!(custom_subdomains -> sessions (session_id));
 diesel::joinable!(custom_subdomains -> users (created_by));
 diesel::joinable!(deleted_session_costs -> users (user_id));
 diesel::joinable!(forward_subdomains -> sessions (session_id));
+diesel::joinable!(linked_client_grants -> users (user_id));
 diesel::joinable!(messages -> sessions (session_id));
 diesel::joinable!(messages -> users (user_id));
 diesel::joinable!(pending_inputs -> sessions (session_id));
@@ -376,7 +403,9 @@ diesel::joinable!(user_identities -> users (user_id));
 diesel::allow_tables_to_appear_in_same_query!(
     custom_subdomains,
     deleted_session_costs,
+    federation_policy,
     forward_subdomains,
+    linked_client_grants,
     messages,
     pending_inputs,
     pending_permission_requests,

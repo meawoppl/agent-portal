@@ -15,7 +15,12 @@ use std::sync::Arc;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-pub async fn handle_web_client_socket(socket: WebSocket, app_state: Arc<AppState>, user_id: Uuid) {
+pub async fn handle_web_client_socket(
+    socket: WebSocket,
+    app_state: Arc<AppState>,
+    user_id: Uuid,
+    linked: Option<crate::handlers::federation::LinkedAuth>,
+) {
     let session_manager = app_state.session_manager.clone();
     let db_pool = app_state.db_pool.clone();
     let initial_replay_limit = app_state.message_retention_count;
@@ -44,36 +49,32 @@ pub async fn handle_web_client_socket(socket: WebSocket, app_state: Arc<AppState
         initial_replay_limit,
     };
 
-    let send_task = tokio::spawn(async move {
-        while let Some(msg) = rx.recv().await {
-            if ws_sender.send(msg).await.is_err() {
-                break;
+    // Revalidate before every read/write, not just upgrade. An idle socket is
+    // also closed promptly after revocation; queued frames are never delivered
+    // under stale authority. Cookie clients retain their existing behavior.
+    let mut recheck = tokio::time::interval(std::time::Duration::from_secs(5));
+    loop {
+        tokio::select! {
+            _ = recheck.tick(), if linked.is_some() => {
+                if linked.as_ref().is_some_and(|auth| auth.authorize(&app_state, shared::api::TokenScope::Read).is_err()) { break; }
             }
-        }
-    });
-
-    while let Some(result) = ws_receiver.recv().await {
-        match result {
-            Ok(client_msg) => {
-                let should_break = handle_web_client_message(
-                    client_msg,
-                    ctx,
-                    &mut session_key,
-                    &mut verified_session_id,
-                    &mut pending_uploads,
-                );
-                if should_break {
-                    break;
+            msg = rx.recv() => {
+                let Some(msg) = msg else { break; };
+                if linked.as_ref().is_some_and(|auth| auth.authorize(&app_state, shared::api::TokenScope::Read).is_err()) { break; }
+                if ws_sender.send(msg).await.is_err() { break; }
+            }
+            result = ws_receiver.recv() => {
+                let Some(result) = result else { break; };
+                match result {
+                    Ok(client_msg) => {
+                        if linked.as_ref().is_some_and(|auth| auth.authorize(&app_state, crate::handlers::federation::message_scope(&client_msg)).is_err()) { break; }
+                        if handle_web_client_message(client_msg, ctx, &mut session_key, &mut verified_session_id, &mut pending_uploads) { break; }
+                    }
+                    Err(e) => { warn!("WebSocket decode error: {}", e); }
                 }
-            }
-            Err(e) => {
-                warn!("WebSocket decode error: {}", e);
-                continue;
             }
         }
     }
-
-    send_task.abort();
 
     // Eagerly drop this connection's senders from the presence registries.
     // All exit paths of the loop above (client close, decode-fatal break,

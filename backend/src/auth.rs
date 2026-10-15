@@ -70,8 +70,11 @@ fn load_bearer_user(
     let Some(token) = bearer_token(headers) else {
         return Ok(None);
     };
-    let (user_id, _email) =
-        crate::handlers::proxy_tokens::verify_and_get_user(app_state, conn, token)?;
+    let user_id = if token.starts_with(crate::handlers::federation::LINKED_TOKEN_PREFIX) {
+        crate::handlers::federation::authenticate(app_state, conn, token, headers)?.user_id
+    } else {
+        crate::handlers::proxy_tokens::verify_and_get_user(app_state, conn, token)?.0
+    };
 
     use crate::schema::users;
     let user = users::table
