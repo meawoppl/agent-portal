@@ -216,6 +216,19 @@ mod tests {
     }
 
     #[test]
+    fn muse_wonder_is_selectable_and_round_trips_schedule_args() {
+        // The SDK catalog drives the picker; new models must survive schedule editing.
+        let model = "muse-wonder-1.0";
+        assert!(model_catalog(AgentType::Muse)
+            .iter()
+            .any(|entry| entry.0 == model));
+        let input = model_cli_args(AgentType::Muse, model);
+        let (found, rest) = extract_model_arg(&input, AgentType::Muse);
+        assert_eq!(found.as_deref(), Some(model));
+        assert!(rest.is_empty());
+    }
+
+    #[test]
     fn extract_claude_model_and_strips_it() {
         let model = a_known_claude_model();
         let (found, rest) =
