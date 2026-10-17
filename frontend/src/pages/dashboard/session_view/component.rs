@@ -9,7 +9,6 @@
 //! `tasks_panel.rs`.
 
 use crate::components::message_renderer::{MessageRenderer, RenderedMessage};
-use crate::components::plugin_discovery::{plugin_inventory_api_path, suggested_plugins};
 use crate::components::{
     group_is_turn_terminator, group_messages, thinking_chip_starts, ForkDialog,
     MessageGroupRenderer,
@@ -46,6 +45,7 @@ use super::outbox::Outbox;
 use super::permission_handler::{
     build_permission_response, PermissionHandler, PermissionResponseKind,
 };
+use super::plugin_selector::PluginSelector;
 use super::plugin_views::{PluginContextNotice, PluginDiscoverySurface};
 use super::session_surface::{
     clamp_split_percent, clear_open_surface, load_open_surface, load_split_percent,
@@ -291,24 +291,6 @@ fn edit_stack_fetch(ctx: &Context<SessionView>) {
     });
 }
 
-fn plugin_inventory_fetch(ctx: &Context<SessionView>) {
-    let link = ctx.link().clone();
-    let portal = ctx.props().portal.clone();
-    let session_id = ctx.props().session.id;
-    spawn_local(async move {
-        let path = plugin_inventory_api_path(Some(session_id), None);
-        match portal
-            .fetch_json::<PluginInventoryResponse>(&path, On401::Ignore)
-            .await
-        {
-            Ok(data) => link.send_message(SessionViewMsg::PluginInventoryLoaded(data.plugins)),
-            Err(err) => link.send_message(SessionViewMsg::PluginInventoryFailed(format!(
-                "Could not load plugins: {err}"
-            ))),
-        }
-    });
-}
-
 fn plugin_notice_storage_key(session_id: Uuid) -> String {
     format!("{PLUGIN_NOTICE_STORAGE_PREFIX}{session_id}")
 }
@@ -391,8 +373,7 @@ pub enum SessionViewMsg {
     OpenForwardSurface(ForwardInfo),
     /// The forward chip strip fetched the current forward set.
     ForwardsLoaded(Vec<ForwardInfo>),
-    PluginInventoryLoaded(Vec<PortalPluginInfo>),
-    PluginInventoryFailed(String),
+    PluginInventoryLoaded((Uuid, PluginInventoryResponse)),
     TogglePluginsPanel,
     HidePluginsPanel,
     TogglePluginNotice,
@@ -594,7 +575,6 @@ impl Component for SessionView {
         });
 
         edit_stack_fetch(ctx);
-        plugin_inventory_fetch(ctx);
 
         // Hydrate the per-turn metrics buffer in its own task, off the
         // history→WebSocket critical path (#1915): metrics only feed the
@@ -733,7 +713,6 @@ impl Component for SessionView {
             self.surface_split_percent =
                 load_split_percent(ctx.props().session.id, &ctx.props().portal);
             edit_stack_fetch(ctx);
-            plugin_inventory_fetch(ctx);
         }
 
         // Detect interrupt signal change on the focused session. Textarea
@@ -1042,14 +1021,12 @@ impl Component for SessionView {
                 self.edit_stack_error = Some(err);
                 true
             }
-            SessionViewMsg::PluginInventoryLoaded(plugins) => {
-                self.plugins = plugins;
+            SessionViewMsg::PluginInventoryLoaded((session_id, data)) => {
+                if session_id != ctx.props().session.id {
+                    return false;
+                }
+                self.plugins = data.plugins;
                 self.plugin_error = None;
-                true
-            }
-            SessionViewMsg::PluginInventoryFailed(err) => {
-                self.plugins.clear();
-                self.plugin_error = Some(err);
                 true
             }
             SessionViewMsg::TogglePluginsPanel => {
@@ -1069,7 +1046,6 @@ impl Component for SessionView {
                     self.active_surface =
                         Some(SessionSurface::from_plugins(ctx.props().session.id, mode));
                     self.edit_stack_panel_open = false;
-                    plugin_inventory_fetch(ctx);
                 }
                 true
             }
@@ -1485,18 +1461,6 @@ impl Component for SessionView {
             .is_some_and(SessionSurface::is_work_queue);
         let work_queue_needs_attention = pending_work_count > 0 || self.edit_stack_error.is_some();
         let work_queue_active = queue_open || work_queue_needs_attention;
-        let suggested_plugin_count = suggested_plugins(&self.plugins).len();
-        let plugin_count_label = if suggested_plugin_count > 0 {
-            suggested_plugin_count
-        } else {
-            self.plugins.len()
-        };
-        let plugins_open = self
-            .active_surface
-            .as_ref()
-            .is_some_and(SessionSurface::is_plugins);
-        let plugins_active =
-            plugins_open || suggested_plugin_count > 0 || self.plugin_error.is_some();
 
         html! {
             <ContextProvider<PortalClient> context={ctx.props().portal.clone()}>
@@ -1530,27 +1494,15 @@ impl Component for SessionView {
                             { format!("launcher v{}", version) }
                         </span>
                     }
-                    <button
-                        type="button"
-                        class={classes!(
-                            "session-header-action",
-                            "plugin-action",
-                            plugins_active.then_some("active"),
-                        )}
-                        title={if plugins_open { "Hide plugins" } else { "View plugin discovery" }}
-                        aria-controls="session-plugins"
-                        aria-expanded={plugins_open.to_string()}
-                        onclick={ctx.link().callback(|_| SessionViewMsg::TogglePluginsPanel)}
-                        disabled={ctx.props().portal.is_linked()}
-                    >
-                        {
-                            if plugin_count_label > 0 {
-                                format!("Plugins {plugin_count_label}")
-                            } else {
-                                "Plugins".to_string()
-                            }
-                        }
-                    </button>
+                    if !ctx.props().portal.is_linked() {
+                        <PluginSelector
+                            key={ctx.props().session.id.to_string()}
+                            session_id={ctx.props().session.id}
+                            is_owner={is_forward_owner}
+                            on_loaded={ctx.link().callback(SessionViewMsg::PluginInventoryLoaded)}
+                            on_details={ctx.link().callback(|_| SessionViewMsg::TogglePluginsPanel)}
+                        />
+                    }
                     if !ctx.props().portal.is_linked() { <ForwardChips
                         session_id={ctx.props().session.id}
                         is_owner={is_forward_owner}

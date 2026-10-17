@@ -37,6 +37,9 @@ pub const LAUNCHER_CAPABILITY_IMPORT_CODEX: &str = "session.import_codex_v1";
 /// conversation (`ServerToLauncher::PrepareSessionRestore`).
 pub const LAUNCHER_CAPABILITY_RESTORE_SESSION: &str = "session.restore_v1";
 
+/// Launcher supports inventory and per-session plugin skill selection.
+pub const LAUNCHER_CAPABILITY_SESSION_PLUGINS: &str = "session.plugins";
+
 /// Launcher capability advertised by versions that honor
 /// `ServerToLauncher::Restart` (restart the process without updating the binary).
 pub const LAUNCHER_CAPABILITY_RESTART: &str = "launcher.restart";

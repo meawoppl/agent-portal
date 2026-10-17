@@ -43,6 +43,10 @@ pub enum SessionExitReason {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum LauncherToServer {
+    SessionPluginsResult {
+        request_id: Uuid,
+        result: Result<crate::api::PluginInventoryResponse, String>,
+    },
     /// Register a launcher daemon
     LauncherRegister {
         launcher_id: Uuid,
@@ -255,6 +259,13 @@ pub enum LauncherRejectReason {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ServerToLauncher {
+    /// Inventory or update the installed plugin skills selected for one session.
+    SessionPlugins {
+        request_id: Uuid,
+        session_id: Uuid,
+        working_directory: String,
+        selection: Option<crate::api::PluginOverride>,
+    },
     /// Acknowledge launcher registration
     LauncherRegisterAck {
         success: bool,

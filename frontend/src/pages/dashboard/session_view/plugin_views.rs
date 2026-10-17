@@ -29,7 +29,11 @@ struct PluginCardProps {
 
 #[function_component(PluginContextNotice)]
 pub(super) fn plugin_context_notice(props: &PluginContextNoticeProps) -> Html {
-    let suggested = suggested_plugins(&props.plugins);
+    let suggested = props
+        .plugins
+        .iter()
+        .filter(|plugin| plugin.enabled)
+        .collect::<Vec<_>>();
     if suggested.is_empty() {
         return html! {};
     }
@@ -58,7 +62,7 @@ pub(super) fn plugin_context_notice(props: &PluginContextNoticeProps) -> Html {
                 aria-expanded={expanded.to_string()}
             >
                 <span class="plugin-context-caret">{ if expanded { "▾" } else { "▸" } }</span>
-                <span class="plugin-context-title">{ "Plugin context" }</span>
+                <span class="plugin-context-title">{ "Selected plugin skills" }</span>
                 <span class="plugin-context-names">{ label }</span>
                 <span class="plugin-context-size">
                     { plugin_context_label(context_bytes, estimated_tokens) }

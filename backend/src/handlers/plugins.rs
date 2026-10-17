@@ -1,4 +1,4 @@
-//! Read-only Portal plugin inventory and directory-specific suggestions.
+//! Plugin discovery and launcher-backed session skill selection.
 
 use std::collections::BTreeSet;
 use std::env;
@@ -44,9 +44,13 @@ pub async fn list_plugins(
     Query(query): Query<PluginInventoryQuery>,
 ) -> Result<Json<PluginInventoryResponse>, AppError> {
     let working_directory = if let Some(session_id) = query.session_id {
-        let mut conn = app_state.conn()?;
-        let session = verify_session_reader(&mut conn, session_id, current_user_id)?;
-        Some(session.working_directory)
+        let session = {
+            let mut conn = app_state.conn()?;
+            verify_session_reader(&mut conn, session_id, current_user_id)?
+        };
+        return session_inventory(&app_state, &session, None)
+            .await
+            .map(Json);
     } else {
         query
             .working_directory
@@ -54,6 +58,72 @@ pub async fn list_plugins(
     };
 
     Ok(Json(discover_plugins(working_directory)))
+}
+
+/// PATCH /api/plugins. A session choice never changes the host installation.
+pub async fn set_session_plugin(
+    State(state): State<Arc<AppState>>,
+    CurrentUserId(user_id): CurrentUserId,
+    Json(request): Json<shared::api::SetSessionPluginRequest>,
+) -> Result<Json<PluginInventoryResponse>, AppError> {
+    let session = {
+        let mut conn = state.conn()?;
+        super::session_access::verify_session_owner(&mut conn, request.session_id, user_id)?
+    };
+    let launcher = session
+        .launcher_id
+        .ok_or(AppError::BadRequest("Session has no launcher"))?;
+    super::launcher_rpc::require_launcher_owner(&state, launcher, user_id)?;
+    session_inventory(
+        &state,
+        &session,
+        Some(shared::api::PluginOverride {
+            name: request.name,
+            enabled: request.enabled,
+        }),
+    )
+    .await
+    .map(Json)
+}
+
+async fn session_inventory(
+    state: &AppState,
+    session: &crate::models::Session,
+    selection: Option<shared::api::PluginOverride>,
+) -> Result<PluginInventoryResponse, AppError> {
+    let launcher = session
+        .launcher_id
+        .ok_or(AppError::BadRequest("Session has no launcher"))?;
+    if !state
+        .session_manager
+        .launcher_supports_capability(launcher, shared::LAUNCHER_CAPABILITY_SESSION_PLUGINS)
+    {
+        return Err(AppError::BadRequest(
+            "Update the session launcher to manage plugins",
+        ));
+    }
+    let request_id = Uuid::new_v4();
+    let response = super::launcher_rpc::launcher_rpc(
+        state,
+        launcher,
+        request_id,
+        shared::ServerToLauncher::SessionPlugins {
+            request_id,
+            session_id: session.id,
+            working_directory: session.working_directory.clone(),
+            selection,
+        },
+        20,
+    )
+    .await?;
+    match response {
+        shared::LauncherToServer::SessionPluginsResult { result, .. } => {
+            result.map_err(AppError::BadGatewayMessage)
+        }
+        _ => Err(AppError::Internal(
+            "Unexpected launcher plugin response".into(),
+        )),
+    }
 }
 
 fn discover_plugins(working_directory: Option<String>) -> PluginInventoryResponse {

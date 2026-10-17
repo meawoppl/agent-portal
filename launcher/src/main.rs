@@ -21,6 +21,7 @@ mod progress;
 mod scheduler;
 mod seppuku;
 mod service;
+mod session_plugins;
 mod work_queue;
 mod worktree;
 
