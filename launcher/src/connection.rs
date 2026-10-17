@@ -127,6 +127,7 @@ pub async fn run_launcher_loop(
                         .ok()
                         .map(|p| p.to_string_lossy().to_string()),
                     capabilities: vec![
+                        shared::LAUNCHER_CAPABILITY_SESSION_PLUGINS.to_string(),
                         shared::LAUNCHER_CAPABILITY_CREATE_WORKTREE.to_string(),
                         shared::LAUNCHER_CAPABILITY_SCRATCH_WORKTREE.to_string(),
                         shared::LAUNCHER_CAPABILITY_FORK_SESSION.to_string(),
@@ -878,6 +879,25 @@ async fn handle_message(
             {
                 warn!("Failed to send session restore result");
             }
+        }
+        ServerToLauncher::SessionPlugins {
+            request_id,
+            session_id,
+            working_directory,
+            selection,
+        } => {
+            let sender = import_reply_tx.clone();
+            tokio::spawn(async move {
+                let result = tokio::task::spawn_blocking(move || {
+                    crate::session_plugins::request(session_id, working_directory, selection)
+                })
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(|result| result.map_err(|error| format!("{error:#}")));
+                let _ = sender
+                    .send(LauncherToServer::SessionPluginsResult { request_id, result })
+                    .await;
+            });
         }
         ServerToLauncher::ListDirectories { request_id, path } => {
             let response = list_directory(&path, request_id);

@@ -1117,3 +1117,90 @@
     border-color: rgba(187, 154, 247, 0.34);
     background: rgba(187, 154, 247, 0.08);
 }
+
+/* Session plugin selection stays anchored to its header control on desktop. */
+.plugin-selector {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.plugin-selector > summary {
+    list-style: none;
+    cursor: pointer;
+}
+
+.plugin-selector > summary::-webkit-details-marker {
+    display: none;
+}
+
+.plugin-selector[open] > summary {
+    color: var(--text-teal, #7dcfff);
+}
+
+.plugin-selector-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 120;
+    width: min(360px, calc(100vw - 24px));
+    padding: 16px;
+    border: 1px solid var(--border-color, #565f89);
+    border-radius: 8px;
+    background: var(--bg-secondary, #1a1b26);
+    color: var(--text-primary, #c0caf5);
+    box-shadow: 0 8px 24px #0006;
+    white-space: normal;
+    max-height: min(70vh, 600px);
+    overflow-y: auto;
+}
+
+.plugin-selector-menu p {
+    font-size: 12px;
+    line-height: 1.5;
+    margin: 8px 0;
+}
+
+.plugin-selector-option {
+    display: flex;
+    gap: 10px;
+    padding: 10px 0;
+    cursor: pointer;
+    align-items: flex-start;
+}
+
+.plugin-selector-option input {
+    margin-top: 3px;
+    accent-color: #7dcfff;
+}
+
+.plugin-selector-option span {
+    min-width: 0;
+}
+
+.plugin-selector-option small {
+    display: block;
+    margin-top: 4px;
+    font-size: 12px;
+    opacity: .8;
+    overflow-wrap: anywhere;
+}
+
+.plugin-selector-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.plugin-selector-error {
+    color: var(--error, #f7768e);
+}
+
+@media (max-width: 640px) {
+    .plugin-selector-menu {
+        position: fixed;
+        top: 100px;
+        left: 12px;
+        right: 12px;
+        width: auto;
+    }
+}

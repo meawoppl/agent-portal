@@ -22,6 +22,7 @@ mod history;
 mod input_bar;
 mod outbox;
 mod permission_handler;
+mod plugin_selector;
 mod plugin_views;
 mod session_surface;
 mod state;
