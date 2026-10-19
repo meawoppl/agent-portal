@@ -31,8 +31,19 @@ pub(super) fn fast_mode_disabled_label(reason: &shared::FastModeDisabledReason) 
 pub fn render_result_message(
     msg: &shared::ResultMessage,
     turn_metrics: Option<&shared::TurnMetrics>,
+    on_claude_login: Option<Callback<()>>,
 ) -> Html {
     let is_error = msg.is_error;
+    let login = super::errors::render_claude_login_action(
+        is_error
+            && msg
+                .result
+                .iter()
+                .chain(msg.errors.iter())
+                .any(|text| super::errors::is_expired_oauth_error(text)),
+        on_claude_login,
+    )
+    .unwrap_or_default();
     let status_class = if is_error { "error" } else { "success" };
 
     let duration_ms = msg.duration_ms;
@@ -135,6 +146,7 @@ pub fn render_result_message(
             return html! {
                 <>
                     { error_html }
+                    { login }
                     <div class={classes!("claude-message", "result-message", status_class)}>
                         <div class="result-stats-bar">
                             <span class={classes!("result-status", status_class)}>{ "✗" }</span>
@@ -153,6 +165,7 @@ pub fn render_result_message(
 
     html! {
         <div class={classes!("claude-message", "result-message", status_class)}>
+            { login }
             <div class="result-stats-bar">
                 <span class={classes!("result-status", status_class)}>
                     { if is_error { "✗" } else { "✓" } }

@@ -48,10 +48,15 @@ pub(crate) fn render_frame(ctx: FrameRenderContext<'_>) -> Html {
                 renderers::render_system_message(&msg, ctx.timestamp)
             }
             AgentFrame::Claude(ClaudeMessage::Assistant(msg)) => {
-                renderers::render_assistant_message(&msg, ctx.timestamp, ctx.session_id)
+                renderers::render_assistant_message(
+                    &msg,
+                    ctx.timestamp,
+                    ctx.session_id,
+                    ctx.on_claude_login,
+                )
             }
             AgentFrame::Claude(ClaudeMessage::Result(msg)) => {
-                renderers::render_result_message(&msg, ctx.turn_metrics)
+                renderers::render_result_message(&msg, ctx.turn_metrics, ctx.on_claude_login)
             }
             AgentFrame::Claude(ClaudeMessage::User(msg)) => renderers::render_user_message(
                 &msg,
@@ -142,6 +147,7 @@ pub(crate) fn render_identity_group_part(
     session_id: Uuid,
     continuation_statuses: &HashMap<Uuid, String>,
     on_schedule_continuation: Callback<Uuid>,
+    on_claude_login: Option<Callback<()>>,
 ) -> Option<Html> {
     if let Some(shared::MessageSource::Agent { .. }) = message.source() {
         return Some(renderers::render_agent_message_body(
@@ -160,7 +166,7 @@ pub(crate) fn render_identity_group_part(
             renderers::render_optimistic_user_message_content(&msg, session_id)
         }
         AgentFrame::Claude(ClaudeMessage::Assistant(msg)) => {
-            renderers::render_assistant_message_content(&msg, session_id)
+            renderers::render_assistant_message_content(&msg, session_id, on_claude_login)
         }
         AgentFrame::Claude(ClaudeMessage::Portal(msg)) => {
             Some(renderers::render_portal_message_content(
