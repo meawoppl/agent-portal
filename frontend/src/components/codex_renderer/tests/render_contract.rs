@@ -31,6 +31,7 @@ fn no_body_events_render_none_in_group() {
         // as empty parts drew a "Codex × 2" header over a blank body until the
         // reply completed.
         r#"{"type":"item.started","item":{"id":"msg_1","phase":"commentary","text":"","type":"agentMessage"}}"#,
+        r#"{"type":"item.started","item":{"content":[],"id":"rs_1","summary":[],"type":"reasoning"}}"#,
         r#"{"type":"item.completed","item":{"content":[],"id":"rs_1","summary":[],"type":"reasoning"}}"#,
         r#"{"type":"item.completed","item":{"content":["  "],"id":"rs_2","summary":["\n"],"type":"reasoning"}}"#,
         r#"{"type":"item.completed","item":{"type":"agent_message","id":"m2","text":"  \n"}}"#,
@@ -48,8 +49,6 @@ fn content_bearing_events_render_some_in_group() {
         // App-server reasoning with a trace renders it, collapsed.
         r#"{"type":"item.completed","item":{"content":[],"id":"rs_3","summary":["**Plan** read the tests"],"type":"reasoning"}}"#,
         r#"{"type":"item.completed","item":{"content":["raw reasoning"],"id":"rs_4","summary":[],"type":"reasoning"}}"#,
-        // Private reasoning still in progress shows that the agent is working.
-        r#"{"type":"item.started","item":{"content":[],"id":"rs_5","summary":[],"type":"reasoning"}}"#,
     ] {
         let event: CodexEvent = serde_json::from_str(json).unwrap();
         assert!(

@@ -27,24 +27,15 @@ pub(super) fn render_agent_message_content(text: &str, session_id: Uuid) -> Opti
 }
 
 /// A reasoning trace renders collapsed under a "reasoning" label. Models that
-/// keep their reasoning private send none: while that item is in progress a
-/// pulsing label shows the agent is working, and once it completes there is
-/// nothing to show, so it renders `None` instead of an empty card.
+/// keep their reasoning private send none, which renders `None` instead of an
+/// empty card. Not even an in-progress marker: a transcript row cannot know
+/// when the item ends (its completion may land in a later group, or never for
+/// an interrupted turn), so it would be left pulsing in history.
 pub(super) fn render_reasoning(trace: &str, completed: bool) -> Option<Html> {
-    let class = item_card_classes(completed);
     if !crate::utils::is_non_blank(trace) {
-        return (!completed).then(|| {
-            html! {
-                <div class={class}>
-                    <div class="message-body">
-                        <div class="thinking-block">
-                            <span class="thinking-label">{ "reasoning…" }</span>
-                        </div>
-                    </div>
-                </div>
-            }
-        });
+        return None;
     }
+    let class = item_card_classes(completed);
     Some(html! {
         <div class={class}>
             <div class="message-body">

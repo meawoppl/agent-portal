@@ -17,7 +17,7 @@
   <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2248 · Stop Codex replies rendering as blank cards</text>
 
   <text x="55" y="100" font-size="34" fill="#e6e9f5">Empty Codex items used to render Some(empty), so replies showed a blank "Codex x 2" card;</text>
-  <text x="55" y="140" font-size="34" fill="#e6e9f5">now blank items render None and private reasoning in progress shows a reasoning... label.</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">now blank items render None, so the card appears only once the reply has text to show.</text>
   <line x1="55" y1="166" x2="1945" y2="166" stroke="#3d4666" stroke-width="1"/>
 
   <text x="55" y="215" font-size="22" font-weight="bold" letter-spacing="4" fill="#f7768e">BEFORE</text>
@@ -59,14 +59,14 @@
   <rect x="1045" y="445" width="900" height="190" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
   <text x="1069" y="485" font-size="26" fill="#c0caf5">render_agent_message_content / render_reasoning</text>
   <text x="1069" y="525" font-size="23" fill="#9ece6a">blank agent message: None (is_non_blank)</text>
-  <text x="1069" y="560" font-size="23" fill="#9ece6a">no trace, in progress: pulsing "reasoning..." label</text>
-  <text x="1069" y="595" font-size="23" fill="#9ece6a">no trace, completed: None  |  trace: collapsible</text>
+  <text x="1069" y="560" font-size="23" fill="#9ece6a">reasoning with no trace: None, started or completed</text>
+  <text x="1069" y="595" font-size="23" fill="#9ece6a">reasoning with a trace: collapsible "reasoning" block</text>
   <line x1="1495" y1="635" x2="1495" y2="680" stroke="#9ece6a" stroke-width="2" marker-end="url(#arr-green)"/>
 
   <rect x="1045" y="685" width="900" height="150" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
-  <text x="1069" y="725" font-size="26" fill="#9ece6a">Card shows "reasoning..." while Codex works</text>
-  <text x="1069" y="765" font-size="23" fill="#a9b1d6">then only the reply text once it completes</text>
-  <text x="1069" y="800" font-size="23" fill="#a9b1d6">nothing blank left behind for private reasoning</text>
+  <text x="1069" y="725" font-size="26" fill="#9ece6a">No blank card while Codex works</text>
+  <text x="1069" y="765" font-size="23" fill="#a9b1d6">the reply text appears when item.completed lands</text>
+  <text x="1069" y="800" font-size="23" fill="#a9b1d6">nothing stranded if a turn is split or interrupted</text>
 
   <rect x="1045" y="875" width="900" height="190" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
   <text x="1069" y="915" font-size="26" fill="#c0caf5">impl Deserialize for CodexItem</text>
@@ -74,5 +74,5 @@
   <text x="1069" y="990" font-size="23" fill="#9ece6a">reasoning_trace: summary, else content, collapsed</text>
   <text x="1069" y="1025" font-size="23" fill="#a9b1d6">codex_item_id maps it, so started/completed dedup</text>
 
-  <text x="55" y="1172" font-size="22" fill="#565f89">Not in scope: a live reasoning-token count during the turn needs the proxy to forward ThreadTokenUsageUpdated (still Noop).</text>
+  <text x="55" y="1172" font-size="22" fill="#565f89">Not in scope: a live "working" indicator / reasoning-token count needs the proxy to forward ThreadTokenUsageUpdated (still Noop).</text>
 </svg>
