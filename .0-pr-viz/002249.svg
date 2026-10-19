@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="sans-serif"><text x="55" y="55" font-size="24" fill="#a9b1d6">PR #2249 · Claude authentication recovery</text>
+<text x="55" y="110" font-size="34" fill="#e6e9f5">Sign in directly from authentication failures; success closes the modal and refreshes status.</text>
+<path d="M55 170H1945 M1000 190V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="55" y="240" font-size="22" fill="#f7768e">BEFORE</text><text x="1055" y="240" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="55" y="300" width="880" height="700" rx="18" fill="#1e202e" stroke="#565f89"/><rect x="1055" y="300" width="880" height="700" rx="18" fill="#1e202e" stroke="#565f89"/>
+<text x="90" y="380" font-size="30" fill="#f7768e">Assistant authentication reply: no login action</text>
+<text x="1090" y="380" font-size="30" fill="#9ece6a">Sign in to Claude on replies and failed results</text>
+<text x="90" y="510" font-size="30" fill="#c0caf5">Successful login stays on the settled screen</text>
+<text x="1090" y="510" font-size="30" fill="#9ece6a">AgentLoginModal settles, then closes</text>
+<text x="90" y="640" font-size="30" fill="#f7768e">Success advances only the display timer</text>
+<text x="1090" y="640" font-size="30" fill="#9ece6a">probe_revision triggers fresh agent probes</text>
+<text x="90" y="770" font-size="30" fill="#c0caf5">Unchanged launcher list: stale login matrix</text>
+<text x="1090" y="770" font-size="30" fill="#9ece6a">Computers matrix reflects the new login</text>
+<text x="1090" y="900" font-size="26" fill="#c0caf5">Failure stays visible; success notifies once</text>
+<text x="55" y="1172" font-size="22" fill="#a9b1d6">Scope: existing login flow and authorization; this does not restart running agents or enable linked-portal login.</text></g></svg>
