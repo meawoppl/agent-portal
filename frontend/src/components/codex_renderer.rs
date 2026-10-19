@@ -73,14 +73,14 @@ fn render_codex_event(
         CodexEvent::ItemStarted { item } | CodexEvent::ItemUpdated { item } => {
             match item.as_ref() {
                 Some(CodexItem::Thread(ThreadItem::AgentMessage(it))) if bare_agent_message => {
-                    Some(render_agent_message_content(&it.text, session_id))
+                    render_agent_message_content(&it.text, session_id)
                 }
                 item => render_item(item, false, session_id),
             }
         }
         CodexEvent::ItemCompleted { item } => match item.as_ref() {
             Some(CodexItem::Thread(ThreadItem::AgentMessage(it))) if bare_agent_message => {
-                Some(render_agent_message_content(&it.text, session_id))
+                render_agent_message_content(&it.text, session_id)
             }
             item => render_item(item, true, session_id),
         },
@@ -111,6 +111,26 @@ fn render_codex_event(
     }
 }
 
+/// The readable reasoning an app-server item carries: its summary when the
+/// model provides one, otherwise the raw reasoning content.
+fn reasoning_trace(summary: &Option<Vec<String>>, content: &Option<Vec<String>>) -> String {
+    let join = |parts: &Option<Vec<String>>| {
+        parts
+            .iter()
+            .flatten()
+            .map(|part| part.trim())
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    };
+    let summary = join(summary);
+    if summary.is_empty() {
+        join(content)
+    } else {
+        summary
+    }
+}
+
 /// CSS class set for any item-card wrapper. Adds `codex-item-in-progress` for
 /// pre-completion (`item.started` / `item.updated`) renders so the stylesheet
 /// can pulse the indicator and dim the text.
@@ -126,10 +146,8 @@ fn render_item(item: Option<&CodexItem>, completed: bool, session_id: Uuid) -> O
     let item = item?;
     match item {
         CodexItem::Thread(item) => match item {
-            ThreadItem::AgentMessage(it) => {
-                Some(render_agent_message(&it.text, completed, session_id))
-            }
-            ThreadItem::Reasoning(it) => Some(render_reasoning(&it.text, completed)),
+            ThreadItem::AgentMessage(it) => render_agent_message(&it.text, completed, session_id),
+            ThreadItem::Reasoning(it) => render_reasoning(&it.text, completed),
             ThreadItem::CommandExecution(it) => Some(render_command_execution(it, completed)),
             ThreadItem::FileChange(it) => Some(render_file_change(it, completed)),
             ThreadItem::McpToolCall(it) => Some(render_mcp_tool_call(it, completed)),
@@ -146,6 +164,9 @@ fn render_item(item: Option<&CodexItem>, completed: bool, session_id: Uuid) -> O
             AppServerThreadItem::ContextCompaction { .. } => {
                 Some(render_context_compaction_item(completed))
             }
+            AppServerThreadItem::Reasoning {
+                summary, content, ..
+            } => render_reasoning(&reasoning_trace(summary, content), completed),
             AppServerThreadItem::CollabAgentToolCall {
                 agents_states,
                 model,

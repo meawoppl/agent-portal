@@ -1077,6 +1077,17 @@
     cursor: help;
 }
 
+/* Collapsible codex reasoning: `display: block` above would hide the summary's
+   disclosure marker, which is the only cue that the trace can be expanded. */
+.codex-reasoning > .thinking-label {
+    display: list-item;
+    cursor: pointer;
+}
+
+.codex-reasoning:not([open]) > .thinking-label {
+    margin-bottom: 0;
+}
+
 .thinking-content {
     font-style: italic;
     color: var(--text-secondary);
