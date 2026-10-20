@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="Arial, sans-serif">
+<text x="55" y="52" fill="#a9b1d6" font-size="24">PR #2225 · Supervise hosted services independently of agent sessions</text>
+<text x="55" y="108" fill="#e6e9f5" font-size="34">Session-owned service processes can disappear on restart.</text>
+<text x="55" y="151" fill="#e6e9f5" font-size="34">Launcher-owned recipes restore them while a stable relay preserves the URL.</text>
+<path d="M55 180 H1945" stroke="#565f89"/>
+<path d="M1000 210 V1125" stroke="#565f89" stroke-dasharray="8 10"/>
+<text x="65" y="235" fill="#f7768e" font-size="22" font-weight="bold" letter-spacing="4">BEFORE</text>
+<text x="1065" y="235" fill="#9ece6a" font-size="22" font-weight="bold" letter-spacing="4">AFTER</text>
+<rect x="65" y="275" width="870" height="165" rx="14" fill="#16161e" stroke="#565f89"/>
+<text x="93" y="318" fill="#7aa2f7" font-size="26">PluginProcess::spawn_surface</text>
+<text x="93" y="363" fill="#c0caf5" font-size="23">The command that opens the plugin spawns its server.</text>
+<text x="93" y="400" fill="#c0caf5" font-size="23">SurfaceState remembers a PID and a chosen port.</text>
+<path d="M500 440 V505 M488 489 L500 505 L512 489" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="65" y="515" width="870" height="165" rx="14" fill="#16161e" stroke="#f7768e"/>
+<text x="93" y="558" fill="#f7768e" font-size="26">No persistent recovery loop</text>
+<text x="93" y="603" fill="#c0caf5" font-size="23">Session restart or server exit can leave no listener.</text>
+<text x="93" y="640" fill="#c0caf5" font-size="23">A saved process record does not restart the service.</text>
+<path d="M500 680 V745 M488 729 L500 745 L512 729" fill="none" stroke="#f7768e" stroke-width="3"/>
+<rect x="65" y="755" width="870" height="205" rx="14" fill="#16161e" stroke="#f7768e"/>
+<text x="93" y="798" fill="#f7768e" font-size="26">Forward remains, hosted app disappears</text>
+<text x="93" y="843" fill="#c0caf5" font-size="23">Opening the plugin again is a manual recovery step.</text>
+<text x="93" y="880" fill="#c0caf5" font-size="23">Registering a different port rotates the forward URL.</text>
+<rect x="1065" y="275" width="870" height="165" rx="14" fill="#16161e" stroke="#9ece6a"/>
+<text x="1093" y="318" fill="#9ece6a" font-size="26">plugin open / forward run</text>
+<text x="1093" y="363" fill="#c0caf5" font-size="23">Persist Recipe: executable, arguments, cwd, environment.</text>
+<text x="1093" y="400" fill="#c0caf5" font-size="23">The launcher owns it independently of the agent session.</text>
+<path d="M1500 440 V505 M1488 489 L1500 505 L1512 489" fill="none" stroke="#9ece6a" stroke-width="3"/>
+<rect x="1065" y="515" width="870" height="165" rx="14" fill="#16161e" stroke="#9ece6a"/>
+<text x="1093" y="558" fill="#9ece6a" font-size="26">managed_forward::supervise + serve</text>
+<text x="1093" y="603" fill="#c0caf5" font-size="23">Restore recipes; restart exits and failed health checks.</text>
+<text x="1093" y="640" fill="#c0caf5" font-size="23">PORTAL_PORT + {port} inject each child's allocated port.</text>
+<path d="M1500 680 V745 M1488 729 L1500 745 L1512 729" fill="none" stroke="#9ece6a" stroke-width="3"/>
+<rect x="1065" y="755" width="870" height="205" rx="14" fill="#16161e" stroke="#9ece6a"/>
+<text x="1093" y="798" fill="#9ece6a" font-size="26">Stable relay port, replaceable child</text>
+<text x="1093" y="843" fill="#c0caf5" font-size="23">Child recovery retains the URL; occupied relays fail safely.</text>
+<text x="1093" y="880" fill="#c0caf5" font-size="23">Revocation stops recovery; generations protect replacements.</text>
+<text x="1065" y="1030" fill="#e0af68" font-size="23">Start commands must keep the server in the foreground.</text>
+<text x="1065" y="1070" fill="#a9b1d6" font-size="23">Crash + restore + revocation tested with a real HTTP child.</text>
+<text x="55" y="1172" fill="#a9b1d6" font-size="22">Requires the updated launcher. Browser traffic still waits for the session tunnel to reconnect; this change does not deploy it.</text>
+</g></svg>

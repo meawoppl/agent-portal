@@ -59,7 +59,8 @@ pub enum ClaudeMessage {
     User(Box<shared::UserMessage>),
     Error(shared::AnthropicError),
     Portal(shared::PortalMessage),
-    RateLimitEvent(shared::RateLimitEvent),
+    /// Keep growing rate-limit diagnostics off the stack of every rendered message.
+    RateLimitEvent(Box<shared::RateLimitEvent>),
     /// Claude's delivery bookkeeping for an input carrying a client-supplied
     /// UUID. It is typed so it never falls through to the raw-JSON renderer,
     /// but it has no transcript body: queued/started/terminal states describe
@@ -109,7 +110,7 @@ impl ClaudeMessage {
             shared::ClaudeOutput::Assistant(msg) => Some(Self::Assistant(Box::new(msg))),
             shared::ClaudeOutput::Result(msg) => Some(Self::Result(Box::new(msg))),
             shared::ClaudeOutput::Error(msg) => Some(Self::Error(msg)),
-            shared::ClaudeOutput::RateLimitEvent(msg) => Some(Self::RateLimitEvent(msg)),
+            shared::ClaudeOutput::RateLimitEvent(msg) => Some(Self::RateLimitEvent(Box::new(msg))),
             shared::ClaudeOutput::CommandLifecycle(msg) => Some(Self::CommandLifecycle(msg)),
             shared::ClaudeOutput::ConversationReset(msg) => Some(Self::ConversationReset(msg)),
             // Wildcard: control frames plus the 2.1.160 wire additions

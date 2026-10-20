@@ -1,0 +1,85 @@
+# Production self-hosting stack: Postgres + the portal + Caddy for HTTPS.
+#
+#   cd deploy && ./setup.sh        # writes .env (secrets generated, mode 600)
+#   docker compose up -d
+#
+# See docs/SELF_HOSTING.md for prerequisites, backups, upgrades and rollback.
+# Nothing here publishes Postgres or the backend port; only Caddy listens
+# publicly, on 80 (ACME + redirect) and 443.
+
+name: agent-portal
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: agent_portal
+      POSTGRES_USER: agent_portal
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run ./setup.sh first}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent_portal -d agent_portal"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  portal:
+    # Pin a released version (e.g. 2.15.1690) so `up -d` never upgrades you
+    # by surprise; see "Upgrading" in docs/SELF_HOSTING.md.
+    image: ghcr.io/meawoppl/agent-portal:${PORTAL_VERSION:?set PORTAL_VERSION in .env}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://agent_portal:${POSTGRES_PASSWORD}@db:5432/agent_portal
+      BASE_URL: https://${PORTAL_DOMAIN:?set PORTAL_DOMAIN in .env}
+      HOST: 0.0.0.0
+      PORT: "3000"
+      PORTAL_SESSION_ARCHIVE_BACKEND: local
+      PORTAL_SESSION_ARCHIVE_LOCAL_ROOT: /data/archive
+    volumes:
+      - archive:/data/archive
+    networks: [internal, edge]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      portal:
+        condition: service_healthy
+    environment:
+      PORTAL_DOMAIN: ${PORTAL_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [edge]
+
+networks:
+  # `internal` has no published ports and no external route; Caddy is not on
+  # it, so Postgres is isolated from the edge (the Docker host stays trusted).
+  internal:
+    internal: true
+  edge: {}
+
+volumes:
+  db_data:
+  archive:
+  caddy_data:
+  caddy_config:

@@ -1,16 +1,15 @@
 //! Portal features reminder delivered to the agent at fresh-context start and
 //! after each compaction boundary.
 //!
-//! At fresh-context start the reminder is folded into the first real user
-//! input, rather than sent as a standalone turn. A resumed context already has
-//! the reminder in transcript history, so process restarts must not spend it
-//! again. The transcript keeps that first injection in a collapsed notice so
-//! the user can inspect exactly what the agent received without spending
-//! scrollback on it. After a compaction boundary it is injected directly to
-//! re-prime the shortened agent context. In both cases the agent-facing copy is
-//! wrapped in
-//! `<system-reminder>…</system-reminder>` tags so the agent treats it as
-//! out-of-band context.
+//! The reminder is never sent as a turn of its own. A fresh context, `/clear`,
+//! or a compaction boundary arms `reminder_pending`, and the next real user
+//! input claims it and carries the reminder in front of the user's words. A
+//! resumed context already has the reminder in transcript history, so process
+//! restarts must not spend it again. The transcript keeps the injection in a
+//! collapsed notice, above the user's message in the order the agent saw it,
+//! so the user can inspect exactly what the agent received. The agent-facing
+//! copy is wrapped in `<system-reminder>…</system-reminder>` tags so the agent
+//! treats it as out-of-band context.
 //!
 //! The reminder body lives in `session-lib/portal_reminder.md` as a
 //! readable markdown file and is baked into the binary via `include_str!`.
@@ -18,10 +17,7 @@
 //! readable path; on a missing or unreadable override we log a warning and
 //! fall back to the bundled default.
 
-use tracing::{error, info, warn};
-
-use crate::agent::Agent;
-use crate::session::Session;
+use tracing::{info, warn};
 
 /// Bundled fallback body (relative to this file).
 const DEFAULT_BODY: &str = include_str!("../../portal_reminder.md");
@@ -32,7 +28,7 @@ const DEFAULT_BODY: &str = include_str!("../../portal_reminder.md");
 const PORTAL_VERSION: &str = shared::VERSION;
 
 /// Resolve the reminder body. Honors `PORTAL_REMINDER_FILE` at call time so
-/// operators can hot-edit the file and have the next compaction pick it up
+/// operators can hot-edit the file and have the next injection pick it up
 /// without restarting the proxy.
 pub fn load_reminder_body() -> String {
     match std::env::var("PORTAL_REMINDER_FILE") {
@@ -63,13 +59,6 @@ fn reminder_contents(body: &str) -> String {
         "Agent Portal version {}.\n\n{}",
         PORTAL_VERSION,
         body.trim()
-    )
-}
-
-fn agent_facing(body: &str) -> String {
-    format!(
-        "<system-reminder>\n{}\n</system-reminder>",
-        reminder_contents(body)
     )
 }
 
@@ -159,25 +148,9 @@ fn attach_base_notice_to_agent_message(
     message.to_json()
 }
 
+/// The transcript copy, in the order the agent received it: reminder first.
 fn visible_text_with_base_session_notice(text: &str, contents: &str) -> String {
-    format!("{text}\n\n<system-reminder>\n{contents}\n</system-reminder>")
-}
-
-/// Inject the reminder into the agent's stdin only. The user-bound copy was
-/// removed (#692): it bloated the scrollback for content the user already
-/// knew, and the agent-side reminder is the part that actually does work
-/// (re-priming the model after a compaction). The companion fix in the proxy
-/// output forwarder also filters Claude's user-message echo of the
-/// `<system-reminder>` text so the wrapper doesn't leak into the transcript.
-pub async fn inject_portal_reminder<A: Agent>(claude_session: &mut Session<A>) {
-    let body = body_with_plugin_skills(claude_session.config().plugin_skill_reminder.as_deref());
-
-    if let Err(e) = claude_session
-        .send_input(serde_json::Value::String(agent_facing(&body)))
-        .await
-    {
-        error!("Failed to inject portal reminder into agent stdin: {}", e);
-    }
+    format!("<system-reminder>\n{contents}\n</system-reminder>\n\n{text}")
 }
 
 #[cfg(test)]
@@ -235,6 +208,11 @@ mod tests {
 
         let display = display.expect("a display event is required, not optional");
         assert_eq!(display["type"], "user");
+        // The transcript shows the instructions where the agent saw them:
+        // before the user's words.
+        let shown = display["text"].as_str().expect("echo text");
+        assert!(shown.starts_with("<system-reminder>"), "got {shown}");
+        assert!(shown.ends_with("hello agent"), "got {shown}");
         assert!(
             display.to_string().contains("hello agent"),
             "display event must echo the user's text, got {display}"
@@ -277,7 +255,8 @@ mod tests {
         };
         assert_eq!(from_agent_type, "codex");
         assert_eq!(from_session_id, "11111111-1111-1111-1111-111111111111");
-        assert!(text.starts_with("relayed"));
+        assert!(text.starts_with("<system-reminder>"));
+        assert!(text.ends_with("relayed"));
         assert!(text.contains("Agent Portal version"));
         assert!(text.contains("agent-portal show"));
     }

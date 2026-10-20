@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200" font-family="'Segoe UI','Noto Sans',sans-serif">
+  <rect width="2000" height="1200" fill="#16161e"/>
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2196 · Show one machine at a time in the header service monitor</text>
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">With three launchers the header grew one chip per machine and overflowed the toolbar.</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">Now a picker shows one compact stacked chip, remembers the choice, and hides on mobile.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="2"/>
+
+  <text x="105" y="235" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1090" y="235" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1140" stroke="#3d4666" stroke-width="2" stroke-dasharray="12 14"/>
+
+  <!-- BEFORE: header toolbar with one chip per service, overflowing -->
+  <rect x="105" y="290" width="840" height="110" rx="8" fill="#1a1b26" stroke="#3d4666" stroke-width="2"/>
+  <text x="129" y="330" font-size="22" fill="#565f89">header toolbar at 1400 px</text>
+  <rect x="129" y="345" width="200" height="40" rx="6" fill="#1e202e" stroke="#7aa2f7" stroke-width="2"/>
+  <text x="141" y="372" font-size="20" fill="#c0caf5">backend 2% 47%</text>
+  <rect x="345" y="345" width="200" height="40" rx="6" fill="#1e202e" stroke="#7aa2f7" stroke-width="2"/>
+  <text x="357" y="372" font-size="20" fill="#c0caf5">macbook 35% 62%</text>
+  <rect x="561" y="345" width="200" height="40" rx="6" fill="#1e202e" stroke="#7aa2f7" stroke-width="2"/>
+  <text x="573" y="372" font-size="20" fill="#c0caf5">fc 72% 81% 6.4</text>
+  <rect x="777" y="345" width="200" height="40" rx="6" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+  <text x="789" y="372" font-size="20" fill="#f7768e">bench 12% 37%</text>
+  <text x="129" y="440" font-size="23" fill="#f7768e">Fourth chip pushes past the Launch button</text>
+
+  <rect x="105" y="500" width="360" height="150" rx="8" fill="#1e202e" stroke="#7aa2f7" stroke-width="3"/>
+  <text x="129" y="550" font-size="26" fill="#7aa2f7">One chip per service</text>
+  <text x="129" y="594" font-size="23" fill="#c0caf5">name, CPU, RAM, load, sparkline</text>
+  <text x="129" y="628" font-size="23" fill="#c0caf5">laid out in a single row</text>
+
+  <path d="M465 575H565" stroke="#565f89" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <rect x="565" y="500" width="380" height="150" rx="8" fill="#1e202e" stroke="#f7768e" stroke-width="3"/>
+  <text x="589" y="550" font-size="26" fill="#f7768e">Width grows with machines</text>
+  <text x="589" y="594" font-size="23" fill="#c0caf5">3 launchers = 4 chips wide</text>
+  <text x="589" y="628" font-size="23" fill="#c0caf5">still rendered on phones</text>
+
+  <text x="105" y="740" font-size="23" fill="#a9b1d6">Every chip was always visible, so the strip</text>
+  <text x="105" y="774" font-size="23" fill="#a9b1d6">competed with the toolbar buttons for space.</text>
+
+  <!-- AFTER: one compact stacked chip with a picker -->
+  <rect x="1090" y="290" width="840" height="110" rx="8" fill="#1a1b26" stroke="#3d4666" stroke-width="2"/>
+  <text x="1114" y="330" font-size="22" fill="#565f89">header toolbar at 1400 px</text>
+  <rect x="1410" y="340" width="250" height="52" rx="6" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1422" y="360" font-size="18" font-weight="700" fill="#c0caf5">cfl-test-bench v</text>
+  <polyline points="1600,370 1612,366 1622,368 1634,358 1646,360" fill="none" stroke="#7aa2f7" stroke-width="2"/>
+  <text x="1422" y="384" font-size="17" fill="#565f89">cpu <tspan fill="#9ece6a">21%</tspan> ram <tspan fill="#9ece6a">37%</tspan> load <tspan fill="#a9b1d6">1.7</tspan></text>
+  <rect x="1700" y="345" width="200" height="40" rx="6" fill="#1e202e" stroke="#7aa2f7" stroke-width="2"/>
+  <text x="1722" y="372" font-size="20" fill="#7aa2f7">+ Launch Session</text>
+  <text x="1114" y="440" font-size="23" fill="#9ece6a">250 x 38 px however many launchers connect</text>
+
+  <rect x="1090" y="500" width="360" height="150" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1114" y="550" font-size="26" fill="#9ece6a">Picker chooses the machine</text>
+  <text x="1114" y="594" font-size="23" fill="#c0caf5">default: first launcher, else backend</text>
+  <text x="1114" y="628" font-size="23" fill="#c0caf5">choice kept in localStorage</text>
+
+  <path d="M1450 575H1550" stroke="#565f89" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <rect x="1550" y="500" width="380" height="150" rx="8" fill="#1e202e" stroke="#7aa2f7" stroke-width="3"/>
+  <text x="1574" y="550" font-size="26" fill="#7aa2f7">Stacked two-line chip</text>
+  <text x="1574" y="594" font-size="23" fill="#c0caf5">name and sparkline, then stats</text>
+  <text x="1574" y="628" font-size="23" fill="#c0caf5">click opens the centred table</text>
+
+  <rect x="1090" y="700" width="840" height="120" rx="8" fill="#1e202e" stroke="#e0af68" stroke-width="2"/>
+  <text x="1114" y="745" font-size="24" fill="#e0af68">Mobile</text>
+  <text x="1114" y="785" font-size="23" fill="#c0caf5">not mounted on the mobile dashboard, hidden by CSS under 1100 px</text>
+
+  <rect x="1090" y="860" width="840" height="120" rx="8" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+  <text x="1114" y="905" font-size="24" fill="#f7768e">Also fixed</text>
+  <text x="1114" y="945" font-size="23" fill="#c0caf5">a hook ran after an early return and panicked on the first stats update</text>
+
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0 0L12 6L0 12Z" fill="#565f89"/>
+    </marker>
+  </defs>
+</svg>

@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200" font-family="'Segoe UI','Noto Sans',sans-serif">
+  <rect width="2000" height="1200" fill="#16161e"/>
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2201 · Compact Claude sessions at 50% context before dispatching queued work</text>
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">Queued items were dispatched into Claude sessions however full their context was.</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">Now at 50% or more the queue sends /compact and waits for it, so every item starts fresh.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="2"/>
+
+  <text x="105" y="235" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1090" y="235" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1140" stroke="#3d4666" stroke-width="2" stroke-dasharray="12 14"/>
+
+  <!-- BEFORE -->
+  <rect x="105" y="270" width="840" height="110" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+  <text x="129" y="312" font-size="26" fill="#c0caf5">Turn ends: result</text>
+  <text x="129" y="350" font-size="23" fill="#a9b1d6">message_handlers.rs: edit_stack_output_releases_next</text>
+  <line x1="525" y1="380" x2="525" y2="425" stroke="#565f89" stroke-width="3"/>
+  <rect x="105" y="425" width="840" height="110" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+  <text x="129" y="467" font-size="26" fill="#7aa2f7">try_send_next_pending_edit_stack_item</text>
+  <text x="129" y="505" font-size="23" fill="#a9b1d6">ready? claim the oldest pending row, enqueue_input</text>
+  <line x1="525" y1="535" x2="525" y2="580" stroke="#565f89" stroke-width="3"/>
+  <rect x="105" y="580" width="840" height="150" rx="8" fill="#1e202e" stroke="#f7768e" stroke-width="3"/>
+  <text x="129" y="622" font-size="26" fill="#f7768e">Next item lands on a context already 50-90% full</text>
+  <text x="129" y="660" font-size="23" fill="#a9b1d6">Long kicadmium queues stack task on task in one context;</text>
+  <text x="129" y="695" font-size="23" fill="#a9b1d6">auto-compaction then fires in the middle of a subtask.</text>
+
+  <!-- AFTER -->
+  <rect x="1055" y="270" width="840" height="110" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+  <text x="1079" y="312" font-size="26" fill="#c0caf5">Turn ends: result</text>
+  <text x="1079" y="350" font-size="23" fill="#a9b1d6">edit_stack_compaction_turn_ended advances the phase</text>
+  <line x1="1475" y1="380" x2="1475" y2="425" stroke="#565f89" stroke-width="3"/>
+  <rect x="1055" y="425" width="840" height="150" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1079" y="467" font-size="26" fill="#9ece6a">edit_stack_compaction_gate: Check</text>
+  <text x="1079" y="505" font-size="23" fill="#a9b1d6">latest Claude turn_metrics context_fraction()</text>
+  <text x="1079" y="540" font-size="23" fill="#e0af68">&gt;= EDIT_STACK_COMPACT_FRACTION (0.5): send /compact, hold</text>
+  <line x1="1475" y1="575" x2="1475" y2="620" stroke="#565f89" stroke-width="3"/>
+  <rect x="1055" y="620" width="840" height="270" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1079" y="662" font-size="26" fill="#9ece6a">CompactionPhase, held until it settles</text>
+  <text x="1079" y="705" font-size="23" fill="#a9b1d6">Requested: /compact sent, item stays pending</text>
+  <text x="1079" y="742" font-size="23" fill="#a9b1d6">Compacted: compact_boundary system message seen</text>
+  <text x="1079" y="779" font-size="23" fill="#a9b1d6">AwaitingReminder: /compact result; reminder turn runs</text>
+  <text x="1079" y="816" font-size="23" fill="#a9b1d6">JustCompacted: reminder result arrives (or 60 s timeout)</text>
+  <text x="1079" y="853" font-size="23" fill="#e0af68">No boundary? Requested goes to JustCompacted: no loop</text>
+  <line x1="1475" y1="890" x2="1475" y2="935" stroke="#565f89" stroke-width="3"/>
+  <rect x="1055" y="935" width="840" height="150" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1079" y="977" font-size="26" fill="#9ece6a">Gate: Proceed, dispatched into a fresh context</text>
+  <text x="1079" y="1015" font-size="23" fill="#a9b1d6">Skips the check once: the gauge predates the compaction.</text>
+  <text x="1079" y="1050" font-size="23" fill="#a9b1d6">Any hold older than COMPACTION_HOLD_TTL (10 min) expires.</text>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">Claude only; Codex, Muse and Antigravity dispatch unchanged. Uses the previous turn's metric. The browser's Send all button does not pass through this gate.</text>
+</svg>

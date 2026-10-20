@@ -72,7 +72,7 @@ pub(crate) fn handle_codex_server_message(
     (ok, false)
 }
 
-fn turn_status_label(status: &codex_codes::TurnStatus) -> &'static str {
+pub(crate) fn turn_status_label(status: &codex_codes::TurnStatus) -> &'static str {
     match status {
         codex_codes::TurnStatus::Completed => "completed",
         codex_codes::TurnStatus::Interrupted => "interrupted",

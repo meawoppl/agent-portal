@@ -646,7 +646,7 @@ fn format_peek(data: &PeekMessagesResponse, now: chrono::DateTime<chrono::Utc>) 
         return out;
     }
     out.push_str(&format!(
-        "Last {} of {} messages (oldest first):\n",
+        "Last {} entries of {} messages (oldest first; thinking bursts are one entry):\n",
         data.messages.len(),
         data.total_messages
     ));
@@ -818,7 +818,7 @@ mod tests {
         assert!(out.starts_with(
             "0c24805b  claude / connected / busy / awaiting permission: Bash  host  session  /repo"
         ));
-        assert!(out.contains("Last 2 of 42 messages (oldest first):"));
+        assert!(out.contains("Last 2 entries of 42 messages (oldest first"));
         assert!(out.contains("[     5m] text        fix the bug"));
         assert!(out.contains("[    12s] tool_use    Bash: cargo test"));
     }

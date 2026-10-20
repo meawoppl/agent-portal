@@ -95,6 +95,29 @@ use super::launch_target_picker::{AgentTargetSelect, DirectoryTargetSelect, Laun
 
 #[function_component(ScheduleDialog)]
 pub fn schedule_dialog(props: &ScheduleDialogProps) -> Html {
+    let portal = crate::portal_client::use_portal();
+    if portal.is_linked() {
+        let path = props
+            .session
+            .as_ref()
+            .map(|s| format!("/dashboard?session={}", s.id))
+            .unwrap_or_else(|| "/settings".into());
+        let close = {
+            let close = props.on_close.clone();
+            Callback::from(move |_| close.emit(()))
+        };
+        return html! { <div class="modal-overlay"><div class="modal-content">
+            <h2>{"Schedule on the owning portal"}</h2>
+            <p>{"Scheduling uses native host and directory access. Open this session on its portal to manage schedules."}</p>
+            <a href={portal.url(&path)} target="_blank" rel="noopener noreferrer">{portal.origin()}</a>
+            <button onclick={close}>{"Close"}</button>
+        </div></div> };
+    }
+    html! { <NativeScheduleDialog session={props.session.clone()} on_close={props.on_close.clone()} /> }
+}
+
+#[function_component(NativeScheduleDialog)]
+fn native_schedule_dialog(props: &ScheduleDialogProps) -> Html {
     let tasks = use_state(Vec::<ScheduledTaskInfo>::new);
     let loading = use_state(|| true);
     let form_mode = use_state(|| None::<FormMode>);

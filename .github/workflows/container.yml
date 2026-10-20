@@ -78,10 +78,15 @@ jobs:
           image="${REGISTRY}/${IMAGE_NAME,,}"
           short_sha="${GITHUB_SHA::7}"
           created="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          # The same major.minor.<commit count> the portal reports as its
+          # version (shared/build.rs), so self-hosters pin by version.
+          minor="$(sed -n 's/^version = "\([0-9]*\.[0-9]*\)\..*/\1/p' Cargo.toml | head -1)"
+          version="${minor}.$(git rev-list --count HEAD)"
 
           {
             echo "tags<<EOF"
             echo "${image}:${short_sha}"
+            echo "${image}:${version}"
             echo "${image}:latest"
             echo "EOF"
             echo "labels<<EOF"

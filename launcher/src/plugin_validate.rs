@@ -283,7 +283,7 @@ fn check_surface(surface: &Table, report: &mut Report) {
         None => report.error("surface.start", "a [surface] needs a `start` command"),
         Some(_) => {
             if let Some(start) = opt_str(surface, "start", "surface.start", report) {
-                if start.trim().is_empty() {
+                if !shared::strings::is_non_blank(start) {
                     report.error("surface.start", "`start` is empty");
                 }
                 check_placeholders(start, "surface.start", report);
@@ -343,7 +343,7 @@ fn check_commands(manifest: &Table, report: &mut Report) {
             report,
         );
         if let Some(run) = required_str(entry, "run", &field, report) {
-            if run.trim().is_empty() {
+            if !shared::strings::is_non_blank(run) {
                 report.error(format!("{field}.run"), "`run` is empty");
             }
             check_placeholders(run, &format!("{field}.run"), report);
@@ -910,6 +910,16 @@ domain = "testing"
         let report = validate_manifest(&manifest);
         assert!(has(&report.errors, "commands[1].run", "empty"));
         assert!(has(&report.errors, "surface.start", "needs a `start`"));
+    }
+
+    #[test]
+    fn whitespace_only_surface_start_is_empty() {
+        let manifest = GOOD_MANIFEST.replace(
+            "start = \"bin/demo serve --port {port} --session {session_id} --cwd {cwd}\"",
+            "start = \"  \"",
+        );
+        let report = validate_manifest(&manifest);
+        assert!(has(&report.errors, "surface.start", "`start` is empty"));
     }
 
     #[test]

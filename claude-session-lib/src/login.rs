@@ -210,17 +210,7 @@ fn failed(message: &str) -> AgentLoginOutcome {
 /// Keep the tail of a CLI transcript for a failure message — the end carries
 /// the error, and it's char-safe against multi-byte output.
 fn transcript_tail(transcript: &str) -> String {
-    let trimmed = transcript.trim();
-    let chars: Vec<char> = trimmed.chars().collect();
-    if chars.len() <= MESSAGE_TAIL {
-        return trimmed.to_string();
-    }
-    format!(
-        "…{}",
-        chars[chars.len() - MESSAGE_TAIL..]
-            .iter()
-            .collect::<String>()
-    )
+    shared::strings::tail_with_ellipsis(transcript.trim(), MESSAGE_TAIL)
 }
 
 #[cfg(test)]

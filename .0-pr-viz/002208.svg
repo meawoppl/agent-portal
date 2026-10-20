@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200" font-family="'Segoe UI','Noto Sans',sans-serif">
+  <rect width="2000" height="1200" fill="#16161e"/>
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2208 · Key dashboard session state by portal connection</text>
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">Dashboard state filed sessions by bare Uuid, unique only within one portal.</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">Now every set, map and callback uses SessionKey { conn, id }, so portals never collide.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="2"/>
+
+  <text x="105" y="235" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1090" y="235" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1140" stroke="#3d4666" stroke-width="2" stroke-dasharray="12 14"/>
+
+  <!-- BEFORE -->
+  <rect x="105" y="270" width="840" height="150" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+  <text x="129" y="312" font-size="26" fill="#7aa2f7">use_sessions -> Vec&lt;SessionInfo&gt;</text>
+  <text x="129" y="350" font-size="23" fill="#a9b1d6">Rows carry no portal; page actions build URLs with</text>
+  <text x="129" y="385" font-size="23" fill="#a9b1d6">utils::api_url and Request::delete / post.</text>
+  <line x1="525" y1="420" x2="525" y2="465" stroke="#565f89" stroke-width="3"/>
+  <rect x="105" y="465" width="840" height="190" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+  <text x="129" y="507" font-size="26" fill="#c0caf5">DashboardSessionState: HashSet&lt;Uuid&gt;</text>
+  <text x="129" y="545" font-size="23" fill="#a9b1d6">awaiting, seen, hidden, connected, activated, focused_id;</text>
+  <text x="129" y="580" font-size="23" fill="#a9b1d6">rail maps, metrics, progress and SessionView callbacks</text>
+  <text x="129" y="615" font-size="23" fill="#a9b1d6">all keyed by the bare session id.</text>
+  <line x1="525" y1="655" x2="525" y2="700" stroke="#565f89" stroke-width="3"/>
+  <rect x="105" y="700" width="840" height="150" rx="8" fill="#1e202e" stroke="#f7768e" stroke-width="3"/>
+  <text x="129" y="742" font-size="26" fill="#f7768e">Same id from two portals = one merged entry</text>
+  <text x="129" y="780" font-size="23" fill="#a9b1d6">A linked portal echoing a home session id could share</text>
+  <text x="129" y="815" font-size="23" fill="#a9b1d6">its awaiting flag, focus or input route.</text>
+
+  <!-- AFTER -->
+  <rect x="1055" y="270" width="840" height="150" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1079" y="312" font-size="26" fill="#9ece6a">PortalSession { key, portal, info }</text>
+  <text x="1079" y="350" font-size="23" fill="#a9b1d6">use_sessions fetches via use_portal(); delete, leave, stop</text>
+  <text x="1079" y="385" font-size="23" fill="#a9b1d6">and pause go through the session's own PortalClient.</text>
+  <line x1="1475" y1="420" x2="1475" y2="465" stroke="#565f89" stroke-width="3"/>
+  <rect x="1055" y="465" width="840" height="190" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1079" y="507" font-size="26" fill="#9ece6a">SessionKey { conn: ConnId, id } everywhere</text>
+  <text x="1079" y="545" font-size="23" fill="#a9b1d6">Reducer, rail, sparkline, broadcast, keyboard nav, client</text>
+  <text x="1079" y="580" font-size="23" fill="#a9b1d6">WS maps; SessionView keyed by SessionKey; rail dialogs</text>
+  <text x="1079" y="615" font-size="23" fill="#a9b1d6">wrapped in the session's PortalClient context.</text>
+  <line x1="1475" y1="655" x2="1475" y2="700" stroke="#565f89" stroke-width="3"/>
+  <rect x="1055" y="700" width="840" height="190" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1079" y="742" font-size="26" fill="#9ece6a">Only ConnId::HOME can log the page out</text>
+  <text x="1079" y="780" font-size="23" fill="#a9b1d6">PortalClient::fetch_json ignores On401::Logout for any</text>
+  <text x="1079" y="815" font-size="23" fill="#a9b1d6">other connection. Test: same id, two ConnIds, two entries.</text>
+  <text x="1079" y="850" font-size="23" fill="#e0af68">localStorage formats unchanged; only home keys persist.</text>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">All sessions are still home, so behavior is unchanged. Persisted keys are not yet account-qualified, and ScheduleDialog still posts via utils.</text>
+</svg>

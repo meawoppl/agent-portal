@@ -10,12 +10,24 @@ pub struct PluginInventoryResponse {
     pub working_directory: Option<String>,
     #[serde(default)]
     pub scanned: bool,
+    /// The session launcher supports saving per-session skill selection.
+    #[serde(default)]
+    pub session_selection_supported: bool,
     #[serde(default)]
     pub injected_context: Vec<PluginContextEntry>,
     #[serde(default)]
     pub plugins: Vec<PortalPluginInfo>,
     #[serde(default)]
     pub warnings: Vec<String>,
+}
+
+/// Save one plugin selection without overwriting choices made in another tab.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetSessionPluginRequest {
+    pub session_id: uuid::Uuid,
+    pub name: String,
+    pub enabled: bool,
 }
 
 /// A locally installed Portal plugin plus session/path-specific discovery
@@ -248,6 +260,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn session_selection_requires_an_explicit_session_and_boolean() {
+        let request = SetSessionPluginRequest {
+            session_id: uuid::Uuid::new_v4(),
+            name: "slowbooks".into(),
+            enabled: false,
+        };
+        let wire = serde_json::to_string(&request).unwrap();
+        assert_eq!(
+            serde_json::from_str::<SetSessionPluginRequest>(&wire).unwrap(),
+            request
+        );
+        assert!(serde_json::from_str::<SetSessionPluginRequest>(
+            r#"{"name":"slowbooks","enabled":false}"#
+        )
+        .is_err());
+        assert!(serde_json::from_str::<SetSessionPluginRequest>(
+            &wire.replace(",\"enabled\":false", "")
+        )
+        .is_err());
+    }
+
+    #[test]
     fn command_approval_is_explicit_and_arguments_round_trip() {
         let request = PluginRequest {
             working_directory: Some("/project".into()),
@@ -273,6 +307,7 @@ mod tests {
         let response: PluginInventoryResponse =
             serde_json::from_str(r#"{"plugins":[{"name":"tools","displayName":"Tools"}]}"#)
                 .unwrap();
+        assert!(!response.session_selection_supported);
         assert!(response.injected_context.is_empty());
         assert_eq!(response.plugins[0].policy, PluginPolicy::Ask);
         assert!(response.plugins[0].activation.is_none());

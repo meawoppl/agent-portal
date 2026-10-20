@@ -1,10 +1,9 @@
 use super::page_state::{active_session_ids, DashboardSessionAction, DashboardSessionState};
 use super::session_order;
-use super::types::{load_last_active_session, save_last_active_session};
+use super::types::{load_last_active_session, save_last_active_session, PortalSession};
+use crate::portal_client::SessionKey;
 use gloo::timers::callback::Timeout;
-use shared::SessionInfo;
 use std::collections::HashSet;
-use uuid::Uuid;
 use yew::prelude::*;
 
 /// Background sessions activated per hydration tick (#1915).
@@ -18,7 +17,7 @@ pub(super) struct DashboardFocus {
     pub focused_index: usize,
     pub on_select_session: Callback<usize>,
     pub on_clear_selection: Callback<()>,
-    pub on_activate: Callback<Uuid>,
+    pub on_activate: Callback<SessionKey>,
     pub on_interrupt: Callback<()>,
     pub interrupt_signal: u32,
     pub on_jump_to_latest: Callback<()>,
@@ -26,8 +25,8 @@ pub(super) struct DashboardFocus {
 }
 
 fn focused_session_terminated(
-    prior: Option<(Uuid, bool)>,
-    focused_id: Uuid,
+    prior: Option<(SessionKey, bool)>,
+    focused_id: SessionKey,
     is_live: bool,
 ) -> bool {
     prior == Some((focused_id, true)) && !is_live
@@ -35,12 +34,13 @@ fn focused_session_terminated(
 
 #[hook]
 pub(super) fn use_dashboard_focus(
-    active_sessions: Vec<SessionInfo>,
-    effective_hidden_sessions: HashSet<Uuid>,
+    active_sessions: Vec<PortalSession>,
+    effective_hidden_sessions: HashSet<SessionKey>,
     loading: bool,
     mobile_session_selector: bool,
     session_state: UseReducerHandle<DashboardSessionState>,
 ) -> DashboardFocus {
+    let home_user = crate::portal_client::use_portal().account_id();
     // Derive the focused display index from the focused session id against the
     // current sorted order. The rail, keyboard nav, and focus render all
     // consume this derived index.
@@ -71,7 +71,7 @@ pub(super) fn use_dashboard_focus(
     // disconnected session remains possible. We only move focus on a live ->
     // not-live transition, which is the lifecycle produced by `seppuku`.
     {
-        let prior_focus_liveness = use_mut_ref(|| None::<(Uuid, bool)>);
+        let prior_focus_liveness = use_mut_ref(|| None::<(SessionKey, bool)>);
         let focused_id = session_state.focused_id;
         let connected_sessions = session_state.connected_sessions.clone();
         let sessions = active_sessions.clone();
@@ -84,7 +84,7 @@ pub(super) fn use_dashboard_focus(
                 active_session_ids(&sessions),
                 sessions
                     .iter()
-                    .map(|session| (session.id, session.status.clone()))
+                    .map(|session| (session.key, session.info.status.clone()))
                     .collect::<Vec<_>>(),
                 connected_sessions.clone(),
                 hidden_sessions.clone(),
@@ -94,8 +94,8 @@ pub(super) fn use_dashboard_focus(
                 if let Some(focused_id) = focused_id {
                     let is_live = connected_sessions.contains(&focused_id)
                         || sessions.iter().any(|session| {
-                            session.id == focused_id
-                                && session.status == shared::SessionStatus::Active
+                            session.key == focused_id
+                                && session.info.status == shared::SessionStatus::Active
                         });
 
                     let prior = *prior_focus_liveness.borrow();
@@ -147,13 +147,16 @@ pub(super) fn use_dashboard_focus(
                         });
                     } else {
                         let visible =
-                            |session: &&SessionInfo| !hidden_sessions.contains(&session.id);
-                        let saved_focus = load_last_active_session().and_then(|saved_id| {
-                            sessions
-                                .iter()
-                                .find(|s| s.id == saved_id && !hidden_sessions.contains(&s.id))
-                                .map(|s| s.id)
-                        });
+                            |session: &&PortalSession| !hidden_sessions.contains(&session.key);
+                        let saved_focus =
+                            load_last_active_session(home_user).and_then(|saved_id| {
+                                sessions
+                                    .iter()
+                                    .find(|s| {
+                                        s.key == saved_id && !hidden_sessions.contains(&s.key)
+                                    })
+                                    .map(|s| s.key)
+                            });
                         // Prefer the last active session from this browser, then
                         // fall back to the first non-hidden session by id (then
                         // the first session if all are hidden).
@@ -162,11 +165,11 @@ pub(super) fn use_dashboard_focus(
                                 .iter()
                                 .find(visible)
                                 .or_else(|| sessions.first())
-                                .map(|s| s.id)
+                                .map(|s| s.key)
                         });
 
                         if let Some(id) = focus_id {
-                            save_last_active_session(id);
+                            save_last_active_session(id, home_user);
                         }
 
                         session_state.dispatch(DashboardSessionAction::InitializeFocus {
@@ -226,14 +229,19 @@ pub(super) fn use_dashboard_focus(
             move |_| {
                 let mut tick = None;
                 if initialized && !mobile_session_selector {
-                    let mut pending: Vec<&SessionInfo> = active_sessions
+                    let mut pending: Vec<&PortalSession> = active_sessions
                         .iter()
-                        .filter(|s| !hidden_sessions.contains(&s.id) && !activated.contains(&s.id))
+                        .filter(|s| {
+                            !hidden_sessions.contains(&s.key) && !activated.contains(&s.key)
+                        })
                         .collect();
                     if !pending.is_empty() {
                         pending.sort_by(|a, b| session_order::history_hydration_cmp(a, b));
-                        let next: Vec<Uuid> =
-                            pending.iter().take(HYDRATION_BATCH).map(|s| s.id).collect();
+                        let next: Vec<SessionKey> = pending
+                            .iter()
+                            .take(HYDRATION_BATCH)
+                            .map(|s| s.key)
+                            .collect();
                         tick = Some(Timeout::new(HYDRATION_DRIP_MS, move || {
                             for id in next {
                                 session_state.dispatch(DashboardSessionAction::Activate(id));
@@ -252,7 +260,7 @@ pub(super) fn use_dashboard_focus(
         let focused_id = session_state.focused_id;
         use_effect_with(focused_id, move |focused_id| {
             if let Some(id) = focused_id {
-                save_last_active_session(*id);
+                save_last_active_session(*id, home_user);
             }
             || ()
         });
@@ -280,11 +288,11 @@ pub(super) fn use_dashboard_focus(
             crate::audio::ensure_audio_context();
             crate::audio::play_sound(crate::audio::SoundEvent::SessionSwap);
             if let Some(session) = active_sessions.get(index) {
-                save_last_active_session(session.id);
+                save_last_active_session(session.key, home_user);
                 session_state.dispatch(if mobile_session_selector {
-                    DashboardSessionAction::FocusExclusively(session.id)
+                    DashboardSessionAction::FocusExclusively(session.key)
                 } else {
-                    DashboardSessionAction::FocusAndActivate(session.id)
+                    DashboardSessionAction::FocusAndActivate(session.key)
                 });
             }
         })
@@ -299,7 +307,7 @@ pub(super) fn use_dashboard_focus(
 
     let on_activate = {
         let session_state = session_state.clone();
-        Callback::from(move |session_id: Uuid| {
+        Callback::from(move |session_id: SessionKey| {
             session_state.dispatch(DashboardSessionAction::Activate(session_id));
         })
     };
@@ -344,12 +352,13 @@ pub(super) fn use_dashboard_focus(
 #[cfg(test)]
 mod tests {
     use super::focused_session_terminated;
+    use crate::portal_client::SessionKey;
     use uuid::Uuid;
 
     #[test]
     fn switches_only_when_the_same_focused_session_transitions_out_of_live() {
-        let focused = Uuid::from_u128(1);
-        let other = Uuid::from_u128(2);
+        let focused = SessionKey::home(Uuid::from_u128(1));
+        let other = SessionKey::home(Uuid::from_u128(2));
 
         assert!(focused_session_terminated(
             Some((focused, true)),

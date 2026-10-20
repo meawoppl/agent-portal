@@ -1,4 +1,3 @@
-use gloo_net::http::Request;
 use shared::api::{ForkDirectoryMode, ForkSessionRequest, ForkSessionResponse};
 use shared::SessionInfo;
 use uuid::Uuid;
@@ -7,6 +6,7 @@ use web_sys::{HtmlInputElement, HtmlTextAreaElement};
 use yew::prelude::*;
 
 use crate::components::{FloatingPane, ModelSelect};
+use crate::portal_client::use_portal;
 use crate::utils;
 
 #[derive(Properties, PartialEq)]
@@ -52,6 +52,7 @@ pub fn fork_dialog(props: &ForkDialogProps) -> Html {
         let mode = mode.clone();
         Callback::from(move |_| mode.set(next))
     };
+    let portal = use_portal();
     let submit = {
         let source_id = props.session.id;
         let name = name.clone();
@@ -88,12 +89,9 @@ pub fn fork_dialog(props: &ForkDialogProps) -> Html {
             let error = error.clone();
             let on_close = on_close.clone();
             let on_forked = on_forked.clone();
+            let request = portal.post(&format!("/api/sessions/{source_id}/fork"));
             spawn_local(async move {
-                let response = utils::send_json(
-                    Request::post(&format!("/api/sessions/{source_id}/fork")),
-                    &body,
-                )
-                .await;
+                let response = utils::send_json(request, &body).await;
                 match response {
                     Ok(response) if response.ok() => {
                         match response.json::<ForkSessionResponse>().await {

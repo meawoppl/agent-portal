@@ -34,7 +34,7 @@ fn path_with_local_bin(existing: &str, home: Option<&str>) -> String {
 fn service_path(binary_path: &str) -> String {
     let home = std::env::var("HOME").ok();
     let mut base = path_with_local_bin(&std::env::var("PATH").unwrap_or_default(), home.as_deref());
-    if let Some(home) = home.filter(|h| !h.is_empty()) {
+    if let Some(home) = home.filter(|h| shared::strings::is_non_empty(h)) {
         let cargo_bin = format!("{home}/.cargo/bin");
         if std::path::Path::new(&cargo_bin).is_dir() {
             base = path_with_dir(&base, &cargo_bin);

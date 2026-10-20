@@ -22,9 +22,12 @@ RUN apt-get update && \
 # Copy pre-built backend binary from CI (frontend assets are embedded)
 COPY build-output/backend /app/backend
 
-# Create non-root user
+# Create non-root user. /data/archive must exist and belong to it in the image:
+# an empty named volume mounted there copies this ownership on first use, so
+# the local session archive is writable without a root init step.
 RUN useradd -m -u 1001 -s /bin/bash appuser && \
-    chown -R appuser:appuser /app
+    mkdir -p /data/archive && \
+    chown -R appuser:appuser /app /data
 
 USER appuser
 

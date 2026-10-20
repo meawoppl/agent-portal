@@ -443,6 +443,14 @@ async fn handle_forward_stt(
         )
             .into_response();
     };
+    // A public forward is not permission to spend the portal's STT budget.
+    // Cookies can outlive sharing changes, so recheck current membership.
+    let access = app_state.conn().and_then(|mut conn| {
+        crate::handlers::session_access::verify_session_reader(&mut conn, session_id, user_id)
+    });
+    if let Err(error) = access {
+        return error.into_response();
+    }
     let language = stt_language(req.uri());
     let (parts, body) = req.into_parts();
     let cap = app_state.max_audio_mb as usize * 1024 * 1024;
@@ -519,7 +527,11 @@ fn create_and_send_forward_edit_stack(
             items: response.items.clone(),
         },
     );
-    Ok(response)
+    // The plugin that posted only needs to see its items queued; echoing the
+    // captured image back down the tunnel is what made submits feel slow.
+    Ok(shared::api::EditStackResponse {
+        items: crate::handlers::edit_stack::without_images(response.items),
+    })
 }
 
 /// Missing/expired cookie: bounce navigations through the portal origin (the
@@ -1272,6 +1284,126 @@ mod tests {
         assert_eq!(
             rewrite_upstream_location("http://localhost:80801/x", 8080, origin),
             "http://localhost:80801/x"
+        );
+    }
+}
+
+#[cfg(test)]
+mod stt_access_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn transcription_requires_current_membership_and_bounds_audio() {
+        let Some(pool) = crate::test_support::shared_pool() else {
+            return;
+        };
+        let mut state = crate::test_support::test_app_state(pool);
+        let (owner, stranger, session) = {
+            let mut conn = state.conn().expect("test connection");
+            let owner = crate::test_support::insert_user(&mut conn, "stt-owner");
+            let stranger = crate::test_support::insert_user(&mut conn, "stt-stranger");
+            let session = crate::test_support::insert_session(&mut conn, owner.id, "stt-forward");
+            diesel::insert_into(crate::schema::session_members::table)
+                .values(crate::models::NewSessionMember {
+                    session_id: session.id,
+                    user_id: owner.id,
+                    role: "owner".into(),
+                })
+                .execute(&mut conn)
+                .expect("membership");
+            (owner, stranger, session)
+        };
+        let claims = |user| {
+            decode_token(
+                &state,
+                &mint_token(&state, AUD_COOKIE, session.id, user, 60),
+                AUD_COOKIE,
+                session.id,
+            )
+        };
+        let request = |method: Method| {
+            Request::builder()
+                .method(method)
+                .uri("/__portal/stt/transcribe?session_id=ignored&language=en")
+                .header(header::CONTENT_TYPE, "audio/webm")
+                .body(Body::from("audio"))
+                .expect("request")
+        };
+        assert_eq!(
+            handle_forward_stt(&state, session.id, None, request(Method::GET))
+                .await
+                .status(),
+            StatusCode::METHOD_NOT_ALLOWED
+        );
+        assert_eq!(
+            handle_forward_stt(&state, session.id, None, request(Method::POST))
+                .await
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            handle_forward_stt(
+                &state,
+                session.id,
+                claims(stranger.id),
+                request(Method::POST)
+            )
+            .await
+            .status(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            handle_forward_stt(&state, session.id, claims(owner.id), request(Method::POST))
+                .await
+                .status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        let token = mint_token(&state, AUD_COOKIE, session.id, owner.id, 60);
+        // A cookie remains cryptographically valid after membership is revoked.
+        {
+            use crate::schema::session_members;
+            diesel::delete(
+                session_members::table.filter(session_members::session_id.eq(session.id)),
+            )
+            .execute(&mut *state.conn().expect("test connection"))
+            .expect("revoke");
+        }
+        assert_eq!(
+            handle_forward_stt(
+                &state,
+                session.id,
+                decode_token(&state, &token, AUD_COOKIE, session.id),
+                request(Method::POST)
+            )
+            .await
+            .status(),
+            StatusCode::NOT_FOUND
+        );
+        let session2 = crate::test_support::insert_session(
+            &mut state.conn().expect("connection"),
+            owner.id,
+            "stt-cap",
+        );
+        diesel::insert_into(crate::schema::session_members::table)
+            .values(crate::models::NewSessionMember {
+                session_id: session2.id,
+                user_id: owner.id,
+                role: "owner".into(),
+            })
+            .execute(&mut *state.conn().expect("connection"))
+            .expect("membership");
+        state.max_audio_mb = 0;
+        let token = mint_token(&state, AUD_COOKIE, session2.id, owner.id, 60);
+        assert_eq!(
+            handle_forward_stt(
+                &state,
+                session2.id,
+                decode_token(&state, &token, AUD_COOKIE, session2.id),
+                request(Method::POST)
+            )
+            .await
+            .status(),
+            StatusCode::PAYLOAD_TOO_LARGE
         );
     }
 }

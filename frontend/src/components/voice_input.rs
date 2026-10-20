@@ -36,6 +36,7 @@ use wasm_bindgen_futures::{spawn_local, JsFuture};
 use web_sys::{Blob, BlobEvent, MediaRecorder, MediaRecorderOptions, MediaStream};
 use yew::prelude::*;
 
+use crate::portal_client::{portal_from_context, PortalClient};
 use crate::utils;
 
 const UNSUPPORTED_HINT: &str = "Voice input needs the Web Speech API. Try Chrome, Edge, or Safari.";
@@ -522,8 +523,9 @@ impl Component for VoiceInput {
 
                 let link = ctx.link().clone();
                 let session_id = ctx.props().session_id;
+                let portal = portal_from_context(ctx);
                 spawn_local(async move {
-                    match transcribe(session_id, audio, content_type).await {
+                    match transcribe(&portal, session_id, audio, content_type).await {
                         Ok(text) => link.send_message(VoiceInputMsg::Transcribed(text)),
                         Err(error) => link.send_message(VoiceInputMsg::TranscribeFailed(error)),
                     }
@@ -1025,13 +1027,15 @@ async fn start_recording_async() -> Result<ServerRecording, StartFailure> {
 
 /// POST one recording to the server and return the transcript.
 async fn transcribe(
+    portal: &PortalClient,
     session_id: Option<Uuid>,
     audio: Vec<u8>,
     content_type: String,
 ) -> Result<String, String> {
     let path = transcribe_path(session_id, document_language().as_deref());
     let body = Uint8Array::from(audio.as_slice());
-    let response = gloo_net::http::Request::post(&utils::api_url(&path))
+    let response = portal
+        .post(&path)
         .header("Content-Type", &content_type)
         .body(body)
         .map_err(|e| format!("Could not build the upload: {e}"))?

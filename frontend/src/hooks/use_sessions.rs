@@ -1,114 +1,147 @@
-//! Hook for managing session list with automatic polling.
-
-use crate::utils::{self, On401};
+//! Poll each connection independently, discarding results after its lifecycle ends.
+use crate::{
+    federation::{Federation, FederationAction},
+    pages::dashboard::PortalSession,
+    portal_client::{use_portal, ConnId},
+    utils::On401,
+};
 use shared::api::SessionsResponse;
-use shared::SessionInfo;
+use std::{
+    cell::{Cell, RefCell},
+    collections::{HashMap, HashSet},
+    rc::Rc,
+};
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
-/// Return value from the use_sessions hook.
 pub struct UseSessions {
-    /// Current list of sessions
-    pub sessions: Vec<SessionInfo>,
-    /// Whether sessions are currently being loaded (initial load only)
+    pub sessions: Vec<PortalSession>,
     pub loading: bool,
-    /// Manually trigger a refresh
+    pub loaded_connections: HashSet<ConnId>,
     pub refresh: Callback<()>,
-    /// Update the session list directly (for local modifications)
-    pub set_sessions: Callback<Vec<SessionInfo>>,
+    pub set_sessions: Callback<Vec<PortalSession>>,
 }
 
-/// Hook for fetching and polling session list.
-///
-/// Automatically fetches sessions on mount and polls every 5 seconds.
-/// Handles 401 responses by redirecting to logout.
-///
-/// # Returns
-/// * `UseSessions` - The current sessions, loading state, and control callbacks
-///
+#[derive(Default)]
+struct Lists {
+    rows: HashMap<ConnId, Vec<PortalSession>>,
+    loaded: HashSet<ConnId>,
+}
+enum ListAction {
+    Received(ConnId, Vec<PortalSession>),
+    Set(Vec<PortalSession>),
+}
+impl Reducible for Lists {
+    type Action = ListAction;
+    fn reduce(self: Rc<Self>, action: Self::Action) -> Rc<Self> {
+        let mut next = Self {
+            rows: self.rows.clone(),
+            loaded: self.loaded.clone(),
+        };
+        match action {
+            ListAction::Received(conn, rows) => {
+                next.rows.insert(conn, rows);
+                next.loaded.insert(conn);
+            }
+            ListAction::Set(rows) => {
+                next.rows.clear();
+                for row in rows {
+                    next.rows.entry(row.key.conn).or_default().push(row);
+                }
+            }
+        }
+        next.into()
+    }
+}
+
 #[hook]
 pub fn use_sessions() -> UseSessions {
-    let sessions = use_state(Vec::<SessionInfo>::new);
-    let loading = use_state(|| true);
-    let refresh_trigger = use_state(|| 0u32);
-
-    // Fetch sessions callback
-    let fetch_sessions = {
-        let sessions = sessions.clone();
-        let loading = loading.clone();
-
-        Callback::from(move |set_loading: bool| {
-            let sessions = sessions.clone();
-            let loading = loading.clone();
-
-            spawn_local(async move {
-                // 401 means the session is invalid; the helper redirects to logout.
-                match utils::fetch_json::<SessionsResponse>("/api/sessions", On401::Logout).await {
-                    Ok(data) => {
-                        sessions.set(data.sessions);
-                    }
-                    Err(e) => {
-                        log::error!("Failed to fetch sessions: {}", e);
+    let home = use_portal();
+    let federation = use_context::<Federation>();
+    let mut portals = vec![home];
+    if let Some(registry) = &federation {
+        portals.extend(registry.rows.iter().filter_map(|row| row.client.clone()));
+    }
+    let lists = use_reducer(Lists::default);
+    let refresh_tick = use_state(|| 0u64);
+    {
+        let lists = lists.clone();
+        let federation = federation.clone();
+        use_effect_with((portals.clone(), *refresh_tick), move |(portals, _)| {
+            let cancelled = Rc::new(Cell::new(false));
+            let busy = Rc::new(RefCell::new(HashSet::new()));
+            let fetch = {
+                let portals = portals.clone();
+                let cancelled = cancelled.clone();
+                move || {
+                    for portal in portals.clone() {
+                        if !busy.borrow_mut().insert(portal.conn()) {
+                            continue;
+                        }
+                        let (cancelled, busy, lists, federation) = (
+                            cancelled.clone(),
+                            busy.clone(),
+                            lists.clone(),
+                            federation.clone(),
+                        );
+                        spawn_local(async move {
+                            let result = portal
+                                .fetch_json::<SessionsResponse>("/api/sessions", On401::Logout)
+                                .await;
+                            if cancelled.get() {
+                                return;
+                            }
+                            let (rows, status) = match result {
+                                Ok(data) => (
+                                    data.sessions
+                                        .into_iter()
+                                        .map(|info| PortalSession::new(portal.clone(), info))
+                                        .collect(),
+                                    "Connected".to_string(),
+                                ),
+                                Err(error) => (vec![], format!("Unavailable: {error}")),
+                            };
+                            if portal.is_linked() {
+                                if let Some(registry) = &federation {
+                                    registry
+                                        .dispatch(FederationAction::Status(portal.conn(), status));
+                                }
+                            }
+                            lists.dispatch(ListAction::Received(portal.conn(), rows));
+                            busy.borrow_mut().remove(&portal.conn());
+                        });
                     }
                 }
-                if set_loading {
-                    loading.set(false);
-                }
-            });
-        })
-    };
-
-    // Initial fetch
-    {
-        let fetch_sessions = fetch_sessions.clone();
-        use_effect_with((), move |_| {
-            fetch_sessions.emit(true);
-            || ()
-        });
-    }
-
-    // Polling every 5 seconds
-    {
-        let fetch_sessions = fetch_sessions.clone();
-        use_effect_with((), move |_| {
-            let interval = gloo::timers::callback::Interval::new(5_000, move || {
-                fetch_sessions.emit(false);
-            });
-            move || drop(interval)
-        });
-    }
-
-    // Refresh trigger effect
-    {
-        let fetch_sessions = fetch_sessions.clone();
-        let refresh = *refresh_trigger;
-        use_effect_with(refresh, move |_| {
-            if refresh > 0 {
-                fetch_sessions.emit(false);
+            };
+            fetch();
+            let timer = gloo::timers::callback::Interval::new(5_000, fetch);
+            move || {
+                cancelled.set(true);
+                drop(timer);
             }
-            || ()
         });
     }
-
-    // Manual refresh callback
     let refresh = {
-        let refresh_trigger = refresh_trigger.clone();
-        Callback::from(move |_| {
-            refresh_trigger.set(*refresh_trigger + 1);
-        })
+        let tick = refresh_tick.clone();
+        Callback::from(move |_| tick.set(*tick + 1))
     };
-
-    // Direct setter for local modifications
     let set_sessions = {
-        let sessions = sessions.clone();
-        Callback::from(move |new_sessions: Vec<SessionInfo>| {
-            sessions.set(new_sessions);
-        })
+        let state = lists.clone();
+        Callback::from(move |rows| state.dispatch(ListAction::Set(rows)))
     };
-
+    let current: HashSet<_> = portals.iter().map(|p| p.conn()).collect();
     UseSessions {
-        sessions: (*sessions).clone(),
-        loading: *loading,
+        // Removing/replacing a connection hides its old rows synchronously,
+        // before any async fetch can complete.
+        sessions: lists
+            .rows
+            .values()
+            .flatten()
+            .filter(|s| current.contains(&s.key.conn))
+            .cloned()
+            .collect(),
+        loading: !lists.loaded.contains(&ConnId::HOME),
+        loaded_connections: lists.loaded.intersection(&current).copied().collect(),
         refresh,
         set_sessions,
     }

@@ -1,0 +1,225 @@
+<svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" width="1500" height="1010" viewBox="0 0 1500 1010" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#c0caf5"/>
+    </marker>
+    <style>
+      .t { fill: #c0caf5; font-size: 13px; }
+      .m { fill: #565f89; font-size: 12px; }
+      .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; fill: #c0caf5; }
+      .monom { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; fill: #565f89; }
+      .new { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; fill: #9ece6a; }
+      .hdr { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; font-weight: bold; }
+      .tbl { fill: #24283b; stroke: #565f89; stroke-width: 1; }
+      .tblnew { fill: #24283b; stroke: #9ece6a; stroke-width: 1.5; stroke-dasharray: 6 3; }
+      .arrow { stroke: #c0caf5; stroke-width: 1.6; fill: none; marker-end: url(#ah); }
+      .step { fill: #1a1b26; stroke: #c0caf5; stroke-width: 1.4; }
+      .stepn { fill: #c0caf5; font-size: 12px; font-weight: bold; text-anchor: middle; }
+    </style>
+  </defs>
+  <rect x="0" y="0" width="1500" height="1010" fill="#1a1b26"/>
+
+  <text x="750" y="34" text-anchor="middle" fill="#c0caf5" font-size="21" font-weight="bold">Federated portal views — records, credentials and linking</text>
+  <text x="750" y="54" text-anchor="middle" class="m">dashed green = new table / column · solid grey = exists on main today · ①–⑤ = flows (legend, centre bottom)</text>
+
+  <!-- ================= HOME PORTAL ================= -->
+  <rect x="30" y="70" width="420" height="860" rx="10" fill="none" stroke="#7aa2f7" stroke-width="1.5"/>
+  <rect x="30" y="70" width="420" height="52" rx="10" fill="#7aa2f7" fill-opacity="0.15"/>
+  <text x="240" y="93" text-anchor="middle" fill="#7aa2f7" font-size="16" font-weight="bold">txcl.io — HOME portal</text>
+  <text x="240" y="112" text-anchor="middle" class="t">personal · signs in as meawoppl@gmail.com</text>
+
+  <!-- users -->
+  <rect x="50" y="140" width="380" height="86" rx="5" class="tbl"/>
+  <text x="62" y="157" class="hdr" fill="#7aa2f7">users</text>
+  <text x="62" y="182" class="mono">id        U1</text>
+  <text x="62" y="200" class="mono">email     meawoppl@gmail.com</text>
+  <text x="62" y="218" class="mono">is_admin  true</text>
+
+  <!-- user_identities -->
+  <rect x="50" y="242" width="380" height="86" rx="5" class="tbl"/>
+  <text x="62" y="259" class="hdr" fill="#7aa2f7">user_identities</text>
+  <text x="62" y="284" class="mono">user_id   → U1</text>
+  <text x="62" y="302" class="mono">provider  google</text>
+  <text x="62" y="320" class="mono">subject   1043…  (immutable provider id)</text>
+
+  <!-- portal_connections NEW -->
+  <rect x="50" y="344" width="380" height="176" rx="5" class="tblnew"/>
+  <text x="62" y="361" class="hdr" fill="#9ece6a">portal_connections  NEW</text>
+  <text x="62" y="386" class="new">id              C1</text>
+  <text x="62" y="404" class="new">user_id         → U1</text>
+  <text x="62" y="422" class="new">remote_origin   portal.cosmicfrontier.org</text>
+  <text x="62" y="440" class="new">remote_user_id  W7   (label key, not an FK)</text>
+  <text x="62" y="458" class="new">label           "work"</text>
+  <text x="62" y="476" class="new">scopes_hint     [read, write]  (display only)</text>
+  <text x="62" y="500" class="monom">no token column — tokens never reach here</text>
+
+  <!-- sessions -->
+  <rect x="50" y="536" width="380" height="68" rx="5" class="tbl"/>
+  <text x="62" y="553" class="hdr" fill="#7aa2f7">sessions · session_members</text>
+  <text x="62" y="578" class="mono">sessions.user_id     → U1</text>
+  <text x="62" y="596" class="mono">session_members      (U1, owner)</text>
+
+  <!-- home notes -->
+  <text x="50" y="634" class="t" font-weight="bold">What the home operator learns</text>
+  <text x="50" y="654" class="m">• synced rows correlate U1 ↔ W7 (work affiliation,</text>
+  <text x="50" y="671" class="m">  private hostnames, scopes) — disclosed before sync</text>
+  <text x="50" y="688" class="m">• "device-only" connections are never written here</text>
+  <text x="50" y="705" class="m">• serves the frontend code that runs on your device</text>
+
+  <rect x="50" y="726" width="380" height="186" rx="6" fill="#bb9af7" fill-opacity="0.08" stroke="#bb9af7" stroke-dasharray="4 3"/>
+  <text x="62" y="748" fill="#bb9af7" font-size="13" font-weight="bold">Later (deferred): notification relay</text>
+  <text x="62" y="770" class="m">linked portals send notify-only events to the</text>
+  <text x="62" y="787" class="m">home, which pushes with its own VAPID key</text>
+  <text x="62" y="804" class="m">→ one existing Web Push subscription still works.</text>
+  <text x="62" y="826" class="m">Grants are notify-only (never read/control), per</text>
+  <text x="62" y="843" class="m">source revocable and rate-limited. v1 = foreground</text>
+  <text x="62" y="860" class="m">only; each portal keeps its own notifications.</text>
+  <text x="62" y="882" class="m">Native APNs/FCM for arbitrary homes needs a</text>
+  <text x="62" y="899" class="m">shared delivery service — separate decision.</text>
+
+  <!-- ================= DEVICE ================= -->
+  <rect x="540" y="70" width="420" height="860" rx="10" fill="none" stroke="#7dcfff" stroke-width="1.5"/>
+  <rect x="540" y="70" width="420" height="52" rx="10" fill="#7dcfff" fill-opacity="0.15"/>
+  <text x="750" y="93" text-anchor="middle" fill="#7dcfff" font-size="16" font-weight="bold">Your device — browser or Tauri app</text>
+  <text x="750" y="112" text-anchor="middle" class="t">runs the home frontend; one store per device</text>
+
+  <!-- credential store -->
+  <rect x="560" y="140" width="380" height="96" rx="5" class="tbl" stroke="#7dcfff"/>
+  <text x="572" y="157" class="hdr" fill="#7dcfff">credential store (this device only)</text>
+  <text x="572" y="182" class="mono">txcl.io · U1          cc_session cookie</text>
+  <text x="572" y="200" class="new">cosmicfrontier · W7   bearer JWT [read, write]</text>
+  <text x="572" y="224" class="monom">new device ⇒ "1 linked portal needs re-auth"</text>
+
+  <!-- PortalClients -->
+  <rect x="560" y="254" width="180" height="50" rx="5" fill="#7aa2f7" fill-opacity="0.12" stroke="#7aa2f7"/>
+  <text x="650" y="275" text-anchor="middle" class="mono">PortalClient</text>
+  <text x="650" y="292" text-anchor="middle" class="mono">(txcl.io, U1)</text>
+  <rect x="760" y="254" width="180" height="50" rx="5" fill="#e0af68" fill-opacity="0.12" stroke="#e0af68"/>
+  <text x="850" y="275" text-anchor="middle" class="mono">PortalClient</text>
+  <text x="850" y="292" text-anchor="middle" class="mono">(cosmicfrontier, W7)</text>
+
+  <!-- rail mock -->
+  <rect x="560" y="322" width="380" height="226" rx="6" fill="#24283b" stroke="#565f89"/>
+  <text x="572" y="342" class="t" font-weight="bold">Merged session rail</text>
+  <text x="572" y="366" fill="#7aa2f7" font-size="12" font-weight="bold">txcl.io · personal</text>
+  <rect x="572" y="374" width="356" height="26" rx="13" fill="#7aa2f7" fill-opacity="0.15" stroke="#7aa2f7"/>
+  <text x="588" y="392" class="t">ap-claude-app</text>
+  <text x="916" y="392" text-anchor="end" class="m">meawoppl@gmail</text>
+  <rect x="572" y="406" width="356" height="26" rx="13" fill="#7aa2f7" fill-opacity="0.15" stroke="#7aa2f7"/>
+  <text x="588" y="424" class="t">zodiacal</text>
+  <text x="916" y="424" text-anchor="end" class="m">meawoppl@gmail</text>
+  <text x="572" y="452" fill="#e0af68" font-size="12" font-weight="bold">cosmicfrontier · work · full access</text>
+  <rect x="572" y="460" width="356" height="26" rx="13" fill="#e0af68" fill-opacity="0.15" stroke="#e0af68"/>
+  <text x="588" y="478" class="t">cf-services</text>
+  <text x="916" y="478" text-anchor="end" class="m">matt@cosmicfrontier</text>
+  <rect x="572" y="492" width="356" height="26" rx="13" fill="#e0af68" fill-opacity="0.15" stroke="#e0af68"/>
+  <text x="588" y="510" class="t">hardware-docs</text>
+  <text x="916" y="510" text-anchor="end" class="m">matt@cosmicfrontier</text>
+  <text x="572" y="538" class="monom">actions bound to (portal, account, session)</text>
+
+  <!-- trust warning -->
+  <rect x="560" y="564" width="380" height="64" rx="6" fill="#f7768e" fill-opacity="0.10" stroke="#f7768e"/>
+  <text x="572" y="586" fill="#f7768e" font-size="13" font-weight="bold">Trust boundary</text>
+  <text x="572" y="604" class="t">Code served by txcl.io can read these tokens.</text>
+  <text x="572" y="620" class="t">Linking says: "trust txcl.io with these accounts".</text>
+
+  <!-- legend -->
+  <text x="560" y="656" class="t" font-weight="bold">Flows</text>
+  <circle cx="572" cy="676" r="10" class="step"/><text x="572" y="680" class="stepn">1</text>
+  <text x="590" y="674" class="t">Link portal: device flow on cosmicfrontier; you</text>
+  <text x="590" y="690" class="t">sign in as matt@. Page shows "txcl.io (requested)".</text>
+  <circle cx="572" cy="712" r="10" class="step"/><text x="572" y="716" class="stepn">2</text>
+  <text x="590" y="716" class="t">Scoped JWT (read+write) returned → device only.</text>
+  <circle cx="572" cy="740" r="10" class="step"/><text x="572" y="744" class="stepn">3</text>
+  <text x="590" y="738" class="t">Connection metadata (no token) synced to home,</text>
+  <text x="590" y="754" class="t">unless you pick device-only.</text>
+  <circle cx="572" cy="776" r="10" class="step"/><text x="572" y="780" class="stepn">4</text>
+  <text x="590" y="774" class="t">Bearer → POST /api/ws-ticket → one-use 30s ticket</text>
+  <text x="590" y="790" class="t">→ /ws/client?ticket=… ; GET /api/sessions (bearer).</text>
+  <circle cx="572" cy="812" r="10" class="step"/><text x="572" y="816" class="stepn">5</text>
+  <text x="590" y="816" class="t">Home portal: cookie, REST + /ws/client — unchanged.</text>
+  <text x="560" y="846" class="m">Media (img/video/downloads) can't carry bearer headers:</text>
+  <text x="560" y="862" class="m">authenticated fetch → blob, or short-lived scoped URLs.</text>
+  <text x="560" y="886" class="m">Portal too old / missing capabilities → its own status</text>
+  <text x="560" y="902" class="m">card + link to its native UI; other portals unaffected.</text>
+
+  <!-- ================= REMOTE PORTAL ================= -->
+  <rect x="1050" y="70" width="420" height="860" rx="10" fill="none" stroke="#e0af68" stroke-width="1.5"/>
+  <rect x="1050" y="70" width="420" height="52" rx="10" fill="#e0af68" fill-opacity="0.15"/>
+  <text x="1260" y="93" text-anchor="middle" fill="#e0af68" font-size="16" font-weight="bold">portal.cosmicfrontier.org — LINKED</text>
+  <text x="1260" y="112" text-anchor="middle" class="t">work · separate account matt@cosmicfrontier.org</text>
+
+  <!-- policy -->
+  <rect x="1070" y="140" width="380" height="86" rx="5" class="tblnew"/>
+  <text x="1082" y="157" class="hdr" fill="#9ece6a">federation policy (admin)  NEW</text>
+  <text x="1082" y="182" class="new">mode           allowlist   (default: off)</text>
+  <text x="1082" y="200" class="new">allowed_homes  [txcl.io]   max_scope write</text>
+  <text x="1082" y="218" class="monom">gates ① and ④ · origin check is browser-only</text>
+
+  <!-- users -->
+  <rect x="1070" y="242" width="380" height="68" rx="5" class="tbl"/>
+  <text x="1082" y="259" class="hdr" fill="#e0af68">users</text>
+  <text x="1082" y="284" class="mono">id        W7</text>
+  <text x="1082" y="302" class="mono">email     matt@cosmicfrontier.org</text>
+
+  <!-- identities -->
+  <rect x="1070" y="326" width="380" height="68" rx="5" class="tbl"/>
+  <text x="1082" y="343" class="hdr" fill="#e0af68">user_identities</text>
+  <text x="1082" y="368" class="mono">user_id   → W7</text>
+  <text x="1082" y="386" class="mono">provider  google   subject 5521…</text>
+
+  <!-- grants NEW -->
+  <rect x="1070" y="410" width="380" height="122" rx="5" class="tblnew"/>
+  <text x="1082" y="427" class="hdr" fill="#9ece6a">linked_client_grants  NEW</text>
+  <text x="1082" y="452" class="new">id              G1</text>
+  <text x="1082" y="470" class="new">user_id         → W7</text>
+  <text x="1082" y="488" class="new">requested_home  txcl.io  (requested, unverified)</text>
+  <text x="1082" y="506" class="new">scopes          [read, write]  ≤ admin cap</text>
+  <text x="1082" y="524" class="new">approved_at · revoked_at</text>
+
+  <!-- tokens -->
+  <rect x="1070" y="548" width="380" height="122" rx="5" class="tbl"/>
+  <text x="1082" y="565" class="hdr" fill="#e0af68">proxy_auth_tokens</text>
+  <text x="1082" y="590" class="mono">user_id     → W7</text>
+  <text x="1082" y="608" class="mono">token_hash  sha256(jwt)   revoked false</text>
+  <text x="1082" y="626" class="mono">expires_at  +30d (rotates at half-life)</text>
+  <text x="1082" y="644" class="new">+ grant_id  → G1     NEW column</text>
+  <text x="1082" y="662" class="new">+ scopes    [read, write]  NEW, REST+WS</text>
+
+  <!-- tickets NEW -->
+  <rect x="1070" y="686" width="380" height="104" rx="5" class="tblnew"/>
+  <text x="1082" y="703" class="hdr" fill="#9ece6a">ws_tickets  NEW (short-lived)</text>
+  <text x="1082" y="728" class="new">ticket_hash   token_id → proxy_auth_tokens</text>
+  <text x="1082" y="746" class="new">client_origin txcl.io   aud /ws/client</text>
+  <text x="1082" y="764" class="new">expires +30s  consumed_at (atomic, one-use)</text>
+  <text x="1082" y="782" class="monom">redacted from logs; new ticket per reconnect</text>
+
+  <!-- sessions -->
+  <rect x="1070" y="806" width="380" height="68" rx="5" class="tbl"/>
+  <text x="1082" y="823" class="hdr" fill="#e0af68">sessions · session_members</text>
+  <text x="1082" y="848" class="mono">sessions.user_id     → W7</text>
+  <text x="1082" y="866" class="mono">existing owner/editor/viewer checks still apply</text>
+  <text x="1070" y="902" class="m">Scope only narrows: write still needs owner/editor role.</text>
+
+  <!-- ================= ARROWS ================= -->
+  <!-- 1: device -> grants -->
+  <path d="M 940 279 L 1000 279 L 1000 470 L 1066 470" class="arrow"/>
+  <circle cx="1000" cy="380" r="10" class="step"/><text x="1000" y="384" class="stepn">1</text>
+  <!-- 2: tokens -> credential store -->
+  <path d="M 1070 600 L 1025 600 L 1025 200 L 944 200" class="arrow"/>
+  <circle cx="1025" cy="300" r="10" class="step"/><text x="1025" y="304" class="stepn">2</text>
+  <!-- 4: device client -> tickets -->
+  <path d="M 850 304 L 850 314 L 975 314 L 975 738 L 1066 738" class="arrow"/>
+  <circle cx="975" cy="640" r="10" class="step"/><text x="975" y="644" class="stepn">4</text>
+  <!-- 3: device -> portal_connections -->
+  <path d="M 560 220 L 495 220 L 495 430 L 434 430" class="arrow"/>
+  <circle cx="495" cy="330" r="10" class="step"/><text x="495" y="334" class="stepn">3</text>
+  <!-- 5: home client -> home sessions -->
+  <path d="M 560 290 L 515 290 L 515 570 L 434 570" class="arrow"/>
+  <circle cx="515" cy="470" r="10" class="step"/><text x="515" y="474" class="stepn">5</text>
+
+  <!-- bottom banner -->
+  <rect x="30" y="946" width="1440" height="50" rx="8" fill="#24283b" stroke="#565f89"/>
+  <text x="750" y="967" text-anchor="middle" class="t" font-weight="bold">No identity merge: U1 and W7 are never joined by either server. Each portal only knows its own account.</text>
+  <text x="750" y="985" text-anchor="middle" class="m">The only link is the home's portal_connections row (or device-only storage) — explicit, revocable correlation chosen by you; email is a label, never a key.</text>
+</svg>

@@ -499,6 +499,7 @@ fn classify_muse_event(output: &str) -> Option<ActivityTag> {
         // muse_record" (which returns None and falls through to Unknown gray).
         muse_codes::MusePayload::ModelConfigured(_)
         | muse_codes::MusePayload::RunStarted(_)
+        | muse_codes::MusePayload::RunUsage(_)
         | muse_codes::MusePayload::CommandAccepted(_)
         | muse_codes::MusePayload::SessionRunLinked(_)
         | muse_codes::MusePayload::TurnInputUser(_)

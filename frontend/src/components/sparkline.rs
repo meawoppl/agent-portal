@@ -1,5 +1,5 @@
 //! Pure-SVG sparkline component used by the dashboard-header
-//! [`TurnMetricsHeaderPill`](super::turn_metrics_pill::TurnMetricsHeaderPill).
+//! the header services monitor ([`super::service_monitor`]).
 //!
 //! Hand-rolled — no chart library dependency — so the dashboard pill stays
 //! a single `<svg>` of a few dozen bytes and the project doesn't acquire a

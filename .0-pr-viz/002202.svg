@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200" font-family="'Segoe UI','Noto Sans',sans-serif">
+  <rect width="2000" height="1200" fill="#16161e"/>
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2202 · Stop re-sending a session's whole annotation history on every edit-stack change</text>
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">One annotation post returned the session's entire edit stack with every image inline.</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">Now lists are light, images are fetched by URL, and the plugin gets back only its own items.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="2"/>
+
+  <text x="105" y="235" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1090" y="235" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1140" stroke="#3d4666" stroke-width="2" stroke-dasharray="12 14"/>
+
+  <rect x="105" y="290" width="360" height="150" rx="8" fill="#1e202e" stroke="#7aa2f7" stroke-width="3"/>
+  <text x="129" y="340" font-size="26" fill="#7aa2f7">Plugin posts one note</text>
+  <text x="129" y="384" font-size="23" fill="#c0caf5">POST /__portal/edit-stack</text>
+  <text x="129" y="418" font-size="23" fill="#c0caf5">note + 300 KB capture</text>
+
+  <path d="M465 365H565" stroke="#565f89" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <rect x="565" y="290" width="380" height="150" rx="8" fill="#1e202e" stroke="#f7768e" stroke-width="3"/>
+  <text x="589" y="340" font-size="26" fill="#f7768e">Backend answers with all</text>
+  <text x="589" y="384" font-size="23" fill="#c0caf5">58 items, every image inline</text>
+  <text x="589" y="418" font-size="23" fill="#c0caf5">4 MB back down the tunnel</text>
+
+  <path d="M755 440V540" stroke="#565f89" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <rect x="565" y="540" width="380" height="150" rx="8" fill="#1e202e" stroke="#f7768e" stroke-width="3"/>
+  <text x="589" y="590" font-size="26" fill="#f7768e">And broadcasts the same</text>
+  <text x="589" y="634" font-size="23" fill="#c0caf5">4 MB to every dashboard</text>
+  <text x="589" y="668" font-size="23" fill="#c0caf5">client on the session</text>
+
+  <rect x="105" y="760" width="840" height="120" rx="8" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+  <text x="129" y="805" font-size="24" fill="#f7768e">Measured on bp-test</text>
+  <text x="129" y="845" font-size="23" fill="#c0caf5">list = 4 065 639 bytes, 3 987 046 of them images; grows with every note</text>
+
+  <text x="105" y="960" font-size="23" fill="#a9b1d6">Lists also pulled every image column out of Postgres</text>
+  <text x="105" y="994" font-size="23" fill="#a9b1d6">on each call, for items dispatched days ago.</text>
+
+  <rect x="1090" y="290" width="360" height="150" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1114" y="340" font-size="26" fill="#9ece6a">Plugin posts one note</text>
+  <text x="1114" y="384" font-size="23" fill="#c0caf5">same request</text>
+  <text x="1114" y="418" font-size="23" fill="#c0caf5">answer: its items, no image</text>
+
+  <path d="M1450 365H1550" stroke="#565f89" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <rect x="1550" y="290" width="380" height="150" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1574" y="340" font-size="26" fill="#9ece6a">Light list everywhere</text>
+  <text x="1574" y="384" font-size="23" fill="#c0caf5">inline image: pending only</text>
+  <text x="1574" y="418" font-size="23" fill="#c0caf5">others carry imageUrl</text>
+
+  <path d="M1740 440V540" stroke="#565f89" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <rect x="1550" y="540" width="380" height="150" rx="8" fill="#1e202e" stroke="#7aa2f7" stroke-width="3"/>
+  <text x="1574" y="590" font-size="26" fill="#7aa2f7">Image endpoint</text>
+  <text x="1574" y="634" font-size="23" fill="#c0caf5">edit-stack/{item}/image</text>
+  <text x="1574" y="668" font-size="23" fill="#c0caf5">decoded once, cached for good</text>
+
+  <rect x="1090" y="760" width="840" height="120" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1114" y="805" font-size="24" fill="#9ece6a">Query</text>
+  <text x="1114" y="845" font-size="23" fill="#c0caf5">rows without the image column, then images for pending ids only</text>
+
+  <text x="1090" y="960" font-size="23" fill="#a9b1d6">Tests: inline-for-pending-only (DB), data URL decoding,</text>
+  <text x="1090" y="994" font-size="23" fill="#a9b1d6">backend 381, frontend 700, shared 244 pass.</text>
+
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0 0L12 6L0 12Z" fill="#565f89"/>
+    </marker>
+  </defs>
+</svg>
