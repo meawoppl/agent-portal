@@ -200,6 +200,28 @@ pub struct HistoryMessageLine {
     pub content: serde_json::Value,
 }
 
+/// Legacy bodyless `POST /api/history/sessions/{user}/{session}/restore` response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RestoreSessionResponse {
+    /// The Portal session to open: the restored copy, or the original when it
+    /// is still live.
+    pub session_id: uuid::Uuid,
+    /// The original session still exists, so nothing was restored.
+    pub already_live: bool,
+    /// An earlier restore of this record already created `session_id`.
+    pub already_restored: bool,
+}
+
+/// Restored ids are stable per owner and archived session, so a retried or
+/// repeated restore opens the same Portal session instead of binding the
+/// native conversation to a second one.
+pub fn restored_session_id(user: uuid::Uuid, source_session_id: uuid::Uuid) -> uuid::Uuid {
+    uuid::Uuid::new_v5(
+        &user,
+        format!("portal-restore-v1:{source_session_id}").as_bytes(),
+    )
+}
+
 /// Parse an NDJSON transcript body into message lines, skipping blank and
 /// unparseable lines (a corrupt line must not lose the whole transcript).
 pub fn parse_history_ndjson(body: &str) -> Vec<HistoryMessageLine> {
@@ -244,3 +266,43 @@ not json
         assert_eq!(m.total_cost_usd, 0.0);
     }
 }
+
+/// Explicit recovery choice: native state is never silently replaced by text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HistoryRestoreMode {
+    Native,
+    Context,
+}
+
+/// POST /api/history/sessions/{user}/{session}/recovery.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoryRestoreRequest {
+    pub launcher_id: uuid::Uuid,
+    pub working_directory: String,
+    pub mode: HistoryRestoreMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HistoryRestoreStatus {
+    pub can_restore: bool,
+    pub existing_session_id: Option<uuid::Uuid>,
+    pub transcript_available: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoryRestoreResponse {
+    pub session_id: uuid::Uuid,
+}
+
+/// Durable launch recipe. It survives backend restarts; archived commands are
+/// reference material delivered with a new user input, never queued work.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryRestoreLaunch {
+    pub source_session_id: uuid::Uuid,
+    pub source_directory: String,
+    pub mode: HistoryRestoreMode,
+    pub context: Option<String>,
+}
+
+pub const MAX_HISTORY_CONTEXT_BYTES: usize = 64 * 1024;

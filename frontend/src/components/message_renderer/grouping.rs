@@ -507,6 +507,18 @@ pub fn thinking_chip_starts(groups: &[MessageGroup], agent_type: shared::AgentTy
         .collect()
 }
 
+fn is_transcript_noise(frame: &AgentFrame) -> bool {
+    match frame {
+        AgentFrame::Claude(ClaudeMessage::System(msg)) => {
+            msg.subtype.as_str() == "commands_changed"
+        }
+        AgentFrame::Claude(ClaudeMessage::Portal(portal)) => {
+            super::group_renderer::is_reconnect_notice(portal)
+        }
+        _ => false,
+    }
+}
+
 /// Walk `messages` and collapse consecutive same-category runs into
 /// `MessageGroup::IdentityGroup`. Mixed / `None` messages become
 /// `MessageGroup::Single`.
@@ -535,7 +547,16 @@ pub fn group_messages(
     }
 
     for message in messages {
-        let kind = AgentFrameRegistry::parse(&message.content, agent_type).kind();
+        let frame = AgentFrameRegistry::parse(&message.content, agent_type);
+
+        // Transport churn with nothing for the reader: reconnect notices and
+        // Claude's `commands_changed` marker (re-sent on every reconnect).
+        // Dropping them here, not in `classify`, keeps the surrounding run in
+        // one group instead of splitting it around each hidden frame.
+        if is_transcript_noise(&frame) {
+            continue;
+        }
+        let kind = frame.kind();
 
         // Claude command lifecycle frames are transport bookkeeping, not
         // conversation. Recognize and omit them rather than surfacing raw JSON

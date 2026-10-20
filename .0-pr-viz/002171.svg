@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="sans-serif">
+<text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2171 · Controlled session plugin views</text>
+<text x="55" y="105" font-size="34" fill="#e6e9f5">Plugin rendering moves out of SessionView into focused components.</text>
+<text x="55" y="148" font-size="34" fill="#e6e9f5">Explicit props and callbacks keep state ownership and UI behavior intact.</text>
+<path d="M55 175 H1945" stroke="#565f89"/>
+<path d="M1000 190 V1135" stroke="#565f89" stroke-dasharray="8 10"/>
+<text x="55" y="225" font-size="22" fill="#a9b1d6">BEFORE</text>
+<text x="1055" y="225" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="55" y="270" width="875" height="166" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="79" y="312" font-size="26" fill="#7aa2f7">SessionView</text>
+<text x="79" y="357" font-size="23" fill="#c0caf5">Inventory fetch and session state</text>
+<text x="79" y="395" font-size="23" fill="#c0caf5">Persisted notice expansion and surface transitions</text>
+<rect x="55" y="520" width="875" height="204" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="79" y="562" font-size="26" fill="#7aa2f7">Rendering methods in the orchestrator</text>
+<text x="79" y="607" font-size="23" fill="#c0caf5">render_plugin_notice</text>
+<text x="79" y="645" font-size="23" fill="#c0caf5">render_plugin_surface</text>
+<text x="79" y="683" font-size="23" fill="#c0caf5">render_plugin_card</text>
+<rect x="1055" y="270" width="875" height="166" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1079" y="312" font-size="26" fill="#7aa2f7">SessionView</text>
+<text x="1079" y="357" font-size="23" fill="#c0caf5">Same inventory fetch and session state</text>
+<text x="1079" y="395" font-size="23" fill="#c0caf5">Same persisted expansion and surface transitions</text>
+<rect x="1055" y="520" width="875" height="128" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="562" font-size="26" fill="#7aa2f7">PluginContextNotice</text>
+<text x="1079" y="607" font-size="23" fill="#c0caf5">plugins, expanded, on_toggle</text>
+<rect x="1055" y="705" width="875" height="166" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="747" font-size="26" fill="#7aa2f7">PluginDiscoverySurface</text>
+<text x="1079" y="792" font-size="23" fill="#c0caf5">plugins, error, collapsed, fullscreen</text>
+<text x="1079" y="830" font-size="23" fill="#c0caf5">on_toggle_collapsed, on_toggle_mode, on_close</text>
+<rect x="1055" y="930" width="875" height="128" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="972" font-size="26" fill="#7aa2f7">PluginCard</text>
+<text x="1079" y="1017" font-size="23" fill="#c0caf5">Keyed by plugin name; receives plugin data</text>
+<text x="55" y="880" font-size="23" fill="#c0caf5">The orchestrator owns rendering and state.</text>
+<text x="55" y="928" font-size="23" fill="#c0caf5">All plugin display decisions live alongside</text>
+<text x="55" y="966" font-size="23" fill="#c0caf5">WebSocket, transcript, and input coordination.</text>
+<text x="55" y="1172" font-size="22" fill="#a9b1d6">Scope: plugin views only; inventory fetching, storage, markup, styling, and event semantics remain unchanged.</text>
+</g></svg>

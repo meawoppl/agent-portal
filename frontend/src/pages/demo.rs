@@ -1,6 +1,7 @@
 use crate::components::{group_messages, thinking_chip_starts, MessageGroupRenderer};
 use crate::pages::dashboard::session_rail::{ActivityRef, BroadcastRef, SessionRail};
-use crate::pages::dashboard::RailPosition;
+use crate::pages::dashboard::{PortalSession, RailPosition};
+use crate::portal_client::{use_portal, SessionKey};
 use gloo::timers::callback::Interval;
 use serde_json::json as fixture_json;
 use shared::{AgentType, MessageSource, PortalMeta, SessionInfo, SessionRole, SessionStatus};
@@ -92,6 +93,7 @@ struct DemoSessionSpec {
 
 #[function_component(DemoPage)]
 pub fn demo_page() -> Html {
+    let portal = use_portal();
     let scenarios = use_memo((), |_| demo_scenarios());
     let focused_index = use_state(|| 0usize);
     let playback = use_reducer({
@@ -121,12 +123,15 @@ pub fn demo_page() -> Html {
         });
     }
 
-    let sessions: Vec<SessionInfo> = scenarios.iter().map(|s| s.session.clone()).collect();
-    let connected_sessions: HashSet<Uuid> = sessions.iter().map(|s| s.id).collect();
-    let awaiting_sessions: HashSet<Uuid> = sessions
+    let sessions: Vec<PortalSession> = scenarios
         .iter()
-        .filter(|s| s.session_name.contains("Review"))
-        .map(|s| s.id)
+        .map(|s| PortalSession::new(portal.clone(), s.session.clone()))
+        .collect();
+    let connected_sessions: HashSet<SessionKey> = sessions.iter().map(|s| s.key).collect();
+    let awaiting_sessions: HashSet<SessionKey> = sessions
+        .iter()
+        .filter(|s| s.info.session_name.contains("Review"))
+        .map(|s| s.key)
         .collect();
     let hidden_sessions = HashSet::new();
     let on_select = {
@@ -183,12 +188,12 @@ pub fn demo_page() -> Html {
                     rail_position={RailPosition::Top}
                     server_version={"demo".to_string()}
                     on_select={on_select}
-                    on_leave={Callback::from(|_: Uuid| {})}
-                    on_delete={Callback::from(|_: Uuid| {})}
-                    on_toggle_hidden={Callback::from(|_: Uuid| {})}
+                    on_leave={Callback::from(|_: SessionKey| {})}
+                    on_delete={Callback::from(|_: SessionKey| {})}
+                    on_toggle_hidden={Callback::from(|_: SessionKey| {})}
                     on_toggle_inactive_hidden={Callback::from(|_: MouseEvent| {})}
-                    on_stop={Callback::from(|_: Uuid| {})}
-                    on_toggle_pause={Callback::from(|_: (Uuid, bool)| {})}
+                    on_stop={Callback::from(|_: SessionKey| {})}
+                    on_toggle_pause={Callback::from(|_: (SessionKey, bool)| {})}
                 />
 
                 <div class="session-views-container demo-session-views">

@@ -79,11 +79,12 @@ impl<A: Agent> Drop for Session<A> {
     }
 }
 
-/// Signal the process group led by `pid` (the agent was spawned as a group
-/// leader, so its pgid == pid). Negative pid targets the whole group, reaping
-/// tools the agent spawned. Best-effort: a dead group yields `ESRCH`, ignored.
+/// Signal the process group led by `pid` (the process must have been spawned
+/// as a group leader, so its pgid == pid). Negative pid targets the whole
+/// group, reaping its children too. Best-effort: a dead group yields `ESRCH`,
+/// ignored. Also used by the launcher to stop plugin surfaces.
 #[cfg(unix)]
-fn signal_process_group(pid: u32, sig: libc::c_int) {
+pub fn signal_process_group(pid: u32, sig: libc::c_int) {
     // SAFETY: `kill(2)` with a group target and a fixed signal has no memory
     // safety implications; the worst case is `ESRCH` for an already-dead group.
     unsafe {
@@ -207,6 +208,11 @@ impl<A: Agent> Session<A> {
     /// Get the session config.
     pub fn config(&self) -> &SessionConfig {
         &self.config
+    }
+
+    /// Claim recovered reference text for a real input, preserving slash commands.
+    pub fn take_recovery_context(&mut self) -> Option<String> {
+        self.config.recovery_context.take()
     }
 
     /// Poll for the next event.
@@ -667,6 +673,43 @@ mod tests {
             GUARD_DROPPED.load(Ordering::SeqCst),
             "stop() should abort the io task and reap it"
         );
+    }
+
+    #[tokio::test]
+    async fn recovered_context_is_claimed_once_without_sending_an_input() {
+        // No command is sent by constructing a recovered session or claiming
+        // its reference text. Only handle_input can enqueue a user's work.
+        struct NoInputAgent;
+        impl Agent for NoInputAgent {
+            fn spawn_io_task(
+                _config: SessionConfig,
+                mut commands: mpsc::UnboundedReceiver<IoCommand>,
+                _events: mpsc::UnboundedSender<IoEvent>,
+            ) -> Result<tokio::task::JoinHandle<()>, SessionError> {
+                Ok(tokio::spawn(async move {
+                    if let Some(command) = commands.recv().await {
+                        match command {
+                            IoCommand::Shutdown { completed } => {
+                                let _ = completed.send(());
+                            }
+                            _ => panic!("Recovery must not enqueue historical work"),
+                        }
+                    }
+                }))
+            }
+        }
+        let mut session = Session::<NoInputAgent>::new(SessionConfig {
+            recovery_context: Some("quoted past request".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            session.take_recovery_context().as_deref(),
+            Some("quoted past request")
+        );
+        assert_eq!(session.take_recovery_context(), None);
+        session.stop().await.unwrap();
     }
 
     #[tokio::test]

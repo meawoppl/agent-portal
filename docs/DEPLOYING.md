@@ -1,6 +1,8 @@
 # Deployment Guide
 
-This guide covers deploying agent-portal to production.
+This guide covers deploying agent-portal to production by hand. To run your
+own portal on a single host with a released image, HTTPS, backups and
+upgrades handled, follow [SELF_HOSTING.md](SELF_HOSTING.md) instead.
 
 ## Prerequisites
 
@@ -8,7 +10,9 @@ This guide covers deploying agent-portal to production.
   - [NeonDB](https://neon.tech) (recommended, serverless)
   - Or any PostgreSQL 12+ instance
 
-- **Google OAuth Credentials** (see [Google OAuth Setup](#google-oauth-setup) below)
+- **OAuth credentials for at least one login provider** — Google (see
+  [Google OAuth Setup](#google-oauth-setup) below) or GitHub
+  (`GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` / `GITHUB_REDIRECT_URI`)
 
 ## Environment Variables
 

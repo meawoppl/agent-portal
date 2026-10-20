@@ -6,6 +6,7 @@ description = "Codex agent backend for session-lib (CodexAgent + codex_io_task +
 license = "MIT"
 
 [dependencies]
+anyhow.workspace = true
 session-lib = { path = "../session-lib" }
 shared = { path = "../shared" }
 # We touch ClaudeInput here because the cross-agent `IoCommand` enum (defined

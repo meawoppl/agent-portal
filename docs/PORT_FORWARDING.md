@@ -364,7 +364,38 @@ resolves to the session owner.
 agent-portal forward <port>   # set the forward (replacing any current one), print the URL
 agent-portal forward list     # show the current forward
 agent-portal forward close    # revoke it
+agent-portal forward run ./start.sh --health-path /healthz -- --port '{port}'
 ```
+
+`forward run` registers an executable foreground start script with the local
+launcher daemon. The launcher persists its working directory and arguments,
+injects the allocated child port as `PORTAL_PORT` and `PORT`, and substitutes
+`{port}` in arguments without interpreting them as shell code. Scripts should
+`exec` their server and bind to `127.0.0.1` (or `0.0.0.0`), for example:
+
+```sh
+#!/bin/sh
+exec ./bin/my-server --port "$PORTAL_PORT"
+```
+
+The updated launcher daemon must be running. It owns the server independently
+of the agent session, waits for a successful HTTP health response, and restarts
+exited or repeatedly unhealthy children with backoff up to 30 seconds. A local
+TCP relay keeps the forwarding port and URL stable while each child receives a
+new port. TCP streaming, SSE and WebSockets pass through unchanged. Restarting
+the launcher restores saved services; a conflict on the saved relay port is
+reported instead of adopting another process or silently changing the URL.
+The session tunnel still requires the agent to reconnect before browser traffic
+can resume. Services persist until explicitly stopped; they do not stop merely
+because an agent is paused.
+
+`forward close` unregisters the launch recipe as well as the forward. Closing or
+replacing a forward through the Portal also stops its managed service after the
+next successful poll (normally five seconds). Logs, launch recipes and status
+live in the launcher's config directory under `managed-forwards/`, keyed by
+session UUID. Re-running the same recipe is idempotent; changing it replaces the
+session's managed service. Scripts must establish any application-specific
+environment themselves; interactive shell environment variables are not saved.
 
 - Auth: the launcher's stored token from `launcher.json`, exactly like
   `message`.

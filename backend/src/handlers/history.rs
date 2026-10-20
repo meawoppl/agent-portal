@@ -96,7 +96,7 @@ fn manifest_has_member(manifest: &SessionArchiveManifest, user_id: Uuid) -> bool
 /// Per-session read check for the manifest/messages/media endpoints. Cheap
 /// paths first (admin, owner-by-path, live membership); the manifest is only
 /// fetched for the archived-share case. Every failure is a 404.
-async fn verify_history_reader(
+pub(super) async fn verify_history_reader(
     app_state: &AppState,
     runtime: &Arc<ArchiveRuntime>,
     user: &User,
@@ -434,12 +434,7 @@ fn backfill_user_message_count(
     // earlier copy here could clobber a concurrently re-archived (newer)
     // manifest — losing its fresher last_activity, counts, and transcript
     // info. Under the lock, a fresh read + conditional write is a CAS.
-    let _manifest_guard = runtime
-        .manifest_write_lock
-        .lock()
-        // A poisoned lock only means another writer panicked mid-write; the
-        // ordering guarantee is unaffected, so continue.
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _manifest_guard = shared::sync::lock_recovering_poison(&runtime.manifest_write_lock);
     let mut manifest = match runtime.store.get_session_manifest(owner_id, session_id) {
         Ok(Some(m)) => m,
         Ok(None) => return false,

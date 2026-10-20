@@ -1,9 +1,9 @@
 //! Hook for two-mode keyboard navigation (edit mode / nav mode).
 
+use crate::pages::dashboard::PortalSession;
+use crate::portal_client::SessionKey;
 use gloo::events::{EventListener, EventListenerOptions, EventListenerPhase};
-use shared::SessionInfo;
 use std::collections::HashSet;
-use uuid::Uuid;
 use wasm_bindgen::JsCast;
 use web_sys::KeyboardEvent;
 use yew::prelude::*;
@@ -207,32 +207,32 @@ pub fn use_interrupt_hotkey(on_interrupt: Callback<()>) {
 /// Configuration for the keyboard navigation hook.
 pub struct KeyboardNavConfig {
     /// All sessions (sorted in display order)
-    pub sessions: Vec<SessionInfo>,
+    pub sessions: Vec<PortalSession>,
     /// Currently focused session index
     pub focused_index: usize,
-    /// Set of hidden session IDs
-    pub hidden_sessions: HashSet<Uuid>,
+    /// Set of hidden sessions
+    pub hidden_sessions: HashSet<SessionKey>,
     /// Callback when session selection changes
     pub on_select: Callback<usize>,
     /// Callback to activate a session (mark it as having been viewed)
-    pub on_activate: Callback<Uuid>,
+    pub on_activate: Callback<SessionKey>,
     /// Callback to open the keyboard-shortcuts help overlay (`?`)
     pub on_show_help: Callback<()>,
     /// Callback to open a new session (nav-mode `n`)
     pub on_new_session: Callback<()>,
-    /// Callback to delete a session, given its id (nav-mode `d` on the focused session)
-    pub on_delete: Callback<Uuid>,
+    /// Callback to delete a session, given its key (nav-mode `d` on the focused session)
+    pub on_delete: Callback<SessionKey>,
     /// Callback to jump the focused session's transcript to the newest message
     /// and resume live tailing (nav-mode `G`).
     pub on_jump_to_latest: Callback<()>,
     /// Callback to interrupt the focused session's running agent (nav-mode
     /// `x`). Same action as `Ctrl+Z`, exposed as a single nav-mode key (#1330).
     pub on_interrupt: Callback<()>,
-    /// Callback to collapse (hide) / expand (show) a session, given its id
+    /// Callback to collapse (hide) / expand (show) a session, given its key
     /// (nav-mode `c` on the focused session). Reuses the rail's Hide toggle, so
     /// a collapsed session drops into the rail's hidden group and out of
     /// focus/keyboard rotation.
-    pub on_toggle_hidden: Callback<Uuid>,
+    pub on_toggle_hidden: Callback<SessionKey>,
 }
 
 /// Return value from the use_keyboard_nav hook.
@@ -322,7 +322,7 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                 for i in 1..=len {
                     let idx = (current + i) % len;
                     if let Some(session) = sessions.get(idx) {
-                        if !hidden_sessions.contains(&session.id) {
+                        if !hidden_sessions.contains(&session.key) {
                             return Some(idx);
                         }
                     }
@@ -338,7 +338,7 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
 
                 let non_hidden_count = sessions
                     .iter()
-                    .filter(|s| !hidden_sessions.contains(&s.id))
+                    .filter(|s| !hidden_sessions.contains(&s.key))
                     .count();
 
                 // If all sessions are hidden, allow normal navigation
@@ -353,7 +353,7 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                 for _ in 0..len {
                     new_index = (new_index + step) % len;
                     if let Some(session) = sessions.get(new_index) {
-                        if !hidden_sessions.contains(&session.id) {
+                        if !hidden_sessions.contains(&session.key) {
                             return Some(new_index);
                         }
                     }
@@ -366,7 +366,7 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                 e.prevent_default();
                 if let Some(new_idx) = navigate_to_next_active(focused_index) {
                     if let Some(session) = sessions.get(new_idx) {
-                        on_activate.emit(session.id);
+                        on_activate.emit(session.key);
                     }
                     on_select.emit(new_idx);
                 }
@@ -415,7 +415,7 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                         e.prevent_default();
                         if let Some(new_idx) = navigate_by_delta(focused_index, -1) {
                             if let Some(session) = sessions.get(new_idx) {
-                                on_activate.emit(session.id);
+                                on_activate.emit(session.key);
                             }
                             on_select.emit(new_idx);
                         }
@@ -424,7 +424,7 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                         e.prevent_default();
                         if let Some(new_idx) = navigate_by_delta(focused_index, 1) {
                             if let Some(session) = sessions.get(new_idx) {
-                                on_activate.emit(session.id);
+                                on_activate.emit(session.key);
                             }
                             on_select.emit(new_idx);
                         }
@@ -463,7 +463,7 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                         e.prevent_default();
                         if let Some(new_idx) = navigate_to_next_active(focused_index) {
                             if let Some(session) = sessions.get(new_idx) {
-                                on_activate.emit(session.id);
+                                on_activate.emit(session.key);
                             }
                             on_select.emit(new_idx);
                         }
@@ -481,7 +481,7 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                         // destructive.
                         e.prevent_default();
                         if let Some(session) = sessions.get(focused_index) {
-                            on_delete.emit(session.id);
+                            on_delete.emit(session.key);
                         }
                     }
                     "x" => {
@@ -503,13 +503,13 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                         // nav mode like the other action keys.
                         e.prevent_default();
                         if let Some(session) = sessions.get(focused_index) {
-                            let was_hidden = hidden_sessions.contains(&session.id);
-                            on_toggle_hidden.emit(session.id);
+                            let was_hidden = hidden_sessions.contains(&session.key);
+                            on_toggle_hidden.emit(session.key);
                             if !was_hidden {
                                 if let Some(new_idx) = navigate_to_next_active(focused_index) {
                                     if new_idx != focused_index {
                                         if let Some(next) = sessions.get(new_idx) {
-                                            on_activate.emit(next.id);
+                                            on_activate.emit(next.key);
                                         }
                                         on_select.emit(new_idx);
                                     }
@@ -547,15 +547,15 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                                     .iter()
                                     .enumerate()
                                     .filter(|(_, s)| {
-                                        !hidden_sessions.contains(&s.id)
-                                            && s.scheduled_task_id.is_none()
+                                        !hidden_sessions.contains(&s.key)
+                                            && s.info.scheduled_task_id.is_none()
                                     })
                                     .map(|(idx, _)| idx)
                                     .collect();
                                 if let Some(&actual_idx) = visible_indices.get(num - 1) {
                                     e.prevent_default();
                                     if let Some(session) = sessions.get(actual_idx) {
-                                        on_activate.emit(session.id);
+                                        on_activate.emit(session.key);
                                     }
                                     on_select.emit(actual_idx);
                                     // Stay in Nav mode after jumping so rapid

@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200" font-family="sans-serif">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-size="24" fill="#565f89">FEDERATION / NATIVE CONSENT / PR 2232</text>
+<text x="55" y="100" font-size="34" fill="#e6e9f5">Approve a specific portal and scope. Keep that boundary</text>
+<text x="55" y="140" font-size="34" fill="#e6e9f5">through enrollment, token rotation and revocation.</text>
+<line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666"/>
+<line x1="1000" y1="190" x2="1000" y2="1140" stroke="#565f89" stroke-dasharray="12 14"/>
+<text x="105" y="235" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1090" y="235" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="105" y="280" width="840" height="180" rx="8" fill="#1e202e" stroke="#f7768e"/>
+<text x="129" y="325" font-size="26" fill="#f7768e">Legacy device login</text>
+<text x="129" y="368" font-size="23" fill="#a9b1d6">A device credential represents the local account.</text>
+<text x="129" y="406" font-size="23" fill="#a9b1d6">It does not carry a linked-portal grant.</text>
+<line x1="525" y1="460" x2="525" y2="510" stroke="#565f89" stroke-width="3"/>
+<rect x="105" y="510" width="840" height="180" rx="8" fill="#1e202e" stroke="#f7768e"/>
+<text x="129" y="555" font-size="26" fill="#f7768e">No linked consent ceremony</text>
+<text x="129" y="598" font-size="23" fill="#a9b1d6">A remote client cannot enroll with explicit scope.</text>
+<text x="129" y="636" font-size="23" fill="#a9b1d6">Discovery correctly offers no linked access.</text>
+<line x1="525" y1="690" x2="525" y2="740" stroke="#565f89" stroke-width="3"/>
+<rect x="105" y="740" width="840" height="180" rx="8" fill="#1e202e" stroke="#f7768e"/>
+<text x="129" y="785" font-size="26" fill="#f7768e">No grant-preserving lifecycle</text>
+<text x="129" y="828" font-size="23" fill="#a9b1d6">Renewal must never turn a restricted credential</text>
+<text x="129" y="866" font-size="23" fill="#a9b1d6">into an unrestricted proxy credential.</text>
+<rect x="1055" y="280" width="840" height="180" rx="8" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="325" font-size="26" fill="#9ece6a">Native account approves origin + scope</text>
+<text x="1079" y="368" font-size="23" fill="#a9b1d6">Signed CSRF nonce and same-origin form submission.</text>
+<text x="1079" y="406" font-size="23" fill="#a9b1d6">Ten-minute code; consume approval only once.</text>
+<line x1="1475" y1="460" x2="1475" y2="510" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="510" width="840" height="180" rx="8" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="555" font-size="26" fill="#9ece6a">Opaque token inside a 30-day grant</text>
+<text x="1079" y="598" font-size="23" fill="#a9b1d6">Store hashes only; return the secret once.</text>
+<text x="1079" y="636" font-size="23" fill="#a9b1d6">One-hour token; recheck policy and account.</text>
+<line x1="1475" y1="690" x2="1475" y2="740" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="740" width="840" height="180" rx="8" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="785" font-size="26" fill="#9ece6a">Rotate without increasing authority</text>
+<text x="1079" y="828" font-size="23" fill="#a9b1d6">Revoke the old token; retain grant expiry and scope.</text>
+<text x="1079" y="866" font-size="23" fill="#a9b1d6">Linked clients can revoke only their own grant.</text>
+<text x="55" y="1172" font-size="22" fill="#e0af68">PostgreSQL tests: forged consent, wrong origin, replay, refresh, policy shutdown and revocation.</text>
+</svg>

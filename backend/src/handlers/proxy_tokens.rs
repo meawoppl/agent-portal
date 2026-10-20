@@ -120,16 +120,21 @@ pub fn issue_proxy_token_with_type(
             saved_token.id
         }
         TokenPersist::Renew { token_id } => {
-            diesel::update(
+            let updated = diesel::update(
                 proxy_auth_tokens::table
                     .filter(proxy_auth_tokens::id.eq(token_id))
-                    .filter(proxy_auth_tokens::user_id.eq(user_id)),
+                    .filter(proxy_auth_tokens::user_id.eq(user_id))
+                    .filter(proxy_auth_tokens::linked_grant_id.is_null())
+                    .filter(proxy_auth_tokens::scope.is_null()),
             )
             .set((
                 proxy_auth_tokens::token_hash.eq(&token_hash),
                 proxy_auth_tokens::expires_at.eq(expires_at.map(|t| t.naive_utc())),
             ))
             .execute(conn)?;
+            if updated != 1 {
+                return Err(AppError::Forbidden);
+            }
             token_id
         }
     };
@@ -323,6 +328,15 @@ pub fn verify_and_get_user_with_token(
                 AppError::ServiceUnavailable("token verification unavailable")
             }
         })?;
+
+    // Scoped rows can never authenticate a launcher, rotate through legacy
+    // renewal, or lose their grant context through this verifier.
+    if db_token.scope.is_some()
+        || db_token.linked_grant_id.is_some()
+        || db_token.user_id != claims.sub
+    {
+        return Err(AppError::Unauthorized);
+    }
 
     // Check if revoked
     if db_token.revoked {

@@ -61,42 +61,5 @@ fn failure_detail(output: &std::process::Output) -> String {
     if !is_non_blank(trimmed) {
         return format!("install command exited with {}", output.status);
     }
-    tail(trimmed, MESSAGE_TAIL)
-}
-
-/// Last `max` chars of `s`, on a char boundary, prefixed with an ellipsis when
-/// truncated.
-fn tail(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        return s.to_string();
-    }
-    let start = s.chars().count() - max;
-    let tail: String = s.chars().skip(start).collect();
-    format!("…{tail}")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn tail_keeps_short_strings_whole() {
-        assert_eq!(tail("hello", 2000), "hello");
-    }
-
-    #[test]
-    fn tail_truncates_with_an_ellipsis() {
-        let long = "x".repeat(2100);
-        let out = tail(&long, 2000);
-        assert!(out.starts_with('…'));
-        assert_eq!(out.chars().count(), 2001); // ellipsis + 2000
-    }
-
-    #[test]
-    fn tail_respects_char_boundaries() {
-        let s = "é".repeat(2100);
-        let out = tail(&s, 2000);
-        // No panic, and the multibyte chars survive intact.
-        assert_eq!(out.chars().filter(|c| *c == 'é').count(), 2000);
-    }
+    shared::strings::tail_with_ellipsis(trimmed, MESSAGE_TAIL)
 }

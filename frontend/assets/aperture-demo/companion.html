@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Companion Calibration · Aperture Demo</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: #e9e7e1;
+        color: #252722;
+        font:
+          12px Arial,
+          sans-serif;
+        overflow: hidden;
+      }
+      header {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 13px 18px;
+        border-bottom: 1px solid #bbb9b1;
+        font: 9px monospace;
+        letter-spacing: 1px;
+      }
+      header span:last-child {
+        color: #696b60;
+      }
+      main {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        align-items: center;
+        height: 211px;
+        padding: 12px 24px;
+        gap: 15px;
+      }
+      .scene {
+        height: 185px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        perspective: 700px;
+        position: relative;
+      }
+      .scene:after {
+        content: "";
+        position: absolute;
+        bottom: 9px;
+        width: 120px;
+        height: 15px;
+        border-radius: 50%;
+        background: #3332;
+        filter: blur(6px);
+      }
+      .cube {
+        --rotation: 0deg;
+        position: relative;
+        width: 84px;
+        height: 84px;
+        transform-style: preserve-3d;
+        transform: rotateX(-20deg) rotateY(calc(-30deg + var(--rotation)));
+        transition: transform 0.65s;
+        z-index: 1;
+      }
+      #dessert { width: 180px; height: 180px; object-fit: contain; position: relative; z-index: 2; }
+      [hidden] { display: none !important; }
+      .face {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        background: #d4d0c4;
+        border: 6px solid #8e8e87;
+        outline: 1px solid #676a62;
+        box-shadow: inset 0 0 0 3px #eeebe3;
+        color: #d88189;
+        font-size: 39px;
+      }
+      .face:before {
+        content: "♥";
+        display: grid;
+        place-items: center;
+        border: 2px solid #aca99f;
+        border-radius: 50%;
+        width: 57px;
+        height: 57px;
+        background: #e7e3d9;
+      }
+      .front {
+        transform: translateZ(42px);
+      }
+      .back {
+        transform: rotateY(180deg) translateZ(42px);
+      }
+      .right {
+        transform: rotateY(90deg) translateZ(42px);
+      }
+      .left {
+        transform: rotateY(-90deg) translateZ(42px);
+      }
+      .top {
+        transform: rotateX(90deg) translateZ(42px);
+      }
+      .bottom {
+        transform: rotateX(-90deg) translateZ(42px);
+      }
+      h1 {
+        font:
+          bold 27px/0.95 Arial,
+          sans-serif;
+        letter-spacing: -1px;
+        margin: 0 0 12px;
+        text-transform: uppercase;
+      }
+      p {
+        font-size: 11px;
+        line-height: 1.5;
+        color: #626458;
+        margin: 0 0 15px;
+      }
+      .controls {
+        display: flex;
+        gap: 7px;
+        flex-wrap: wrap;
+      }
+      button {
+        padding: 9px 12px;
+        border: 1px solid #242922;
+        background: #242922;
+        color: #faf8f1;
+        font:
+          10px Arial,
+          sans-serif;
+        cursor: pointer;
+      }
+      button.secondary {
+        background: transparent;
+        color: #242922;
+      }
+      button:focus-visible {
+        outline: 3px solid #168fe8;
+        outline-offset: 3px;
+      }
+      button:hover {
+        background: #474d40;
+        color: white;
+      }
+      footer {
+        display: flex;
+        justify-content: space-between;
+        padding: 13px 18px;
+        background: #d9d6ca;
+        font: 9px monospace;
+        border-top: 1px solid #bcb8aa;
+        color: #666351;
+      }
+      #status {
+        color: #35634c;
+      }
+      .launch {
+        animation: launch 1.2s ease-in-out;
+      }
+      @keyframes launch {
+        0%,
+        100% {
+          translate: 0 0;
+        }
+        35% {
+          translate: 0 -65px;
+        }
+        65% {
+          translate: 0 -25px;
+        }
+      }
+      @media (max-width: 400px) {
+        main {
+          padding: 12px 15px;
+          gap: 12px;
+        }
+        h1 {
+          font-size: 22px;
+        }
+        .cube {
+          scale: 0.85;
+        }
+        header {
+          font-size: 8px;
+          padding: 13px 12px;
+        }
+        footer {
+          font-size: 8px;
+          padding: 13px 12px;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .cube {
+          transition: none;
+        }
+        .launch {
+          animation: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong>APERTURE / COMPANION CALIBRATION</strong
+      ><span>LIVE SAMPLE APP</span>
+    </header>
+    <main>
+      <div
+        class="scene"
+        role="img"
+        aria-label="Three dimensional companion cube"
+      >
+        <img id="dessert" src="/aperture-assets/evidence/cake-web.jpg" alt="Actual yapCAD cake render" hidden />
+        <div class="cube" id="cube">
+          <div class="face front"></div>
+          <div class="face back"></div>
+          <div class="face right"></div>
+          <div class="face left"></div>
+          <div class="face top"></div>
+          <div class="face bottom"></div>
+        </div>
+      </div>
+      <div>
+        <h1>Emotional support.<br />Now calibrated.</h1>
+        <p>
+          A small website, built by your agent.<br />The buttons actually do
+          things.
+        </p>
+        <div class="controls">
+          <button id="rotate">Rotate cube</button
+          ><button id="launch" class="secondary">Launch gently</button>
+          <button id="serve-cake" class="secondary">Serve cake</button>
+        </div>
+      </div>
+    </main>
+    <footer>
+      <span>PORT 8080 · DEMONSTRATION</span
+      ><span id="status" role="status">CUBE STABLE</span>
+    </footer>
+    <script>
+      const cube = document.querySelector("#cube"),
+        status = document.querySelector("#status");
+      let rotation = 0,
+        launches = 0,
+        timer;
+      document.querySelector("#rotate").addEventListener("click", () => {
+        rotation += 90;
+        cube.style.setProperty("--rotation", rotation + "deg");
+        status.textContent = "ORIENTATION " + (rotation % 360) + "°";
+      });
+      document.querySelector("#launch").addEventListener("click", () => {
+        clearTimeout(timer);
+        cube.classList.remove("launch");
+        void cube.offsetWidth;
+        cube.classList.add("launch");
+        launches++;
+        status.textContent = "FLIGHT " + launches + " / PLEASE REMAIN CALM";
+        timer = setTimeout(() => {
+          cube.classList.remove("launch");
+          status.textContent = "LANDED / FEELINGS INTACT";
+        }, 1200);
+      });
+    document.querySelector("#serve-cake").addEventListener("click", () => {
+        const cake = document.querySelector("#dessert");
+        cake.hidden = !cake.hidden;
+        document.querySelector("#cube").hidden = !cake.hidden;
+        document.querySelector("#status").textContent = cake.hidden ? "CUBE STABLE" : "HTTP 200 OK · CALORIES 404";
+      });
+    </script>
+  </body>
+</html>

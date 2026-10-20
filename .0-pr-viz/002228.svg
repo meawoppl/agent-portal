@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="Arial, sans-serif">
+<text x="55" y="52" font-size="24" fill="#a9b1d6" letter-spacing="1">PR #2228 · Queue composer messages from the Send menu</text>
+<text x="55" y="106" font-size="34" fill="#e6e9f5">The composer gains a work-queue action: save a draft for later,</text>
+<text x="55" y="150" font-size="34" fill="#e6e9f5">with confirmation before clearing and recovery when saving fails.</text>
+<path d="M55 175 H1945" stroke="#3d4666"/>
+<path d="M1000 190 V1135" stroke="#565f89" stroke-dasharray="9 9"/>
+<text x="55" y="220" font-size="22" font-weight="bold" letter-spacing="4" fill="#f7768e">BEFORE</text>
+<text x="1055" y="220" font-size="22" font-weight="bold" letter-spacing="4" fill="#9ece6a">AFTER</text>
+<rect x="55" y="260" width="880" height="160" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="80" y="305" font-size="26" fill="#7aa2f7">InputBar composer</text>
+<text x="80" y="351" font-size="23" fill="#c0caf5">Draft text and a Send dropdown</text>
+<text x="80" y="390" font-size="23" fill="#c0caf5">Normal, Wiggum, attachment and secret-file actions</text>
+<path d="M495 420 V475" stroke="#a9b1d6" stroke-width="3"/>
+<path d="M485 463 L495 478 L505 463" fill="none" stroke="#a9b1d6" stroke-width="3"/>
+<rect x="55" y="490" width="880" height="155" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="80" y="537" font-size="26" fill="#f7768e">No queue action in this menu</text>
+<text x="80" y="585" font-size="23" fill="#c0caf5">A composed message cannot be saved to the work queue</text>
+<text x="80" y="620" font-size="23" fill="#c0caf5">from the Send dropdown.</text>
+<rect x="55" y="720" width="880" height="150" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="80" y="768" font-size="26" fill="#7aa2f7">Existing work queue</text>
+<text x="80" y="814" font-size="23" fill="#c0caf5">Stores pending items and supports later dispatch</text>
+<text x="80" y="849" font-size="23" fill="#c0caf5">through the session's edit-stack API</text>
+<rect x="1055" y="260" width="890" height="160" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="305" font-size="26" fill="#9ece6a">Send to queue / QueueInput</text>
+<text x="1080" y="351" font-size="23" fill="#c0caf5">Snapshot the draft; block duplicate queue clicks</text>
+<text x="1080" y="390" font-size="23" fill="#c0caf5">Reject messages above the 16,000-character API limit</text>
+<path d="M1500 420 V475" stroke="#a9b1d6" stroke-width="3"/>
+<path d="M1490 463 L1500 478 L1510 463" fill="none" stroke="#a9b1d6" stroke-width="3"/>
+<rect x="1055" y="490" width="890" height="155" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="537" font-size="26" fill="#7aa2f7">CreateEditStackRequest via PortalClient</text>
+<text x="1080" y="585" font-size="23" fill="#c0caf5">POST /api/sessions/{session_id}/edit-stack</text>
+<text x="1080" y="620" font-size="23" fill="#c0caf5">One text item, saved to the session's own portal</text>
+<path d="M1500 645 V700" stroke="#a9b1d6" stroke-width="3"/>
+<path d="M1490 688 L1500 703 L1510 688" fill="none" stroke="#a9b1d6" stroke-width="3"/>
+<rect x="1055" y="720" width="890" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="768" font-size="26" fill="#9ece6a">QueueFinished confirms persistence</text>
+<text x="1080" y="814" font-size="23" fill="#c0caf5">Success: refresh queue; clear only the submitted draft</text>
+<text x="1080" y="849" font-size="23" fill="#c0caf5">Newer edits stay in the composer</text>
+<text x="1080" y="884" font-size="23" fill="#e0af68">Failure: show the error and retain the draft for retry</text>
+<text x="1055" y="985" font-size="26" fill="#9ece6a">No immediate agent input from this action</text>
+<text x="55" y="1172" font-size="22" fill="#a9b1d6">Scope: text-only queue submission; the existing work-queue dispatch controls decide when saved work is sent.</text>
+</g>
+</svg>

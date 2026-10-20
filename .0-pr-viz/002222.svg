@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200" font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', sans-serif">
+  <rect width="2000" height="1200" fill="#1a1b26"/>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#565f89"/></marker>
+    <marker id="new-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/></marker>
+  </defs>
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#a9b1d6">PR #2222 · Allow renaming sessions from the dashboard</text>
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">Session labels were fixed after creation; owners and editors can now rename them.</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">The new name persists across reconnects without restarting the agent.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666"/>
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1140" stroke="#3d4666" stroke-dasharray="2 6"/>
+
+  <rect x="80" y="250" width="860" height="150" rx="12" fill="#1e202e" stroke="#3d4666"/>
+  <text x="104" y="291" font-size="26" fill="#7aa2f7">SessionView / SessionRailMenu</text>
+  <text x="104" y="333" font-size="23" fill="#c0caf5">The session title is a read-only span.</text>
+  <text x="104" y="372" font-size="23" fill="#f7768e">No rename action in the session menu.</text>
+  <line x1="510" y1="400" x2="510" y2="453" stroke="#565f89" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="80" y="460" width="860" height="190" rx="12" fill="#1e202e" stroke="#f7768e"/>
+  <text x="104" y="502" font-size="26" fill="#f7768e">No display-name mutation endpoint</text>
+  <text x="104" y="547" font-size="23" fill="#c0caf5">A user cannot change the label of an existing</text>
+  <text x="104" y="584" font-size="23" fill="#c0caf5">active or paused session through the dashboard.</text>
+  <text x="104" y="622" font-size="23" fill="#a9b1d6">The creation-time name remains in use.</text>
+  <line x1="510" y1="650" x2="510" y2="703" stroke="#565f89" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="80" y="710" width="860" height="150" rx="12" fill="#1e202e" stroke="#3d4666"/>
+  <text x="104" y="751" font-size="26" fill="#7aa2f7">sessions.session_name</text>
+  <text x="104" y="793" font-size="23" fill="#c0caf5">Database-owned name survives registration.</text>
+  <text x="104" y="832" font-size="23" fill="#a9b1d6">Reconnecting keeps the old label.</text>
+  <line x1="510" y1="860" x2="510" y2="923" stroke="#565f89" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="80" y="930" width="860" height="170" rx="12" fill="#1e202e" stroke="#f7768e"/>
+  <text x="104" y="974" font-size="26" fill="#f7768e">The label cannot follow the work</text>
+  <text x="104" y="1019" font-size="23" fill="#c0caf5">The original name stays in the header, rail,</text>
+  <text x="104" y="1056" font-size="23" fill="#c0caf5">mobile selector and future archive metadata.</text>
+
+  <rect x="1065" y="250" width="860" height="150" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+  <text x="1089" y="291" font-size="26" fill="#7aa2f7">SessionName / SessionRailMenu</text>
+  <text x="1089" y="333" font-size="23" fill="#9ece6a">Title or menu opens RenameSessionDialog.</text>
+  <text x="1089" y="372" font-size="23" fill="#c0caf5">Local draft keeps focus; mobile shows Rename.</text>
+  <line x1="1495" y1="400" x2="1495" y2="453" stroke="#9ece6a" stroke-width="2" marker-end="url(#new-arrow)"/>
+
+  <rect x="1065" y="460" width="860" height="190" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+  <text x="1089" y="502" font-size="26" fill="#7aa2f7">PATCH /api/sessions/{id}/name</text>
+  <text x="1089" y="547" font-size="23" fill="#e0af68">verify_session_mutator: owner or editor</text>
+  <text x="1089" y="584" font-size="23" fill="#c0caf5">validate_session_name: trim, 1-255 characters,</text>
+  <text x="1089" y="622" font-size="23" fill="#c0caf5">no control characters; failures keep the draft.</text>
+  <line x1="1495" y1="650" x2="1495" y2="703" stroke="#9ece6a" stroke-width="2" marker-end="url(#new-arrow)"/>
+
+  <rect x="1065" y="710" width="860" height="150" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+  <text x="1089" y="751" font-size="26" fill="#7aa2f7">sessions.session_name + archived_at</text>
+  <text x="1089" y="793" font-size="23" fill="#c0caf5">Update the name and invalidate archive freshness.</text>
+  <text x="1089" y="832" font-size="23" fill="#9ece6a">Same ID, agent process and activity timestamps.</text>
+  <line x1="1495" y1="860" x2="1495" y2="923" stroke="#9ece6a" stroke-width="2" marker-end="url(#new-arrow)"/>
+
+  <rect x="1065" y="930" width="860" height="170" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+  <text x="1089" y="974" font-size="26" fill="#9ece6a">A durable label for the same session</text>
+  <text x="1089" y="1019" font-size="23" fill="#c0caf5">Refresh updates the dashboard; reconnects keep it.</text>
+  <text x="1089" y="1056" font-size="23" fill="#c0caf5">Next archive includes it; same-name retries are safe.</text>
+
+  <text x="55" y="1172" font-size="22" fill="#a9b1d6">Portal labels only: native thread titles and archive-only History records stay unchanged. Other tabs update by session polling.</text>
+</svg>

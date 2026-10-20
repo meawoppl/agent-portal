@@ -94,6 +94,28 @@ pub fn truncate_with_ellipsis(s: &str, max_chars: usize) -> String {
     out
 }
 
+/// Keep the last `max_chars` of `s`, prefixing `…` when cut.
+///
+/// Short input returns as-is; otherwise the ellipsis marker plus the last
+/// `max_chars` chars, so output is `max_chars + 1` chars. Single home for
+/// the repeated take-the-tail + `…` shape in failure-message surfaces (the
+/// agent install error and the login transcript tail) so the call sites
+/// cannot drift (e.g. one slicing bytes while another counts chars).
+///
+/// Note the asymmetry with [`truncate_with_ellipsis`]: that helper budgets
+/// the marker *inside* `max_chars`, while this one keeps `max_chars` of
+/// content *plus* the marker — both centralized call sites counted content
+/// chars, and this preserves their output byte-for-byte.
+#[must_use]
+pub fn tail_with_ellipsis(s: &str, max_chars: usize) -> String {
+    let len = s.chars().count();
+    if len <= max_chars {
+        return s.to_string();
+    }
+    let tail: String = s.chars().skip(len - max_chars).collect();
+    format!("…{tail}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,5 +200,26 @@ mod tests {
         let cut = truncate_with_ellipsis(&"é".repeat(500), 120);
         assert_eq!(cut.chars().count(), 120);
         assert!(cut.ends_with('…'));
+    }
+
+    #[test]
+    fn tail_with_ellipsis_keeps_short_input_untouched() {
+        assert_eq!(tail_with_ellipsis("hello", 2000), "hello");
+        assert_eq!(tail_with_ellipsis("hello", 5), "hello");
+    }
+
+    #[test]
+    fn tail_with_ellipsis_keeps_the_end_with_marker() {
+        assert_eq!(tail_with_ellipsis("prefix-RETAIN", 6), "…RETAIN");
+        let cut = tail_with_ellipsis(&"x".repeat(2100), 2000);
+        assert_eq!(cut.chars().count(), 2001);
+        assert!(cut.starts_with('…'));
+    }
+
+    #[test]
+    fn tail_with_ellipsis_is_char_boundary_safe() {
+        let out = tail_with_ellipsis(&"é".repeat(2100), 2000);
+        assert!(out.starts_with('…'));
+        assert_eq!(out.chars().filter(|c| *c == 'é').count(), 2000);
     }
 }

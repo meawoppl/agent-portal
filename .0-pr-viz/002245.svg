@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+  <rect width="2000" height="1200" fill="#1a1b26"/>
+  <g font-family="sans-serif">
+    <text x="55" y="55" font-size="24" fill="#a9b1d6">PR #2245 · Select installed plugin skills per session</text>
+    <text x="55" y="110" font-size="34" fill="#e6e9f5">Plugin skills followed host-wide defaults. Session owners can now choose their own set.</text>
+    <text x="55" y="155" font-size="34" fill="#e6e9f5">Saved choices filter skill injection on the next session restart.</text>
+    <path d="M55 185 H1945" stroke="#565f89"/>
+    <path d="M1000 215 V1120" stroke="#565f89" stroke-dasharray="8 10"/>
+    <text x="75" y="245" font-size="22" font-weight="bold" letter-spacing="4" fill="#f7768e">BEFORE</text>
+    <text x="1055" y="245" font-size="22" font-weight="bold" letter-spacing="4" fill="#9ece6a">AFTER</text>
+    <rect x="75" y="285" width="850" height="180" rx="12" fill="#1e202e" stroke="#565f89"/>
+    <text x="105" y="330" font-size="26" fill="#7aa2f7">Plugins: discovery panel</text>
+    <text x="105" y="375" font-size="23" fill="#c0caf5">Lists skills and project suggestions.</text>
+    <text x="105" y="415" font-size="23" fill="#f7768e">No way to change the session's selection.</text>
+    <path d="M500 465 V525 L490 510 M500 525 L510 510" fill="none" stroke="#565f89" stroke-width="3"/>
+    <rect x="75" y="545" width="850" height="180" rx="12" fill="#1e202e" stroke="#565f89"/>
+    <text x="105" y="590" font-size="26" fill="#7aa2f7">GET /api/plugins</text>
+    <text x="105" y="635" font-size="23" fill="#c0caf5">Scans plugin directories on the backend host.</text>
+    <text x="105" y="675" font-size="23" fill="#f7768e">May not describe the session's actual launcher.</text>
+    <path d="M500 725 V785 L490 770 M500 785 L510 770" fill="none" stroke="#565f89" stroke-width="3"/>
+    <rect x="75" y="805" width="850" height="220" rx="12" fill="#1e202e" stroke="#565f89"/>
+    <text x="105" y="850" font-size="26" fill="#7aa2f7">plugin_skill_context</text>
+    <text x="105" y="895" font-size="23" fill="#c0caf5">Uses enabled plugins from launcher.json.</text>
+    <text x="105" y="935" font-size="23" fill="#f7768e">All sessions inherit the same host defaults.</text>
+    <text x="105" y="975" font-size="23" fill="#c0caf5">No per-session overrides.</text>
+    <rect x="1055" y="285" width="870" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+    <text x="1085" y="330" font-size="26" fill="#9ece6a">PluginSelector: checkbox dropdown</text>
+    <text x="1085" y="375" font-size="23" fill="#c0caf5">Select installed skills; save one choice at a time.</text>
+    <text x="1085" y="415" font-size="23" fill="#c0caf5">Mobile layout, owner-only edits, failure rollback.</text>
+    <path d="M1490 465 V525 L1480 510 M1490 525 L1500 510" fill="none" stroke="#9ece6a" stroke-width="3"/>
+    <rect x="1055" y="545" width="870" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+    <text x="1085" y="590" font-size="26" fill="#9ece6a">SessionPlugins launcher request</text>
+    <text x="1085" y="635" font-size="23" fill="#c0caf5">Inventory comes from the session's own machine.</text>
+    <text x="1085" y="675" font-size="23" fill="#c0caf5">Atomic file: session-plugins/&lt;session-uuid&gt;.json</text>
+    <path d="M1490 725 V785 L1480 770 M1490 785 L1500 770" fill="none" stroke="#9ece6a" stroke-width="3"/>
+    <rect x="1055" y="805" width="870" height="220" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+    <text x="1085" y="850" font-size="26" fill="#9ece6a">Next restart: apply_selection</text>
+    <text x="1085" y="895" font-size="23" fill="#c0caf5">Filters Claude plugin directories and skill reminders.</text>
+    <text x="1085" y="935" font-size="23" fill="#9ece6a">Host defaults and other sessions stay unchanged.</text>
+    <text x="1085" y="975" font-size="23" fill="#e0af68">Older launchers must update before accepting edits.</text>
+    <text x="55" y="1170" font-size="22" fill="#a9b1d6">Scope: skill injection on restart. Does not uninstall binaries, stop surfaces, or erase instructions already in conversation history.</text>
+  </g>
+</svg>

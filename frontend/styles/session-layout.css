@@ -313,3 +313,27 @@
     border-color: var(--border);
     background: rgba(255, 255, 255, 0.05);
 }
+
+/* Keep the editable title in the same header layout as a read-only name. */
+.session-name-button {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    padding: 0;
+    cursor: pointer;
+    text-align: left;
+}
+
+.session-name-button:hover,
+.session-name-button:focus-visible {
+    text-decoration: underline;
+}
+
+.rename-session-dialog {
+    white-space: normal;
+}
+
+.session-rename-label {
+    display: none;
+}

@@ -770,7 +770,11 @@ fn banned_redirect(reason: &str) -> Redirect {
 fn device_approval_redirect(user_code: &str) -> Redirect {
     Redirect::temporary(&format!(
         "{}?user_code={}",
-        routes::AUTH_DEVICE,
+        if user_code.starts_with("LP-") {
+            "/api/auth/linked"
+        } else {
+            routes::AUTH_DEVICE
+        },
         encode_query_value(user_code)
     ))
 }

@@ -3,12 +3,13 @@
 //! Dropdown pattern matches the send button: always in DOM, toggled by .open class,
 //! parent page onclick closes it, toggle button uses stop_propagation.
 
-use crate::components::{ForkDialog, ScheduleDialog, ShareDialog};
+use super::types::PortalSession;
+use crate::components::{ForkDialog, RenameSessionDialog, ScheduleDialog, ShareDialog};
+use crate::portal_client::{PortalClient, SessionKey};
 use gloo::events::EventListener;
 use gloo::timers::callback::Interval;
-use shared::{PrRef, SessionInfo};
+use shared::PrRef;
 use std::collections::HashSet;
-use uuid::Uuid;
 use wasm_bindgen::JsCast;
 use web_sys::{Element, HtmlElement, WheelEvent};
 use yew::prelude::*;
@@ -143,35 +144,36 @@ fn repo_pr_menu_hint(repo_url: Option<&str>, pr_count: usize) -> &'static str {
 /// identical to the pre-grouping render path.
 fn render_pill_section(
     props: &SessionRailProps,
-    entries: &[(usize, &SessionInfo)],
+    entries: &[(usize, &PortalSession)],
     number_offset: usize,
-    broadcast_active_ids: (&[Uuid], &[Uuid]),
+    broadcast_active_ids: (&[SessionKey], &[SessionKey]),
     render_time: f64,
-    on_toggle_menu: &Callback<(Uuid, MouseEvent)>,
+    on_toggle_menu: &Callback<(SessionKey, MouseEvent)>,
     section_key: &str,
 ) -> Html {
     let (broadcast_senders, broadcast_receivers) = broadcast_active_ids;
 
     // One keyed pill. `display_idx` is the pill's position within this section
     // (across all host groups), so nav numbering stays sequential.
-    let render_pill = |display_idx: usize, index: usize, session: &SessionInfo| -> Html {
+    let render_pill = |display_idx: usize, index: usize, session: &PortalSession| -> Html {
+        let key = session.key;
         html! {
             <SessionPill
-                key={session.id.to_string()}
+                key={key.to_string()}
                 index={index}
                 display_number={Some(number_offset + display_idx)}
                 session={session.clone()}
                 is_focused={index == props.focused_index}
-                is_awaiting={props.awaiting_sessions.contains(&session.id)}
-                is_hidden={props.hidden_sessions.contains(&session.id)}
-                is_connected={props.connected_sessions.contains(&session.id)}
+                is_awaiting={props.awaiting_sessions.contains(&key)}
+                is_hidden={props.hidden_sessions.contains(&key)}
+                is_connected={props.connected_sessions.contains(&key)}
                 nav_mode={props.nav_mode}
                 server_version={props.server_version.clone()}
                 activity_timestamps={props.activity_timestamps.clone()}
-                context_fraction={props.context_fractions.get(&session.id).copied()}
-                progress_fraction={props.progress_fractions.get(&session.id).copied()}
-                is_broadcast_sender={broadcast_senders.contains(&session.id)}
-                is_broadcast_receiver={broadcast_receivers.contains(&session.id)}
+                context_fraction={props.context_fractions.get(&key).copied()}
+                progress_fraction={props.progress_fractions.get(&key).copied()}
+                is_broadcast_sender={broadcast_senders.contains(&key)}
+                is_broadcast_receiver={broadcast_receivers.contains(&key)}
                 render_time={render_time}
                 on_select={props.on_select.clone()}
                 on_toggle_menu={on_toggle_menu.clone()}
@@ -232,28 +234,28 @@ fn render_pill_section(
 /// Props for the SessionRail component
 #[derive(Properties, PartialEq)]
 pub struct SessionRailProps {
-    pub sessions: Vec<SessionInfo>,
+    pub sessions: Vec<PortalSession>,
     pub focused_index: usize,
-    pub awaiting_sessions: HashSet<Uuid>,
-    pub hidden_sessions: HashSet<Uuid>,
+    pub awaiting_sessions: HashSet<SessionKey>,
+    pub hidden_sessions: HashSet<SessionKey>,
     pub inactive_hidden: bool,
     /// Opt-in: render per-host section headers between pill groups. The order
     /// itself is grouped upstream (see `page.rs`); this flag only controls the
     /// visual header rows so the rail stays in lockstep with nav numbering.
     pub group_by_host: bool,
-    pub connected_sessions: HashSet<Uuid>,
+    pub connected_sessions: HashSet<SessionKey>,
     pub nav_mode: bool,
     #[prop_or_default]
     pub activity_timestamps: ActivityRef,
-    /// Per-session context-window fill fraction (session id → 0.0..), derived
+    /// Per-session context-window fill fraction (session key → 0.0..), derived
     /// from recent turn metrics upstream. Sessions absent from the map render
     /// no context bar.
     #[prop_or_default]
-    pub context_fractions: std::collections::HashMap<Uuid, f64>,
+    pub context_fractions: std::collections::HashMap<SessionKey, f64>,
     /// Per-session completion fraction of the agent's progress bars (session
-    /// id → 0.0..=1.0). Sessions absent from the map render no pill fill.
+    /// key → 0.0..=1.0). Sessions absent from the map render no pill fill.
     #[prop_or_default]
-    pub progress_fractions: std::collections::HashMap<Uuid, f32>,
+    pub progress_fractions: std::collections::HashMap<SessionKey, f32>,
     #[prop_or_default]
     pub broadcasts: BroadcastRef,
     pub rail_position: crate::pages::dashboard::RailPosition,
@@ -265,26 +267,39 @@ pub struct SessionRailProps {
     #[prop_or_default]
     pub archive_enabled: bool,
     pub on_select: Callback<usize>,
-    pub on_leave: Callback<Uuid>,
-    pub on_delete: Callback<Uuid>,
-    pub on_toggle_hidden: Callback<Uuid>,
+    #[prop_or_default]
+    pub on_renamed: Callback<()>,
+    pub on_leave: Callback<SessionKey>,
+    pub on_delete: Callback<SessionKey>,
+    pub on_toggle_hidden: Callback<SessionKey>,
     pub on_toggle_inactive_hidden: Callback<MouseEvent>,
-    pub on_stop: Callback<Uuid>,
-    pub on_toggle_pause: Callback<(Uuid, bool)>,
+    pub on_stop: Callback<SessionKey>,
+    pub on_toggle_pause: Callback<(SessionKey, bool)>,
+}
+
+/// Render a menu dialog against the portal its session lives on, so every
+/// request it makes reaches that portal.
+fn on_session_portal(portal: &PortalClient, dialog: Html) -> Html {
+    html! {
+        <ContextProvider<PortalClient> context={portal.clone()}>
+            { dialog }
+        </ContextProvider<PortalClient>>
+    }
 }
 
 /// SessionRail - Horizontal carousel of session pills
 #[function_component(SessionRail)]
 pub fn session_rail(props: &SessionRailProps) -> Html {
     let rail_ref = use_node_ref();
-    let menu_session = use_state(|| None::<Uuid>);
+    let menu_session = use_state(|| None::<SessionKey>);
     let menu_pos = use_state(|| (0i32, 0i32));
     let stop_confirm = use_state(|| false);
     let delete_confirm = use_state(|| false);
     let copied_id = use_state(|| false);
-    let share_session_id = use_state(|| None::<Uuid>);
-    let schedule_session = use_state(|| None::<SessionInfo>);
-    let fork_session = use_state(|| None::<SessionInfo>);
+    let share_session = use_state(|| None::<PortalSession>);
+    let schedule_session = use_state(|| None::<PortalSession>);
+    let fork_session = use_state(|| None::<PortalSession>);
+    let rename_session = use_state(|| None::<PortalSession>);
 
     // Independent 100 ms tick that drives sparkline redraws.
     // Accumulation happens externally via ActivityRef mutations; this timer
@@ -394,15 +409,15 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
         });
     }
 
-    let open_session: Option<SessionInfo> = (*menu_session)
-        .and_then(|id| props.sessions.iter().find(|s| s.id == id))
+    let open_session: Option<PortalSession> = (*menu_session)
+        .and_then(|key| props.sessions.iter().find(|s| s.key == key))
         .cloned();
-    let open_session_id = open_session.as_ref().map(|session| session.id);
-    let is_menu_session_hidden = open_session_id
-        .map(|id| props.hidden_sessions.contains(&id))
+    let open_session_key = open_session.as_ref().map(|session| session.key);
+    let is_menu_session_hidden = open_session_key
+        .map(|key| props.hidden_sessions.contains(&key))
         .unwrap_or(false);
-    let is_menu_session_connected = open_session_id
-        .map(|id| props.connected_sessions.contains(&id))
+    let is_menu_session_connected = open_session_key
+        .map(|key| props.connected_sessions.contains(&key))
         .unwrap_or(false);
 
     let close_menu = {
@@ -426,8 +441,8 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
     };
 
     let on_share = {
-        let share_session_id = share_session_id.clone();
-        Callback::from(move |session_id| share_session_id.set(Some(session_id)))
+        let share_session = share_session.clone();
+        Callback::from(move |session| share_session.set(Some(session)))
     };
 
     let on_schedule = {
@@ -439,18 +454,23 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
         Callback::from(move |session| fork_session.set(Some(session)))
     };
 
+    let on_rename = {
+        let rename_session = rename_session.clone();
+        Callback::from(move |session| rename_session.set(Some(session)))
+    };
+
     let on_toggle_pill_menu = {
         let menu_session = menu_session.clone();
         let menu_pos = menu_pos.clone();
         let stop_confirm = stop_confirm.clone();
         let delete_confirm = delete_confirm.clone();
         let copied_id = copied_id.clone();
-        Callback::from(move |(session_id, e): (Uuid, MouseEvent)| {
+        Callback::from(move |(session_key, e): (SessionKey, MouseEvent)| {
             e.stop_propagation();
             stop_confirm.set(false);
             delete_confirm.set(false);
             copied_id.set(false);
-            if *menu_session == Some(session_id) {
+            if *menu_session == Some(session_key) {
                 menu_session.set(None);
                 return;
             }
@@ -478,7 +498,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                     viewport_height,
                 ));
             }
-            menu_session.set(Some(session_id));
+            menu_session.set(Some(session_key));
         })
     };
 
@@ -486,22 +506,22 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
     // Cron sessions default to hidden alongside manually-hidden sessions.
     let (visible_indices, hidden_indices): (Vec<_>, Vec<_>) =
         props.sessions.iter().enumerate().partition(|(_, session)| {
-            let is_hidden =
-                props.hidden_sessions.contains(&session.id) || session.scheduled_task_id.is_some();
+            let is_hidden = props.hidden_sessions.contains(&session.key)
+                || session.info.scheduled_task_id.is_some();
             !is_hidden
         });
 
     let hidden_count = hidden_indices.len();
     let visible_count = visible_indices.len();
-    let mut rendered_sessions: Vec<(Uuid, shared::AgentType)> = visible_indices
+    let mut rendered_sessions: Vec<(SessionKey, shared::AgentType)> = visible_indices
         .iter()
-        .map(|(_, session)| (session.id, session.agent_type))
+        .map(|(_, session)| (session.key, session.info.agent_type))
         .collect();
     if !props.inactive_hidden {
         rendered_sessions.extend(
             hidden_indices
                 .iter()
-                .map(|(_, session)| (session.id, session.agent_type)),
+                .map(|(_, session)| (session.key, session.info.agent_type)),
         );
     }
     let (broadcast_senders, broadcast_receivers) =
@@ -606,12 +626,26 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                 on_share={on_share}
                 on_schedule={on_schedule}
                 on_fork={on_fork}
+                on_rename={on_rename}
             />
             {
-                if let Some(session_id) = *share_session_id {
-                    let share_session_id = share_session_id.clone();
-                    let on_close = Callback::from(move |_| share_session_id.set(None));
-                    html! { <ShareDialog {session_id} {on_close} /> }
+                if let Some(ref session) = *rename_session {
+                    let rename_session = rename_session.clone();
+                    let on_close = Callback::from(move |_| rename_session.set(None));
+                    on_session_portal(
+                        &session.portal,
+                        html! { <RenameSessionDialog key={session.key.to_string()} session_id={session.info.id} current_name={session.info.session_name.clone()} {on_close} on_renamed={props.on_renamed.clone()} /> },
+                    )
+                } else { html! {} }
+            }
+            {
+                if let Some(ref session) = *share_session {
+                    let share_session = share_session.clone();
+                    let on_close = Callback::from(move |_| share_session.set(None));
+                    on_session_portal(
+                        &session.portal,
+                        html! { <ShareDialog session_id={session.info.id} {on_close} /> },
+                    )
                 } else {
                     html! {}
                 }
@@ -620,7 +654,10 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                 if let Some(ref session) = *schedule_session {
                     let schedule_session = schedule_session.clone();
                     let on_close = Callback::from(move |_| schedule_session.set(None));
-                    html! { <ScheduleDialog session={Some(session.clone())} {on_close} /> }
+                    on_session_portal(
+                        &session.portal,
+                        html! { <ScheduleDialog session={Some(session.info.clone())} {on_close} /> },
+                    )
                 } else {
                     html! {}
                 }
@@ -629,7 +666,10 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                 if let Some(ref session) = *fork_session {
                     let fork_session = fork_session.clone();
                     let on_close = Callback::from(move |_| fork_session.set(None));
-                    html! { <ForkDialog session={session.clone()} {on_close} /> }
+                    on_session_portal(
+                        &session.portal,
+                        html! { <ForkDialog session={session.info.clone()} {on_close} /> },
+                    )
                 } else {
                     html! {}
                 }

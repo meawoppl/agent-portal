@@ -5,6 +5,7 @@
 use super::lightbox_gesture::{LightboxGesture, LightboxView, Point};
 use crate::components::DismissibleBackdrop;
 use crate::hooks::use_escape_capture;
+use crate::linked_media::use_media_url;
 use yew::prelude::*;
 
 const ALLOWED_IMAGE_MEDIA_TYPES: &[&str] = &[
@@ -45,7 +46,7 @@ pub(in crate::components) fn render_image_url(
     quiet_when_unavailable: bool,
 ) -> Html {
     html! {
-        <ImageViewer
+        <ImageViewer key={src.clone()}
             {src}
             media_type={media_type.to_string()}
             {filename}
@@ -104,6 +105,7 @@ fn viewport_center() -> Point {
 
 #[function_component(ImageViewer)]
 fn image_viewer(props: &ImageViewerProps) -> Html {
+    let media_url = use_media_url(&props.src);
     let expanded = use_state(|| false);
     // The gesture (pointers, pinch baseline, current view) lives in a mut_ref,
     // not state: two fingers moving in one frame must each see the other's
@@ -133,6 +135,12 @@ fn image_viewer(props: &ImageViewerProps) -> Html {
         use_escape_capture(*expanded, Callback::from(move |()| expanded.set(false)));
     }
 
+    let src = match media_url {
+        Ok(Some(url)) => url,
+        Ok(None) => return html! { <div class="media-loading">{"Loading media…"}</div> },
+        Err(_) if props.quiet_when_unavailable => return html! {},
+        Err(_) => return render_media_expired(props.filename.as_deref(), "media"),
+    };
     if *failed {
         if props.quiet_when_unavailable {
             return html! {};
@@ -277,9 +285,7 @@ fn image_viewer(props: &ImageViewerProps) -> Html {
     html! {
         <>
             <div class={classes!("tool-result-image", size_fallback)} onclick={on_thumb_click}>
-                // Lazy so a long transcript doesn't fetch every image at once;
-                // `data:` sources are unaffected.
-                <img src={props.src.clone()} alt="Tool result image" loading="lazy" onerror={on_error} />
+                <img src={src.clone()} alt="Tool result image" loading="lazy" onerror={on_error} />
             </div>
             if *expanded {
                 <DismissibleBackdrop class="image-lightbox" on_close={close_lightbox.clone()}>
@@ -298,7 +304,7 @@ fn image_viewer(props: &ImageViewerProps) -> Html {
                         <img
                             class={classes!(size_fallback)}
                             style={lightbox_view.style()}
-                            src={props.src.clone()}
+                            src={src.clone()}
                             alt="Full size image"
                             draggable="false"
                         />
@@ -312,7 +318,7 @@ fn image_viewer(props: &ImageViewerProps) -> Html {
                             </button>
                             <a
                                 class="image-lightbox-download"
-                                href={props.src.clone()}
+                                href={src.clone()}
                                 download={download_name}
                             >
                                 { "Download" }
@@ -399,8 +405,14 @@ struct VideoViewerProps {
 
 #[function_component(VideoViewer)]
 fn video_viewer(props: &VideoViewerProps) -> Html {
+    let media_url = use_media_url(&props.src);
     let failed = use_state(|| false);
 
+    let src = match media_url {
+        Ok(Some(url)) => url,
+        Ok(None) => return html! { <div class="media-loading">{"Loading media…"}</div> },
+        Err(_) => return render_media_expired(props.filename.as_deref(), "media"),
+    };
     if *failed {
         return render_media_expired(props.filename.as_deref(), "video");
     }
@@ -418,7 +430,7 @@ fn video_viewer(props: &VideoViewerProps) -> Html {
             <video
                 controls=true
                 preload="metadata"
-                src={props.src.clone()}
+                src={src.clone()}
                 onerror={on_error}
             />
         </div>

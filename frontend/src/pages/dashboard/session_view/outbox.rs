@@ -92,6 +92,15 @@ impl Outbox {
             .collect()
     }
 
+    /// Preserve the distinction between queued and transport-accepted inputs
+    /// when a linked connection refuses automatic replay.
+    pub(super) fn delivery_states(&self) -> Vec<(Uuid, bool)> {
+        self.entries
+            .iter()
+            .map(|e| (e.client_msg_id, e.transmitted))
+            .collect()
+    }
+
     #[cfg(test)]
     pub(super) fn len(&self) -> usize {
         self.entries.len()
@@ -125,6 +134,11 @@ mod tests {
 
         let pending: Vec<Uuid> = ob.unresolved().into_iter().map(|(id, _)| id).collect();
         assert_eq!(pending, vec![a, b], "every unresolved frame flushes");
+        assert_eq!(
+            ob.delivery_states(),
+            vec![(a, true), (b, false)],
+            "linked reconnect distinguishes uncertain delivery from never sent"
+        );
     }
 
     #[test]

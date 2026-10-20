@@ -11,6 +11,7 @@ mod browser;
 mod fetch;
 mod filters;
 mod media_rewrite;
+mod restore;
 mod transcript;
 
 pub use browser::HistoryBrowserPage;
