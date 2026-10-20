@@ -93,15 +93,34 @@ pub enum CodexEvent {
     Unknown,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
 pub enum CodexItem {
     /// Exec-level item wrapper used by the stable codex renderer paths.
     Thread(ThreadItem),
     /// App-server item wrapper for item variants that the exec-level helper
-    /// model intentionally does not expose yet, such as `contextCompaction`
-    /// and `collabAgentToolCall`.
+    /// model intentionally does not expose yet, such as `contextCompaction`,
+    /// `collabAgentToolCall`, and reasoning carried as `summary`/`content`.
     AppServer(Box<AppServerThreadItem>),
+}
+
+impl<'de> Deserialize<'de> for CodexItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        // App-server reasoning puts its trace in `summary`/`content`. The
+        // exec-level item only has `text`, so trying it first would parse
+        // successfully and silently throw the trace away.
+        let app_server_reasoning = value.get("type").and_then(|t| t.as_str()) == Some("reasoning")
+            && (value.get("summary").is_some() || value.get("content").is_some());
+        if !app_server_reasoning {
+            if let Ok(item) = serde_json::from_value::<ThreadItem>(value.clone()) {
+                return Ok(Self::Thread(item));
+            }
+        }
+        serde_json::from_value::<AppServerThreadItem>(value)
+            .map(|item| Self::AppServer(Box::new(item)))
+            .map_err(serde::de::Error::custom)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -287,6 +306,7 @@ pub fn codex_item_id(item: &CodexItem) -> Option<&str> {
         CodexItem::AppServer(item) => match item.as_ref() {
             AppServerThreadItem::ContextCompaction { id } => Some(id),
             AppServerThreadItem::CollabAgentToolCall { id, .. } => Some(id),
+            AppServerThreadItem::Reasoning { id, .. } => Some(id),
             _ => None,
         },
     }

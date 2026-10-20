@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="arr-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+    <marker id="arr-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/>
+    </marker>
+  </defs>
+
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2248 · Stop Codex replies rendering as blank cards</text>
+
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">Empty Codex items used to render Some(empty), so replies showed a blank "Codex x 2" card;</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">now blank items render None, so the card appears only once the reply has text to show.</text>
+  <line x1="55" y1="166" x2="1945" y2="166" stroke="#3d4666" stroke-width="1"/>
+
+  <text x="55" y="215" font-size="22" font-weight="bold" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1045" y="215" font-size="22" font-weight="bold" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1140" stroke="#3d4666" stroke-width="2" stroke-dasharray="10 8"/>
+
+  <!-- BEFORE: incoming frames -->
+  <rect x="55" y="245" width="900" height="150" rx="10" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+  <text x="79" y="285" font-size="26" fill="#c0caf5">Every Astra reply opens with two frames</text>
+  <text x="79" y="325" font-size="23" fill="#a9b1d6">item.started agentMessage, text ""</text>
+  <text x="79" y="360" font-size="23" fill="#a9b1d6">item.started reasoning, summary [] content []</text>
+  <line x1="505" y1="395" x2="505" y2="440" stroke="#565f89" stroke-width="2" marker-end="url(#arr-dim)"/>
+
+  <rect x="55" y="445" width="900" height="190" rx="10" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+  <text x="79" y="485" font-size="26" fill="#c0caf5">render_codex_frame_content</text>
+  <text x="79" y="525" font-size="23" fill="#f7768e">agent message: Some(html!{}) for empty text</text>
+  <text x="79" y="560" font-size="23" fill="#f7768e">reasoning: Some(html!{}) when it has no trace</text>
+  <text x="79" y="595" font-size="23" fill="#a9b1d6">group collapses only when every part is None</text>
+  <line x1="505" y1="635" x2="505" y2="680" stroke="#f7768e" stroke-width="2" marker-end="url(#arr-red)"/>
+
+  <rect x="55" y="685" width="900" height="150" rx="10" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+  <text x="79" y="725" font-size="26" fill="#f7768e">Card: "CODEX - ASTRA 6  x 2" over a blank body</text>
+  <text x="79" y="765" font-size="23" fill="#a9b1d6">stays blank until item.completed fills the text</text>
+  <text x="79" y="800" font-size="23" fill="#a9b1d6">no sign that Codex is working meanwhile</text>
+
+  <rect x="55" y="875" width="900" height="190" rx="10" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+  <text x="79" y="915" font-size="26" fill="#c0caf5">CodexItem: #[serde(untagged)], ThreadItem first</text>
+  <text x="79" y="955" font-size="23" fill="#a9b1d6">exec ThreadItem::Reasoning only has text</text>
+  <text x="79" y="990" font-size="23" fill="#f7768e">app-server summary / content traces parsed away</text>
+  <text x="79" y="1025" font-size="23" fill="#a9b1d6">models that do send a trace showed nothing</text>
+
+  <!-- AFTER -->
+  <rect x="1045" y="245" width="900" height="150" rx="10" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+  <text x="1069" y="285" font-size="26" fill="#c0caf5">Same two frames</text>
+  <text x="1069" y="325" font-size="23" fill="#a9b1d6">item.started agentMessage, text ""</text>
+  <text x="1069" y="360" font-size="23" fill="#a9b1d6">item.started reasoning, summary [] content []</text>
+  <line x1="1495" y1="395" x2="1495" y2="440" stroke="#565f89" stroke-width="2" marker-end="url(#arr-dim)"/>
+
+  <rect x="1045" y="445" width="900" height="190" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1069" y="485" font-size="26" fill="#c0caf5">render_agent_message_content / render_reasoning</text>
+  <text x="1069" y="525" font-size="23" fill="#9ece6a">blank agent message: None (is_non_blank)</text>
+  <text x="1069" y="560" font-size="23" fill="#9ece6a">reasoning with no trace: None, started or completed</text>
+  <text x="1069" y="595" font-size="23" fill="#9ece6a">reasoning with a trace: collapsible "reasoning" block</text>
+  <line x1="1495" y1="635" x2="1495" y2="680" stroke="#9ece6a" stroke-width="2" marker-end="url(#arr-green)"/>
+
+  <rect x="1045" y="685" width="900" height="150" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1069" y="725" font-size="26" fill="#9ece6a">No blank card while Codex works</text>
+  <text x="1069" y="765" font-size="23" fill="#a9b1d6">the reply text appears when item.completed lands</text>
+  <text x="1069" y="800" font-size="23" fill="#a9b1d6">nothing stranded if a turn is split or interrupted</text>
+
+  <rect x="1045" y="875" width="900" height="190" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1069" y="915" font-size="26" fill="#c0caf5">impl Deserialize for CodexItem</text>
+  <text x="1069" y="955" font-size="23" fill="#9ece6a">reasoning with summary/content -> app-server variant</text>
+  <text x="1069" y="990" font-size="23" fill="#9ece6a">reasoning_trace: summary, else content, collapsed</text>
+  <text x="1069" y="1025" font-size="23" fill="#a9b1d6">codex_item_id maps it, so started/completed dedup</text>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">Not in scope: a live "working" indicator / reasoning-token count needs the proxy to forward ThreadTokenUsageUpdated (still Noop).</text>
+</svg>
