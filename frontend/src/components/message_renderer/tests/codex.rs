@@ -273,6 +273,7 @@ fn traceless_reasoning_leaves_no_part_across_groups_or_without_completion() {
                 uuid::Uuid::nil(),
                 &HashMap::new(),
                 yew::Callback::noop(),
+                None,
             );
             assert!(
                 part.is_none(),
