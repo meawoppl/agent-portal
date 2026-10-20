@@ -47,7 +47,7 @@ pub(in crate::components) fn render_image_url(
 ) -> Html {
     html! {
         <ImageViewer key={src.clone()}
-            {src}
+            src={src.clone()}
             media_type={media_type.to_string()}
             {filename}
             {quiet_when_unavailable}
