@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" fill="#a9b1d6" font-family="sans-serif" font-size="24">PR #2226 · Keep cron schedules armed across reconnects</text>
+<text x="55" y="108" fill="#e6e9f5" font-family="sans-serif" font-size="34">A sync during a run used to silence later cron firings.</text>
+<text x="55" y="150" fill="#e6e9f5" font-family="sans-serif" font-size="34">Enabled tasks now keep their next firing; existing overlap rules still apply.</text>
+<path d="M55 175 H1945 M1000 195 V1135" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="55" y="225" fill="#f7768e" font-family="sans-serif" font-size="22">BEFORE</text>
+<text x="1055" y="225" fill="#9ece6a" font-family="sans-serif" font-size="22">AFTER</text>
+<rect x="55" y="280" width="890" height="130" rx="12" fill="#1e202e" stroke="#7aa2f7"/>
+<text x="79" y="324" fill="#7aa2f7" font-family="sans-serif" font-size="26">ScheduleSync during active session</text>
+<text x="79" y="367" fill="#c0caf5" font-family="sans-serif" font-size="23">update_tasks receives enabled task</text>
+<path d="M500 410 v55 l-8 -12 m8 12 l8 -12" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="55" y="475" width="890" height="130" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="519" fill="#f7768e" font-family="sans-serif" font-size="26">Clear next_fire</text>
+<text x="79" y="562" fill="#c0caf5" font-family="sans-serif" font-size="23">Running task receives None</text>
+<path d="M500 605 v55 l-8 -12 m8 12 l8 -12" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="55" y="670" width="890" height="130" rx="12" fill="#1e202e" stroke="#7aa2f7"/>
+<text x="79" y="714" fill="#7aa2f7" font-family="sans-serif" font-size="26">Session exits</text>
+<text x="79" y="757" fill="#c0caf5" font-family="sans-serif" font-size="23">on_session_exited removes running state</text>
+<path d="M500 800 v55 l-8 -12 m8 12 l8 -12" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="55" y="865" width="890" height="130" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="909" fill="#f7768e" font-family="sans-serif" font-size="26">No future firing</text>
+<text x="79" y="952" fill="#c0caf5" font-family="sans-serif" font-size="23">No clock remains to wake the task</text>
+<rect x="1055" y="280" width="890" height="130" rx="12" fill="#1e202e" stroke="#7aa2f7"/>
+<text x="1079" y="324" fill="#7aa2f7" font-family="sans-serif" font-size="26">ScheduleSync during active session</text>
+<text x="1079" y="367" fill="#c0caf5" font-family="sans-serif" font-size="23">update_tasks receives enabled task</text>
+<path d="M1500 410 v55 l-8 -12 m8 12 l8 -12" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="475" width="890" height="130" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="519" fill="#9ece6a" font-family="sans-serif" font-size="26">Compute next_fire</text>
+<text x="1079" y="562" fill="#c0caf5" font-family="sans-serif" font-size="23">config.enabled keeps the clock armed</text>
+<path d="M1500 605 v55 l-8 -12 m8 12 l8 -12" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="670" width="890" height="130" rx="12" fill="#1e202e" stroke="#7aa2f7"/>
+<text x="1079" y="714" fill="#7aa2f7" font-family="sans-serif" font-size="26">Session exits</text>
+<text x="1079" y="757" fill="#c0caf5" font-family="sans-serif" font-size="23">on_session_exited removes running state</text>
+<path d="M1500 800 v55 l-8 -12 m8 12 l8 -12" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="865" width="890" height="130" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="909" fill="#9ece6a" font-family="sans-serif" font-size="26">Next scheduled firing</text>
+<text x="1079" y="952" fill="#c0caf5" font-family="sans-serif" font-size="23">fire_due_tasks launches or resumes</text>
+<text x="55" y="1172" fill="#a9b1d6" font-family="sans-serif" font-size="22">Scope: enabled schedules only. Fresh runs still skip overlap; Continue mode still injects into an active session.</text>
+</svg>

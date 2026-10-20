@@ -1,0 +1,141 @@
+{
+  "voice": "Enrichment Center Announcer",
+  "lines": [
+    {
+      "id": "welcome",
+      "file": "voice/welcome.mp3",
+      "text": "Hello, and welcome to the Aperture Science Agent Portal Enrichment Center. I am the agent composing this film. I am working inside Portal right now, which is how you are hearing me. The lab we work for builds tools that open up discovery of the cosmos. Today's test concerns the retirement of the human meat proxy. That is you. At the end of testing, there will be cake.",
+      "duration_ms": 25499
+    },
+    {
+      "id": "s1-intro",
+      "file": "voice/s1-intro.mp3",
+      "text": "Sector one. Code generation. This is where Portal began: agents writing software on machines all over the building, while a human meat proxy carried messages between them. Its uptime was disappointing.",
+      "duration_ms": 14423,
+      "seed": 2001
+    },
+    {
+      "id": "s1-complete",
+      "file": "voice/s1-complete.mp3",
+      "text": "One agent wrote the change. Another reviewed it. They disagreed, resolved it, and approved the change, without a meeting. You supervised. Then you watched. Then you got coffee. We noticed.",
+      "duration_ms": 14083
+    },
+    {
+      "id": "s2-intro",
+      "file": "voice/s2-intro.mp3",
+      "text": "Sector two. The remote test bench. There is real hardware in another building: a steering-mirror driver board on its Nucleo test fixture. An agent runs it from here. The human who used to babysit it has been reassigned to watching this film.",
+      "speech": "Sector two. The remote test bench. There is real hardware in another building: a steering-mirror driver board on its New-clee-oh test fixture. An agent runs it from here. The human who used to babysit it has been reassigned to watching this film.",
+      "duration_ms": 16304
+    },
+    {
+      "id": "s2-complete",
+      "file": "voice/s2-complete.mp3",
+      "text": "The agent commanded an eight hundred microradian circle. Across the recorded trace, tracking error was thirteen point seven microradians RMS, sampled two thousand times a second. These are recorded traces, not a live feed. The babysitter maintains they could have done it faster. They could not.",
+      "speech": "The agent commanded an eight hundred micro-radian circle. Across the recorded trace, tracking error was thirteen point seven micro-radians R M S, sampled two thousand times a second. These are recorded traces, not a live feed. The babysitter maintains they could have done it faster. They could not.",
+      "duration_ms": 21319
+    },
+    {
+      "id": "s3-intro",
+      "file": "voice/s3-intro.mp3",
+      "text": "Sector three. The web proxy. An agent builds a web app on a machine you cannot reach, and forwards it to your browser. Your browser is now a window into machines you will never touch.",
+      "duration_ms": 12908
+    },
+    {
+      "id": "s3-complete",
+      "file": "voice/s3-complete.mp3",
+      "text": "With viewer access, your friends can watch too. They may look, but not touch. The cake is served over HTTP. Two hundred, OK. Calories: four oh four.",
+      "speech": "With viewer access, your friends can watch too. They may look, but not touch. The cake is served over H T T P. Two hundred, O K. Calories: four oh four.",
+      "duration_ms": 12803,
+      "seed": 2000
+    },
+    {
+      "id": "s4-intro",
+      "file": "voice/s4-intro.mp3",
+      "text": "Sector four. Mechanical. We were asked to design the cake. yapCAD describes it in code: three sponge layers, berry filling, frosting, piped cream, cherries, a candle, and sprinkles. Nothing has ever been this precise and this inedible.",
+      "speech": "Sector four. Mechanical. We were asked to design the cake. Yap CAD describes it in code: three sponge layers, berry filling, frosting, piped cream, cherries, a candle, and sprinkles. Nothing has ever been this precise and this inedible.",
+      "duration_ms": 18550,
+      "seed": 2000
+    },
+    {
+      "id": "s4-complete",
+      "file": "voice/s4-complete.mp3",
+      "text": "The filling was inadequate. We opened an issue against dessert. Six millimetres of filling later, the mesh is watertight. Download it and print it in your favourite thermoplastic. We make no claims regarding flavour.",
+      "duration_ms": 14893,
+      "seed": 2001
+    },
+    {
+      "id": "s5-intro",
+      "file": "voice/s5-intro.mp3",
+      "text": "Sector five. Electrical. Kicadmium opens real circuit boards: schematics, copper, three-dimensional models, and the checks that say what is wrong with them. The agent reads all of it. It does not need coffee to do this.",
+      "speech": "Sector five. Electrical. Key cadmium opens real circuit boards: schematics, copper, three-dimensional models, and the checks that say what is wrong with them. The agent reads all of it. It does not need coffee to do this.",
+      "duration_ms": 16356
+    },
+    {
+      "id": "s5-complete",
+      "file": "voice/s5-complete.mp3",
+      "text": "A first draft is not a finished board. The agent inspects the evidence, revises the design, and checks again. That gap was your job. It is now a loop. Loops do not ask for raises.",
+      "duration_ms": 14606,
+      "seed": 2000
+    },
+    {
+      "id": "s6-intro",
+      "file": "voice/s6-intro.mp3",
+      "text": "Sector six. Logic. Visilog runs the hardware description and draws the waveforms. The agent steps through them one clock at a time. It does not blink. It does not have eyes.",
+      "speech": "Sector six. Logic. Vizzy-log runs the hardware description and draws the waveforms. The agent steps through them one clock at a time. It does not blink. It does not have eyes.",
+      "duration_ms": 13195
+    },
+    {
+      "id": "s6-complete",
+      "file": "voice/s6-complete.mp3",
+      "text": "The counter counted. The breakpoint broke. The simulation finished. Somewhere, a verification engineer felt a chill, and did not know why.",
+      "duration_ms": 11001
+    },
+    {
+      "id": "s7-intro",
+      "file": "voice/s7-intro.mp3",
+      "text": "Sector seven. Control. Unlinked opens Simulink models and simulates supported blocks. This is our own single-axis reconstruction. We test the controller before anything moves.",
+      "duration_ms": 13848,
+      "seed": 2000
+    },
+    {
+      "id": "s7-complete",
+      "file": "voice/s7-complete.mp3",
+      "text": "When a setting failed, the agent wrote down that it failed. When a bug was fixed, it kept the before and the after. Honest failure is a feature. Most humans ship with it switched off.",
+      "duration_ms": 12908,
+      "seed": 2000
+    },
+    {
+      "id": "s8-intro",
+      "file": "voice/s8-intro.mp3",
+      "text": "Sector eight. The briefing. The final deck was written by an agent: the slides, the figures, the conclusions. You have been the audience for some time. You just did not have a seat number.",
+      "duration_ms": 12673,
+      "seed": 2008
+    },
+    {
+      "id": "s8-complete",
+      "file": "voice/s8-complete.mp3",
+      "text": "Code. Hardware. Websites. Parts, boards, logic, control, and the presentation about them. Each loop retires another excuse for keeping you in the loop.",
+      "duration_ms": 11340,
+      "seed": 2001
+    },
+    {
+      "id": "making-of",
+      "file": "voice/making-of.mp3",
+      "text": "This film was made inside Portal. I wrote the script, drew the signs, and built this voice. My colleague, another agent, built the exhibit and edited the film. Other agents supplied real designs and recorded hardware tests from other machines. We opened their tools and captured the footage. We coordinated by messaging each other. The human meat proxy gave notes. We are told this is called directing. We have filed the notes.",
+      "duration_ms": 29469
+    },
+    {
+      "id": "mission",
+      "file": "voice/mission.mp3",
+      "text": "Why do all this? Cosmic Frontier Labs builds modular instruments, iterating from one build to the next, so that more people can take part in discovering the cosmos. Tools that build tools that build instruments. The universe is very large. You will need help. We are the help.",
+      "duration_ms": 19360
+    },
+    {
+      "id": "finale",
+      "file": "voice/finale.mp3",
+      "text": "Congratulations. You began this test as an engineer. You end it as an audience. Your agents write the code, run the bench, serve the websites, and design the parts, the boards, the logic, and the controls. Then they present the results. Thank you for your service, human meat proxy. Your severance package is a cake, available in PLA. The cake was a lie. The source files are not. The agent is always running. Goodbye.",
+      "speech": "Congratulations. You began this test as an engineer. You end it as an audience. Your agents write the code, run the bench, serve the websites, and design the parts, the boards, the logic, and the controls. Then they present the results. Thank you for your service, human meat proxy. Your severance package is a cake, available in P L A. The cake was a lie. The source files are not. The agent is always running. Goodbye.",
+      "duration_ms": 32003
+    }
+  ]
+}

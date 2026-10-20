@@ -125,6 +125,7 @@ pub fn history_browser_page(props: &HistoryBrowserProps) -> Html {
             <header class="history-header">
                 <h1>{ "Session History" }</h1>
             </header>
+            <p>{ "Open a conversation to view or restore it." }</p>
             { body }
         </div>
     }
@@ -506,7 +507,7 @@ fn visible_models(models: &[String]) -> String {
 fn owner_label(s: &HistorySessionSummary) -> String {
     s.owner_name
         .clone()
-        .filter(|n| !n.is_empty())
+        .filter(|n| shared::strings::is_non_empty(n))
         .unwrap_or_else(|| {
             if s.owner_email.is_empty() {
                 s.user_id.clone()

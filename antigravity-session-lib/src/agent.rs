@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use session_lib::agent::Agent;
 use session_lib::error::SessionError;
 use session_lib::io::{IoCommand, IoEvent};
@@ -6,10 +8,14 @@ use tokio::sync::mpsc;
 
 use crate::io_task::antigravity_io_task;
 
-/// Zero-sized selector for the Antigravity session backend.
+/// Zero-sized type that selects the Antigravity backend for `Session`.
 pub struct AntigravityAgent;
 
 impl Agent for AntigravityAgent {
+    fn graceful_stop_timeout() -> Option<Duration> {
+        Some(Duration::from_secs(8))
+    }
+
     fn spawn_io_task(
         config: SessionConfig,
         command_rx: mpsc::UnboundedReceiver<IoCommand>,

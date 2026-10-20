@@ -208,9 +208,12 @@ mod tests {
     }
 
     #[test]
-    fn matrix_covers_every_agent_without_offering_broken_external_login() {
+    fn matrix_covers_every_agent_without_offering_broken_preview_logins() {
         assert_eq!(AGENTS.len(), 4);
         assert!(AGENTS.iter().any(|(agent, _)| *agent == AgentType::Muse));
+        assert!(AGENTS
+            .iter()
+            .any(|(agent, _)| *agent == AgentType::Antigravity));
         assert!(sign_in_button(
             &AgentLoginStatus::LoggedOut,
             AgentType::Muse,

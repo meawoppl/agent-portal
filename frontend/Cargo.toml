@@ -44,6 +44,8 @@ web-sys = { workspace = true, features = [
     # download never becomes a top-level navigation (markdown/portal_file_link.rs)
     "Url",
     "BlobPropertyBag",
+    "ReadableStream",
+    "ReadableStreamDefaultReader",
     "FilePropertyBag",
     "HtmlAnchorElement",
     "DomRect",
@@ -55,6 +57,8 @@ web-sys = { workspace = true, features = [
     "Location",
     "Storage",
     "Navigator",
+    # (pointer: coarse) check for the touch-first composer placeholder.
+    "MediaQueryList",
     "ServiceWorkerContainer",
     "ServiceWorkerRegistration",
     # Web Push subscribe flow (mobile-apps plan D2)

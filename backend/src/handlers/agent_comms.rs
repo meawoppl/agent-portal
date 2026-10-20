@@ -43,6 +43,12 @@ pub(crate) fn resolve_user(
     crate::auth::extract_user_id(app_state, Some(headers), cookies)
 }
 
+/// Raw rows a peek reads before condensing thinking bursts. The request counts
+/// condensed entries, and one burst can be hundreds of markers, so the read is
+/// a fixed budget rather than a multiple of the limit: a tool call followed by
+/// a long burst still shows up. Older history is `message history`'s job.
+const PEEK_RAW_ROWS: i64 = 400;
+
 /// Look up a display name for `user_id`, keeping this path's `"portal"`
 /// fallback for unknown users. Resolution itself lives in
 /// [`crate::handlers::helpers::user_display_name`] (single query,
@@ -173,17 +179,16 @@ fn turn_signal_value_is_busy(agent_type: &str, value: &serde_json::Value) -> boo
             .get("payload_type")
             .and_then(|value| value.as_str())
             .is_some_and(|kind| kind.starts_with("run.terminal.")),
-        // A startup/configuration failure has no accepted turn and therefore
-        // emits only `error`. Treat it as idle here. The edit-stack predicate
-        // intentionally does not: accepted failed turns emit error + terminal,
-        // and releasing on both would advance two queued edits.
-        "antigravity" => !matches!(
-            kind,
-            Some(shared::antigravity::TURN_COMPLETED_FRAME_TYPE | "error")
-        ),
+        "antigravity" => kind != Some("antigravity_turn_completed"),
         _ => !matches!(
             kind,
-            Some("result" | "turn.completed" | "turn.failed" | "error")
+            Some(
+                "result"
+                    | "turn.completed"
+                    | "turn.failed"
+                    | "antigravity_turn_completed"
+                    | "error"
+            )
         ),
     }
 }
@@ -261,9 +266,10 @@ pub async fn peek_agent_messages(
     if let Some(since) = since {
         rows_query = rows_query.filter(messages::created_at.gt(since));
     }
+    // `limit` counts condensed entries, so read the fixed raw budget.
     let rows: Vec<crate::models::Message> = rows_query
         .order(messages::created_at.desc())
-        .limit(limit)
+        .limit(PEEK_RAW_ROWS)
         .load(&mut conn)?;
 
     let total_messages: i64 = messages::table
@@ -272,19 +278,22 @@ pub async fn peek_agent_messages(
         .get_result(&mut conn)?;
 
     // Newest-first from the query; the wire contract is oldest → newest.
-    let peek_messages: Vec<shared::api::PeekMessage> = rows
+    let summarized = rows
         .into_iter()
         .rev()
         .map(|m| {
-            super::peek_summary::summarize_message(
+            let estimate = super::peek_summary::thinking_estimate(&m.agent_type, &m.content);
+            let message = super::peek_summary::summarize_message(
                 m.id,
                 &m.agent_type,
                 &m.role,
                 &m.content,
                 m.created_at,
-            )
+            );
+            (message, estimate)
         })
         .collect();
+    let peek_messages = super::peek_summary::newest_entries(summarized, limit as usize);
 
     // Status header — same signals as the list endpoint, scoped to one session.
     let connected = app_state
@@ -810,27 +819,6 @@ mod tests {
             turn_signal_activity_state(
                 "muse",
                 r#"{"type":"muse_record","payload_type":"run.terminal.completed"}"#
-            ),
-            SessionActivityState::Idle
-        );
-        assert_eq!(
-            turn_signal_activity_state(
-                "antigravity",
-                r#"{"type":"antigravity_step","kind":"message"}"#
-            ),
-            SessionActivityState::Busy
-        );
-        assert_eq!(
-            turn_signal_activity_state(
-                "antigravity",
-                r#"{"type":"antigravity_turn_completed","status":"completed"}"#
-            ),
-            SessionActivityState::Idle
-        );
-        assert_eq!(
-            turn_signal_activity_state(
-                "antigravity",
-                r#"{"type":"error","message":"startup failed"}"#
             ),
             SessionActivityState::Idle
         );

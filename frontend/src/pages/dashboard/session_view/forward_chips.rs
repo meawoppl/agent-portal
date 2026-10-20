@@ -8,13 +8,13 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use gloo_net::http::Request;
 use shared::api::{ForwardInfo, SessionForwardsResponse};
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
-use crate::utils::{api_url, fetch_json, On401};
+use crate::portal_client::use_portal;
+use crate::utils::On401;
 
 #[derive(Properties, PartialEq)]
 pub struct ForwardChipsProps {
@@ -41,36 +41,42 @@ pub fn forward_chips(props: &ForwardChipsProps) -> Html {
     // old session could clobber the new session's already-loaded chips, which
     // might never refetch and would vanish indefinitely.
     let state = use_state(|| (Uuid::nil(), Vec::<ForwardInfo>::new()));
+    let portal = use_portal();
 
-    // Refetch on mount and whenever (session, refresh) changes.
+    // Refetch on mount and whenever (portal, session, refresh) changes.
     {
         let state = state.clone();
         let on_loaded = props.on_loaded.clone();
         let session_id = props.session_id;
-        use_effect_with((session_id, props.refresh), move |_| {
-            let cancelled = Rc::new(Cell::new(false));
-            let guard = cancelled.clone();
-            spawn_local(async move {
-                let result = fetch_json::<SessionForwardsResponse>(
-                    &format!("/api/sessions/{session_id}/forwards"),
-                    On401::Ignore,
-                )
-                .await;
-                // Superseded by a newer (session, refresh) — don't write.
-                if !guard.get() {
-                    match result {
-                        Ok(data) => {
-                            on_loaded.emit(data.forwards.clone());
-                            state.set((session_id, data.forwards));
+        use_effect_with(
+            (portal.clone(), session_id, props.refresh),
+            move |(portal, ..)| {
+                let cancelled = Rc::new(Cell::new(false));
+                let guard = cancelled.clone();
+                let portal = portal.clone();
+                spawn_local(async move {
+                    let result = portal
+                        .fetch_json::<SessionForwardsResponse>(
+                            &format!("/api/sessions/{session_id}/forwards"),
+                            On401::Ignore,
+                        )
+                        .await;
+                    // Superseded by a newer (session, refresh) — don't write.
+                    if !guard.get() {
+                        match result {
+                            Ok(data) => {
+                                on_loaded.emit(data.forwards.clone());
+                                state.set((session_id, data.forwards));
+                            }
+                            Err(_) => state.set((session_id, Vec::new())),
                         }
-                        Err(_) => state.set((session_id, Vec::new())),
                     }
-                }
-            });
-            // Cleanup runs before the next effect (deps changed) and on
-            // unmount, tripping the flag for this now-stale fetch.
-            move || cancelled.set(true)
-        });
+                });
+                // Cleanup runs before the next effect (deps changed) and on
+                // unmount, tripping the flag for this now-stale fetch.
+                move || cancelled.set(true)
+            },
+        );
     }
 
     // Ignore results tagged for a different (stale) session.
@@ -86,12 +92,14 @@ pub fn forward_chips(props: &ForwardChipsProps) -> Html {
     let revoke = {
         let state = state.clone();
         let session_id = props.session_id;
+        let portal = portal.clone();
         Callback::from(move |_: ()| {
             let state = state.clone();
+            let portal = portal.clone();
             spawn_local(async move {
                 // A session has one forward; DELETE takes no port.
-                let url = api_url(&format!("/api/sessions/{session_id}/forwards"));
-                if Request::delete(&url).send().await.is_ok() {
+                let path = format!("/api/sessions/{session_id}/forwards");
+                if portal.delete(&path).send().await.is_ok() {
                     // Optimistic: clear locally (keeping this session's tag);
                     // the ForwardsChanged frame reconciles if the server
                     // disagrees.
@@ -106,7 +114,7 @@ pub fn forward_chips(props: &ForwardChipsProps) -> Html {
             { for forwards.iter().map(|f| {
                 let on_revoke = revoke.clone();
                 let on_open = props.on_open.clone();
-                let open_url = api_url(&format!("/api/sessions/{}/forwards/open", props.session_id));
+                let open_url = portal.url(&format!("/api/sessions/{}/forwards/open", props.session_id));
                 let forward = f.clone();
                 // Health is conveyed by color alone: pulsing green = last
                 // probe saw a listener, flat red = connection refused,

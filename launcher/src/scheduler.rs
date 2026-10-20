@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use shared::{ContinuationConfig, ScheduledTaskConfig};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
@@ -116,12 +116,13 @@ impl Scheduler {
 
     /// Replace task configs from ScheduleSync. Preserves running session state.
     pub fn update_tasks(&mut self, configs: Vec<ScheduledTaskConfig>) {
-        let running_task_ids: HashSet<Uuid> = self.running.values().map(|r| r.task_id).collect();
-
         self.tasks = configs
             .into_iter()
             .map(|config| {
-                let next_fire = if config.enabled && !running_task_ids.contains(&config.id) {
+                // Keep the clock armed even during a run. fire_due_tasks handles
+                // overlap; suppressing this here permanently stalls a task after
+                // a reconnect sync followed by the running session exiting.
+                let next_fire = if config.enabled {
                     compute_next_fire(&config.fields.cron_expression, &config.fields.timezone)
                 } else {
                     None
@@ -543,6 +544,74 @@ mod tests {
         scheduler.update_tasks(vec![task]);
         assert_eq!(scheduler.tasks.len(), 1);
         assert!(scheduler.tasks[0].next_fire.is_none());
+    }
+
+    #[test]
+    fn resync_running_task_keeps_schedule_after_session_exits() {
+        for mode in [shared::SessionMode::Fresh, shared::SessionMode::Continue] {
+            let mut scheduler = Scheduler::new();
+            let mut task = make_task("resync", "* * * * *");
+            task.fields.session_mode = mode;
+            scheduler.update_tasks(vec![task.clone()]);
+            make_due(&mut scheduler);
+            let first = scheduler.fire_due_tasks();
+            let session_id = Uuid::new_v4();
+            scheduler.on_session_spawned(first[0].request_id, session_id);
+
+            // Backend reconnects while the scheduled session is still alive.
+            scheduler.update_tasks(vec![task]);
+            assert!(scheduler.next_fire_duration().is_some());
+            assert!(scheduler.running.contains_key(&session_id));
+            assert!(scheduler.on_session_exited(&session_id).is_some());
+            assert!(scheduler.next_fire_duration().is_some());
+            make_due(&mut scheduler);
+            let next = scheduler.fire_due_tasks();
+            assert_eq!(next.len(), 1);
+            let info = scheduler
+                .get_pending_launch_info(&next[0].request_id)
+                .unwrap();
+            assert_eq!(
+                info.last_session_id,
+                if mode == shared::SessionMode::Continue {
+                    Some(session_id)
+                } else {
+                    None
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn resync_running_task_preserves_overlap_policy() {
+        for mode in [shared::SessionMode::Fresh, shared::SessionMode::Continue] {
+            let mut scheduler = Scheduler::new();
+            let mut task = make_task("resync", "* * * * *");
+            task.fields.session_mode = mode;
+            scheduler.update_tasks(vec![task.clone()]);
+            make_due(&mut scheduler);
+            let first = scheduler.fire_due_tasks();
+            let session_id = Uuid::new_v4();
+            scheduler.on_session_spawned(first[0].request_id, session_id);
+            scheduler.pending_prompts.clear();
+            scheduler.update_tasks(vec![task.clone()]);
+            make_due(&mut scheduler);
+            assert!(scheduler.fire_due_tasks().is_empty());
+            let prompts = scheduler.ready_prompts();
+            assert_eq!(
+                prompts.len(),
+                usize::from(mode == shared::SessionMode::Continue)
+            );
+            if let Some((target, _, _)) = prompts.first() {
+                assert_eq!(*target, session_id);
+            }
+            assert!(scheduler.next_fire_duration().is_some());
+
+            task.enabled = false;
+            scheduler.update_tasks(vec![task]);
+            scheduler.on_session_exited(&session_id);
+            assert!(scheduler.next_fire_duration().is_none());
+            assert!(scheduler.fire_due_tasks().is_empty());
+        }
     }
 
     #[test]

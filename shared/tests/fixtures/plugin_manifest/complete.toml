@@ -1,0 +1,49 @@
+name = "fixture"
+display_name = "Fixture Plugin"
+description = "Manifest compatibility fixture"
+homepage = "https://example.com/plugin"
+future_metadata = ["ignored"]
+
+[install]
+setup = "echo setup"
+doctor = "echo doctor"
+
+[surface]
+kind = "web"
+default_title = "Fixture"
+start = "echo start"
+stop = "echo stop"
+health_path = "/health"
+default_width_percent = 40
+
+[[skills]]
+name = "review"
+path = "skills/review/SKILL.md"
+agents = ["claude", "codex"]
+future_skill_field = true
+
+[[prompts]]
+name = "context"
+path = "prompts/context.md"
+
+[[commands]]
+name = "check"
+description = "Check the project"
+run = "echo check"
+
+[[toolchains]]
+name = "tools"
+home = "tools"
+install = "echo tools"
+doctor = "echo tools-doctor"
+[toolchains.env]
+FIXTURE = "value"
+
+[[detect]]
+name = "project"
+any = ["Cargo.toml"]
+
+[capabilities]
+flag = true
+count = 2
+nested = { value = "kept" }

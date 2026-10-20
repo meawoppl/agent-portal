@@ -47,6 +47,12 @@ pub enum IoCommand {
     /// interrupt on stdin; Codex: `turn/interrupt`). A no-op when nothing is
     /// running.
     Interrupt,
+    /// Ask the I/O task to flush durable state and end cleanly.
+    ///
+    /// Only agents that override [`crate::agent::Agent::graceful_stop_timeout`]
+    /// should normally receive this; other tasks keep explicit arms so adding
+    /// new commands stays a compile-time exercise.
+    Shutdown { completed: oneshot::Sender<()> },
 }
 
 /// Events emitted from the per-agent I/O task back up to `Session<A>`.

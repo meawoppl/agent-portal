@@ -8,7 +8,7 @@ use yew::prelude::*;
 const EXPIRED_OAUTH_MESSAGE: &str =
     "Failed to authenticate: OAuth session expired and could not be refreshed";
 
-fn is_expired_oauth_error(message: &str) -> bool {
+pub(super) fn is_expired_oauth_error(message: &str) -> bool {
     message.contains(EXPIRED_OAUTH_MESSAGE)
 }
 
@@ -35,20 +35,25 @@ pub fn render_error_message(
             </div>
             <div class="message-body">
                 <div class="error-text">{ crate::components::markdown::linkify_urls(message) }</div>
-                if is_expired_oauth_error(message) {
-                    if let Some(on_login) = on_claude_login {
-                        <button
-                            type="button"
-                            class="error-recovery-button"
-                            onclick={on_login.reform(|_: MouseEvent| ())}
-                        >
-                            { "Sign in to Claude" }
-                        </button>
-                    }
-                }
+                { render_claude_login_action(is_expired_oauth_error(message), on_claude_login).unwrap_or_default() }
             </div>
         </div>
     }
+}
+
+/// Reuse the session-owner/launcher-gated login callback across Claude's error
+/// envelopes. Assistant authentication failures are not Anthropic error frames.
+pub(super) fn render_claude_login_action(
+    authentication_failed: bool,
+    on_claude_login: Option<Callback<()>>,
+) -> Option<Html> {
+    let on_login = on_claude_login.filter(|_| authentication_failed)?;
+    Some(html! {
+        <button type="button" class="error-recovery-button"
+            onclick={on_login.reform(|_: MouseEvent| ())}>
+            { "Sign in to Claude" }
+        </button>
+    })
 }
 
 #[cfg(test)]

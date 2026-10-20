@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2149 - Fix demo playback timer reading stale state</text>
+<text x="55" y="108" font-family="sans-serif" font-size="34" fill="#e6e9f5">The demo timer read a state snapshot from mount, so playback</text>
+<text x="55" y="148" font-family="sans-serif" font-size="34" fill="#e6e9f5">stuck at 2 events; a reducer lets each tick build on live state.</text>
+<path d="M55 190 H1945 M1000 207 V1130" stroke="#565f89" fill="none"/>
+<text x="55" y="235" font-family="sans-serif" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1055" y="235" font-family="sans-serif" font-size="22" fill="#9ece6a">AFTER</text>
+<g>
+<rect x="55" y="285" width="870" height="180" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="327" font-family="sans-serif" font-size="26" fill="#f7768e">Playback state</text>
+<text x="79" y="371" font-family="sans-serif" font-size="23" fill="#c0caf5">revealed_counts was a use_state handle captured by</text>
+<text x="79" y="407" font-family="sans-serif" font-size="23" fill="#c0caf5">the Interval closure at mount.</text>
+</g>
+<g>
+<rect x="1055" y="285" width="870" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="327" font-family="sans-serif" font-size="26" fill="#9ece6a">Playback reducer</text>
+<text x="1079" y="371" font-family="sans-serif" font-size="23" fill="#c0caf5">Playback holds counts and lengths; the Interval</text>
+<text x="1079" y="407" font-family="sans-serif" font-size="23" fill="#c0caf5">dispatches PlaybackTick to live state.</text>
+</g>
+<g>
+<rect x="55" y="570" width="870" height="180" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="612" font-family="sans-serif" font-size="26" fill="#f7768e">What the timer read</text>
+<text x="79" y="656" font-family="sans-serif" font-size="23" fill="#c0caf5">*revealed_counts always saw the initial [1, ..],</text>
+<text x="79" y="692" font-family="sans-serif" font-size="23" fill="#c0caf5">so every tick computed [2, ..].</text>
+</g>
+<g>
+<rect x="1055" y="570" width="870" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="612" font-family="sans-serif" font-size="26" fill="#9ece6a">What each tick builds on</text>
+<text x="1079" y="656" font-family="sans-serif" font-size="23" fill="#c0caf5">reduce advances from the current counts, so ticks</text>
+<text x="1079" y="692" font-family="sans-serif" font-size="23" fill="#c0caf5">go 2, 3, 4 and onward.</text>
+</g>
+<g>
+<rect x="55" y="855" width="870" height="180" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="897" font-family="sans-serif" font-size="26" fill="#f7768e">Visible symptom</text>
+<text x="79" y="941" font-family="sans-serif" font-size="23" fill="#c0caf5">The demo chip stuck at 2/23 events and never</text>
+<text x="79" y="977" font-family="sans-serif" font-size="23" fill="#c0caf5">revealed the image or later cards.</text>
+</g>
+<g>
+<rect x="1055" y="855" width="870" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="897" font-family="sans-serif" font-size="26" fill="#9ece6a">Visible result</text>
+<text x="1079" y="941" font-family="sans-serif" font-size="23" fill="#c0caf5">The chip counts 1/23 through 9/23 and beyond; a</text>
+<text x="1079" y="977" font-family="sans-serif" font-size="23" fill="#c0caf5">unit test pins the sequence and loop.</text>
+</g>
+</svg>

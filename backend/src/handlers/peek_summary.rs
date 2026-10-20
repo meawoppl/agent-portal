@@ -35,9 +35,81 @@ pub fn summarize_message(
     }
 }
 
+/// Running thinking-token estimate a row carries: the Claude CLI's
+/// `thinking_tokens` markers report a cumulative estimate for the burst.
+pub fn thinking_estimate(agent_type: &str, content: &str) -> Option<u64> {
+    if agent_type != "claude" {
+        return None;
+    }
+    match serde_json::from_str::<claude_codes::ClaudeOutput>(content).ok()? {
+        claude_codes::ClaudeOutput::System(s) => s.as_thinking_tokens().map(|t| t.estimated_tokens),
+        _ => None,
+    }
+}
+
+fn thinking_label(steps: usize, estimated_tokens: u64) -> String {
+    let mut label = if steps > 1 {
+        format!("thinking × {steps}")
+    } else {
+        "thinking…".to_string()
+    };
+    if estimated_tokens > 0 {
+        label.push_str(&format!(" (~{} tokens)", compact_count(estimated_tokens)));
+    }
+    label
+}
+
+fn compact_count(n: u64) -> String {
+    if n >= 1000 {
+        format!("{:.1}k", n as f64 / 1000.0)
+    } else {
+        n.to_string()
+    }
+}
+
+/// Collapse each consecutive run of `thinking` rows into one line, so a burst
+/// of reasoning steps reads as a single entry instead of pushing everything
+/// else out of the peek window. The run keeps its newest row's id and time and
+/// reports the peak running token estimate.
+pub fn condense_thinking(rows: Vec<(PeekMessage, Option<u64>)>) -> Vec<PeekMessage> {
+    let mut out: Vec<PeekMessage> = Vec::with_capacity(rows.len());
+    let mut run: Vec<(PeekMessage, Option<u64>)> = Vec::new();
+    let flush = |run: &mut Vec<(PeekMessage, Option<u64>)>, out: &mut Vec<PeekMessage>| {
+        let steps = run.len();
+        let tokens = run.iter().filter_map(|(_, t)| *t).max().unwrap_or(0);
+        if let Some((mut last, _)) = run.pop() {
+            if steps > 1 {
+                last.summary = thinking_label(steps, tokens);
+            }
+            out.push(last);
+        }
+        run.clear();
+    };
+    for row in rows {
+        if row.0.kind == "thinking" {
+            run.push(row);
+        } else {
+            flush(&mut run, &mut out);
+            out.push(row.0);
+        }
+    }
+    flush(&mut run, &mut out);
+    out
+}
+
+/// Condense chronological rows, then keep the newest `limit` entries (still
+/// oldest first). Trimming after condensing is what makes `limit` count
+/// entries rather than raw markers.
+pub fn newest_entries(rows: Vec<(PeekMessage, Option<u64>)>, limit: usize) -> Vec<PeekMessage> {
+    let mut entries = condense_thinking(rows);
+    let excess = entries.len().saturating_sub(limit);
+    entries.drain(..excess);
+    entries
+}
+
 /// One line, whitespace-collapsed, capped, with an ellipsis when truncated.
 fn cap(text: &str) -> String {
-    let one_line = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let one_line = shared::strings::collapse_whitespace(text);
     shared::strings::truncate_with_ellipsis(&one_line, MAX_SUMMARY_CHARS)
 }
 
@@ -49,7 +121,7 @@ fn excerpt(text: &str) -> String {
     stripped
         .lines()
         .map(str::trim)
-        .find(|line| !line.is_empty())
+        .find(|line| shared::strings::is_non_empty(line))
         .unwrap_or("")
         .to_string()
 }
@@ -124,7 +196,10 @@ fn summarize_claude(content: &str) -> (&'static str, String) {
                 format!("turn complete ({} turns)", r.num_turns)
             },
         ),
-        ClaudeOutput::System(s) => ("system", format!("system: {:?}", s.subtype)),
+        ClaudeOutput::System(s) => match s.as_thinking_tokens() {
+            Some(t) => ("thinking", thinking_label(1, t.estimated_tokens)),
+            None => ("system", format!("system: {:?}", s.subtype)),
+        },
         ClaudeOutput::Error(e) => (
             "error",
             format!(
@@ -274,29 +349,44 @@ fn summarize_muse(content: &str) -> (&'static str, String) {
 }
 
 fn summarize_antigravity(content: &str) -> (&'static str, String) {
-    if let Ok(terminal) =
-        serde_json::from_str::<shared::antigravity::AntigravityTurnCompletedEnvelope>(content)
-    {
-        if terminal.is_valid() {
-            return ("turn_end", format!("turn {}", terminal.status.as_str()));
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(content) else {
+        return summarize_local_or_fallback(content);
+    };
+    match value.get("type").and_then(|value| value.as_str()) {
+        Some("antigravity_turn_completed") => {
+            let stop = value
+                .get("stop_reason")
+                .and_then(|value| value.as_str())
+                .unwrap_or("complete");
+            if value
+                .get("is_error")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false)
+            {
+                ("turn_end", format!("turn failed: {stop}"))
+            } else {
+                ("turn_end", format!("turn complete: {stop}"))
+            }
         }
-    }
-    if let Ok(step) = serde_json::from_str::<shared::antigravity::AntigravityStepEnvelope>(content)
-    {
-        if step.is_valid() {
-            if let Some(error) = step.error_message.as_deref() {
-                return ("error", format!("error: {}", excerpt(error)));
+        Some("antigravity_event") => {
+            let event = value
+                .get("event")
+                .and_then(|value| value.as_str())
+                .unwrap_or("event");
+            if let Some(text) = value.get("text").and_then(|value| value.as_str()) {
+                return ("text", excerpt(text));
             }
-            if !step.text.trim().is_empty() {
-                return ("text", excerpt(&step.text));
+            if let Some(summary) = value
+                .get("error_message")
+                .and_then(|value| value.as_str())
+                .filter(|message| shared::strings::is_non_empty(message))
+            {
+                return ("error", format!("error: {}", excerpt(summary)));
             }
-            if !step.thinking.trim().is_empty() {
-                return ("thinking", "thinking…".to_string());
-            }
-            return ("tool_use", step.kind.display_name().to_string());
+            ("system", format!("antigravity {event}"))
         }
+        _ => summarize_local_or_fallback(content),
     }
-    summarize_local_or_fallback(content)
 }
 
 /// Non-wire shapes shared across agents: the portal's local frames (a plain
@@ -345,6 +435,129 @@ mod tests {
                 .expect("valid timestamp")
                 .naive_utc(),
         )
+    }
+
+    fn thinking_marker(estimated_tokens: u64) -> String {
+        format!(
+            r#"{{"type":"system","subtype":"thinking_tokens","estimated_tokens":{estimated_tokens},"estimated_tokens_delta":50,"session_id":"s","uuid":"u{estimated_tokens}"}}"#
+        )
+    }
+
+    fn row(agent_type: &str, role: &str, content: &str) -> (PeekMessage, Option<u64>) {
+        (
+            summarize_row(agent_type, role, content),
+            thinking_estimate(agent_type, content),
+        )
+    }
+
+    /// A row with its own id and timestamp (`n` seconds after a base time),
+    /// so tests can tell which raw row an entry kept.
+    fn row_at(n: u8, content: &str) -> (PeekMessage, Option<u64>) {
+        let message = summarize_message(
+            Uuid::from_bytes([n; 16]),
+            "claude",
+            "system",
+            content,
+            chrono::DateTime::from_timestamp(1_700_000_000 + i64::from(n), 0)
+                .expect("valid timestamp")
+                .naive_utc(),
+        );
+        (message, thinking_estimate("claude", content))
+    }
+
+    const TOOL: &str = r#"{"type":"assistant","session_id":"s","message":{"id":"m1","role":"assistant","model":"claude-fable-5","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}"#;
+
+    #[test]
+    fn a_condensed_run_keeps_its_newest_row_and_peak_estimate() {
+        // The peak is not the last value: a later marker can report less.
+        let out = condense_thinking(vec![
+            row_at(1, &thinking_marker(300)),
+            row_at(2, &thinking_marker(900)),
+            row_at(3, &thinking_marker(120)),
+        ]);
+        assert_eq!(out.len(), 1);
+        assert_eq!(
+            out[0].id,
+            Uuid::from_bytes([3; 16]),
+            "newest row represents the run"
+        );
+        assert_eq!(
+            out[0].created_at,
+            chrono::DateTime::from_timestamp(1_700_000_003, 0)
+                .expect("valid timestamp")
+                .to_rfc3339()
+        );
+        assert_eq!(out[0].summary, "thinking × 3 (~900 tokens)");
+    }
+
+    /// `limit` counts entries after condensing: a tool call followed by a long
+    /// burst is still in a two-entry window.
+    #[test]
+    fn newest_entries_trims_after_condensing() {
+        let mut rows = vec![row_at(1, TOOL), row_at(2, TOOL)];
+        rows.extend((3..83).map(|n| row_at(n, &thinking_marker(u64::from(n) * 10))));
+        let out = newest_entries(rows, 2);
+        let kinds: Vec<_> = out.iter().map(|m| m.kind.as_str()).collect();
+        assert_eq!(kinds, vec!["tool_use", "thinking"]);
+        assert_eq!(
+            out[0].id,
+            Uuid::from_bytes([2; 16]),
+            "keeps the newest tool call"
+        );
+        assert_eq!(out[1].summary, "thinking × 80 (~820 tokens)");
+        assert_eq!(newest_entries(vec![row_at(1, TOOL)], 10).len(), 1);
+    }
+
+    #[test]
+    fn claude_thinking_markers_read_as_thinking_with_their_estimate() {
+        let m = summarize_row("claude", "system", &thinking_marker(1250));
+        assert_eq!(m.kind, "thinking");
+        assert_eq!(m.summary, "thinking… (~1.2k tokens)");
+        assert_eq!(
+            thinking_estimate("claude", &thinking_marker(1250)),
+            Some(1250)
+        );
+        assert_eq!(thinking_estimate("codex", &thinking_marker(1250)), None);
+    }
+
+    /// A burst of thinking markers is one peek line, so it can't push the
+    /// actual activity out of a short window.
+    #[test]
+    fn consecutive_thinking_rows_condense_into_one_line() {
+        let tool = r#"{"type":"assistant","session_id":"s","message":{"id":"m1","role":"assistant","model":"claude-fable-5","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}"#;
+        let rows = vec![
+            row("claude", "system", &thinking_marker(50)),
+            row("claude", "system", &thinking_marker(400)),
+            row("claude", "system", &thinking_marker(1300)),
+            row("claude", "assistant", tool),
+            row("claude", "system", &thinking_marker(80)),
+        ];
+        let out = condense_thinking(rows);
+        let lines: Vec<_> = out
+            .iter()
+            .map(|m| (m.kind.as_str(), m.summary.as_str()))
+            .collect();
+        assert_eq!(
+            lines,
+            vec![
+                ("thinking", "thinking × 3 (~1.3k tokens)"),
+                ("tool_use", "Bash: ls"),
+                ("thinking", "thinking… (~80 tokens)"),
+            ]
+        );
+    }
+
+    /// Codex reasoning items carry no estimate; the run is still one line.
+    #[test]
+    fn thinking_runs_without_estimates_condense_to_a_count() {
+        let reasoning =
+            r#"{"type":"item.completed","item":{"type":"reasoning","id":"r1","text":""}}"#;
+        let out = condense_thinking(vec![
+            row("codex", "assistant", reasoning),
+            row("codex", "assistant", reasoning),
+        ]);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].summary, "thinking × 2");
     }
 
     /// The context-safety invariant: no summary ever exceeds the cap or spans
@@ -433,38 +646,5 @@ mod tests {
         let m = summarize_row("muse", "assistant", content);
         assert_eq!(m.kind, "turn_end");
         assert_eq!(m.summary, "run completed: done");
-    }
-
-    #[test]
-    fn antigravity_terminal_reads_as_turn_end() {
-        let content =
-            serde_json::to_string(&shared::antigravity::AntigravityTurnCompletedEnvelope::new(
-                shared::antigravity::AntigravityTurnStatus::Completed,
-            ))
-            .unwrap();
-        let m = summarize_row("antigravity", "assistant", &content);
-        assert_eq!(m.kind, "turn_end");
-        assert_eq!(m.summary, "turn completed");
-    }
-
-    #[test]
-    fn antigravity_step_reads_as_text() {
-        let content = serde_json::to_string(&shared::antigravity::AntigravityStepEnvelope {
-            frame_type: shared::antigravity::STEP_FRAME_TYPE.to_string(),
-            trajectory_id: "cascade".to_string(),
-            step_index: 1,
-            kind: shared::antigravity::AntigravityStepKind::Message,
-            state: Default::default(),
-            source: Default::default(),
-            target: Default::default(),
-            text: "hello from Antigravity".to_string(),
-            thinking: String::new(),
-            error_message: None,
-            update: Default::default(),
-        })
-        .unwrap();
-        let m = summarize_row("antigravity", "assistant", &content);
-        assert_eq!(m.kind, "text");
-        assert_eq!(m.summary, "hello from Antigravity");
     }
 }

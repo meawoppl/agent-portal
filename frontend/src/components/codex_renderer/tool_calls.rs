@@ -170,12 +170,12 @@ pub(super) fn render_collab_agent_tool_call(
     // status plus model + reasoning-effort meta when present.
     let mut status_text = value_label(status).unwrap_or_else(|| "running...".to_string());
     let mut meta_bits: Vec<String> = Vec::new();
-    if let Some(model) = model.filter(|s| !s.is_empty()) {
+    if let Some(model) = model.filter(|s| shared::strings::is_non_empty(s)) {
         meta_bits.push(model.to_string());
     }
     if let Some(effort) = reasoning_effort
         .map(|effort| effort.0.as_str())
-        .filter(|s| !s.is_empty())
+        .filter(|s| shared::strings::is_non_empty(s))
     {
         meta_bits.push(format!("effort: {}", effort));
     }

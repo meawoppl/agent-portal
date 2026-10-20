@@ -7,30 +7,31 @@
 use std::cmp::Ordering;
 use std::collections::HashSet;
 
-use shared::SessionInfo;
-use uuid::Uuid;
+use super::types::PortalSession;
+use crate::portal_client::SessionKey;
 
 /// Total, deterministic display-order key for a session.
 ///
-/// Sessions sort by folder and agent with `id` as the unique final tie-breaker.
+/// Sessions sort by folder and agent with the portal-qualified session key as
+/// the unique final tie-breaker.
 ///
 /// Deliberately **does not** key on `git_branch`, full working directory,
 /// hostname, or timestamps. Those values may change while the user is reading
 /// another session and must not move its pill.
 ///
-/// Because the key ends in the unique `id`, the order is *total*: the same set
-/// of sessions always sorts identically no matter what order the poll returned
-/// them in, and never depends on branch state.
-fn display_sort_key(s: &SessionInfo) -> (String, String, Uuid) {
+/// Because the key ends in the unique session key, the order is *total*: the
+/// same set of sessions always sorts identically no matter what order the poll
+/// returned them in, and never depends on branch state.
+fn display_sort_key(s: &PortalSession) -> (String, String, SessionKey) {
     (
-        crate::utils::extract_folder(&s.working_directory).to_lowercase(),
-        s.agent_type.as_str().to_string(),
-        s.id,
+        crate::utils::extract_folder(&s.info.working_directory).to_lowercase(),
+        s.info.agent_type.as_str().to_string(),
+        s.key,
     )
 }
 
 /// Total ordering comparator for the session rail. See [`display_sort_key`].
-pub(super) fn session_display_cmp(a: &SessionInfo, b: &SessionInfo) -> Ordering {
+pub(super) fn session_display_cmp(a: &PortalSession, b: &PortalSession) -> Ordering {
     display_sort_key(a).cmp(&display_sort_key(b))
 }
 
@@ -38,12 +39,13 @@ pub(super) fn session_display_cmp(a: &SessionInfo, b: &SessionInfo) -> Ordering 
 ///
 /// This is intentionally separate from [`session_display_cmp`]: messaging a
 /// session should make its transcript warm sooner on the next full reload, but
-/// must not rearrange the rail. The unique id makes equal timestamps total and
+/// must not rearrange the rail. The unique key makes equal timestamps total and
 /// independent of the REST response order.
-pub(super) fn history_hydration_cmp(a: &SessionInfo, b: &SessionInfo) -> Ordering {
-    b.last_messaged_at
-        .cmp(&a.last_messaged_at)
-        .then_with(|| a.id.cmp(&b.id))
+pub(super) fn history_hydration_cmp(a: &PortalSession, b: &PortalSession) -> Ordering {
+    b.info
+        .last_messaged_at
+        .cmp(&a.info.last_messaged_at)
+        .then_with(|| a.key.cmp(&b.key))
 }
 
 /// Pick the most recently messaged session to receive focus after the current
@@ -51,31 +53,29 @@ pub(super) fn history_hydration_cmp(a: &SessionInfo, b: &SessionInfo) -> Orderin
 ///
 /// Prefer a visible, live session, then any visible session, and finally any
 /// remaining session. This is deliberately independent of rail order (and of
-/// host grouping): "most recently edited" is [`SessionInfo::last_messaged_at`],
+/// host grouping): "most recently edited" is
+/// [`shared::SessionInfo::last_messaged_at`],
 /// not whichever pill happens to render first.
 pub(super) fn termination_focus_fallback(
-    sessions: &[SessionInfo],
-    terminated_id: Uuid,
-    hidden: &HashSet<Uuid>,
-    connected: &HashSet<Uuid>,
-) -> Option<Uuid> {
-    let remaining = || {
-        sessions
-            .iter()
-            .filter(|session| session.id != terminated_id)
-    };
-    let newest = |iter: Box<dyn Iterator<Item = &SessionInfo> + '_>| {
+    sessions: &[PortalSession],
+    terminated: SessionKey,
+    hidden: &HashSet<SessionKey>,
+    connected: &HashSet<SessionKey>,
+) -> Option<SessionKey> {
+    let remaining = || sessions.iter().filter(|session| session.key != terminated);
+    let newest = |iter: Box<dyn Iterator<Item = &PortalSession> + '_>| {
         iter.min_by(|a, b| history_hydration_cmp(a, b))
-            .map(|session| session.id)
+            .map(|session| session.key)
     };
 
     newest(Box::new(remaining().filter(|session| {
-        !hidden.contains(&session.id)
-            && (session.status == shared::SessionStatus::Active || connected.contains(&session.id))
+        !hidden.contains(&session.key)
+            && (session.info.status == shared::SessionStatus::Active
+                || connected.contains(&session.key))
     })))
     .or_else(|| {
         newest(Box::new(
-            remaining().filter(|session| !hidden.contains(&session.id)),
+            remaining().filter(|session| !hidden.contains(&session.key)),
         ))
     })
     .or_else(|| newest(Box::new(remaining())))
@@ -87,8 +87,8 @@ pub(super) const UNKNOWN_HOST_LABEL: &str = "unknown host";
 /// Group-membership label for a session's host section. Whitespace-only /
 /// empty hostnames collapse into a single [`UNKNOWN_HOST_LABEL`] bucket;
 /// otherwise the trimmed hostname (original case preserved for display).
-pub(super) fn host_group_label(s: &SessionInfo) -> String {
-    let host = s.hostname.trim();
+pub(super) fn host_group_label(s: &PortalSession) -> String {
+    let host = s.info.hostname.trim();
     if host.is_empty() {
         UNKNOWN_HOST_LABEL.to_string()
     } else {
@@ -101,8 +101,8 @@ pub(super) fn host_group_label(s: &SessionInfo) -> String {
 /// last via the leading `is_unknown` flag. This is intentionally coarser than
 /// [`display_sort_key`] — it only decides which section a session lands in, not
 /// its order *within* the section.
-fn host_group_key(s: &SessionInfo) -> (bool, String) {
-    let host = s.hostname.trim();
+fn host_group_key(s: &PortalSession) -> (bool, String) {
+    let host = s.info.hostname.trim();
     (host.is_empty(), host.to_lowercase())
 }
 
@@ -118,7 +118,7 @@ fn host_group_key(s: &SessionInfo) -> (bool, String) {
 ///   session set. That totality is what lets nav-mode numbering, `j`/`k`
 ///   traversal, and [`resolve_focus_index`] all consume the same vector and
 ///   agree with the visible top-to-bottom order.
-pub(super) fn session_display_cmp_grouped(a: &SessionInfo, b: &SessionInfo) -> Ordering {
+pub(super) fn session_display_cmp_grouped(a: &PortalSession, b: &PortalSession) -> Ordering {
     host_group_key(a)
         .cmp(&host_group_key(b))
         .then_with(|| session_display_cmp(a, b))
@@ -150,13 +150,13 @@ pub(super) fn session_display_cmp_grouped(a: &SessionInfo, b: &SessionInfo) -> O
 /// 3. Nothing focused yet (`focused_id` is `None`, e.g. initial load) → the
 ///    first non-hidden session (then `0`).
 pub(super) fn resolve_focus_index(
-    sessions: &[SessionInfo],
-    focused_id: Option<Uuid>,
-    hidden: &HashSet<Uuid>,
+    sessions: &[PortalSession],
+    focused_id: Option<SessionKey>,
+    hidden: &HashSet<SessionKey>,
     previous_index: usize,
 ) -> usize {
-    if let Some(id) = focused_id {
-        if let Some(idx) = sessions.iter().position(|s| s.id == id) {
+    if let Some(key) = focused_id {
+        if let Some(idx) = sessions.iter().position(|s| s.key == key) {
             return idx;
         }
         // Focused id set but not in this snapshot: transient gap, not a real
@@ -168,16 +168,27 @@ pub(super) fn resolve_focus_index(
     }
     sessions
         .iter()
-        .position(|s| !hidden.contains(&s.id))
+        .position(|s| !hidden.contains(&s.key))
         .unwrap_or(0)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::portal_client::{ConnId, PortalClient};
     use shared::{AgentType, SessionInfo, SessionRole, SessionStatus};
+    use uuid::Uuid;
 
-    fn session(id: Uuid, dir: &str, host: &str, branch: Option<&str>) -> SessionInfo {
+    fn key(id: Uuid) -> SessionKey {
+        SessionKey::home(id)
+    }
+
+    fn session(id: Uuid, dir: &str, host: &str, branch: Option<&str>) -> PortalSession {
+        let portal = PortalClient::at("http://localhost:3000", ConnId::HOME);
+        PortalSession::new(portal, info(id, dir, host, branch))
+    }
+
+    fn info(id: Uuid, dir: &str, host: &str, branch: Option<&str>) -> SessionInfo {
         SessionInfo {
             id,
             user_id: Uuid::nil(),
@@ -211,42 +222,42 @@ mod tests {
     #[test]
     fn most_recently_messaged_session_hydrates_first_without_moving_pills() {
         let mut older = session(Uuid::from_u128(1), "/work/zeta", "host", None);
-        older.last_messaged_at = "2026-08-29T10:00:00Z".to_string();
+        older.info.last_messaged_at = "2026-08-29T10:00:00Z".to_string();
         let mut newer = session(Uuid::from_u128(2), "/work/alpha", "host", None);
-        newer.last_messaged_at = "2026-08-29T11:00:00Z".to_string();
+        newer.info.last_messaged_at = "2026-08-29T11:00:00Z".to_string();
         let baseline = session(Uuid::from_u128(3), "/work/0-baseline", "host", None);
 
-        let baseline_id = baseline.id;
+        let baseline_key = baseline.key;
         let mut hydration = [older.clone(), baseline.clone(), newer.clone()];
         hydration.sort_by(history_hydration_cmp);
 
-        assert_eq!(hydration[0].id, newer.id);
-        assert_eq!(hydration[1].id, older.id);
-        assert_eq!(hydration[2].id, baseline_id);
+        assert_eq!(hydration[0].key, newer.key);
+        assert_eq!(hydration[1].key, older.key);
+        assert_eq!(hydration[2].key, baseline_key);
 
         let mut pills = [older, baseline, newer];
         pills.sort_by(session_display_cmp);
-        assert_eq!(pills[0].id, baseline_id);
-        assert_eq!(pills[1].working_directory, "/work/alpha");
-        assert_eq!(pills[2].working_directory, "/work/zeta");
+        assert_eq!(pills[0].key, baseline_key);
+        assert_eq!(pills[1].info.working_directory, "/work/alpha");
+        assert_eq!(pills[2].info.working_directory, "/work/zeta");
     }
 
     #[test]
     fn termination_fallback_uses_message_recency_not_rail_order() {
         let terminated = session(Uuid::from_u128(1), "/work/a", "host", None);
         let mut older = session(Uuid::from_u128(2), "/work/z", "host", None);
-        older.last_messaged_at = "2026-08-29T10:00:00Z".to_string();
+        older.info.last_messaged_at = "2026-08-29T10:00:00Z".to_string();
         let mut newer = session(Uuid::from_u128(3), "/work/m", "host", None);
-        newer.last_messaged_at = "2026-08-29T11:00:00Z".to_string();
+        newer.info.last_messaged_at = "2026-08-29T11:00:00Z".to_string();
 
         assert_eq!(
             termination_focus_fallback(
                 &[terminated.clone(), older, newer.clone()],
-                terminated.id,
+                terminated.key,
                 &HashSet::new(),
-                &HashSet::from([newer.id]),
+                &HashSet::from([newer.key]),
             ),
-            Some(newer.id)
+            Some(newer.key)
         );
     }
 
@@ -254,12 +265,12 @@ mod tests {
     fn termination_fallback_prefers_visible_live_session() {
         let terminated = session(Uuid::from_u128(1), "/work/a", "host", None);
         let mut hidden_newest = session(Uuid::from_u128(2), "/work/b", "host", None);
-        hidden_newest.last_messaged_at = "2026-08-29T12:00:00Z".to_string();
+        hidden_newest.info.last_messaged_at = "2026-08-29T12:00:00Z".to_string();
         let mut disconnected = session(Uuid::from_u128(3), "/work/c", "host", None);
-        disconnected.last_messaged_at = "2026-08-29T11:00:00Z".to_string();
-        disconnected.status = SessionStatus::Disconnected;
+        disconnected.info.last_messaged_at = "2026-08-29T11:00:00Z".to_string();
+        disconnected.info.status = SessionStatus::Disconnected;
         let mut visible_live = session(Uuid::from_u128(4), "/work/d", "host", None);
-        visible_live.last_messaged_at = "2026-08-29T10:00:00Z".to_string();
+        visible_live.info.last_messaged_at = "2026-08-29T10:00:00Z".to_string();
 
         assert_eq!(
             termination_focus_fallback(
@@ -269,11 +280,11 @@ mod tests {
                     disconnected,
                     visible_live.clone(),
                 ],
-                terminated.id,
-                &HashSet::from([hidden_newest.id]),
-                &HashSet::from([visible_live.id]),
+                terminated.key,
+                &HashSet::from([hidden_newest.key]),
+                &HashSet::from([visible_live.key]),
             ),
-            Some(visible_live.id)
+            Some(visible_live.key)
         );
     }
 
@@ -300,7 +311,7 @@ mod tests {
         reversed.reverse();
         reversed.sort_by(session_display_cmp);
 
-        let ids = |v: &[SessionInfo]| v.iter().map(|s| s.id).collect::<Vec<_>>();
+        let ids = |v: &[PortalSession]| v.iter().map(|s| s.info.id).collect::<Vec<_>>();
         assert_eq!(ids(&forward), ids(&reversed));
         // And it's the id order, since every other key is equal.
         assert_eq!(ids(&forward), vec![a, b, c]);
@@ -324,7 +335,7 @@ mod tests {
         second.reverse();
         second.sort_by(session_display_cmp);
 
-        let ids = |v: &[SessionInfo]| v.iter().map(|s| s.id).collect::<Vec<_>>();
+        let ids = |v: &[PortalSession]| v.iter().map(|s| s.info.id).collect::<Vec<_>>();
         assert_eq!(ids(&first), ids(&second));
         // wt1 sorts before wt2 on the top-level folder name.
         assert_eq!(ids(&first), vec![a, b]);
@@ -340,9 +351,9 @@ mod tests {
         let codex = Uuid::from_u128(200);
         let mk = || {
             let mut c = session(claude, "/home/me/app", "h", Some("main"));
-            c.agent_type = AgentType::Claude;
+            c.info.agent_type = AgentType::Claude;
             let mut x = session(codex, "/home/me/app", "h", Some("feature"));
-            x.agent_type = AgentType::Codex;
+            x.info.agent_type = AgentType::Codex;
             vec![x, c] // codex-first input order on purpose
         };
 
@@ -350,17 +361,17 @@ mod tests {
         v.sort_by(session_display_cmp);
         // "claude" < "codex" → claude first, regardless of input order.
         assert_eq!(
-            v.iter().map(|s| s.id).collect::<Vec<_>>(),
+            v.iter().map(|s| s.info.id).collect::<Vec<_>>(),
             vec![claude, codex]
         );
 
         // Flip/clear both branches — order must NOT change (branch isn't keyed).
         let mut v2 = mk();
-        v2[0].git_branch = Some("totally-different".to_string());
-        v2[1].git_branch = None;
+        v2[0].info.git_branch = Some("totally-different".to_string());
+        v2[1].info.git_branch = None;
         v2.sort_by(session_display_cmp);
         assert_eq!(
-            v2.iter().map(|s| s.id).collect::<Vec<_>>(),
+            v2.iter().map(|s| s.info.id).collect::<Vec<_>>(),
             vec![claude, codex]
         );
     }
@@ -379,7 +390,7 @@ mod tests {
             session(b, "/b", "h", None),
             session(c, "/c", "h", None),
         ];
-        assert_eq!(resolve_focus_index(&order1, Some(b), &hidden, 0), 1);
+        assert_eq!(resolve_focus_index(&order1, Some(key(b)), &hidden, 0), 1);
 
         // A later poll surfaces the same sessions in a different order; focus
         // by id resolves to b's NEW index, not the stale 1.
@@ -388,14 +399,14 @@ mod tests {
             session(b, "/b", "h", None),
             session(a, "/a", "h", None),
         ];
-        assert_eq!(resolve_focus_index(&order2, Some(b), &hidden, 1), 1);
+        assert_eq!(resolve_focus_index(&order2, Some(key(b)), &hidden, 1), 1);
 
         let order3 = vec![
             session(b, "/b", "h", None),
             session(a, "/a", "h", None),
             session(c, "/c", "h", None),
         ];
-        assert_eq!(resolve_focus_index(&order3, Some(b), &hidden, 1), 0);
+        assert_eq!(resolve_focus_index(&order3, Some(key(b)), &hidden, 1), 0);
     }
 
     /// Nothing focused yet (`None`) falls back to the first non-hidden session.
@@ -404,7 +415,7 @@ mod tests {
         let a = Uuid::from_u128(1);
         let b = Uuid::from_u128(2);
         let mut hidden = HashSet::new();
-        hidden.insert(a);
+        hidden.insert(key(a));
 
         let sessions = vec![session(a, "/a", "h", None), session(b, "/b", "h", None)];
         // a is hidden → first non-hidden is b at index 1.
@@ -428,16 +439,25 @@ mod tests {
             session(b, "/b", "h", None),
             session(launched, "/c", "h", None),
         ];
-        assert_eq!(resolve_focus_index(&full, Some(launched), &hidden, 0), 2);
+        assert_eq!(
+            resolve_focus_index(&full, Some(key(launched)), &hidden, 0),
+            2
+        );
 
         // A stale poll response momentarily lacks the new session. Holding the
         // previous index (clamped to bounds) avoids the "jump to the first
         // session" bug — it does NOT fall back to index 0.
         let stale = vec![session(a, "/a", "h", None), session(b, "/b", "h", None)];
-        assert_eq!(resolve_focus_index(&stale, Some(launched), &hidden, 2), 1);
+        assert_eq!(
+            resolve_focus_index(&stale, Some(key(launched)), &hidden, 2),
+            1
+        );
 
         // Next refresh brings the session back; focus resolves by id again.
-        assert_eq!(resolve_focus_index(&full, Some(launched), &hidden, 1), 2);
+        assert_eq!(
+            resolve_focus_index(&full, Some(key(launched)), &hidden, 1),
+            2
+        );
     }
 
     /// Grouped ordering sorts sessions into alphabetical host sections, and the
@@ -461,7 +481,11 @@ mod tests {
         reversed.reverse();
         reversed.sort_by(session_display_cmp_grouped);
 
-        let hosts = |v: &[SessionInfo]| v.iter().map(|s| s.hostname.clone()).collect::<Vec<_>>();
+        let hosts = |v: &[PortalSession]| {
+            v.iter()
+                .map(|s| s.info.hostname.clone())
+                .collect::<Vec<_>>()
+        };
         // alpha < mid < zeta, regardless of input order.
         assert_eq!(hosts(&forward), vec!["alpha", "mid", "zeta"]);
         assert_eq!(hosts(&forward), hosts(&reversed));
@@ -488,7 +512,7 @@ mod tests {
         let mut ungrouped = mk();
         ungrouped.sort_by(session_display_cmp);
 
-        let ids = |v: &[SessionInfo]| v.iter().map(|s| s.id).collect::<Vec<_>>();
+        let ids = |v: &[PortalSession]| v.iter().map(|s| s.info.id).collect::<Vec<_>>();
         // Single host → grouped is identical to ungrouped, i.e. folder order.
         assert_eq!(ids(&grouped), ids(&ungrouped));
         assert_eq!(ids(&grouped), vec![a, b, c]);
@@ -510,7 +534,7 @@ mod tests {
 
         // Named host first; the two empty/whitespace hosts share the trailing
         // unknown bucket (ordered among themselves by the total inner key).
-        assert_eq!(v[0].id, named);
+        assert_eq!(v[0].info.id, named);
         assert_eq!(host_group_label(&v[0]), "web-01");
         assert_eq!(host_group_label(&v[1]), UNKNOWN_HOST_LABEL);
         assert_eq!(host_group_label(&v[2]), UNKNOWN_HOST_LABEL);
@@ -536,15 +560,15 @@ mod tests {
         sessions.sort_by(session_display_cmp_grouped);
         // Grouped order is alpha(b), mid(c), zeta(a).
         assert_eq!(
-            sessions.iter().map(|s| s.id).collect::<Vec<_>>(),
+            sessions.iter().map(|s| s.info.id).collect::<Vec<_>>(),
             vec![b, c, a]
         );
 
         // Focused session `a` (host zeta) resolves to its grouped index 2, not
         // its pre-sort index 0.
-        assert_eq!(resolve_focus_index(&sessions, Some(a), &hidden, 0), 2);
-        assert_eq!(resolve_focus_index(&sessions, Some(b), &hidden, 0), 0);
-        assert_eq!(resolve_focus_index(&sessions, Some(c), &hidden, 0), 1);
+        assert_eq!(resolve_focus_index(&sessions, Some(key(a)), &hidden, 0), 2);
+        assert_eq!(resolve_focus_index(&sessions, Some(key(b)), &hidden, 0), 0);
+        assert_eq!(resolve_focus_index(&sessions, Some(key(c)), &hidden, 0), 1);
     }
 
     /// The transient-miss hold must never index past the end of the list.
@@ -556,9 +580,12 @@ mod tests {
 
         let sessions = vec![session(a, "/a", "h", None)];
         // previous_index 5 is stale/out of range → clamped to the last index.
-        assert_eq!(resolve_focus_index(&sessions, Some(gone), &hidden, 5), 0);
+        assert_eq!(
+            resolve_focus_index(&sessions, Some(key(gone)), &hidden, 5),
+            0
+        );
 
         // Empty list can't hold anything → 0.
-        assert_eq!(resolve_focus_index(&[], Some(gone), &hidden, 3), 0);
+        assert_eq!(resolve_focus_index(&[], Some(key(gone)), &hidden, 3), 0);
     }
 }

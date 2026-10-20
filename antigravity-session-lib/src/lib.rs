@@ -1,11 +1,13 @@
-//! Google Antigravity backend for `session-lib`.
+//! Antigravity backend for `session-lib`.
 //!
-//! Antigravity's `localharness` bootstraps over binary stdio and then moves to
-//! an authenticated loopback WebSocket. The transport and step assembly live
-//! in `antigravity-codes`; this crate maps that runtime onto Portal's neutral
-//! `Session<A>` boundary.
+//! This is intentionally a preview integration. The harness runs with its
+//! read-only built-in tools, launches per turn, and is shut down after every
+//! accepted turn so `sessionEndResponse` confirms state was flushed before the
+//! portal reports the turn durable.
 
 mod agent;
 mod io_task;
 
 pub use agent::AntigravityAgent;
+
+pub const DEFAULT_MODEL: &str = "gemini-flash-latest";

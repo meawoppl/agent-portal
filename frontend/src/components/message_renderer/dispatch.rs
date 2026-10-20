@@ -48,10 +48,15 @@ pub(crate) fn render_frame(ctx: FrameRenderContext<'_>) -> Html {
                 renderers::render_system_message(&msg, ctx.timestamp)
             }
             AgentFrame::Claude(ClaudeMessage::Assistant(msg)) => {
-                renderers::render_assistant_message(&msg, ctx.timestamp, ctx.session_id)
+                renderers::render_assistant_message(
+                    &msg,
+                    ctx.timestamp,
+                    ctx.session_id,
+                    ctx.on_claude_login,
+                )
             }
             AgentFrame::Claude(ClaudeMessage::Result(msg)) => {
-                renderers::render_result_message(&msg, ctx.turn_metrics)
+                renderers::render_result_message(&msg, ctx.turn_metrics, ctx.on_claude_login)
             }
             AgentFrame::Claude(ClaudeMessage::User(msg)) => renderers::render_user_message(
                 &msg,
@@ -94,8 +99,7 @@ pub(crate) fn render_frame(ctx: FrameRenderContext<'_>) -> Html {
             }
             AgentFrame::Codex(_)
             | AgentFrame::Muse(_)
-            | AgentFrame::AntigravityStep(_)
-            | AgentFrame::AntigravityTurnCompleted(_)
+            | AgentFrame::Antigravity(_)
             | AgentFrame::RawJson => render_raw_json(json),
         },
         FrameRenderer::Codex => match frame {
@@ -127,53 +131,10 @@ pub(crate) fn render_frame(ctx: FrameRenderContext<'_>) -> Html {
             _ => html! {},
         },
         FrameRenderer::Antigravity => match frame {
-            AgentFrame::AntigravityStep(step) => render_antigravity_step(&step),
-            AgentFrame::AntigravityTurnCompleted(terminal) => {
-                render_antigravity_terminal(&terminal, ctx.turn_metrics)
-            }
+            AgentFrame::Antigravity(value) => renderers::render_antigravity_frame(&value),
             _ => html! {},
         },
         FrameRenderer::RawJson => render_raw_json(json),
-    }
-}
-
-fn render_antigravity_terminal(
-    terminal: &shared::antigravity::AntigravityTurnCompletedEnvelope,
-    turn_metrics: Option<&shared::TurnMetrics>,
-) -> Html {
-    html! {
-        <div class="claude-message result-message">
-            <div class="message-header">
-                <span class="message-type-badge result">{ "Antigravity" }</span>
-                <span>{ terminal.status.as_str() }</span>
-            </div>
-            { super::turn_metrics_footer::render_turn_metrics_footer(turn_metrics) }
-        </div>
-    }
-}
-
-fn render_antigravity_step(step: &shared::antigravity::AntigravityStepEnvelope) -> Html {
-    html! {
-        <div class="claude-message assistant-message antigravity-message">
-            <div class="message-header">
-                <span class="message-type-badge assistant">{ "Antigravity" }</span>
-                <span>{ step.kind.display_name() }</span>
-            </div>
-            <div class="message-body">
-                if !step.thinking.is_empty() {
-                    <details class="thinking-section">
-                        <summary>{ "Thinking" }</summary>
-                        <pre>{ &step.thinking }</pre>
-                    </details>
-                }
-                if !step.text.is_empty() {
-                    <div class="text-content">{ &step.text }</div>
-                }
-                if let Some(error) = step.error_message.as_deref() {
-                    <div class="error-message">{ error }</div>
-                }
-            </div>
-        </div>
     }
 }
 
@@ -186,6 +147,7 @@ pub(crate) fn render_identity_group_part(
     session_id: Uuid,
     continuation_statuses: &HashMap<Uuid, String>,
     on_schedule_continuation: Callback<Uuid>,
+    on_claude_login: Option<Callback<()>>,
 ) -> Option<Html> {
     if let Some(shared::MessageSource::Agent { .. }) = message.source() {
         return Some(renderers::render_agent_message_body(
@@ -204,7 +166,7 @@ pub(crate) fn render_identity_group_part(
             renderers::render_optimistic_user_message_content(&msg, session_id)
         }
         AgentFrame::Claude(ClaudeMessage::Assistant(msg)) => {
-            renderers::render_assistant_message_content(&msg, session_id)
+            renderers::render_assistant_message_content(&msg, session_id, on_claude_login)
         }
         AgentFrame::Claude(ClaudeMessage::Portal(msg)) => {
             Some(renderers::render_portal_message_content(
@@ -217,7 +179,7 @@ pub(crate) fn render_identity_group_part(
         AgentFrame::Codex(event) => {
             crate::components::codex_renderer::render_codex_frame_content(&event, session_id)
         }
-        AgentFrame::AntigravityStep(step) => Some(render_antigravity_step(&step)),
+        AgentFrame::Antigravity(value) => renderers::render_antigravity_frame_content(&value),
         _ => None,
     }
 }

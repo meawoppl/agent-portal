@@ -3,11 +3,13 @@
 //! Restricted to users with is_admin=true. Provides system overview,
 //! user management, and session management capabilities.
 
+mod federation_tab;
 mod overview_tab;
 mod sessions_tab;
 mod subdomains_tab;
 mod users_tab;
 
+use federation_tab::AdminFederationTab;
 use overview_tab::AdminOverviewTab;
 use sessions_tab::AdminSessionsTab;
 use subdomains_tab::AdminSubdomainsTab;
@@ -38,6 +40,7 @@ enum AdminTab {
     Users,
     Sessions,
     Subdomains,
+    Federation,
 }
 
 // ============================================================================
@@ -440,6 +443,7 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
     let on_users_tab = make_tab_handler(AdminTab::Users);
     let on_sessions_tab = make_tab_handler(AdminTab::Sessions);
     let on_subdomains_tab = make_tab_handler(AdminTab::Subdomains);
+    let on_federation_tab = make_tab_handler(AdminTab::Federation);
 
     // Cancel confirmation
     let on_cancel_confirm = {
@@ -510,6 +514,7 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
                                 >
                                     { "Subdomains" }
                                 </button>
+                                <button class={classes!("tab-btn", if *active_tab == AdminTab::Federation { Some("active") } else { None })} onclick={on_federation_tab}>{"Federation"}</button>
                             </nav>
 
                             <div class="admin-content">
@@ -538,6 +543,7 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
                                                 />
                                             }
                                         }
+                                        AdminTab::Federation => html! { <AdminFederationTab /> },
                                         AdminTab::Subdomains => {
                                             html! { <AdminSubdomainsTab /> }
                                         }

@@ -1,0 +1,22 @@
+name = "inventory"
+install = false
+prompts = "ignored"
+toolchains = 42
+
+[surface]
+start = false
+stop = 42
+default_width_percent = 300
+
+[[commands]]
+name = "without-run"
+[[commands]]
+name = "ignored-run"
+run = false
+
+[[skills]]
+name = "review"
+path = "skills/review/SKILL.md"
+
+[[detect]]
+name = "empty"

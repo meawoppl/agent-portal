@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200" font-family="'Segoe UI','Noto Sans',sans-serif">
+  <rect width="2000" height="1200" fill="#16161e"/>
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2198 · Fit the service monitor panel in the window and say when a launcher has no readings</text>
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">The click-open table hung off the chip and ran off the left edge; silent launchers showed zeros.</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">Now the panel is centred in the window and a launcher that never reported says so, with its version.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="2"/>
+
+  <text x="105" y="235" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1090" y="235" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1140" stroke="#3d4666" stroke-width="2" stroke-dasharray="12 14"/>
+
+  <!-- BEFORE: panel clipped at the left edge, zero rows -->
+  <rect x="105" y="290" width="840" height="60" rx="8" fill="#1a1b26" stroke="#3d4666" stroke-width="2"/>
+  <text x="129" y="328" font-size="22" fill="#565f89">window edge</text>
+  <rect x="105" y="370" width="700" height="230" rx="8" fill="#1e202e" stroke="#f7768e" stroke-width="3"/>
+  <text x="129" y="410" font-size="20" fill="#565f89">host CPU   process                 host RAM        load 1 / 5 / 15</text>
+  <text x="129" y="450" font-size="20" fill="#c0caf5">9b068fe3     1%    0% of 1 core · 801 MB   3.6 GB / 7.6 GB  0.10 / 0.20 / 0.21</text>
+  <text x="129" y="490" font-size="20" fill="#f7768e">main Matthews   0%    0% of 1 core · 0 B RSS   0 B / 0 B   0.00 / 0.00 on 0 cores</text>
+  <text x="129" y="530" font-size="20" fill="#f7768e">ench cfl-test   0%    0% of 1 core · 0 B RSS   0 B / 0 B   0.00 / 0.00 on 0 cores</text>
+  <text x="129" y="570" font-size="20" fill="#f7768e">c meawoppl-fc   0%    0% of 1 core · 0 B RSS   0 B / 0 B   0.00 / 0.00 on 0 cores</text>
+  <line x1="105" y1="370" x2="105" y2="600" stroke="#f7768e" stroke-width="6"/>
+  <text x="129" y="650" font-size="23" fill="#f7768e">Name column cut off at the window edge</text>
+  <text x="129" y="684" font-size="23" fill="#f7768e">Unreported launchers shown as zeros and "stale"</text>
+
+  <rect x="105" y="740" width="360" height="150" rx="8" fill="#1e202e" stroke="#7aa2f7" stroke-width="3"/>
+  <text x="129" y="790" font-size="26" fill="#7aa2f7">Panel anchored to chip</text>
+  <text x="129" y="834" font-size="23" fill="#c0caf5">absolute, centred on the chip</text>
+  <text x="129" y="868" font-size="23" fill="#c0caf5">1100 px cap, seven columns</text>
+
+  <path d="M465 815H565" stroke="#565f89" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <rect x="565" y="740" width="380" height="150" rx="8" fill="#1e202e" stroke="#f7768e" stroke-width="3"/>
+  <text x="589" y="790" font-size="26" fill="#f7768e">Sample always present</text>
+  <text x="589" y="834" font-size="23" fill="#c0caf5">missing reading = default zeros</text>
+  <text x="589" y="868" font-size="23" fill="#c0caf5">old launcher looks dead, not old</text>
+
+  <!-- AFTER: fitted panel, honest rows -->
+  <rect x="1090" y="290" width="840" height="60" rx="8" fill="#1a1b26" stroke="#3d4666" stroke-width="2"/>
+  <text x="1114" y="328" font-size="22" fill="#565f89">window edge</text>
+  <rect x="1150" y="370" width="720" height="230" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1174" y="410" font-size="20" fill="#565f89">service             CPU   RAM used / total  load 1 / 5 / 15          sampled</text>
+  <text x="1174" y="446" font-size="20" fill="#c0caf5">BACKEND backend     11%   36.2 / 62.2 GB   16.8 / 16.1 / 15.3 x80   0s ago</text>
+  <text x="1174" y="486" font-size="20" fill="#c0caf5">LAUNCHER bench      12%   5.5 / 14.9 GB    1.70 / 1.70 / 1.70 x8    0s ago</text>
+  <text x="1174" y="526" font-size="20" fill="#c0caf5">LAUNCHER fc         72%   12.1 / 14.9 GB   6.40 / 6.40 / 6.40 x8    0s ago</text>
+  <text x="1174" y="566" font-size="20" fill="#9ece6a">LAUNCHER old-mac    no readings (v2.14.3)                         -</text>
+  <text x="1114" y="650" font-size="23" fill="#9ece6a">792 px wide, centred in the viewport at 1400 and 1150 px</text>
+  <text x="1114" y="684" font-size="23" fill="#9ece6a">Silent launcher names its version; tooltip says to update it</text>
+
+  <rect x="1090" y="740" width="360" height="150" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1114" y="790" font-size="26" fill="#9ece6a">Panel fixed to viewport</text>
+  <text x="1114" y="834" font-size="23" fill="#c0caf5">top measured from the chip</text>
+  <text x="1114" y="868" font-size="23" fill="#c0caf5">six columns, stacked name + host</text>
+
+  <path d="M1450 815H1550" stroke="#565f89" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <rect x="1550" y="740" width="380" height="150" rx="8" fill="#1e202e" stroke="#7aa2f7" stroke-width="3"/>
+  <text x="1574" y="790" font-size="26" fill="#7aa2f7">sample: Option, version</text>
+  <text x="1574" y="834" font-size="23" fill="#c0caf5">None until the first reading</text>
+  <text x="1574" y="868" font-size="23" fill="#c0caf5">chip prefers a reporting launcher</text>
+
+  <text x="1090" y="960" font-size="23" fill="#a9b1d6">Checked headless with two reporting launchers and one silent v2.14.3;</text>
+  <text x="1090" y="994" font-size="23" fill="#a9b1d6">frontend 700 and shared 244 tests pass, clippy and stylelint clean.</text>
+
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0 0L12 6L0 12Z" fill="#565f89"/>
+    </marker>
+  </defs>
+</svg>

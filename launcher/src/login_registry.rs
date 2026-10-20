@@ -83,7 +83,7 @@ impl LoginRegistry {
             }
             AgentType::Antigravity => {
                 return Err(
-                    "Antigravity uses GEMINI_API_KEY or Vertex application credentials on the launcher host"
+                    "antigravity sign-in uses GEMINI_API_KEY or Vertex ADC; no interactive sign-in flow"
                         .to_string(),
                 );
             }

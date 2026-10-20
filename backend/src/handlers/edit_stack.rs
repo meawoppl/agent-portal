@@ -6,7 +6,8 @@ use crate::schema::{session_edit_stack_items, users};
 use crate::AppState;
 use axum::{
     extract::{Path, State},
-    http::HeaderMap,
+    http::{header, HeaderMap, HeaderValue, StatusCode},
+    response::{IntoResponse, Response},
     Json,
 };
 use diesel::prelude::*;
@@ -26,6 +27,9 @@ const MAX_EDIT_STACK_TITLE_CHARS: usize = 200;
 const MAX_EDIT_STACK_TEXT_CHARS: usize = 16_000;
 const MAX_EDIT_STACK_JSON_CHARS: usize = 64_000;
 const MAX_EDIT_STACK_IMAGE_CHARS: usize = 1_500_000;
+/// Context-window fraction at or above which a Claude session is compacted
+/// before the next queued item is dispatched into it.
+const EDIT_STACK_COMPACT_FRACTION: f64 = 0.5;
 
 pub async fn list_edit_stack(
     State(app_state): State<Arc<AppState>>,
@@ -52,6 +56,71 @@ pub async fn list_agent_edit_stack(
         current_user_id,
         session_id,
     )?))
+}
+
+/// Where an item's captured image is served from.
+pub(crate) fn image_url_for(session_id: Uuid, item_id: Uuid) -> String {
+    format!("/api/sessions/{session_id}/edit-stack/{item_id}/image")
+}
+
+/// `(mime, bytes)` of a `data:<mime>;base64,<payload>` URL.
+pub(crate) fn decode_image_data_url(value: &str) -> Option<(String, Vec<u8>)> {
+    use base64::Engine;
+    let rest = value.strip_prefix("data:")?;
+    let (meta, payload) = rest.split_once(',')?;
+    let mut parts = meta.split(';');
+    let mime = parts.next().unwrap_or("").trim();
+    if !mime.starts_with("image/") || !parts.any(|p| p.trim() == "base64") {
+        return None;
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(payload.trim())
+        .ok()?;
+    Some((mime.to_string(), bytes))
+}
+
+/// The captured image of one item, decoded from its stored data URL. Items
+/// are immutable once created, so browsers may cache this for good.
+pub async fn get_edit_stack_item_image(
+    State(app_state): State<Arc<AppState>>,
+    CurrentUserId(current_user_id): CurrentUserId,
+    Path((session_id, item_id)): Path<(Uuid, Uuid)>,
+) -> Result<Response, AppError> {
+    let mut conn = app_state.conn()?;
+    let _session = verify_session_reader(&mut conn, session_id, current_user_id)?;
+    let stored: Option<Option<String>> = session_edit_stack_items::table
+        .filter(session_edit_stack_items::session_id.eq(session_id))
+        .filter(session_edit_stack_items::id.eq(item_id))
+        .filter(session_edit_stack_items::status.ne("deleted"))
+        .select(session_edit_stack_items::image_data_url)
+        .first(&mut conn)
+        .optional()?;
+    let Some((mime, bytes)) = stored.flatten().as_deref().and_then(decode_image_data_url) else {
+        return Ok((StatusCode::NOT_FOUND, "no image on this edit stack item").into_response());
+    };
+    let mut response = bytes.into_response();
+    let headers = response.headers_mut();
+    if let Ok(value) = HeaderValue::from_str(&mime) {
+        headers.insert(header::CONTENT_TYPE, value);
+    }
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("private, max-age=31536000, immutable"),
+    );
+    Ok(response)
+}
+
+/// Items with their inline images dropped: what a forward origin (the plugin
+/// that posted an annotation) gets back, since it only needs to know the
+/// post was queued.
+pub(crate) fn without_images(items: Vec<EditStackItem>) -> Vec<EditStackItem> {
+    items
+        .into_iter()
+        .map(|item| EditStackItem {
+            image_data_url: None,
+            ..item
+        })
+        .collect()
 }
 
 pub(crate) fn list_edit_stack_for_user(
@@ -156,6 +225,21 @@ pub(crate) fn try_send_next_pending_edit_stack_item(
         return Ok(false);
     };
 
+    use crate::handlers::websocket::CompactionGate;
+    match session_manager.edit_stack_compaction_gate(session_id) {
+        CompactionGate::Hold => return Ok(false),
+        CompactionGate::Proceed => {}
+        CompactionGate::Check => {
+            if let Some(fraction) = claude_context_fraction(&mut conn, session_id)? {
+                if fraction >= EDIT_STACK_COMPACT_FRACTION {
+                    drop(conn);
+                    request_compaction(db_pool, session_manager, session_key, session_id, fraction);
+                    return Ok(false);
+                }
+            }
+        }
+    }
+
     let Some(item) = enrich_items(&mut conn, vec![row.clone()])?
         .into_iter()
         .next()
@@ -228,6 +312,57 @@ pub(crate) fn try_send_next_pending_edit_stack_item(
     .execute(&mut conn)?;
     broadcast_edit_stack_items(db_pool, session_manager, session_key, session_id)?;
     Ok(false)
+}
+
+/// Context-window fraction of the session's latest turn, when that turn was a
+/// Claude turn with a known window. Other agents are never compacted here.
+fn claude_context_fraction(
+    conn: &mut crate::db::DbConnection,
+    session_id: Uuid,
+) -> Result<Option<f64>, AppError> {
+    use crate::models::TurnMetric;
+    use crate::schema::turn_metrics;
+
+    let latest: Option<TurnMetric> = turn_metrics::table
+        .filter(turn_metrics::session_id.eq(session_id))
+        .filter(turn_metrics::model_context_window.gt(0))
+        .order(turn_metrics::started_at.desc())
+        .select(TurnMetric::as_select())
+        .first(conn)
+        .optional()?;
+    Ok(latest
+        .filter(|metric| metric.agent_type == "claude")
+        .and_then(|metric| metric.into_wire().context_fraction()))
+}
+
+/// Send `/compact` ahead of the next queued item. The item stays pending; the
+/// compaction's turn results re-run dispatch (see `edit_stack_compaction.rs`).
+fn request_compaction(
+    db_pool: &crate::db::DbPool,
+    session_manager: &crate::handlers::websocket::SessionManager,
+    session_key: &str,
+    session_id: Uuid,
+    fraction: f64,
+) {
+    session_manager.edit_stack_compaction_requested(session_id);
+    let enqueue = session_manager.enqueue_input(
+        db_pool,
+        session_key,
+        session_id,
+        crate::handlers::websocket::EnqueueInput {
+            content: serde_json::Value::String("/compact".to_string()),
+            send_mode: None,
+            reasoning_effort: None,
+            client_msg_id: Some(Uuid::new_v4()),
+        },
+    );
+    info!(
+        "Edit-stack: compacting session {} at {:.0}% context before the next item (delivered={}, persisted={})",
+        session_id,
+        fraction * 100.0,
+        enqueue.delivered,
+        enqueue.persisted
+    );
 }
 
 pub(crate) fn broadcast_edit_stack_items(
@@ -304,15 +439,21 @@ pub async fn update_edit_stack_item(
     let mut conn = app_state.conn()?;
     let _session = verify_session_mutator(&mut conn, session_id, current_user_id)?;
     let status = req.status.as_deref().unwrap_or("pending");
-    if !matches!(status, "pending" | "sent" | "dismissed") {
+    if !matches!(
+        status,
+        "pending" | "sent" | "completed" | "failed" | "dismissed"
+    ) {
         return Err(AppError::BadRequest("unsupported edit stack status"));
     }
 
-    let target = session_edit_stack_items::table
-        .filter(session_edit_stack_items::session_id.eq(session_id))
-        .filter(session_edit_stack_items::id.eq(item_id));
-    let row: Option<SessionEditStackItem> = if status == "sent" {
-        diesel::update(target)
+    let row: Option<SessionEditStackItem> = match status {
+        "sent" => {
+            let updated = diesel::update(
+                session_edit_stack_items::table
+                    .filter(session_edit_stack_items::session_id.eq(session_id))
+                    .filter(session_edit_stack_items::id.eq(item_id))
+                    .filter(session_edit_stack_items::status.eq_any(["pending", "sent"])),
+            )
             .set((
                 session_edit_stack_items::status.eq(status),
                 session_edit_stack_items::sent_client_msg_id.eq(req.sent_client_msg_id),
@@ -321,18 +462,43 @@ pub async fn update_edit_stack_item(
             ))
             .returning(SessionEditStackItem::as_returning())
             .get_result(&mut conn)
-            .optional()?
-    } else {
-        diesel::update(target)
-            .set((
-                session_edit_stack_items::status.eq(status),
-                session_edit_stack_items::sent_client_msg_id.eq(None::<Uuid>),
-                session_edit_stack_items::sent_at.eq(None::<chrono::NaiveDateTime>),
-                session_edit_stack_items::updated_at.eq(diesel::dsl::now),
-            ))
-            .returning(SessionEditStackItem::as_returning())
-            .get_result(&mut conn)
-            .optional()?
+            .optional()?;
+            match updated {
+                Some(row) => Some(row),
+                None => session_edit_stack_items::table
+                    .filter(session_edit_stack_items::session_id.eq(session_id))
+                    .filter(session_edit_stack_items::id.eq(item_id))
+                    .select(SessionEditStackItem::as_select())
+                    .first(&mut conn)
+                    .optional()?,
+            }
+        }
+        "completed" | "failed" => diesel::update(
+            session_edit_stack_items::table
+                .filter(session_edit_stack_items::session_id.eq(session_id))
+                .filter(session_edit_stack_items::id.eq(item_id)),
+        )
+        .set((
+            session_edit_stack_items::status.eq(status),
+            session_edit_stack_items::updated_at.eq(diesel::dsl::now),
+        ))
+        .returning(SessionEditStackItem::as_returning())
+        .get_result(&mut conn)
+        .optional()?,
+        _ => diesel::update(
+            session_edit_stack_items::table
+                .filter(session_edit_stack_items::session_id.eq(session_id))
+                .filter(session_edit_stack_items::id.eq(item_id)),
+        )
+        .set((
+            session_edit_stack_items::status.eq(status),
+            session_edit_stack_items::sent_client_msg_id.eq(None::<Uuid>),
+            session_edit_stack_items::sent_at.eq(None::<chrono::NaiveDateTime>),
+            session_edit_stack_items::updated_at.eq(diesel::dsl::now),
+        ))
+        .returning(SessionEditStackItem::as_returning())
+        .get_result(&mut conn)
+        .optional()?,
     };
     if row.is_none() {
         return Err(AppError::NotFound("edit stack item not found"));
@@ -377,7 +543,7 @@ fn normalize_item(
     source: &Option<serde_json::Value>,
 ) -> Result<NewSessionEditStackItem, AppError> {
     let title = clean_text(item.title.as_deref(), MAX_EDIT_STACK_TITLE_CHARS)
-        .filter(|value| !value.is_empty())
+        .filter(|value| shared::strings::is_non_empty(value))
         .unwrap_or_else(|| format!("Edit annotation {}", index + 1));
     let body = clean_text(item.body.as_deref(), MAX_EDIT_STACK_TEXT_CHARS).unwrap_or_default();
     let image_data_url = validate_image_data_url(image_data_url(&item))?;
@@ -499,32 +665,128 @@ fn validate_image_data_url(value: Option<&str>) -> Result<Option<String>, AppErr
     Ok(Some(value.to_string()))
 }
 
+/// The session's edit stack without pulling every stored image out of the
+/// database: images ride inline only for `pending` items (which the dashboard
+/// may compose into a prompt itself); the rest get an `image_url`. A session
+/// with a long annotation history used to cost megabytes per list.
 fn load_edit_stack_items(
     conn: &mut crate::db::DbConnection,
     session_id: Uuid,
 ) -> Result<Vec<EditStackItem>, AppError> {
-    let rows: Vec<SessionEditStackItem> = session_edit_stack_items::table
+    type LightRow = (
+        Uuid,
+        Uuid,
+        Uuid,
+        String,
+        String,
+        Option<serde_json::Value>,
+        Option<serde_json::Value>,
+        String,
+        Option<Uuid>,
+        Option<chrono::NaiveDateTime>,
+        chrono::NaiveDateTime,
+        chrono::NaiveDateTime,
+        bool,
+    );
+    let rows: Vec<LightRow> = session_edit_stack_items::table
         .filter(session_edit_stack_items::session_id.eq(session_id))
         .filter(session_edit_stack_items::status.ne("deleted"))
         .order(session_edit_stack_items::created_at.asc())
-        .select(SessionEditStackItem::as_select())
+        .select((
+            session_edit_stack_items::id,
+            session_edit_stack_items::session_id,
+            session_edit_stack_items::created_by,
+            session_edit_stack_items::title,
+            session_edit_stack_items::body,
+            session_edit_stack_items::source,
+            session_edit_stack_items::context,
+            session_edit_stack_items::status,
+            session_edit_stack_items::sent_client_msg_id,
+            session_edit_stack_items::sent_at,
+            session_edit_stack_items::created_at,
+            session_edit_stack_items::updated_at,
+            session_edit_stack_items::image_data_url.is_not_null(),
+        ))
         .load(conn)?;
-    enrich_items(conn, rows)
+    let pending_with_image: Vec<Uuid> = rows
+        .iter()
+        .filter(|row| row.7 == "pending" && row.12)
+        .map(|row| row.0)
+        .collect();
+    let inline: HashMap<Uuid, String> = if pending_with_image.is_empty() {
+        HashMap::new()
+    } else {
+        session_edit_stack_items::table
+            .filter(session_edit_stack_items::id.eq_any(&pending_with_image))
+            .select((
+                session_edit_stack_items::id,
+                session_edit_stack_items::image_data_url,
+            ))
+            .load::<(Uuid, Option<String>)>(conn)?
+            .into_iter()
+            .filter_map(|(id, image)| Some((id, image?)))
+            .collect()
+    };
+    let names = creator_names(conn, rows.iter().map(|row| row.2))?;
+    Ok(rows
+        .into_iter()
+        .map(
+            |(
+                id,
+                session_id,
+                created_by,
+                title,
+                body,
+                source,
+                context,
+                status,
+                sent_client_msg_id,
+                sent_at,
+                created_at,
+                updated_at,
+                has_image,
+            )| EditStackItem {
+                id,
+                session_id,
+                created_by,
+                created_by_name: names.get(&created_by).cloned(),
+                title,
+                body,
+                source,
+                context,
+                image_data_url: inline.get(&id).cloned(),
+                image_url: has_image.then(|| image_url_for(session_id, id)),
+                status,
+                created_at: created_at.format("%Y-%m-%dT%H:%M:%S%.6f").to_string(),
+                updated_at: updated_at.format("%Y-%m-%dT%H:%M:%S%.6f").to_string(),
+                sent_at: sent_at.map(|ts| ts.format("%Y-%m-%dT%H:%M:%S%.6f").to_string()),
+                sent_client_msg_id,
+            },
+        )
+        .collect())
 }
 
-fn enrich_items(
+fn creator_names(
     conn: &mut crate::db::DbConnection,
-    rows: Vec<SessionEditStackItem>,
-) -> Result<Vec<EditStackItem>, AppError> {
-    let creator_ids = rows.iter().map(|row| row.created_by).collect::<Vec<_>>();
+    ids: impl Iterator<Item = Uuid>,
+) -> Result<HashMap<Uuid, String>, AppError> {
+    let creator_ids = ids.collect::<Vec<_>>();
     let user_rows: Vec<(Uuid, Option<String>, Option<String>, String)> = users::table
         .filter(users::id.eq_any(&creator_ids))
         .select((users::id, users::nickname, users::name, users::email))
         .load(conn)?;
-    let names: HashMap<Uuid, String> = user_rows
+    Ok(user_rows
         .into_iter()
         .map(|(id, nickname, name, email)| (id, nickname.or(name).unwrap_or(email)))
-        .collect();
+        .collect())
+}
+
+/// Full rows (image inline) for the dispatch path, which needs the image.
+fn enrich_items(
+    conn: &mut crate::db::DbConnection,
+    rows: Vec<SessionEditStackItem>,
+) -> Result<Vec<EditStackItem>, AppError> {
+    let names = creator_names(conn, rows.iter().map(|row| row.created_by))?;
 
     Ok(rows
         .into_iter()
@@ -537,6 +799,10 @@ fn enrich_items(
             body: row.body,
             source: row.source,
             context: row.context,
+            image_url: row
+                .image_data_url
+                .is_some()
+                .then(|| image_url_for(row.session_id, row.id)),
             image_data_url: row.image_data_url,
             status: row.status,
             created_at: row.created_at.format("%Y-%m-%dT%H:%M:%S%.6f").to_string(),
@@ -547,4 +813,95 @@ fn enrich_items(
             sent_client_msg_id: row.sent_client_msg_id,
         })
         .collect())
+}
+
+#[cfg(test)]
+mod image_tests {
+    use super::*;
+
+    #[test]
+    fn data_urls_decode_to_mime_and_bytes() {
+        let (mime, bytes) = decode_image_data_url("data:image/png;base64,aGVsbG8=").unwrap();
+        assert_eq!(mime, "image/png");
+        assert_eq!(bytes, b"hello");
+        assert!(decode_image_data_url("data:text/plain;base64,aGVsbG8=").is_none());
+        assert!(decode_image_data_url("data:image/png,plain").is_none());
+        assert!(decode_image_data_url("https://example.com/x.png").is_none());
+    }
+
+    /// A session with history lists light: only pending items carry the
+    /// image inline, everything with an image gets a URL, and the stored
+    /// image still decodes for the image endpoint.
+    #[test]
+    fn lists_carry_images_inline_for_pending_items_only() {
+        let Some(pool) = crate::test_support::shared_pool() else {
+            return;
+        };
+        let mut conn = pool.get().expect("conn");
+        conn.begin_test_transaction().unwrap();
+        let user = crate::test_support::insert_user(&mut conn, "edit-stack-images");
+        let session = crate::test_support::insert_session(&mut conn, user.id, "edit-stack-images");
+        let image = "data:image/png;base64,aGVsbG8=";
+        let item = |title: &str, with_image: bool| NewSessionEditStackItem {
+            session_id: session.id,
+            created_by: user.id,
+            title: title.into(),
+            body: "note".into(),
+            source: None,
+            context: None,
+            image_data_url: with_image.then(|| image.to_string()),
+        };
+        diesel::insert_into(session_edit_stack_items::table)
+            .values(&vec![
+                item("pending", true),
+                item("sent", true),
+                item("text", false),
+            ])
+            .execute(&mut conn)
+            .unwrap();
+        diesel::update(
+            session_edit_stack_items::table.filter(session_edit_stack_items::title.eq("sent")),
+        )
+        .set(session_edit_stack_items::status.eq("sent"))
+        .execute(&mut conn)
+        .unwrap();
+
+        let items = load_edit_stack_items(&mut conn, session.id).unwrap();
+        let by_title = |t: &str| items.iter().find(|i| i.title == t).unwrap();
+        let pending = by_title("pending");
+        assert_eq!(pending.image_data_url.as_deref(), Some(image));
+        assert_eq!(
+            pending.image_url.as_deref(),
+            Some(image_url_for(session.id, pending.id).as_str())
+        );
+        let sent = by_title("sent");
+        assert!(
+            sent.image_data_url.is_none(),
+            "dispatched items drop the inline image"
+        );
+        assert!(sent.image_url.is_some());
+        let text = by_title("text");
+        assert!(text.image_data_url.is_none() && text.image_url.is_none());
+
+        // What the image endpoint serves for the dispatched item.
+        let stored: Option<String> = session_edit_stack_items::table
+            .find(sent.id)
+            .select(session_edit_stack_items::image_data_url)
+            .first(&mut conn)
+            .unwrap();
+        let (mime, bytes) = decode_image_data_url(stored.as_deref().unwrap()).unwrap();
+        assert_eq!(
+            (mime.as_str(), bytes.as_slice()),
+            ("image/png", &b"hello"[..])
+        );
+    }
+
+    #[test]
+    fn image_urls_point_at_the_item() {
+        let (s, i) = (Uuid::nil(), Uuid::nil());
+        assert_eq!(
+            image_url_for(s, i),
+            "/api/sessions/00000000-0000-0000-0000-000000000000/edit-stack/00000000-0000-0000-0000-000000000000/image"
+        );
+    }
 }

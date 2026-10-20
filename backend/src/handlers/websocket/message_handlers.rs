@@ -1,4 +1,4 @@
-use super::{ProxySender, SessionId, SessionManager};
+use super::{CompactionPhase, ProxySender, SessionId, SessionManager};
 use crate::db::DbPool;
 use diesel::prelude::*;
 use serde::Deserialize;
@@ -220,55 +220,49 @@ pub fn handle_claude_output(ctx: ClaudeOutputContext<'_>, frame: ClaudeOutputFra
         None
     };
 
-    // Validate Claude frames against the Claude SDK. Other agents deliberately
-    // carry different protocol envelopes; trying to parse them here only
-    // creates false warnings and historically obscured real wire drift.
-    if agent_type == AgentType::Claude {
-        match shared::ClaudeOutput::deserialize(&content) {
-            Ok(parsed) => {
-                if let shared::ClaudeOutput::System(ref sys) = parsed {
-                    if sys.is_task_started() && sys.as_task_started().is_none() {
-                        warn!(
-                            "task_started message matched subtype but failed struct parse: {}",
-                            content
-                        );
-                    }
-                    if sys.is_task_progress() && sys.as_task_progress().is_none() {
-                        warn!(
-                            "task_progress message matched subtype but failed struct parse: {}",
-                            content
-                        );
-                    }
-                    if sys.is_task_notification() {
-                        match sys.as_task_notification() {
-                            Some(notif) => {
-                                // A sub-agent (Task tool) just finished. Its tokens
-                                // aren't in the parent's `result.usage`, so fold the
-                                // completed task's cumulative `total_tokens` into the
-                                // session's running sub-agent total (see
-                                // `SessionManager::subagent_tokens`). `task_notification`
-                                // fires once per task, so summing is exact.
-                                if let (Some(sid), Some(usage)) =
-                                    (db_session_id, notif.usage.as_ref())
-                                {
-                                    session_manager
-                                        .add_subagent_tokens(sid, usage.total_tokens as i64);
-                                }
+    // Validate that content roundtrips through ClaudeOutput parsing (frontend depends on this)
+    match shared::ClaudeOutput::deserialize(&content) {
+        Ok(parsed) => {
+            if let shared::ClaudeOutput::System(ref sys) = parsed {
+                if sys.is_task_started() && sys.as_task_started().is_none() {
+                    warn!(
+                        "task_started message matched subtype but failed struct parse: {}",
+                        content
+                    );
+                }
+                if sys.is_task_progress() && sys.as_task_progress().is_none() {
+                    warn!(
+                        "task_progress message matched subtype but failed struct parse: {}",
+                        content
+                    );
+                }
+                if sys.is_task_notification() {
+                    match sys.as_task_notification() {
+                        Some(notif) => {
+                            // A sub-agent (Task tool) just finished. Its tokens
+                            // aren't in the parent's `result.usage`, so fold the
+                            // completed task's cumulative `total_tokens` into the
+                            // session's running sub-agent total (see
+                            // `SessionManager::subagent_tokens`). `task_notification`
+                            // fires once per task, so summing is exact.
+                            if let (Some(sid), Some(usage)) = (db_session_id, notif.usage.as_ref())
+                            {
+                                session_manager.add_subagent_tokens(sid, usage.total_tokens as i64);
                             }
-                            None => warn!(
+                        }
+                        None => warn!(
                             "task_notification message matched subtype but failed struct parse: {}",
                             content
                         ),
-                        }
                     }
                 }
             }
-            Err(e) => {
-                warn!(
-                    "ClaudeOutput parse failed for message: {} — raw: {}",
-                    e, content
-                );
-            }
+        }
+        Err(e) => {
+            warn!(
+                "ClaudeOutput parse failed for message: {} — raw: {}",
+                e, content
+            );
         }
     }
 
@@ -300,6 +294,11 @@ pub fn handle_claude_output(ctx: ClaudeOutputContext<'_>, frame: ClaudeOutputFra
     let normalized = normalize_output_content(content);
     let content = normalized.content;
     let releases_edit_stack = edit_stack_output_releases_next(agent_type.as_str(), &content);
+    if let Some(session_id) = db_session_id {
+        if agent_type == AgentType::Claude && is_claude_compaction_boundary(&content) {
+            session_manager.edit_stack_compaction_boundary(session_id);
+        }
+    }
 
     // Insert the message FIRST so the live broadcast's `meta` carries the
     // server-assigned `created_at` the historical-read path would surface
@@ -421,8 +420,17 @@ pub fn handle_claude_output(ctx: ClaudeOutputContext<'_>, frame: ClaudeOutputFra
     if releases_edit_stack {
         if let Some(session_id) = db_session_id {
             session_manager.mark_turn_finished(session_id);
+            let compaction = session_manager.edit_stack_compaction_turn_ended(session_id);
             if inserted_created_at.is_some() {
                 if let Some(key) = session_key.as_ref() {
+                    if compaction == Some(CompactionPhase::AwaitingReminder) {
+                        release_edit_stack_after_reminder_timeout(
+                            db_pool.clone(),
+                            session_manager.clone(),
+                            key.clone(),
+                            session_id,
+                        );
+                    }
                     if let Err(err) =
                         crate::handlers::edit_stack::try_send_next_pending_edit_stack_item(
                             db_pool,
@@ -442,6 +450,50 @@ pub fn handle_claude_output(ctx: ClaudeOutputContext<'_>, frame: ClaudeOutputFra
     }
 }
 
+/// How long to wait for the reminder turn the proxy injects after a
+/// compaction before dispatching the next edit-stack item anyway.
+const EDIT_STACK_REMINDER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+fn is_claude_compaction_boundary(content: &serde_json::Value) -> bool {
+    if content.get("type").and_then(|value| value.as_str()) != Some("system") {
+        return false;
+    }
+    serde_json::from_value::<shared::SystemMessage>(content.clone())
+        .is_ok_and(|sys| shared::is_compaction_boundary(&sys))
+}
+
+/// The edit-stack queue holds while the post-compaction reminder turn runs.
+/// If that turn never produces a result (injection failed), release the queue
+/// after a timeout instead of stalling it.
+fn release_edit_stack_after_reminder_timeout(
+    db_pool: DbPool,
+    session_manager: SessionManager,
+    session_key: SessionId,
+    session_id: Uuid,
+) {
+    tokio::spawn(async move {
+        tokio::time::sleep(EDIT_STACK_REMINDER_TIMEOUT).await;
+        if !session_manager.edit_stack_compaction_reminder_timed_out(session_id) {
+            return;
+        }
+        warn!(
+            "No reminder turn after compaction in session {}; releasing the edit stack",
+            session_id
+        );
+        if let Err(err) = crate::handlers::edit_stack::try_send_next_pending_edit_stack_item(
+            &db_pool,
+            &session_manager,
+            session_key.as_str(),
+            session_id,
+        ) {
+            warn!(
+                "Could not promote next edit-stack item after compaction for session {}: {:?}",
+                session_id, err
+            );
+        }
+    });
+}
+
 fn edit_stack_output_releases_next(agent_type: &str, content: &serde_json::Value) -> bool {
     let kind = content.get("type").and_then(|value| value.as_str());
     match agent_type {
@@ -451,10 +503,16 @@ fn edit_stack_output_releases_next(agent_type: &str, content: &serde_json::Value
             .get("payload_type")
             .and_then(|value| value.as_str())
             .is_some_and(|kind| kind.starts_with("run.terminal.")),
-        "antigravity" => kind == Some(shared::antigravity::TURN_COMPLETED_FRAME_TYPE),
+        "antigravity" => matches!(kind, Some("antigravity_turn_completed")),
         _ => matches!(
             kind,
-            Some("result" | "turn.completed" | "turn.failed" | "error")
+            Some(
+                "result"
+                    | "turn.completed"
+                    | "turn.failed"
+                    | "antigravity_turn_completed"
+                    | "error"
+            )
         ),
     }
 }
@@ -683,6 +741,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn claude_compaction_boundary_is_detected() {
+        let boundary = serde_json::json!({
+            "type": "system",
+            "subtype": "compact_boundary",
+            "session_id": "s",
+            "uuid": "u",
+            "compact_metadata": {"trigger": "manual", "pre_tokens": 120000}
+        });
+        assert!(is_claude_compaction_boundary(&boundary));
+        let init = serde_json::json!({"type": "system", "subtype": "init", "session_id": "s"});
+        assert!(!is_claude_compaction_boundary(&init));
+        let result = serde_json::json!({"type": "result", "subtype": "success"});
+        assert!(!is_claude_compaction_boundary(&result));
+    }
+
+    #[test]
     fn parse_send_mode_accepts_persisted_wire_values() {
         assert_eq!(parse_send_mode("normal"), Some(SendMode::Normal));
         assert_eq!(parse_send_mode("wiggum"), Some(SendMode::Wiggum));
@@ -811,10 +885,6 @@ mod tests {
             "muse",
             &serde_json::json!({"type": "muse_record", "payload_type": "run.terminal.completed"})
         ));
-        assert!(edit_stack_output_releases_next(
-            "antigravity",
-            &serde_json::json!({"type": "antigravity_turn_completed", "status": "completed"})
-        ));
 
         assert!(!edit_stack_output_releases_next(
             "claude",
@@ -827,10 +897,6 @@ mod tests {
         assert!(!edit_stack_output_releases_next(
             "muse",
             &serde_json::json!({"type": "muse_record", "payload_type": "tool.result"})
-        ));
-        assert!(!edit_stack_output_releases_next(
-            "antigravity",
-            &serde_json::json!({"type": "antigravity_step", "kind": "message"})
         ));
     }
 }

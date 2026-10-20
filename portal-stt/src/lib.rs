@@ -272,7 +272,7 @@ mod tests {
 
     #[test]
     fn stt_is_off_unless_a_backend_is_named() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = shared::sync::lock_recovering_poison(&ENV_LOCK);
         let _guard = EnvGuard::set(&[(BACKEND_VAR, None), (API_KEY_VAR, None)]);
         assert!(SttProvider::from_env()
             .expect("absent is not an error")
@@ -286,7 +286,7 @@ mod tests {
 
     #[test]
     fn each_backend_builds_its_own_provider() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = shared::sync::lock_recovering_poison(&ENV_LOCK);
 
         let _guard = EnvGuard::set(&[(BACKEND_VAR, Some("openai")), (API_KEY_VAR, Some("k"))]);
         assert_eq!(
@@ -312,7 +312,7 @@ mod tests {
     /// browser path.
     #[test]
     fn a_backend_without_a_key_fails_boot() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = shared::sync::lock_recovering_poison(&ENV_LOCK);
         let _guard = EnvGuard::set(&[(BACKEND_VAR, Some("openai")), (API_KEY_VAR, None)]);
         // `.map(|_| ())` because the provider deliberately has no `Debug` —
         // it holds the API key, and a derived impl would print it.
@@ -330,7 +330,7 @@ mod tests {
 
     #[test]
     fn an_unknown_backend_names_the_valid_choices() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = shared::sync::lock_recovering_poison(&ENV_LOCK);
         let _guard = EnvGuard::set(&[(BACKEND_VAR, Some("whisper")), (API_KEY_VAR, Some("k"))]);
         let err = SttProvider::from_env()
             .map(|_| ())

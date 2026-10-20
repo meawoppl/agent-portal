@@ -1,24 +1,36 @@
 use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use antigravity_codes::protocol::{HarnessSideTools, OutputEventEvent, TrajectoryStateUpdateState};
-use antigravity_codes::{Client, HarnessOptions, ModelBuilder, Step, StepKind};
+use antigravity_codes::protocol::{
+    CallHookResponse, EmptyResult, InputEvent, OutputEventEvent, PolicyConfig,
+    PolicyConfigWorkspaceContainment, PolicyDecisionResponse, PolicyEvaluationOutcome, StepUpdate,
+    ToolConfirmation, ToolResponse, TrajectoryStateUpdateState, UsageMetadata,
+    UserQuestionsResponse,
+};
+use antigravity_codes::steps::{Step, StepAssembler, StepKind};
+use antigravity_codes::{HarnessOptions, ModelBuilder, RawClient};
 use serde::Serialize;
-use session_lib::adapter::AgentOutput;
 use session_lib::io::{IoCommand, IoEvent};
 use session_lib::snapshot::SessionConfig;
-use session_lib::{TurnOutcome, TurnTracker};
-use tokio::sync::mpsc;
+use session_lib::turn_tracker::{TurnOutcome, TurnTracker};
+use shared::LocalFrame;
+use tokio::sync::{mpsc, oneshot};
 
-const DEFAULT_MODEL: &str = "gemini-flash-latest";
-const SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+use crate::DEFAULT_MODEL;
 
-#[derive(Serialize)]
-struct ErrorEnvelope {
-    #[serde(rename = "type")]
-    frame_type: &'static str,
-    message: String,
+type Delivery = Option<oneshot::Sender<Result<(), String>>>;
+
+struct PendingInput {
+    text: String,
+    delivered: Delivery,
+    display_event: Option<Box<serde_json::Value>>,
+}
+
+enum TurnResult {
+    Complete { queued: VecDeque<PendingInput> },
+    Shutdown { completed: oneshot::Sender<()> },
+    Closed,
 }
 
 pub async fn antigravity_io_task(
@@ -26,537 +38,799 @@ pub async fn antigravity_io_task(
     mut command_rx: mpsc::UnboundedReceiver<IoCommand>,
     event_tx: mpsc::UnboundedSender<IoEvent>,
 ) {
-    let options = harness_options(&config);
-    let client = match options.as_ref() {
-        Ok(options) => match launch_client(options.clone(), config.session_id).await {
-            Ok(client) => Some(client),
-            Err(message) => {
-                emit_error(&event_tx, message);
-                None
+    let _ = event_tx.send(IoEvent::AgentStarted { pid: None });
+    let mut queued = VecDeque::new();
+    let mut turn_tracker = TurnTracker::new(config.session_id);
+
+    loop {
+        let pending = match queued.pop_front() {
+            Some(pending) => pending,
+            None => match command_rx.recv().await {
+                Some(IoCommand::UserInput {
+                    text,
+                    delivered,
+                    display_event,
+                    ..
+                }) => PendingInput {
+                    text,
+                    delivered,
+                    display_event,
+                },
+                Some(IoCommand::Permission { request_id, .. }) => {
+                    tracing::debug!(
+                        request_id = %request_id,
+                        "antigravity: ignoring portal permission response; localharness uses its own request frames"
+                    );
+                    continue;
+                }
+                Some(IoCommand::Interrupt) => {
+                    tracing::debug!("antigravity: interrupt outside an active turn");
+                    continue;
+                }
+                Some(IoCommand::Shutdown { completed }) => {
+                    let _ = completed.send(());
+                    break;
+                }
+                None => break,
+            },
+        };
+
+        if pending.text.is_empty() {
+            if let Some(delivered) = pending.delivered {
+                let _ = delivered.send(Ok(()));
             }
-        },
+            continue;
+        }
+
+        turn_tracker.start(Instant::now(), chrono::Utc::now());
+        match run_turn(
+            &config,
+            pending,
+            &mut command_rx,
+            &mut turn_tracker,
+            &event_tx,
+        )
+        .await
+        {
+            TurnResult::Complete {
+                queued: mut newly_queued,
+            } => {
+                append_after_existing(&mut queued, &mut newly_queued);
+            }
+            TurnResult::Closed => break,
+            TurnResult::Shutdown { completed } => {
+                let _ = completed.send(());
+                break;
+            }
+        }
+    }
+}
+
+async fn run_turn(
+    config: &SessionConfig,
+    pending: PendingInput,
+    command_rx: &mut mpsc::UnboundedReceiver<IoCommand>,
+    turn_tracker: &mut TurnTracker,
+    event_tx: &mpsc::UnboundedSender<IoEvent>,
+) -> TurnResult {
+    let mut queued = VecDeque::new();
+    let model = selected_model(config);
+    let options = match build_harness_options(config, &model) {
+        Ok(options) => options,
         Err(message) => {
-            emit_error(&event_tx, message.clone());
-            None
+            fail_delivery(pending.delivered, &message);
+            emit_error(event_tx, message);
+            return TurnResult::Complete { queued };
         }
     };
-    // antigravity-codes intentionally owns the harness process and does not
-    // expose its pid yet. Session stop still works: aborting this task drops
-    // Client -> Harness, whose Drop kills the child.
-    let _ = event_tx.send(IoEvent::AgentStarted { pid: None });
 
-    let model = configured_model(&config.extra_args).to_string();
-    let mut tracker = TurnTracker::new(config.session_id);
-    let mut client = client;
-    let mut pending = VecDeque::new();
-    let mut stopping = false;
+    let mut client = match RawClient::launch(options).await {
+        Ok(client) => client,
+        Err(e) => {
+            let message = format!("Antigravity launch failed: {e}");
+            fail_delivery(pending.delivered, &message);
+            emit_error(event_tx, message);
+            return TurnResult::Complete { queued };
+        }
+    };
 
-    'commands: loop {
-        let command = if let Some(command) = pending.pop_front() {
-            command
-        } else if let Some(command) = command_rx.recv().await {
-            command
-        } else {
-            break;
+    let cascade_id = config.session_id.to_string();
+    if let Err(message) = validate_cascade_id(&cascade_id, client.cascade_id()) {
+        fail_delivery(pending.delivered, &message);
+        emit_error(event_tx, message);
+        shutdown_client(client, event_tx).await;
+        return TurnResult::Complete { queued };
+    }
+    let mut assembler = StepAssembler::new(Some(cascade_id.clone()));
+    warm_assembler(&mut assembler, &client);
+
+    if let Err(e) = client.send(&InputEvent::user(&pending.text)).await {
+        let message = format!("Antigravity input failed: {e}");
+        fail_delivery(pending.delivered, &message);
+        emit_error(event_tx, message);
+        shutdown_client(client, event_tx).await;
+        return TurnResult::Complete { queued };
+    }
+
+    emit_user_input_display(&pending.text, pending.display_event, event_tx);
+    if let Some(delivered) = pending.delivered {
+        let _ = delivered.send(Ok(()));
+    }
+
+    let mut latest_usage = client.initialize_response().cumulative_usage.clone();
+    let mut stop_reason = None;
+    let mut is_error = false;
+
+    loop {
+        tokio::select! {
+            command = command_rx.recv() => {
+                match command {
+                    Some(IoCommand::UserInput {
+                        text,
+                        delivered,
+                        display_event,
+                        ..
+                    }) => {
+                        queued.push_back(PendingInput { text, delivered, display_event });
+                    }
+                    Some(IoCommand::Permission { request_id, .. }) => {
+                        tracing::debug!(
+                            request_id = %request_id,
+                            "antigravity: ignoring portal permission response while turn is active"
+                        );
+                    }
+                    Some(IoCommand::Interrupt) => {
+                        let _ = client.send(&InputEvent::halt()).await;
+                    }
+                    Some(IoCommand::Shutdown { completed }) => {
+                        let _ = client.send(&InputEvent::halt()).await;
+                        shutdown_client(client, event_tx).await;
+                        return TurnResult::Shutdown { completed };
+                    }
+                    None => {
+                        shutdown_client(client, event_tx).await;
+                        return TurnResult::Closed;
+                    }
+                }
+            }
+            event = client.next_event() => {
+                match event {
+                    Ok(Some(event)) => {
+                        match event.into_event() {
+                            Some(OutputEventEvent::StepUpdate(update)) => {
+                                if let Some(step) = handle_step_update(
+                                    update,
+                                    &mut assembler,
+                                    &mut client,
+                                    turn_tracker,
+                                    event_tx,
+                                ).await {
+                                    if matches!(step.kind, StepKind::Error) || step.error_message.is_some() {
+                                        is_error = true;
+                                        stop_reason.get_or_insert_with(|| "step_error".to_string());
+                                    }
+                                }
+                            }
+                            Some(OutputEventEvent::TrajectoryStateUpdate(update)) => {
+                                let is_main = update
+                                    .trajectory_id
+                                    .as_deref()
+                                    .is_some_and(|id| assembler.is_main(id));
+                                emit_antigravity_event(
+                                    event_tx,
+                                    value_or_null(AntigravityTrajectoryEvent {
+                                        frame_type: "antigravity_event",
+                                        event: "trajectory_state_update",
+                                        trajectory_id: update.trajectory_id.clone(),
+                                        state: update.state.as_ref().map(|s| s.as_str().to_string()),
+                                        is_main,
+                                        error: update.error.clone(),
+                                        error_code: update.error_code.clone(),
+                                        stop_reason: update.stop_reason.as_ref().map(|s| s.as_str().to_string()),
+                                    }),
+                                );
+                                if is_main {
+                                    match update.state {
+                                        Some(TrajectoryStateUpdateState::FullyIdle) => {
+                                            stop_reason = update.stop_reason.map(|s| s.as_str().to_string());
+                                            break;
+                                        }
+                                        Some(TrajectoryStateUpdateState::Cancelled) => {
+                                            stop_reason = Some("cancelled".to_string());
+                                            is_error = true;
+                                            break;
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                            Some(OutputEventEvent::UsageUpdate(update)) => {
+                                if let Some(total) = update.total {
+                                    latest_usage = Some(total);
+                                }
+                            }
+                            Some(OutputEventEvent::PolicyDecisionRequest(request)) => {
+                                let response = PolicyDecisionResponse {
+                                    request_id: request.request_id,
+                                    outcome: Some(PolicyEvaluationOutcome::Deny),
+                                    deny_reason: Some(
+                                        "Agent Portal Antigravity preview is read-only".to_string(),
+                                    ),
+                                };
+                                let _ = client.send(&InputEvent::policy_response(response)).await;
+                            }
+                            Some(OutputEventEvent::ToolCall(call)) => {
+                                let id = call.id.unwrap_or_default();
+                                let response = ToolResponse::error(
+                                    id,
+                                    "Agent Portal Antigravity preview does not execute client-side tools",
+                                );
+                                let _ = client.send(&InputEvent::tool_response(response)).await;
+                            }
+                            Some(OutputEventEvent::CallHookRequest(request)) => {
+                                let response = CallHookResponse {
+                                    request_id: request.request_id,
+                                    empty_result: Some(EmptyResult::default()),
+                                    ..Default::default()
+                                };
+                                let _ = client.send(&InputEvent::hook_response(response)).await;
+                            }
+                            Some(OutputEventEvent::SessionEndResponse(_)) => {
+                                break;
+                            }
+                            Some(OutputEventEvent::InitializeConversationResponse(_)) | None => {}
+                        }
+                    }
+                    Ok(None) => {
+                        stop_reason.get_or_insert_with(|| "socket_closed".to_string());
+                        is_error = true;
+                        break;
+                    }
+                    Err(e) => {
+                        let message = format!("Antigravity stream failed: {e}");
+                        emit_error(event_tx, message);
+                        stop_reason.get_or_insert_with(|| "stream_error".to_string());
+                        is_error = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    if !shutdown_client(client, event_tx).await {
+        is_error = true;
+        stop_reason = Some("shutdown_error".into());
+    }
+    finalize_turn_metrics(
+        turn_tracker,
+        &model,
+        latest_usage.as_ref(),
+        stop_reason.clone(),
+        is_error,
+        event_tx,
+    );
+    emit_antigravity_event(
+        event_tx,
+        value_or_null(AntigravityTurnCompleted {
+            frame_type: "antigravity_turn_completed",
+            model,
+            stop_reason,
+            is_error,
+        }),
+    );
+
+    TurnResult::Complete { queued }
+}
+
+fn validate_cascade_id(expected: &str, actual: Option<&str>) -> Result<(), String> {
+    if actual == Some(expected) {
+        Ok(())
+    } else {
+        Err(
+            "Antigravity returned a missing or different conversation id; input was not sent"
+                .into(),
+        )
+    }
+}
+
+// Leave room inside the agent's eight-second graceful-stop deadline. A stuck
+// harness must not prevent shutdown or make a failed flush look successful.
+async fn bounded_shutdown<F, E>(future: F, timeout: Duration) -> Result<(), String>
+where
+    F: std::future::Future<Output = Result<(), E>>,
+    E: std::fmt::Display,
+{
+    match tokio::time::timeout(timeout, future).await {
+        Ok(result) => result.map_err(|error| format!("Antigravity shutdown failed: {error}")),
+        Err(_) => {
+            Err("Antigravity shutdown timed out; conversation persistence is unconfirmed".into())
+        }
+    }
+}
+
+async fn shutdown_client(client: RawClient, event_tx: &mpsc::UnboundedSender<IoEvent>) -> bool {
+    match bounded_shutdown(client.shutdown(), Duration::from_secs(5)).await {
+        Ok(()) => true,
+        Err(message) => {
+            emit_error(event_tx, message);
+            false
+        }
+    }
+}
+
+fn append_after_existing(
+    existing: &mut VecDeque<PendingInput>,
+    incoming: &mut VecDeque<PendingInput>,
+) {
+    existing.append(incoming);
+}
+
+async fn handle_step_update(
+    update: StepUpdate,
+    assembler: &mut StepAssembler,
+    client: &mut RawClient,
+    turn_tracker: &mut TurnTracker,
+    event_tx: &mpsc::UnboundedSender<IoEvent>,
+) -> Option<Step> {
+    let step = assembler.ingest(update);
+    if step.text().is_some() && step.user_facing_text().is_some() {
+        turn_tracker.record_content_frame(Instant::now());
+    }
+    if !matches!(
+        step.kind,
+        StepKind::Message | StepKind::Finish | StepKind::Compaction | StepKind::Error
+    ) {
+        turn_tracker.record_tool_call();
+    }
+    if step.kind == StepKind::QuestionsRequest {
+        let response = UserQuestionsResponse {
+            cancelled: Some(true),
+            trajectory_id: Some(step.trajectory_id.clone()),
+            step_index: Some(step.step_index),
+            ..Default::default()
         };
-        match command {
-            IoCommand::UserInput {
-                text,
-                mut delivered,
-                display_event,
-                ..
-            } => {
-                let options = match options.as_ref() {
-                    Ok(options) => options,
-                    Err(message) => {
-                        fail_undelivered_turn(
-                            &event_tx,
-                            &mut delivered,
-                            format!("Antigravity is not configured: {message}"),
-                        );
-                        continue;
-                    }
-                };
-                let mut active_client = match client.take() {
-                    Some(client) => client,
-                    None => match launch_client(options.clone(), config.session_id).await {
-                        Ok(client) => client,
-                        Err(message) => {
-                            fail_undelivered_turn(&event_tx, &mut delivered, message);
-                            continue;
-                        }
-                    },
-                };
-                let previous_usage = active_client.usage().cloned().unwrap_or_default();
-                tracker.start(Instant::now(), chrono::Utc::now());
-                let mut turn = match active_client.send(text).await {
-                    Ok(turn) => {
-                        if let Some(tx) = delivered.take() {
-                            let _ = tx.send(Ok(()));
-                        }
-                        turn
-                    }
-                    Err(error) => {
-                        let message = error.to_string();
-                        if let Some(tx) = delivered.take() {
-                            let _ = tx.send(Err(message.clone()));
-                        }
-                        emit_failed_turn(
-                            &event_tx,
-                            format!("Antigravity rejected input: {message}"),
-                        );
-                        let usage = active_client.usage().cloned().unwrap_or_default();
-                        emit_metrics(
-                            &event_tx,
-                            &mut tracker,
-                            MetricsReport {
-                                model: &model,
-                                before: &previous_usage,
-                                after: &usage,
-                                interrupted: false,
-                                failure: Some(&message),
-                            },
-                        );
-                        shutdown_client(active_client, &event_tx).await;
-                        continue;
-                    }
-                };
-                // The harness's native user Message is suppressed below because
-                // Portal already owns the optimistic user row. A typed
-                // inter-agent input has no equivalent native echo, though, so
-                // preserve its provenance card verbatim once delivery succeeds.
-                if let Some(event) = display_event {
-                    let _ = event_tx.send(IoEvent::RawOutput(*event));
-                }
-
-                let mut interrupted = false;
-                let mut failed = None;
-                loop {
-                    tokio::select! {
-                        next = turn.next_step() => match next {
-                            Ok(Some(step)) => emit_step(&event_tx, &mut tracker, step),
-                            Ok(None) => break,
-                            Err(error) => {
-                                failed = Some(error.to_string());
-                                break;
-                            }
-                        },
-                        incoming = command_rx.recv() => match incoming {
-                            Some(IoCommand::Interrupt) => {
-                                interrupted = true;
-                                break;
-                            }
-                            Some(IoCommand::Permission { request_id, .. }) => {
-                                tracing::debug!(%request_id, "Antigravity handles confirmations in-harness; ignoring portal permission response");
-                            }
-                            Some(input @ IoCommand::UserInput { .. }) => pending.push_back(input),
-                            // The generic session owner is stopping. Convert
-                            // that into a normal cancellation so this accepted
-                            // turn reaches a terminal state before its
-                            // persistence acknowledgement is requested.
-                            None => {
-                                interrupted = true;
-                                stopping = true;
-                                break;
-                            },
-                        }
-                    }
-                }
-                drop(turn);
-
-                if interrupted {
-                    if let Err(error) = active_client.cancel().await {
-                        emit_error(
-                            &event_tx,
-                            format!("failed to interrupt Antigravity: {error}"),
-                        );
-                    } else {
-                        match tokio::time::timeout(
-                            std::time::Duration::from_secs(10),
-                            drain_cancel(&mut active_client),
-                        )
-                        .await
-                        {
-                            Ok(Ok(())) => {}
-                            Ok(Err(error)) => emit_error(
-                                &event_tx,
-                                format!("Antigravity interrupt did not settle cleanly: {error}"),
-                            ),
-                            Err(_) => emit_error(
-                                &event_tx,
-                                "Antigravity interrupt timed out while waiting for idle"
-                                    .to_string(),
-                            ),
-                        }
-                    }
-                }
-                if let Some(message) = failed.as_ref() {
-                    emit_error(&event_tx, format!("Antigravity turn failed: {message}"));
-                }
-
-                let status = if interrupted {
-                    shared::antigravity::AntigravityTurnStatus::Cancelled
-                } else if failed.is_some() {
-                    shared::antigravity::AntigravityTurnStatus::Failed
-                } else {
-                    shared::antigravity::AntigravityTurnStatus::Completed
-                };
-                emit_terminal(&event_tx, status);
-
-                let usage = active_client.usage().cloned().unwrap_or_default();
-                emit_metrics(
-                    &event_tx,
-                    &mut tracker,
-                    MetricsReport {
-                        model: &model,
-                        before: &previous_usage,
-                        after: &usage,
-                        interrupted,
-                        failure: failed.as_deref(),
-                    },
-                );
-                // `Session::stop` aborts agent tasks rather than asking them to
-                // shut down. Antigravity only guarantees persisted cascade
-                // state after its session-end acknowledgement, so close after
-                // every completed turn and resume the same cascade next turn.
-                // This trades a small launch cost for durable, restart-safe
-                // history without weakening the generic Session contract.
-                shutdown_client(active_client, &event_tx).await;
-                if stopping {
-                    break 'commands;
-                }
-            }
-            IoCommand::Interrupt => {
-                tracing::debug!("Antigravity interrupt received while idle");
-            }
-            IoCommand::Permission { request_id, .. } => {
-                tracing::debug!(%request_id, "Antigravity permission response received while idle");
-            }
-        }
+        let _ = client
+            .send(&InputEvent {
+                question_response: Some(response),
+                ..Default::default()
+            })
+            .await;
     }
-
-    if let Some(client) = client {
-        shutdown_client(client, &event_tx).await;
+    if step.kind == StepKind::ToolConfirmationRequest {
+        let confirmation = ToolConfirmation {
+            trajectory_id: Some(step.trajectory_id.clone()),
+            step_index: Some(step.step_index),
+            accepted: Some(false),
+        };
+        let _ = client
+            .send(&InputEvent {
+                tool_confirmation: Some(confirmation),
+                ..Default::default()
+            })
+            .await;
     }
+    let kind = format!("{:?}", step.kind);
+    let state = step.state.as_str().to_string();
+    let source = step.source.as_str().to_string();
+    let target = step.target.as_str().to_string();
+    let is_main = assembler.is_main(&step.trajectory_id);
+    let is_final = step.is_final();
+    emit_antigravity_event(
+        event_tx,
+        value_or_null(AntigravityStepEvent {
+            frame_type: "antigravity_event",
+            event: "step_update",
+            trajectory_id: step.trajectory_id.clone(),
+            step_index: step.step_index,
+            step_kind: kind,
+            state,
+            source,
+            target,
+            is_main,
+            is_final,
+            text: step.text.clone(),
+            text_delta: step.text_delta.clone(),
+            thinking: step.thinking.clone(),
+            error_message: step.error_message.clone(),
+            update: step.update.clone(),
+        }),
+    );
+    Some(step)
 }
 
-fn fail_undelivered_turn(
-    event_tx: &mpsc::UnboundedSender<IoEvent>,
-    delivered: &mut Option<tokio::sync::oneshot::Sender<Result<(), String>>>,
-    message: String,
-) {
-    if let Some(tx) = delivered.take() {
-        let _ = tx.send(Err(message.clone()));
-    }
-    emit_failed_turn(event_tx, message);
-}
+fn build_harness_options(config: &SessionConfig, model: &str) -> Result<HarnessOptions, String> {
+    let storage_dir = storage_dir(config.session_id);
+    std::fs::create_dir_all(&storage_dir).map_err(|e| {
+        format!(
+            "Failed to create Antigravity storage directory {}: {e}",
+            storage_dir.display()
+        )
+    })?;
 
-fn emit_failed_turn(event_tx: &mpsc::UnboundedSender<IoEvent>, message: String) {
-    emit_error(event_tx, message);
-    emit_terminal(event_tx, shared::antigravity::AntigravityTurnStatus::Failed);
-}
-
-fn emit_terminal(
-    event_tx: &mpsc::UnboundedSender<IoEvent>,
-    status: shared::antigravity::AntigravityTurnStatus,
-) {
-    let terminal = shared::antigravity::AntigravityTurnCompletedEnvelope::new(status);
-    if let Ok(value) = serde_json::to_value(terminal) {
-        let _ = event_tx.send(IoEvent::Classified(AgentOutput::Visible(value)));
-    }
-}
-
-async fn launch_client(options: HarnessOptions, session_id: uuid::Uuid) -> Result<Client, String> {
-    let client = Client::launch(options)
-        .await
-        .map_err(|error| format!("failed to launch Antigravity: {error}"))?;
-    let expected = session_id.to_string();
-    match client.cascade_id() {
-        Some(actual) if actual == expected => Ok(client),
-        actual => {
-            let actual = actual.unwrap_or("<missing>").to_string();
-            let _ = tokio::time::timeout(SHUTDOWN_TIMEOUT, client.shutdown()).await;
-            Err(format!(
-                "Antigravity returned cascade id {actual:?}, expected {expected:?}; refusing to risk resuming a different conversation"
-            ))
-        }
-    }
-}
-
-async fn shutdown_client(client: Client, event_tx: &mpsc::UnboundedSender<IoEvent>) {
-    match tokio::time::timeout(SHUTDOWN_TIMEOUT, client.shutdown()).await {
-        Ok(Ok(())) => {}
-        Ok(Err(error)) => emit_error(
-            event_tx,
-            format!("Antigravity failed to persist the completed turn: {error}"),
-        ),
-        Err(_) => emit_error(
-            event_tx,
-            "Antigravity timed out while persisting the completed turn".to_string(),
-        ),
-    }
-}
-
-fn harness_options(config: &SessionConfig) -> Result<HarnessOptions, String> {
-    let api_key = std::env::var("GEMINI_API_KEY")
-        .map_err(|_| "Antigravity requires GEMINI_API_KEY on the launcher host".to_string())?;
-    let model = configured_model(&config.extra_args);
     let mut options = HarnessOptions::new()
+        .storage_directory(&storage_dir)
+        .app_data_dir(storage_dir.join("app-data"))
         .workspace(&config.working_directory)
-        .model(ModelBuilder::gemini(model, api_key))
-        // The tentative integration is deliberately read-only. The SDK's
-        // default confirmation handler refuses writes; widening this before
-        // Portal can surface native confirmations would be an approval bypass.
-        .harness_side_tools(HarnessSideTools::read_only())
         .cascade_id(config.session_id.to_string())
-        .env("PORTAL_SESSION_ID", config.session_id.to_string());
+        .policy(PolicyConfig {
+            workspace_containment: Some(PolicyConfigWorkspaceContainment::Enabled),
+            ..Default::default()
+        });
 
-    if let Some(path) = discover_harness() {
-        options = options.binary(path);
-    }
-    if let Some(project) = directories::ProjectDirs::from("org", "CosmicFrontier", "agent-portal") {
-        options = options.storage_directory(project.data_dir().join("antigravity"));
-    }
+    options = match credentials_model(model) {
+        Some(model_builder) => options.model(model_builder),
+        None => {
+            return Err(
+                "Antigravity needs GEMINI_API_KEY or ANTIGRAVITY_VERTEX_PROJECT/ANTIGRAVITY_VERTEX_LOCATION"
+                    .to_string(),
+            )
+        }
+    };
+
     Ok(options)
 }
 
-fn configured_model(args: &[String]) -> &str {
-    args.windows(2)
-        .find_map(|pair| (pair[0] == "--model").then_some(pair[1].as_str()))
-        .unwrap_or(DEFAULT_MODEL)
-}
-
-fn discover_harness() -> Option<PathBuf> {
-    if let Ok(path) = antigravity_codes::process::find_harness() {
-        return Some(path);
-    }
-    if let Some(path) =
-        session_lib::probe::antigravity_managed_harness_path().filter(|path| path.is_file())
-    {
-        return Some(path);
-    }
-    // `pip install google-antigravity` keeps the binary inside the wheel.
-    // Ask Python for that deterministic package-relative path so the Install
-    // button produces a launcher that works without a manual symlink.
-    let output = std::process::Command::new("python3")
-        .args([
-            "-c",
-            "import pathlib, google.antigravity as a; print(pathlib.Path(a.__file__).parent / 'bin' / 'localharness')",
-        ])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
-    path.is_file().then_some(path)
-}
-
-fn emit_step(event_tx: &mpsc::UnboundedSender<IoEvent>, tracker: &mut TurnTracker, step: Step) {
-    // The harness reports the user's own prompt as a Message step addressed to
-    // the agent. Portal already owns the optimistic user row; persisting this
-    // echo would render the prompt twice.
-    if step.kind == StepKind::Message && step.user_facing_text().is_none() {
-        return;
-    }
-    if !step.text_delta.is_empty() {
-        tracker.record_content_frame(Instant::now());
-    }
-    // Active and final Step values are snapshots of the same logical step.
-    // Count only the terminal snapshot so a streamed tool does not inflate the
-    // turn's tool-call metric.
-    let is_final = step.is_final();
-    if is_final
-        && !matches!(
-            step.kind,
-            StepKind::Message | StepKind::Finish | StepKind::Compaction
-        )
-    {
-        tracker.record_tool_call();
+fn credentials_model(model: &str) -> Option<ModelBuilder> {
+    if let Ok(key) = std::env::var("GEMINI_API_KEY") {
+        if shared::strings::is_non_blank(&key) {
+            return Some(ModelBuilder::gemini(model, key));
+        }
     }
 
-    let envelope = shared::antigravity::AntigravityStepEnvelope {
-        frame_type: shared::antigravity::STEP_FRAME_TYPE.to_string(),
-        trajectory_id: step.trajectory_id,
-        step_index: step.step_index,
-        kind: portal_step_kind(step.kind),
-        state: step.state,
-        source: step.source,
-        target: step.target,
-        text: step.text,
-        thinking: step.thinking,
-        error_message: step.error_message,
-        update: step.update,
-    };
-    let Ok(payload) = serde_json::to_value(envelope) else {
-        return;
-    };
-    let classified = if is_final {
-        AgentOutput::Visible(payload)
+    let project = std::env::var("ANTIGRAVITY_VERTEX_PROJECT").ok()?;
+    let location = std::env::var("ANTIGRAVITY_VERTEX_LOCATION").ok()?;
+    if shared::strings::is_non_blank(&project) && shared::strings::is_non_blank(&location) {
+        Some(ModelBuilder::vertex(model, project, location))
     } else {
-        AgentOutput::Ephemeral(payload)
-    };
-    let _ = event_tx.send(IoEvent::Classified(classified));
-}
-
-fn portal_step_kind(kind: StepKind) -> shared::antigravity::AntigravityStepKind {
-    use shared::antigravity::AntigravityStepKind as PortalKind;
-    match kind {
-        StepKind::Message => PortalKind::Message,
-        StepKind::ListDirectory => PortalKind::ListDirectory,
-        StepKind::FindFile => PortalKind::FindFile,
-        StepKind::SearchDirectory => PortalKind::SearchDirectory,
-        StepKind::ViewFile => PortalKind::ViewFile,
-        StepKind::CreateFile => PortalKind::CreateFile,
-        StepKind::EditFile => PortalKind::EditFile,
-        StepKind::RunCommand => PortalKind::RunCommand,
-        StepKind::Compaction => PortalKind::Compaction,
-        StepKind::InvokeSubagent => PortalKind::InvokeSubagent,
-        StepKind::GenerateImage => PortalKind::GenerateImage,
-        StepKind::SearchWeb => PortalKind::SearchWeb,
-        StepKind::ReadUrlContent => PortalKind::ReadUrlContent,
-        StepKind::McpTool => PortalKind::McpTool,
-        StepKind::CustomTool => PortalKind::CustomTool,
-        StepKind::Finish => PortalKind::Finish,
-        StepKind::Error => PortalKind::Error,
-        StepKind::ToolConfirmationRequest => PortalKind::ToolConfirmationRequest,
-        StepKind::QuestionsRequest => PortalKind::QuestionsRequest,
-        _ => PortalKind::Other,
+        None
     }
 }
 
-async fn drain_cancel(client: &mut Client) -> antigravity_codes::Result<()> {
-    let main = client.cascade_id().map(str::to_string);
-    loop {
-        let Some(event) = client.raw().next_event().await? else {
-            return Ok(());
-        };
-        if let Some(OutputEventEvent::TrajectoryStateUpdate(update)) = event.into_event() {
-            let is_main = main
-                .as_deref()
-                .is_none_or(|id| update.trajectory_id.as_deref() == Some(id));
-            if is_main
-                && matches!(
-                    update.state,
-                    Some(
-                        TrajectoryStateUpdateState::Cancelled
-                            | TrajectoryStateUpdateState::FullyIdle
-                    )
-                )
-            {
-                return Ok(());
+fn selected_model(config: &SessionConfig) -> String {
+    if let Some(model) = model_arg(&config.extra_args) {
+        return model;
+    }
+    std::env::var("ANTIGRAVITY_MODEL")
+        .ok()
+        .filter(|m| shared::strings::is_non_blank(m))
+        .unwrap_or_else(|| DEFAULT_MODEL.to_string())
+}
+
+fn model_arg(args: &[String]) -> Option<String> {
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        if arg == "--model" {
+            return it
+                .next()
+                .filter(|value| shared::strings::is_non_blank(value))
+                .cloned();
+        }
+        if let Some(value) = arg.strip_prefix("--model=") {
+            if shared::strings::is_non_blank(value) {
+                return Some(value.to_string());
             }
+        }
+    }
+    None
+}
+
+fn storage_dir(session_id: uuid::Uuid) -> PathBuf {
+    session_lib::paths::config_dir()
+        .join("antigravity")
+        .join("sessions")
+        .join(session_id.to_string())
+}
+
+fn warm_assembler(assembler: &mut StepAssembler, client: &RawClient) {
+    for update in client.initialize_response().history.iter().cloned() {
+        assembler.ingest(update);
+    }
+}
+
+fn emit_user_input_display(
+    prompt: &str,
+    display_event: Option<Box<serde_json::Value>>,
+    event_tx: &mpsc::UnboundedSender<IoEvent>,
+) {
+    if display_event.is_none() && prompt.starts_with("<system-reminder>") {
+        return;
+    }
+    let value = match display_event {
+        Some(event) => *event,
+        None => serde_json::from_str(&LocalFrame::user(prompt).to_json()).unwrap_or_else(|_| {
+            value_or_null(LocalUserFallback {
+                frame_type: "user",
+                content: prompt,
+            })
+        }),
+    };
+    let _ = event_tx.send(IoEvent::RawOutput(value));
+}
+
+fn fail_delivery(delivered: Delivery, message: &str) {
+    if let Some(delivered) = delivered {
+        let _ = delivered.send(Err(message.to_string()));
+    }
+}
+
+fn emit_error(event_tx: &mpsc::UnboundedSender<IoEvent>, message: String) {
+    let value =
+        serde_json::from_str(&LocalFrame::error(message.clone()).to_json()).unwrap_or_else(|_| {
+            value_or_null(LocalErrorFallback {
+                frame_type: "error",
+                message,
+            })
+        });
+    let _ = event_tx.send(IoEvent::RawOutput(value));
+}
+
+fn emit_antigravity_event(event_tx: &mpsc::UnboundedSender<IoEvent>, value: serde_json::Value) {
+    let _ = event_tx.send(IoEvent::RawOutput(value));
+}
+
+fn value_or_null<T: Serialize>(payload: T) -> serde_json::Value {
+    serde_json::to_value(payload).unwrap_or(serde_json::Value::Null)
+}
+
+#[derive(Serialize)]
+struct AntigravityTrajectoryEvent {
+    #[serde(rename = "type")]
+    frame_type: &'static str,
+    event: &'static str,
+    trajectory_id: Option<String>,
+    state: Option<String>,
+    is_main: bool,
+    error: Option<String>,
+    error_code: Option<String>,
+    stop_reason: Option<String>,
+}
+
+#[derive(Serialize)]
+struct AntigravityTurnCompleted {
+    #[serde(rename = "type")]
+    frame_type: &'static str,
+    model: String,
+    stop_reason: Option<String>,
+    is_error: bool,
+}
+
+#[derive(Serialize)]
+struct AntigravityStepEvent {
+    #[serde(rename = "type")]
+    frame_type: &'static str,
+    event: &'static str,
+    trajectory_id: String,
+    step_index: u32,
+    step_kind: String,
+    state: String,
+    source: String,
+    target: String,
+    is_main: bool,
+    is_final: bool,
+    text: String,
+    text_delta: String,
+    thinking: String,
+    error_message: Option<String>,
+    update: StepUpdate,
+}
+
+#[derive(Serialize)]
+struct LocalUserFallback<'a> {
+    #[serde(rename = "type")]
+    frame_type: &'static str,
+    content: &'a str,
+}
+
+#[derive(Serialize)]
+struct LocalErrorFallback {
+    #[serde(rename = "type")]
+    frame_type: &'static str,
+    message: String,
+}
+
+fn finalize_turn_metrics(
+    turn_tracker: &mut TurnTracker,
+    model: &str,
+    usage: Option<&UsageMetadata>,
+    stop_reason: Option<String>,
+    is_error: bool,
+    event_tx: &mpsc::UnboundedSender<IoEvent>,
+) {
+    let usage = usage.cloned().unwrap_or_default();
+    let input_tokens = i64_from_u64(usage.prompt_token_count);
+    let cache_read_tokens = i64_from_u64(usage.cached_content_token_count);
+    let output_tokens = i64_from_u64(usage.candidates_token_count);
+    let thinking_tokens = i64_from_u64(usage.thoughts_token_count);
+    let outcome = TurnOutcome {
+        agent_type: shared::AgentType::Antigravity,
+        model: Some(model.to_string()),
+        service_tier: usage.service_tier,
+        input_tokens,
+        output_tokens,
+        cache_creation_tokens: 0,
+        cache_read_tokens,
+        thinking_tokens,
+        subagent_tokens: 0,
+        context_snapshot_tokens: Some(input_tokens),
+        stop_reason,
+        is_error,
+        total_cost_usd: None,
+        model_context_window: None,
+    };
+    if let Some(metrics) = turn_tracker.finalize(Instant::now(), chrono::Utc::now(), outcome) {
+        if metrics.has_known_model() {
+            let _ = event_tx.send(IoEvent::TurnMetricsReady(Box::new(metrics)));
         }
     }
 }
 
-struct MetricsReport<'a> {
-    model: &'a str,
-    before: &'a antigravity_codes::protocol::UsageMetadata,
-    after: &'a antigravity_codes::protocol::UsageMetadata,
-    interrupted: bool,
-    failure: Option<&'a str>,
-}
-
-fn emit_metrics(
-    event_tx: &mpsc::UnboundedSender<IoEvent>,
-    tracker: &mut TurnTracker,
-    report: MetricsReport<'_>,
-) {
-    let outcome = TurnOutcome {
-        agent_type: shared::AgentType::Antigravity,
-        model: Some(report.model.to_string()),
-        service_tier: report.after.service_tier.clone(),
-        input_tokens: usage_delta(
-            report.after.prompt_token_count,
-            report.before.prompt_token_count,
-        ),
-        output_tokens: usage_delta(
-            report.after.candidates_token_count,
-            report.before.candidates_token_count,
-        ),
-        cache_creation_tokens: 0,
-        cache_read_tokens: usage_delta(
-            report.after.cached_content_token_count,
-            report.before.cached_content_token_count,
-        ),
-        thinking_tokens: usage_delta(
-            report.after.thoughts_token_count,
-            report.before.thoughts_token_count,
-        ),
-        subagent_tokens: 0,
-        context_snapshot_tokens: None,
-        stop_reason: Some(if report.interrupted {
-            "cancelled".to_string()
-        } else if report.failure.is_some() {
-            "error".to_string()
-        } else {
-            "completed".to_string()
-        }),
-        is_error: report.failure.is_some(),
-        total_cost_usd: None,
-        model_context_window: None,
-    };
-    if let Some(metrics) = tracker.finalize(Instant::now(), chrono::Utc::now(), outcome) {
-        let _ = event_tx.send(IoEvent::TurnMetricsReady(Box::new(metrics)));
-    }
-}
-
-fn usage_delta(after: Option<u64>, before: Option<u64>) -> i64 {
-    i64::try_from(
-        after
-            .unwrap_or_default()
-            .saturating_sub(before.unwrap_or_default()),
-    )
-    .unwrap_or(i64::MAX)
-}
-
-fn emit_error(event_tx: &mpsc::UnboundedSender<IoEvent>, message: String) {
-    let envelope = ErrorEnvelope {
-        frame_type: "error",
-        message,
-    };
-    if let Ok(value) = serde_json::to_value(envelope) {
-        let _ = event_tx.send(IoEvent::Classified(AgentOutput::Visible(value)));
-    }
+fn i64_from_u64(value: Option<u64>) -> i64 {
+    value.unwrap_or_default().min(i64::MAX as u64) as i64
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use antigravity_codes::protocol::{InitializeConversationResponse, StepUpdateState};
 
     #[test]
-    fn model_flag_or_safe_default() {
-        assert_eq!(configured_model(&[]), DEFAULT_MODEL);
-        assert_eq!(
-            configured_model(&["--model".into(), "gemini-2.5-pro".into()]),
-            "gemini-2.5-pro"
+    fn cascade_identity_must_match_before_sending_input() {
+        assert!(validate_cascade_id("expected", Some("expected")).is_ok());
+        assert!(validate_cascade_id("expected", Some("other")).is_err());
+        assert!(validate_cascade_id("expected", None).is_err());
+    }
+
+    #[tokio::test]
+    async fn shutdown_reports_failures_and_bounds_a_stalled_harness() {
+        assert!(
+            bounded_shutdown(async { Ok::<_, String>(()) }, Duration::from_secs(1))
+                .await
+                .is_ok()
+        );
+        assert!(bounded_shutdown(
+            async { Err::<(), _>("flush failed") },
+            Duration::from_secs(1)
+        )
+        .await
+        .unwrap_err()
+        .contains("flush failed"));
+        assert!(
+            bounded_shutdown(std::future::pending::<Result<(), String>>(), Duration::ZERO)
+                .await
+                .unwrap_err()
+                .contains("timed out")
         );
     }
 
     #[test]
-    fn cumulative_usage_is_reported_as_a_per_turn_delta() {
-        assert_eq!(usage_delta(Some(110), Some(100)), 10);
-        assert_eq!(usage_delta(Some(90), Some(100)), 0);
+    fn model_arg_accepts_space_and_equals_forms() {
+        assert_eq!(
+            model_arg(&["--model".into(), "gemini-2.5-flash".into()]).as_deref(),
+            Some("gemini-2.5-flash")
+        );
+        assert_eq!(
+            model_arg(&["--model=gemini-2.5-pro".into()]).as_deref(),
+            Some("gemini-2.5-pro")
+        );
     }
 
     #[test]
-    fn every_failed_turn_emits_an_explicit_terminal() {
-        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
-        emit_failed_turn(&event_tx, "launch failed".to_string());
+    fn storage_dir_is_session_scoped() {
+        let id = uuid::Uuid::new_v4();
+        let path = storage_dir(id);
+        assert!(path.ends_with(id.to_string()));
+        assert!(path.to_string_lossy().contains("antigravity"));
+    }
 
-        assert!(matches!(
-            event_rx.try_recv(),
-            Ok(IoEvent::Classified(AgentOutput::Visible(_)))
-        ));
-        let Ok(IoEvent::Classified(AgentOutput::Visible(value))) = event_rx.try_recv() else {
-            panic!("failed turn must end with a visible terminal");
+    #[test]
+    fn history_is_warmed_without_creating_visible_events() {
+        let history = vec![StepUpdate {
+            trajectory_id: Some("main".into()),
+            step_index: Some(0),
+            state: Some(StepUpdateState::Done),
+            text: Some("already persisted".into()),
+            ..Default::default()
+        }];
+        let mut assembler = StepAssembler::new(Some("main".into()));
+        for update in history {
+            assembler.ingest(update);
+        }
+
+        let step = assembler.ingest(StepUpdate {
+            trajectory_id: Some("main".into()),
+            step_index: Some(1),
+            state: Some(StepUpdateState::Active),
+            text_delta: Some("new".into()),
+            ..Default::default()
+        });
+        assert_eq!(step.text, "new");
+        assert_eq!(assembler.main_trajectory(), Some("main"));
+    }
+
+    #[test]
+    fn mid_turn_inputs_do_not_jump_existing_queue() {
+        let mut existing = VecDeque::from([pending_text("second")]);
+        let mut incoming = VecDeque::from([pending_text("third")]);
+
+        append_after_existing(&mut existing, &mut incoming);
+
+        let labels: Vec<_> = existing.into_iter().map(|pending| pending.text).collect();
+        assert_eq!(labels, ["second", "third"]);
+        assert!(incoming.is_empty());
+    }
+
+    #[test]
+    fn usage_maps_to_metrics_without_double_counting_cached_input() {
+        let mut tracker = TurnTracker::new(uuid::Uuid::new_v4());
+        tracker.start(Instant::now(), chrono::Utc::now());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        finalize_turn_metrics(
+            &mut tracker,
+            DEFAULT_MODEL,
+            Some(&UsageMetadata {
+                prompt_token_count: Some(100),
+                cached_content_token_count: Some(30),
+                candidates_token_count: Some(20),
+                thoughts_token_count: Some(7),
+                service_tier: Some("test-tier".into()),
+                ..Default::default()
+            }),
+            Some("done".into()),
+            false,
+            &tx,
+        );
+        let Some(IoEvent::TurnMetricsReady(metrics)) = rx.try_recv().ok() else {
+            panic!("metrics should be emitted");
         };
-        let terminal: shared::antigravity::AntigravityTurnCompletedEnvelope =
-            serde_json::from_value(value).unwrap();
+        assert_eq!(metrics.agent_type, shared::AgentType::Antigravity);
+        assert_eq!(metrics.input_tokens, 100);
+        assert_eq!(metrics.cache_read_tokens, 30);
+        assert_eq!(metrics.output_tokens, 20);
+        assert_eq!(metrics.thinking_tokens, 7);
+        assert_eq!(metrics.context_snapshot_tokens, Some(100));
+    }
+
+    #[test]
+    fn read_only_policy_is_part_of_harness_options() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = SessionConfig {
+            session_id: uuid::Uuid::new_v4(),
+            working_directory: dir.path().to_path_buf(),
+            extra_args: vec!["--model".into(), DEFAULT_MODEL.into()],
+            ..Default::default()
+        };
+        std::env::set_var("GEMINI_API_KEY", "test-key");
+        let options = build_harness_options(&config, DEFAULT_MODEL).unwrap();
+        std::env::remove_var("GEMINI_API_KEY");
+        let harness_config = options.config();
+        assert_eq!(harness_config.workspaces.len(), 1);
         assert_eq!(
-            terminal.status,
-            shared::antigravity::AntigravityTurnStatus::Failed
+            harness_config
+                .policy_config
+                .as_ref()
+                .and_then(|p| p.workspace_containment.clone()),
+            Some(PolicyConfigWorkspaceContainment::Enabled)
         );
+        assert!(harness_config.harness_side_tools.is_some());
+    }
+
+    #[test]
+    fn initialize_response_history_shape_stays_expected() {
+        let init = InitializeConversationResponse {
+            cascade_id: Some("main".into()),
+            history: vec![StepUpdate::default()],
+            ..Default::default()
+        };
+        assert_eq!(init.cascade_id.as_deref(), Some("main"));
+        assert_eq!(init.history.len(), 1);
+    }
+
+    fn pending_text(text: &str) -> PendingInput {
+        PendingInput {
+            text: text.to_string(),
+            delivered: None,
+            display_event: None,
+        }
     }
 }

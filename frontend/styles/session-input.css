@@ -623,3 +623,12 @@
     border-color: var(--accent);
     background: rgba(122, 162, 247, 0.05);
 }
+.composer-queue-status {
+    padding: 4px 12px;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
+
+.composer-queue-status.error {
+    color: var(--error-color, #f7768e);
+}

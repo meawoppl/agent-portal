@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-labelledby="title desc">
+  <title id="title">Form blank checks route through shared helper</title>
+  <desc id="desc">launch_dialog and subdomains_tab stop hand-rolling trim and empty checks and compose utils owned_non_blank instead, with identical submit behavior.</desc>
+  <rect width="2000" height="1200" fill="#1a1b26"/>
+
+  <text x="80" y="105" fill="#c0caf5" font-family="sans-serif" font-size="50" font-weight="700">PR #2123 &#183; Route form blank checks via shared helper</text>
+  <text x="80" y="158" fill="#a9b1d6" font-family="sans-serif" font-size="28">Two form submits compose utils owned_non_blank; the hand-rolled trim shape is gone.</text>
+
+  <line x1="1000" y1="210" x2="1000" y2="1050" stroke="#3d4666" stroke-width="3" stroke-dasharray="10 12"/>
+
+  <text x="90" y="250" fill="#f7768e" font-family="sans-serif" font-size="34" font-weight="700" letter-spacing="4">BEFORE</text>
+  <text x="90" y="298" fill="#c0caf5" font-family="sans-serif" font-size="27">two forms owned the trim shape</text>
+  <text x="90" y="335" fill="#a9b1d6" font-family="sans-serif" font-size="24">trim + is_empty + to_string ahead of every submit.</text>
+
+  <rect x="90" y="385" width="830" height="430" rx="16" fill="#16161e" stroke="#3d4666" stroke-width="2"/>
+  <text x="130" y="440" fill="#7aa2f7" font-family="monospace" font-size="26" font-weight="700">launch_dialog + subdomains_tab</text>
+  <text x="130" y="478" fill="#a9b1d6" font-family="sans-serif" font-size="24">trim, check, keep - copied at each form</text>
+  <rect x="130" y="510" width="750" height="64" rx="10" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="155" y="551" fill="#c0caf5" font-family="sans-serif" font-size="25">launch session name: trim + is_empty + keep</text>
+  <rect x="130" y="590" width="750" height="64" rx="10" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="155" y="631" fill="#c0caf5" font-family="sans-serif" font-size="25">subdomain label: trim + is_empty + keep</text>
+  <rect x="130" y="670" width="750" height="64" rx="10" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="155" y="711" fill="#c0caf5" font-family="sans-serif" font-size="25">blank means absent - decided twice</text>
+  <text x="130" y="790" fill="#f7768e" font-family="sans-serif" font-size="25">2 copies of the shape utils already owns.</text>
+
+  <text x="1080" y="250" fill="#9ece6a" font-family="sans-serif" font-size="34" font-weight="700" letter-spacing="4">AFTER</text>
+  <text x="1080" y="298" fill="#c0caf5" font-family="sans-serif" font-size="27">utils owns trim and blank; forms just call</text>
+  <text x="1080" y="335" fill="#a9b1d6" font-family="sans-serif" font-size="24">Same behavior; blank still means absent.</text>
+
+  <rect x="1080" y="385" width="830" height="430" rx="16" fill="#16161e" stroke="#3d4666" stroke-width="2"/>
+  <text x="1120" y="440" fill="#7aa2f7" font-family="monospace" font-size="26" font-weight="700">utils::owned_non_blank</text>
+  <text x="1120" y="478" fill="#a9b1d6" font-family="sans-serif" font-size="24">re-export of shared::strings (one home)</text>
+  <rect x="1120" y="510" width="750" height="64" rx="10" fill="#1e202e" stroke="#7aa2f7" stroke-width="2"/>
+  <text x="1145" y="551" fill="#c0caf5" font-family="sans-serif" font-size="25">trim + reject blank (one home)</text>
+  <line x1="1495" y1="574" x2="1495" y2="640" stroke="#9ece6a" stroke-width="4"/>
+  <path d="M1480 625 L1495 648 L1510 625" fill="none" stroke="#9ece6a" stroke-width="4"/>
+  <rect x="1120" y="648" width="750" height="64" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1145" y="689" fill="#c0caf5" font-family="sans-serif" font-size="25">Some(trimmed) or None - no is_empty</text>
+  <text x="1120" y="770" fill="#9ece6a" font-family="sans-serif" font-size="25">678 frontend tests pass; clippy and fmt clean.</text>
+  <text x="1120" y="806" fill="#a9b1d6" font-family="sans-serif" font-size="24">Two call sites, one line each.</text>
+
+  <rect x="190" y="1080" width="1620" height="70" rx="14" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+  <text x="230" y="1125" fill="#c0caf5" font-family="sans-serif" font-size="24">Scope: DRY refactor only; submit behavior is unchanged.</text>
+</svg>

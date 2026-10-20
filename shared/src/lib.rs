@@ -31,6 +31,17 @@ pub const LAUNCHER_CAPABILITY_SCRATCH_WORKTREE: &str = "launch.scratch_worktree"
 /// Launcher capability advertised by versions that can resolve local agent
 /// state and fork a session on the source host.
 pub const LAUNCHER_CAPABILITY_FORK_SESSION: &str = "launch.fork_session";
+/// History recovery preflight and durable native/context launch recipes.
+pub const LAUNCHER_CAPABILITY_HISTORY_RESTORE: &str = "session.history_restore_v1";
+
+/// Codex discovery/import using the native app-server API.
+pub const LAUNCHER_CAPABILITY_IMPORT_CODEX: &str = "session.import_codex_v1";
+/// Restoring an archived Claude/Codex session by re-binding its native
+/// conversation (`ServerToLauncher::PrepareSessionRestore`).
+pub const LAUNCHER_CAPABILITY_RESTORE_SESSION: &str = "session.restore_v1";
+
+/// Launcher supports inventory and per-session plugin skill selection.
+pub const LAUNCHER_CAPABILITY_SESSION_PLUGINS: &str = "session.plugins";
 
 /// Launcher capability advertised by versions that honor
 /// `ServerToLauncher::Restart` (restart the process without updating the binary).
@@ -41,6 +52,11 @@ pub const LAUNCHER_CAPABILITY_RESTART: &str = "launcher.restart";
 /// acks to launchers that advertise this, so older launchers never see an
 /// undecodable frame (#1366).
 pub const LAUNCHER_CAPABILITY_HEARTBEAT_ACK: &str = "launcher.heartbeat_ack";
+/// Backend capability advertised in `LauncherRegisterAck`: the backend
+/// accepts `LauncherToServer::SystemStats` frames between heartbeats, so a
+/// launcher may report resource usage every few seconds instead of only on
+/// the 30 s heartbeat. Launchers never send the frame without seeing it.
+pub const SERVER_CAPABILITY_SYSTEM_STATS: &str = "server.system_stats";
 
 /// Default git-worktree branch shape for unnamed worktree launches:
 /// `session-<YYYYMMDD-HHMMSS>`. Single source of truth shared by the backend
@@ -133,6 +149,9 @@ pub mod fmt;
 // Blank-string guard shared between frontend and native crates
 pub mod strings;
 
+// Poison-tolerant std Mutex locking shared between native crates
+pub mod sync;
+
 // HTTP<->WebSocket scheme helpers shared between frontend and native crates
 pub mod urls;
 
@@ -156,13 +175,16 @@ pub mod model_version;
 pub use model_version::{compact_model_version, context_window_for};
 
 // API client types and trait
-pub mod antigravity;
 pub mod api;
 pub mod local_frame;
+
+/// Consumer-specific views of the plugin manifest format.
+pub mod plugin_manifest;
 pub use api::{
-    AgentSessionInfo, AgentSessionsResponse, CodexPermissionInput, ErrorMessage, LaunchSpec,
-    ModelUsage, ModelUsageEntry, SendAgentMessageRequest, SendAgentMessageResponse,
-    SoundSettingsResponse, TurnMetrics, TurnMetricsResponse, WorktreeMode,
+    format_bytes_short, AgentSessionInfo, AgentSessionsResponse, CodexPermissionInput,
+    ErrorMessage, LaunchSpec, ModelUsage, ModelUsageEntry, SendAgentMessageRequest,
+    SendAgentMessageResponse, ServiceKind, ServiceStats, SoundSettingsResponse, SystemSample,
+    TurnMetrics, TurnMetricsResponse, WorktreeMode,
 };
 pub use local_frame::{LocalFrame, UserFrame, ERROR_MESSAGE_TYPE};
 
@@ -227,7 +249,7 @@ pub enum AgentType {
     Codex,
     /// Meta Muse Code (`muse` CLI) — journal-stream agent, spawn-per-turn.
     Muse,
-    /// Google Antigravity (`localharness`) — WebSocket agent runtime.
+    /// Google Antigravity (`localharness`) preview agent.
     Antigravity,
 }
 
@@ -302,7 +324,7 @@ impl AgentType {
                 program: "bash",
                 args: vec![
                     "-c",
-                    "set -eu; root=\"${XDG_DATA_HOME:-$HOME/.local/share}/agent-portal/antigravity\"; python3 -m venv \"$root/venv\"; \"$root/venv/bin/python\" -m pip install --upgrade google-antigravity; harness=$(\"$root/venv/bin/python\" -c 'import pathlib, google.antigravity as a; print(pathlib.Path(a.__file__).parent / \"bin\" / \"localharness\")'); ln -sf \"$harness\" \"$root/venv/bin/localharness\"",
+                    "set -euo pipefail; tmp=$(mktemp -d); python3 -m pip download google-antigravity --no-deps -d \"$tmp\"; mkdir -p ~/.local/bin; unzip -o -j \"$tmp\"/*.whl 'google/antigravity/bin/localharness' -d ~/.local/bin; chmod +x ~/.local/bin/localharness",
                 ],
             },
         }
@@ -344,7 +366,7 @@ impl std::str::FromStr for AgentType {
             "claude" => Ok(AgentType::Claude),
             "codex" => Ok(AgentType::Codex),
             "muse" => Ok(AgentType::Muse),
-            "antigravity" => Ok(AgentType::Antigravity),
+            "antigravity" | "localharness" => Ok(AgentType::Antigravity),
             other => Err(format!("unknown agent type: {}", other)),
         }
     }
@@ -1094,13 +1116,8 @@ pub enum PortalContent {
         #[serde(default = "default_continuation_reason")]
         reason: String,
     },
-    /// A proxy reconnect, as a typed event rather than a prose line.
-    ///
-    /// Emitted only for an **expected** cycle (the backend told us it was
-    /// restarting). A genuinely unexpected drop stays a full `Text` card,
-    /// because that one is worth interrupting the reader for; a planned
-    /// redeploy is routine and should cost a single line. The frontend renders
-    /// this as a compact seam chip.
+    /// A proxy reconnect. No longer emitted — reconnects are only logged — but
+    /// kept so stored transcripts still deserialize; the frontend hides it.
     #[serde(rename = "connection_cycle")]
     ConnectionCycle {
         /// Human-readable outage length, e.g. `"35s"`. `None` when the proxy
@@ -1615,6 +1632,10 @@ mod tests {
             AgentType::parse_or_default("antigravity"),
             AgentType::Antigravity
         );
+        assert_eq!(
+            AgentType::parse_or_default("localharness"),
+            AgentType::Antigravity
+        );
         assert_eq!(AgentType::parse_or_default("bogus"), AgentType::Claude);
         assert_eq!(AgentType::parse_or_default(""), AgentType::Claude);
     }
@@ -1850,6 +1871,14 @@ mod install_command_tests {
             "npm install -g @openai/codex"
         );
     }
+
+    #[test]
+    fn antigravity_installs_localharness_from_python_wheel() {
+        let cmd = AgentType::Antigravity.install_command();
+        assert_eq!(cmd.program, "bash");
+        assert!(cmd.display().contains("google-antigravity"));
+        assert!(cmd.display().contains("localharness"));
+    }
 }
 
 #[cfg(test)]
@@ -1877,3 +1906,6 @@ mod agent_type_parse_roundtrip {
         }
     }
 }
+
+/// Launcher supports typed, host-local plugin management.
+pub const LAUNCHER_CAPABILITY_PLUGINS: &str = "plugins.manage.v1";

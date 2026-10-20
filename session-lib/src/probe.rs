@@ -19,9 +19,8 @@ pub struct ProbeResult {
     pub sandbox_ok: Option<bool>,
 }
 
-/// Probe every supported agent runtime. The conventional CLIs return from
-/// `--version`; Antigravity is discovered without invoking `localharness`
-/// because that binary is a long-running protocol server.
+/// Probe both supported agent CLIs. Cheap — each binary returns from
+/// `--version` in tens of milliseconds.
 pub fn probe_all_agents() -> Vec<(AgentType, ProbeResult)> {
     [
         AgentType::Claude,
@@ -40,6 +39,7 @@ pub fn probe_agent(agent: AgentType) -> ProbeResult {
     if agent == AgentType::Antigravity {
         return probe_antigravity();
     }
+
     let name = agent.as_str();
 
     let resolved_path = which::which(name).ok();
@@ -85,71 +85,35 @@ pub fn probe_agent(agent: AgentType) -> ProbeResult {
 fn probe_antigravity() -> ProbeResult {
     let resolved_path = std::env::var_os("ANTIGRAVITY_HARNESS_PATH")
         .map(PathBuf::from)
-        .filter(|path| path.is_file())
-        .or_else(|| which::which("localharness").ok())
-        .or_else(|| antigravity_managed_harness_path().filter(|path| path.is_file()))
-        .or_else(discover_python_antigravity_harness);
-    let version = resolved_path.as_ref().and_then(|_| {
-        let output = Command::new("python3")
-            .args([
-                "-c",
-                "import importlib.metadata; print(importlib.metadata.version('google-antigravity'))",
-            ])
-            .output()
-            .ok()?;
-        output.status.success().then(|| {
-            String::from_utf8_lossy(&output.stdout).trim().to_string()
-        })
-    });
-    ProbeResult {
-        installed: resolved_path.is_some(),
-        resolved_path,
-        version,
-        sandbox_ok: None,
-    }
-}
+        .filter(|path| path.exists())
+        .or_else(|| which::which("localharness").ok());
 
-/// Stable path populated by Agent Portal's launcher-owned Antigravity venv.
-/// Keeping the environment private avoids PEP 668 failures and prevents an
-/// install from mutating the host Python environment.
-pub fn antigravity_managed_harness_path() -> Option<PathBuf> {
-    directories::ProjectDirs::from("org", "CosmicFrontier", "agent-portal").map(|project| {
-        project
-            .data_dir()
-            .join("antigravity")
-            .join("venv")
-            .join("bin")
-            .join("localharness")
-    })
-}
+    let Some(path) = resolved_path else {
+        return ProbeResult {
+            installed: false,
+            resolved_path: None,
+            version: None,
+            sandbox_ok: None,
+        };
+    };
 
-fn discover_python_antigravity_harness() -> Option<PathBuf> {
-    let output = Command::new("python3")
-        .args([
-            "-c",
-            "import pathlib, google.antigravity as a; print(pathlib.Path(a.__file__).parent / 'bin' / 'localharness')",
-        ])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
-    path.is_file().then_some(path)
-}
-
-/// Presence-only credential probe. The first integration uses the Gemini
-/// Developer API; Vertex ADC is intentionally left for the follow-up because
-/// the launch dialog has no provider/project/location fields yet.
-pub fn probe_antigravity_login() -> shared::AgentLoginStatus {
-    if std::env::var("GEMINI_API_KEY").is_ok_and(|v| is_non_blank(&v)) {
-        shared::AgentLoginStatus::LoggedIn {
-            label: Some("Gemini API".to_string()),
-            plan: None,
-            via: Some("env".to_string()),
+    let version = match Command::new(&path).arg("--version").output() {
+        Ok(output) if output.status.success() => {
+            let raw = String::from_utf8_lossy(&output.stdout);
+            let trimmed = raw.trim();
+            is_non_blank(trimmed).then(|| trimmed.to_string())
         }
-    } else {
-        shared::AgentLoginStatus::LoggedOut
+        Ok(_) | Err(_) => Some("google-antigravity localharness".to_string()),
+    };
+
+    ProbeResult {
+        installed: true,
+        resolved_path: Some(path),
+        version,
+        sandbox_ok: Some(matches!(
+            probe_antigravity_login_ready(),
+            shared::AgentLoginStatus::LoggedIn { .. }
+        )),
     }
 }
 
@@ -215,6 +179,38 @@ pub fn probe_muse_login() -> shared::AgentLoginStatus {
     )
 }
 
+/// Presence-only login probe for Antigravity. The harness can authenticate via
+/// a Gemini API key or Vertex/ADC project+location; there is no interactive
+/// sign-in flow for Portal to drive.
+pub fn probe_antigravity_login() -> shared::AgentLoginStatus {
+    probe_antigravity_login_ready()
+}
+
+fn probe_antigravity_login_ready() -> shared::AgentLoginStatus {
+    let gemini_key = std::env::var("GEMINI_API_KEY").is_ok_and(|v| is_non_blank(&v));
+    if gemini_key {
+        return shared::AgentLoginStatus::LoggedIn {
+            label: Some("gemini".to_string()),
+            plan: None,
+            via: Some("env".to_string()),
+        };
+    }
+
+    let vertex_project =
+        std::env::var("ANTIGRAVITY_VERTEX_PROJECT").is_ok_and(|v| is_non_blank(&v));
+    let vertex_location =
+        std::env::var("ANTIGRAVITY_VERTEX_LOCATION").is_ok_and(|v| is_non_blank(&v));
+    if vertex_project && vertex_location {
+        shared::AgentLoginStatus::LoggedIn {
+            label: Some("vertex".to_string()),
+            plan: None,
+            via: Some("adc".to_string()),
+        }
+    } else {
+        shared::AgentLoginStatus::LoggedOut
+    }
+}
+
 fn muse_login_status(
     via_env: bool,
     credentials_present: bool,
@@ -249,10 +245,10 @@ pub const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 mod muse_probe_tests {
     use super::*;
 
-    /// Muse joins the probe set — the matrix needs a column for it even on
+    /// Muse and Antigravity join the probe set — the matrix needs columns even on
     /// hosts where the binary is absent.
     #[test]
-    fn probe_covers_all_agents() {
+    fn probe_covers_all_four_agents() {
         let probed: Vec<AgentType> = probe_all_agents().into_iter().map(|(a, _)| a).collect();
         assert!(probed.contains(&AgentType::Muse));
         assert!(probed.contains(&AgentType::Antigravity));
@@ -264,7 +260,7 @@ mod muse_probe_tests {
     #[test]
     fn sandbox_ok_is_none_for_non_muse_agents() {
         for (agent, result) in probe_all_agents() {
-            if agent != AgentType::Muse {
+            if matches!(agent, AgentType::Claude | AgentType::Codex) {
                 assert_eq!(
                     result.sandbox_ok, None,
                     "{agent:?} should have no sandbox state"
@@ -294,6 +290,21 @@ mod muse_probe_tests {
                 assert!(via.is_none() || via.as_deref() == Some("env"));
             }
             shared::AgentLoginStatus::LoggedOut | shared::AgentLoginStatus::Unknown => {}
+        }
+    }
+
+    #[test]
+    fn antigravity_login_probe_shape() {
+        match probe_antigravity_login() {
+            shared::AgentLoginStatus::LoggedIn { label, plan, via } => {
+                assert!(matches!(label.as_deref(), Some("gemini" | "vertex")));
+                assert_eq!(plan, None, "antigravity exposes no plan/subscription");
+                assert!(matches!(via.as_deref(), Some("env" | "adc")));
+            }
+            shared::AgentLoginStatus::LoggedOut => {}
+            shared::AgentLoginStatus::Unknown => {
+                panic!("antigravity login probe is deterministic env/ADC presence")
+            }
         }
     }
 

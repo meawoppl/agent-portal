@@ -3,12 +3,15 @@ use axum::{
     http::{header, HeaderValue},
     middleware::Next,
     response::Response,
-    routing::{get, post, put},
+    routing::{get, patch, post, put},
     Json, Router,
 };
 use governor::clock::QuantaInstant;
 use governor::middleware::NoOpMiddleware;
-use shared::{api::HealthResponse, WsEndpoint};
+use shared::{
+    api::{HealthResponse, FEDERATION_DISCOVERY_PATH},
+    WsEndpoint,
+};
 use std::sync::Arc;
 use tower_cookies::CookieManagerLayer;
 use tower_governor::governor::GovernorConfigBuilder;
@@ -116,11 +119,16 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
     // The forward-host gate is the outermost layer; the main `app_state`
     // binding is consumed by `.with_state` below.
     let app_state_for_forward_gate = app_state.clone();
+    let app_state_for_linked_gate = app_state.clone();
 
     // Rate-limited device-code creation. Keep this strict: creating a code is
     // user-visible work and should not be spammed.
     let auth_device_code_routes = Router::new()
         .route(AUTH_DEVICE_CODE, post(handlers::device_flow::device_code))
+        .route(
+            "/api/auth/linked/code",
+            post(handlers::federation::enrollment::start),
+        )
         .layer(rate_limit(6, 10)?)
         .with_state(app_state.clone());
 
@@ -129,6 +137,10 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
     // NAT without draining the burst during a slow browser approval (#1047).
     let auth_device_poll_routes = Router::new()
         .route(AUTH_DEVICE_POLL, post(handlers::device_flow::device_poll))
+        .route(
+            "/api/auth/linked/poll",
+            post(handlers::federation::enrollment::poll),
+        )
         .layer(rate_limit(2, 30)?)
         .with_state(app_state.clone());
 
@@ -154,6 +166,11 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
             post(handlers::device_flow::device_approve),
         )
         .route(AUTH_DEVICE_DENY, post(handlers::device_flow::device_deny))
+        .route(
+            "/api/auth/linked",
+            get(handlers::federation::enrollment::approval)
+                .post(handlers::federation::enrollment::decide),
+        )
         .layer(rate_limit(2, 20)?)
         .with_state(app_state.clone());
 
@@ -181,6 +198,10 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
                 })
             }),
         )
+        .route(
+            FEDERATION_DISCOVERY_PATH,
+            get(handlers::federation_discovery::discovery),
+        )
         // Native mobile app-link association files. These must be served at
         // exact well-known paths, before the SPA fallback below.
         .route(
@@ -196,11 +217,19 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
         .route("/privacy", get(handlers::privacy::privacy_policy))
         // App configuration (public, no auth required)
         .route("/api/config", get(handlers::config::get_config))
+        .route(
+            "/api/plugins",
+            get(handlers::plugins::list_plugins).patch(handlers::plugins::set_session_plugin),
+        )
         // Session API routes
         .route("/api/sessions", get(handlers::sessions::list_sessions))
         .route(
             "/api/sessions/{id}",
             get(handlers::sessions::get_session).delete(handlers::sessions::delete_session),
+        )
+        .route(
+            "/api/sessions/{id}/name",
+            patch(handlers::sessions::rename_session),
         )
         .route(
             "/api/sessions/{id}/stop",
@@ -238,6 +267,10 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
             "/api/sessions/{id}/edit-stack/{item_id}",
             axum::routing::patch(handlers::edit_stack::update_edit_stack_item)
                 .delete(handlers::edit_stack::delete_edit_stack_item),
+        )
+        .route(
+            "/api/sessions/{id}/edit-stack/{item_id}/image",
+            get(handlers::edit_stack::get_edit_stack_item_image),
         )
         .route(
             "/api/sessions/{id}/turn-metrics",
@@ -318,6 +351,11 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
                 app_state.max_audio_mb as usize * 1024 * 1024,
             )),
         )
+        .route(
+            "/api/history/sessions/{user}/{session}/recovery",
+            get(handlers::history_restore::restore_status)
+                .post(handlers::history_restore::restore_history),
+        )
         // Session-history browser over the long-term archive. Visibility
         // (owner / shared / admin) is enforced in each handler.
         .route(
@@ -333,6 +371,10 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
             get(handlers::history::get_history_messages),
         )
         .route(
+            "/api/history/sessions/{user}/{session}/restore",
+            post(handlers::session_restore::restore_session),
+        )
+        .route(
             "/api/history/media/{user}/{session}/{media_id}",
             get(handlers::history::get_history_media),
         )
@@ -343,6 +385,20 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
         .route(
             "/api/metrics/turns",
             get(handlers::turn_metrics::list_aggregated_turn_metrics),
+        )
+        // Linked credentials remain confined to their approved grant.
+        .route("/api/ws-ticket", post(handlers::federation::tickets::issue))
+        .route(
+            "/api/linked-grants",
+            get(handlers::federation::credentials::list),
+        )
+        .route(
+            "/api/linked-grants/refresh",
+            post(handlers::federation::credentials::refresh),
+        )
+        .route(
+            "/api/linked-grants/{id}",
+            axum::routing::delete(handlers::federation::credentials::revoke),
         )
         // Proxy token management endpoints
         .route(
@@ -421,6 +477,16 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
             "/api/settings/identities/{id}",
             axum::routing::delete(handlers::identities::unlink_identity),
         )
+        .route(
+            "/api/portal-connections",
+            get(handlers::portal_connections::list_portal_connections)
+                .post(handlers::portal_connections::upsert_portal_connection),
+        )
+        .route(
+            "/api/portal-connections/{id}",
+            axum::routing::patch(handlers::portal_connections::update_portal_connection)
+                .delete(handlers::portal_connections::delete_portal_connection),
+        )
         .route(AUTH_ME, get(handlers::auth::me))
         .route(AUTH_REFRESH, post(handlers::auth::refresh_token))
         .route(AUTH_TOKEN_LOGIN, post(handlers::auth::token_login))
@@ -451,6 +517,11 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
             get(handlers::launchers::list_directories),
         )
         .route("/api/launch", post(handlers::launchers::launch_session))
+        .route(
+            "/api/launchers/{launcher_id}/external-sessions/{agent}",
+            get(handlers::session_imports::list_external_sessions)
+                .post(handlers::session_imports::import_session),
+        )
         .route(
             "/api/sessions/{session_id}/fork",
             post(handlers::launchers::fork_session),
@@ -488,6 +559,11 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
             post(handlers::launchers::install_agent),
         )
         // Admin dashboard routes (admin-only)
+        .route(
+            "/api/admin/federation-policy",
+            get(handlers::federation::policy::get_policy)
+                .put(handlers::federation::policy::set_policy),
+        )
         .route("/api/admin/stats", get(handlers::admin::get_stats))
         .route("/api/admin/users", get(handlers::admin::list_users))
         .route(
@@ -541,6 +617,11 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
         .layer(axum::middleware::from_fn_with_state(
             app_state_for_forward_gate,
             handlers::forward_proxy::forward_host_gate,
+        ))
+        // Outermost auth ceiling also covers forward hosts and SPA fallbacks.
+        .layer(axum::middleware::from_fn_with_state(
+            app_state_for_linked_gate,
+            handlers::federation::linked_scope_gate,
         )))
 }
 

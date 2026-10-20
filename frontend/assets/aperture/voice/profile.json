@@ -1,0 +1,12 @@
+{
+  "version": 5,
+  "synthesizer": "Piper en_US-kristin-medium + WORLD vocoder",
+  "base_hz": 212,
+  "pitch_spread": 1.4,
+  "pitch_step_ms": 140,
+  "upper_pitch_percentile_cap": 90,
+  "random_upward_pitch_jumps": false,
+  "formant_scale": 1.03,
+  "presence_boost": 0.17,
+  "generator_sha256": "df088a13feb609c8adbdb558714adae305ab44795d3b5b7e6c6b3e5dfac696b8"
+}

@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200" font-family="'Segoe UI','Noto Sans',sans-serif">
+  <rect width="2000" height="1200" fill="#16161e"/>
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2203 · Add federated portal views design</text>
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">Each portal was an island: one origin, one cookie, one account per browser view.</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">The design links portals as scoped per-account connections, so one view drives all.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="2"/>
+
+  <text x="105" y="235" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1090" y="235" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1140" stroke="#3d4666" stroke-width="2" stroke-dasharray="12 14"/>
+
+  <!-- BEFORE -->
+  <rect x="105" y="270" width="840" height="150" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+  <text x="129" y="312" font-size="26" fill="#7aa2f7">utils::get_base_url</text>
+  <text x="129" y="350" font-size="23" fill="#a9b1d6">api_url and get_ws_url derive from window.location:</text>
+  <text x="129" y="385" font-size="23" fill="#a9b1d6">the frontend can only talk to the portal that served it.</text>
+  <line x1="525" y1="420" x2="525" y2="465" stroke="#565f89" stroke-width="3"/>
+  <rect x="105" y="465" width="840" height="150" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+  <text x="129" y="507" font-size="26" fill="#c0caf5">/ws/client authenticated by cc_session cookie</text>
+  <text x="129" y="545" font-size="23" fill="#a9b1d6">Bearer works for REST, but a browser cannot set headers</text>
+  <text x="129" y="580" font-size="23" fill="#a9b1d6">on a WebSocket, and the cookie never crosses sites.</text>
+  <line x1="525" y1="615" x2="525" y2="660" stroke="#565f89" stroke-width="3"/>
+  <rect x="105" y="660" width="840" height="190" rx="8" fill="#1e202e" stroke="#f7768e" stroke-width="3"/>
+  <text x="129" y="702" font-size="26" fill="#f7768e">Two portals = two tabs, two logins</text>
+  <text x="129" y="740" font-size="23" fill="#a9b1d6">txcl.io as meawoppl@gmail.com and</text>
+  <text x="129" y="775" font-size="23" fill="#a9b1d6">portal.cosmicfrontier.org as matt@cosmicfrontier.org</text>
+  <text x="129" y="810" font-size="23" fill="#a9b1d6">never appear in one rail.</text>
+
+  <!-- AFTER -->
+  <rect x="1055" y="270" width="840" height="150" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1079" y="312" font-size="26" fill="#9ece6a">PortalClient per (portal, account)</text>
+  <text x="1079" y="350" font-size="23" fill="#a9b1d6">Home frontend keeps one client per linked connection;</text>
+  <text x="1079" y="385" font-size="23" fill="#a9b1d6">every key is (portal, account, session).</text>
+  <line x1="1475" y1="420" x2="1475" y2="465" stroke="#565f89" stroke-width="3"/>
+  <rect x="1055" y="465" width="840" height="190" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1079" y="507" font-size="26" fill="#9ece6a">linked_client_grants + scoped token + ws_tickets</text>
+  <text x="1079" y="545" font-size="23" fill="#a9b1d6">Device flow on the linked portal mints a read/write token</text>
+  <text x="1079" y="580" font-size="23" fill="#a9b1d6">kept on the device; POST /api/ws-ticket trades it for a</text>
+  <text x="1079" y="615" font-size="23" fill="#a9b1d6">one-use ticket for /ws/client?ticket=...</text>
+  <line x1="1475" y1="655" x2="1475" y2="700" stroke="#565f89" stroke-width="3"/>
+  <rect x="1055" y="700" width="840" height="190" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1079" y="742" font-size="26" fill="#9ece6a">portal_connections on the home: metadata only</text>
+  <text x="1079" y="780" font-size="23" fill="#a9b1d6">No identity merge; email is a label, never a key.</text>
+  <text x="1079" y="815" font-size="23" fill="#e0af68">Linked admin policy: off by default, allowlist, max_scope.</text>
+  <text x="1079" y="850" font-size="23" fill="#e0af68">Home-served code can read device tokens: explicit trust.</text>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">Design only, no code. v1 is foreground-only: background push across portals (home notification relay) is deferred. Self-hosting packaging is a separate track.</text>
+</svg>

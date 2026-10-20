@@ -23,6 +23,8 @@ pub enum GroupCategory {
     /// the group renders as ONE task-tree card (see `MessageGroupRenderer`)
     /// instead of one raw-JSON bubble each.
     Muse,
+    /// Consecutive Agent Portal-authored Antigravity preview frames.
+    Antigravity,
     /// Consecutive `system`/`thinking_tokens` markers emitted by the Claude CLI.
     /// These carry no renderable body — the portal collapses a run of them into
     /// a single compact `thinking × N` chip instead of one empty badge each.
@@ -42,6 +44,7 @@ impl GroupCategory {
             GroupCategory::Codex => "x",
             GroupCategory::Thinking => "t",
             GroupCategory::Muse => "m",
+            GroupCategory::Antigravity => "a",
         }
     }
 }
@@ -273,10 +276,11 @@ pub(super) fn classify(
         return Some(source_identity(source, current_user_id));
     }
 
-    let assistant_identity_label = if agent_type == shared::AgentType::Codex {
-        "Codex"
-    } else {
-        "Claude"
+    let assistant_identity_label = match agent_type {
+        shared::AgentType::Codex => "Codex",
+        shared::AgentType::Muse => "Muse",
+        shared::AgentType::Antigravity => "Antigravity",
+        shared::AgentType::Claude => "Claude",
     };
 
     match AgentFrameRegistry::parse(json, agent_type) {
@@ -374,16 +378,11 @@ pub(super) fn classify(
                 badge_class: "assistant".to_string(),
             });
         }
-        AgentFrame::AntigravityTurnCompleted(_) => {
-            // Keep the turn terminal as a singleton so its metrics footer can
-            // receive the turn-indexed payload from SessionView.
-            return None;
-        }
-        AgentFrame::AntigravityStep(_) => {
+        AgentFrame::Antigravity(_) => {
             return Some(MessageIdentity {
-                category: GroupCategory::Assistant,
+                category: GroupCategory::Antigravity,
                 label: "Antigravity".to_string(),
-                badge_class: "assistant".to_string(),
+                badge_class: "antigravity".to_string(),
             });
         }
         _ => {}
@@ -508,6 +507,18 @@ pub fn thinking_chip_starts(groups: &[MessageGroup], agent_type: shared::AgentTy
         .collect()
 }
 
+fn is_transcript_noise(frame: &AgentFrame) -> bool {
+    match frame {
+        AgentFrame::Claude(ClaudeMessage::System(msg)) => {
+            msg.subtype.as_str() == "commands_changed"
+        }
+        AgentFrame::Claude(ClaudeMessage::Portal(portal)) => {
+            super::group_renderer::is_reconnect_notice(portal)
+        }
+        _ => false,
+    }
+}
+
 /// Walk `messages` and collapse consecutive same-category runs into
 /// `MessageGroup::IdentityGroup`. Mixed / `None` messages become
 /// `MessageGroup::Single`.
@@ -536,7 +547,16 @@ pub fn group_messages(
     }
 
     for message in messages {
-        let kind = AgentFrameRegistry::parse(&message.content, agent_type).kind();
+        let frame = AgentFrameRegistry::parse(&message.content, agent_type);
+
+        // Transport churn with nothing for the reader: reconnect notices and
+        // Claude's `commands_changed` marker (re-sent on every reconnect).
+        // Dropping them here, not in `classify`, keeps the surrounding run in
+        // one group instead of splitting it around each hidden frame.
+        if is_transcript_noise(&frame) {
+            continue;
+        }
+        let kind = frame.kind();
 
         // Claude command lifecycle frames are transport bookkeeping, not
         // conversation. Recognize and omit them rather than surfacing raw JSON

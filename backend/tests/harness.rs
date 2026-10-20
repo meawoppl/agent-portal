@@ -147,7 +147,7 @@ async fn archive_sweep_persists_and_is_idempotent() {
         eprintln!("skipping: DATABASE_URL not set");
         return;
     }
-    let _guard = ARCHIVE_DB_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let _guard = shared::sync::lock_recovering_poison(&ARCHIVE_DB_LOCK);
     use backend::archive::{read_transcript, ArchiveBackendConfig, ArchiveConfig, ArchiveRuntime};
     use backend::models::{NewMessage, NewSessionWithId};
     use backend::schema::{messages, sessions};
@@ -437,7 +437,7 @@ async fn rearchive_after_trim_merges_transcript() {
         eprintln!("skipping: DATABASE_URL not set");
         return;
     }
-    let _guard = ARCHIVE_DB_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let _guard = shared::sync::lock_recovering_poison(&ARCHIVE_DB_LOCK);
     use backend::archive::{read_transcript, ArchiveBackendConfig, ArchiveConfig, ArchiveRuntime};
     use backend::models::{NewMessage, NewSessionWithId};
     use backend::schema::{messages, sessions};

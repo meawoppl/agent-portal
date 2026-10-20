@@ -456,6 +456,57 @@
     margin: 0.25rem 0;
 }
 
+.plugin-suggestion-strip {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    min-width: 0;
+    margin: -0.25rem 0 1rem;
+    padding: 0.45rem 0.55rem;
+    border: 1px solid rgba(122, 162, 247, 0.25);
+    border-radius: 6px;
+    background: rgba(122, 162, 247, 0.07);
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+}
+
+.plugin-suggestion-strip.muted {
+    border-color: rgba(86, 95, 137, 0.32);
+    background: rgba(36, 40, 59, 0.34);
+}
+
+.plugin-suggestion-title {
+    flex: 0 0 auto;
+    color: var(--text-primary);
+    font-weight: 650;
+}
+
+.plugin-suggestion-list {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    min-width: 0;
+}
+
+.plugin-suggestion-pill {
+    display: inline-flex;
+    align-items: center;
+    max-width: 10rem;
+    min-height: 1.25rem;
+    padding: 0.12rem 0.42rem;
+    border: 1px solid rgba(158, 206, 106, 0.42);
+    border-radius: 999px;
+    background: rgba(158, 206, 106, 0.1);
+    color: var(--success, #9ece6a);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.plugin-suggestion-error {
+    color: var(--error, #f7768e);
+}
+
 .launch-note-warn {
     color: #e0af68;
     background: rgba(224, 175, 104, 0.1);
@@ -713,4 +764,62 @@
 .launch-field textarea:focus {
     outline: none;
     border-color: var(--accent);
+}
+
+/* Native session import: wrap paths and keep the picker usable on phones. */
+.launch-source-tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin: 1rem 0;
+}
+
+.launch-source-tabs .launch-button-cancel {
+    flex: 1;
+    padding: 0.65rem 0.75rem;
+}
+
+.launch-source-tabs .launch-button-cancel[aria-pressed="true"] {
+    border-color: var(--accent);
+    background: var(--bg-dark);
+    color: var(--text-primary);
+}
+
+.session-import .launch-button-cancel:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.import-session-list {
+    max-height: 42vh;
+    overflow-y: auto;
+    margin: 1rem 0;
+}
+
+.import-session-row {
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--border-color, #3d4666);
+}
+
+.import-session-choice {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+}
+
+.import-session-choice span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.import-session-choice small {
+    display: block;
+    opacity: 0.75;
+    margin-top: 0.25rem;
+}
+
+.import-session-row button {
+    margin-top: 0.5rem;
+}
+
+.session-import .launch-actions {
+    flex-wrap: wrap;
 }

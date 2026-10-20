@@ -67,6 +67,20 @@ fn turn_terminator_detection_covers_claude_and_codex() {
         },
         shared::AgentType::Claude
     ));
+
+    let antigravity_completed = serde_json::json!({
+        "type": "antigravity_turn_completed",
+        "is_error": false,
+    })
+    .to_string();
+    assert!(group_is_turn_terminator(
+        &MessageGroup::Single(rendered(antigravity_completed.clone())),
+        shared::AgentType::Antigravity
+    ));
+    assert!(!group_is_turn_terminator(
+        &MessageGroup::Single(rendered(antigravity_completed)),
+        shared::AgentType::Claude
+    ));
 }
 
 /// One canonical wire shape per realistic message kind paired with the
@@ -108,6 +122,17 @@ fn classifier_exhaustive_over_realistic_messages() {
             Some(GroupCategory::Codex),
         ),
         (
+            "antigravity event",
+            serde_json::json!({
+                "type": "antigravity_event",
+                "event": "step_update",
+                "step_kind": "message",
+                "text": "starting",
+            })
+            .to_string(),
+            None,
+        ),
+        (
             "system message",
             serde_json::json!({
                 "type": "system",
@@ -144,6 +169,26 @@ fn classifier_exhaustive_over_realistic_messages() {
             "{label}: classifier returned {got:?}, expected {expected:?}"
         );
     }
+}
+
+#[test]
+fn antigravity_event_classifies_only_on_antigravity_sessions() {
+    let json = serde_json::json!({
+        "type": "antigravity_event",
+        "event": "step_update",
+        "step_kind": "message",
+        "text": "starting",
+    })
+    .to_string();
+
+    assert_eq!(
+        classify(&rendered(&json), shared::AgentType::Antigravity, None).map(|i| i.category),
+        Some(GroupCategory::Antigravity)
+    );
+    assert_eq!(
+        classify(&rendered(&json), shared::AgentType::Claude, None).map(|i| i.category),
+        None
+    );
 }
 
 /// `/clear` used to fall through the `_ => Unknown` wildcard and render as a

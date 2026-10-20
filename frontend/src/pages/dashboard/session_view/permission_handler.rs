@@ -469,7 +469,7 @@ fn should_keep_multi_select_options(
     let answer_labels: HashSet<&str> = answer
         .split(',')
         .map(str::trim)
-        .filter(|part| !part.is_empty())
+        .filter(|part| shared::strings::is_non_empty(part))
         .collect();
     selected_labels == answer_labels
 }

@@ -63,13 +63,27 @@ pub fn trimmed_non_blank(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|s| !s.is_empty())
 }
 
+/// Collapse every run of whitespace (including newlines and tabs) into a
+/// single space, trimming the ends.
+///
+/// Single home for the repeated
+/// `split_whitespace().collect::<Vec<_>>().join(" ")` shape in one-line
+/// preview and snippet surfaces so the call sites cannot drift (e.g. one
+/// joining with two spaces while another forgets the trim that
+/// `split_whitespace` provides for free).
+#[must_use]
+pub fn collapse_whitespace(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// Truncate to `max_chars` on a char boundary, appending `…` when cut.
 ///
 /// Short input returns as-is; otherwise the first `max_chars - 1` chars plus
 /// the ellipsis marker, so output never exceeds `max_chars` chars. Single
-/// home for the repeated `take(MAX - 1)` + `push('…')` shape in notification
-/// snippet caps so the call sites cannot drift (e.g. one keeping `MAX` chars
-/// before the marker while another keeps `MAX - 1`).
+/// home for the repeated `take(MAX - 1)` + `push('…')` shape in capped
+/// preview and notification snippet surfaces so the call sites cannot drift
+/// (e.g. one keeping `MAX` chars before the marker while another keeps
+/// `MAX - 1`).
 #[must_use]
 pub fn truncate_with_ellipsis(s: &str, max_chars: usize) -> String {
     if s.chars().count() <= max_chars {
@@ -78,6 +92,28 @@ pub fn truncate_with_ellipsis(s: &str, max_chars: usize) -> String {
     let mut out: String = s.chars().take(max_chars.saturating_sub(1)).collect();
     out.push('…');
     out
+}
+
+/// Keep the last `max_chars` of `s`, prefixing `…` when cut.
+///
+/// Short input returns as-is; otherwise the ellipsis marker plus the last
+/// `max_chars` chars, so output is `max_chars + 1` chars. Single home for
+/// the repeated take-the-tail + `…` shape in failure-message surfaces (the
+/// agent install error and the login transcript tail) so the call sites
+/// cannot drift (e.g. one slicing bytes while another counts chars).
+///
+/// Note the asymmetry with [`truncate_with_ellipsis`]: that helper budgets
+/// the marker *inside* `max_chars`, while this one keeps `max_chars` of
+/// content *plus* the marker — both centralized call sites counted content
+/// chars, and this preserves their output byte-for-byte.
+#[must_use]
+pub fn tail_with_ellipsis(s: &str, max_chars: usize) -> String {
+    let len = s.chars().count();
+    if len <= max_chars {
+        return s.to_string();
+    }
+    let tail: String = s.chars().skip(len - max_chars).collect();
+    format!("…{tail}")
 }
 
 #[cfg(test)]
@@ -135,6 +171,18 @@ mod tests {
     }
 
     #[test]
+    fn collapse_whitespace_joins_runs_with_single_spaces() {
+        assert_eq!(collapse_whitespace("  hello   world  "), "hello world");
+        assert_eq!(
+            collapse_whitespace("line one\n\tline two\r\nline three"),
+            "line one line two line three"
+        );
+        assert_eq!(collapse_whitespace(""), "");
+        assert_eq!(collapse_whitespace("   "), "");
+        assert_eq!(collapse_whitespace("already single"), "already single");
+    }
+
+    #[test]
     fn truncate_with_ellipsis_keeps_short_input_untouched() {
         assert_eq!(truncate_with_ellipsis("hello", 120), "hello");
         assert_eq!(truncate_with_ellipsis("hello", 5), "hello");
@@ -152,5 +200,26 @@ mod tests {
         let cut = truncate_with_ellipsis(&"é".repeat(500), 120);
         assert_eq!(cut.chars().count(), 120);
         assert!(cut.ends_with('…'));
+    }
+
+    #[test]
+    fn tail_with_ellipsis_keeps_short_input_untouched() {
+        assert_eq!(tail_with_ellipsis("hello", 2000), "hello");
+        assert_eq!(tail_with_ellipsis("hello", 5), "hello");
+    }
+
+    #[test]
+    fn tail_with_ellipsis_keeps_the_end_with_marker() {
+        assert_eq!(tail_with_ellipsis("prefix-RETAIN", 6), "…RETAIN");
+        let cut = tail_with_ellipsis(&"x".repeat(2100), 2000);
+        assert_eq!(cut.chars().count(), 2001);
+        assert!(cut.starts_with('…'));
+    }
+
+    #[test]
+    fn tail_with_ellipsis_is_char_boundary_safe() {
+        let out = tail_with_ellipsis(&"é".repeat(2100), 2000);
+        assert!(out.starts_with('…'));
+        assert_eq!(out.chars().filter(|c| *c == 'é').count(), 2000);
     }
 }

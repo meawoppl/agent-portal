@@ -46,3 +46,7 @@ screenlog.*
 parsing-dump/
 /image.png
 builds/
+
+# Self-hosting backups (deploy/backup.sh)
+deploy/backups/
+deploy/.restore.lock

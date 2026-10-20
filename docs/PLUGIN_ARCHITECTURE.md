@@ -1,8 +1,8 @@
 # Agent Portal Plugin Architecture
 
 Status: implemented launcher-local plugin runtime with manifest-described
-extensions. Frontend suggestion UI and stronger sandboxing are still separate
-work.
+extensions, discovery, and session-specific skill selection. Stronger
+sandboxing remains separate work.
 
 This document defines Portal plugins as repo-adjacent capabilities installed by
 the `agent-portal` launcher. A plugin gives a session a domain-specific work
@@ -57,6 +57,30 @@ combination of:
 The smallest useful plugin is just instructions. The common rich plugin is a
 binary that serves a website on localhost and registers that port as the
 session's active surface.
+
+## Selecting plugins for a session
+
+Open **Plugins** in the session header and check the installed plugins whose
+skills should be offered to that session. Changes save immediately and apply on
+the session's next restart. The picker works on desktop and mobile; only the
+session and launcher owner can save changes. **Plugin details** retains the
+skills, commands, and project suggestions view.
+
+Inventory comes from the session's connected launcher, not the backend's disk.
+Both the backend and launcher must support the `session.plugins` capability;
+older launchers receive no unsupported WebSocket messages and the picker asks
+for an update. Disconnected launchers cannot accept changes.
+
+Selections are atomic JSON overrides under the launcher's config directory at
+`session-plugins/<session-uuid>.json`. Unspecified plugins inherit host defaults;
+explicit choices persist across process restarts and do not change other
+sessions or `launcher.json`. Launch preparation filters both generated Claude
+plugin directories and the skill reminders used by other supported agents.
+Invalid selection files fail closed instead of silently restoring every skill.
+
+This controls skill injection, not an execution sandbox: installed binaries and
+already-running plugin surfaces remain available on the host. Restarting does
+not erase plugin instructions already present in conversation history.
 
 ## Filesystem Layout
 
@@ -561,11 +585,17 @@ It is written to:
 $AGENT_PORTAL_PLUGIN_ROOT/kicad-pcb/.portal/state/surfaces/surface.json
 ```
 
-`agent-portal plugin start` reuses that process when the health check still
-passes. Stale state is discarded and the surface is started again. `status
---json` reports the same state with a `healthy` flag; `stop` runs
-`[surface].stop` when declared, otherwise it terminates the stored pid on
-platforms where the launcher can do so. Do not store this lifecycle state in the
+`agent-portal plugin open` persists a launcher-owned service recipe, allocates a
+stable relay port, and injects a child port into the manifest's foreground start
+command. The daemon restarts failed children and restores recipes on startup;
+the session process does not own their lifetime. Managed surface records carry
+a generation ID instead of a PID. `stop` unregisters only that generation.
+
+For direct local startup, `agent-portal plugin start` reuses the process when
+the health check still passes. Stale state is discarded and the surface is
+started again. `status --json` reports the same state with a `healthy` flag;
+for unmanaged surfaces, `stop` runs `[surface].stop` when declared, otherwise
+it terminates the stored process group. Do not store this lifecycle state in the
 backend database until a frontend or API needs cross-device visibility beyond
 the existing forward status.
 

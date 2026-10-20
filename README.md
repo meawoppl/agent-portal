@@ -73,8 +73,12 @@ Open **http://localhost:3000/** — dev mode logs you in as
 - **Keyboard-first.** `Ctrl/Cmd+K` enters nav mode — jump between sessions,
   `w` to hop to the next one waiting on you, scroll transcripts without leaving
   the keyboard. Press `?` for the full list.
+- **Rename sessions.** Owners and editors can change a session's display name
+  from its title or session menu, including while it is paused.
 - **History.** Finished sessions stay browsable and searchable as an overlay,
-  including transcripts restored from long-term archive.
+  including transcripts restored from long-term archive. Open a conversation
+  to restore saved native state or recover from archived context; see
+  [Restore from History](docs/HISTORY_RESTORE.md).
 
 <img src="docs/media/feature-desktop-phone.webp" width="900"
      alt="The same session open on a desktop and a phone at once. The question is typed on the phone; it appears on the desktop immediately and both panes stream the agent's answer in step.">
@@ -93,6 +97,10 @@ Open **http://localhost:3000/** — dev mode logs you in as
 - **Model picker** fed by the SDK crates' model catalogs, per launch.
 - **Fork a session** into a new git worktree to try a second approach without
   disturbing the first.
+- **Import existing Codex conversations** from the CLI or IDE, with optional
+  history and a paused handoff. See [Session import](docs/SESSION_IMPORT.md).
+- **Restore a deleted session from History**, continuing its original Claude
+  or Codex conversation. See [Session restore](docs/SESSION_RESTORE.md).
 
 <img src="docs/media/feature-launch-session.webp" width="900"
      alt="The launch dialog: pick the machine, browse to a directory, choose the model, tick 'create git worktree', and click Launch. A session pill slides into the rail and the agent boots and greets you.">
@@ -256,6 +264,7 @@ the typed Rust parsers for the agent CLIs' JSON protocols.
 | [File Downloads](docs/PORTAL_FILE_DOWNLOADS.md) | `portal://file` links |
 | [Plugin Authoring](docs/PLUGIN_AUTHORING.md) | Writing plugins, skills, surfaces, commands, and toolchains |
 | [Codex Support](docs/CODEX_SUPPORT.md) | Codex integration notes |
+| [Self-Hosting](docs/SELF_HOSTING.md) | Run your own portal: one host, released image, HTTPS, backups, upgrades |
 | [Deployment Guide](docs/DEPLOYING.md) | Production deployment and OAuth setup |
 | [Docker Guide](docs/DOCKER.md) | Docker and Kubernetes with 1Password |
 | [VS Code Setup](docs/VSCODE_SETUP.md) | Portal integration for the VS Code extension |
@@ -305,7 +314,7 @@ When using the hosted instance at **txcl.io**:
 - **No Analysis**: We do not analyze, share, or use your session content for any other purpose
 - **User Control**: You can delete your sessions and associated data at any time
 
-**For complete data control**, self-host. See the [Deployment Guide](docs/DEPLOYING.md).
+**For complete data control**, self-host. See [Self-Hosting](docs/SELF_HOSTING.md).
 
 ## License
 

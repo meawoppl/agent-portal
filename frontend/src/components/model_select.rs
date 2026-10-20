@@ -14,6 +14,12 @@ use shared::AgentType;
 use web_sys::HtmlSelectElement;
 use yew::prelude::*;
 
+const ANTIGRAVITY_MODELS: &[(&str, &str)] = &[
+    ("gemini-flash-latest", "Gemini Flash latest"),
+    ("gemini-2.5-flash", "Gemini 2.5 Flash"),
+    ("gemini-2.5-pro", "Gemini 2.5 Pro"),
+];
+
 /// Build the CLI args that select `model_value` for the given agent. An empty
 /// value means "agent default" and emits no args. Mirrors the mapping used when
 /// launching a session so the two paths stay identical.
@@ -24,8 +30,9 @@ pub fn model_cli_args(agent_type: AgentType, model_value: &str) -> Vec<String> {
     match agent_type {
         AgentType::Claude => vec!["--model".to_string(), model_value.to_string()],
         AgentType::Codex => vec!["-c".to_string(), format!("model={model_value}")],
-        AgentType::Muse => vec!["--model".to_string(), model_value.to_string()],
-        AgentType::Antigravity => vec!["--model".to_string(), model_value.to_string()],
+        AgentType::Muse | AgentType::Antigravity => {
+            vec!["--model".to_string(), model_value.to_string()]
+        }
     }
 }
 
@@ -42,16 +49,15 @@ fn model_catalog(agent_type: AgentType) -> Vec<(&'static str, &'static str, bool
             .iter()
             .map(|m| (m.cli_arg(), m.display_name(), false))
             .collect(),
+        AgentType::Antigravity => ANTIGRAVITY_MODELS
+            .iter()
+            .map(|(cli, name)| (*cli, *name, false))
+            .collect(),
         AgentType::Codex => CodexModel::known()
             .iter()
             .filter(|m| !matches!(m, CodexModel::CodexAutoReview))
             .map(|m| (m.cli_arg(), m.display_name(), false))
             .collect(),
-        // antigravity-codes intentionally models endpoint configuration, not
-        // a fast-moving catalog. This is the one model the SDK verifies works
-        // with a free Gemini Developer API key; future values can still be
-        // supplied in Extra args without the picker swallowing them.
-        AgentType::Antigravity => vec![("gemini-flash-latest", "Gemini Flash (latest)", true)],
     }
 }
 
@@ -205,6 +211,23 @@ mod tests {
         MuseModel::known()[0].cli_arg().to_string()
     }
 
+    fn a_known_antigravity_model() -> String {
+        ANTIGRAVITY_MODELS[0].0.to_string()
+    }
+
+    #[test]
+    fn muse_wonder_is_selectable_and_round_trips_schedule_args() {
+        // The SDK catalog drives the picker; new models must survive schedule editing.
+        let model = "muse-wonder-1.0";
+        assert!(model_catalog(AgentType::Muse)
+            .iter()
+            .any(|entry| entry.0 == model));
+        let input = model_cli_args(AgentType::Muse, model);
+        let (found, rest) = extract_model_arg(&input, AgentType::Muse);
+        assert_eq!(found.as_deref(), Some(model));
+        assert!(rest.is_empty());
+    }
+
     #[test]
     fn extract_claude_model_and_strips_it() {
         let model = a_known_claude_model();
@@ -212,6 +235,18 @@ mod tests {
             extract_model_arg(&args(&["--model", &model, "--verbose"]), AgentType::Claude);
         assert_eq!(found.as_deref(), Some(model.as_str()));
         assert_eq!(rest, args(&["--verbose"]));
+    }
+
+    #[test]
+    fn gpt61_sol_is_selectable_and_round_trips_schedule_args() {
+        let model = "gpt-6.1-sol";
+        assert!(model_catalog(AgentType::Codex).contains(&(model, "GPT-6.1-Sol", false)));
+        let mut input = model_cli_args(AgentType::Codex, model);
+        assert_eq!(input, args(&["-c", "model=gpt-6.1-sol"]));
+        input.extend(args(&["-c", "model_reasoning_effort=high"]));
+        let (found, rest) = extract_model_arg(&input, AgentType::Codex);
+        assert_eq!(found.as_deref(), Some(model));
+        assert_eq!(rest, args(&["-c", "model_reasoning_effort=high"]));
     }
 
     #[test]
@@ -236,12 +271,12 @@ mod tests {
 
     #[test]
     fn extract_antigravity_model_and_strips_it() {
-        let model = "gemini-flash-latest";
+        let model = a_known_antigravity_model();
         let (found, rest) = extract_model_arg(
-            &args(&["--model", model, "--verbose"]),
+            &args(&["--model", &model, "--verbose"]),
             AgentType::Antigravity,
         );
-        assert_eq!(found.as_deref(), Some(model));
+        assert_eq!(found.as_deref(), Some(model.as_str()));
         assert_eq!(rest, args(&["--verbose"]));
     }
 
@@ -304,18 +339,18 @@ mod tests {
         assert_eq!(found.as_deref(), Some(muse.as_str()));
         assert!(rest.is_empty());
 
+        let antigravity = a_known_antigravity_model();
+        let (found, rest) = extract_model_arg(
+            &model_cli_args(AgentType::Antigravity, &antigravity),
+            AgentType::Antigravity,
+        );
+        assert_eq!(found.as_deref(), Some(antigravity.as_str()));
+        assert!(rest.is_empty());
+
         let codex = a_known_codex_model();
         let (found, rest) =
             extract_model_arg(&model_cli_args(AgentType::Codex, &codex), AgentType::Codex);
         assert_eq!(found.as_deref(), Some(codex.as_str()));
-        assert!(rest.is_empty());
-
-        let antigravity = "gemini-flash-latest";
-        let (found, rest) = extract_model_arg(
-            &model_cli_args(AgentType::Antigravity, antigravity),
-            AgentType::Antigravity,
-        );
-        assert_eq!(found.as_deref(), Some(antigravity));
         assert!(rest.is_empty());
     }
 

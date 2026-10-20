@@ -84,11 +84,10 @@ pub fn admin_subdomains_tab() -> Html {
                 error.set(Some("Pick a session with an active forward.".to_string()));
                 return;
             };
-            let label = (*label_input).trim().to_string();
-            if label.is_empty() {
+            let Some(label) = utils::owned_non_blank(&label_input) else {
                 error.set(Some("Enter a subdomain.".to_string()));
                 return;
-            }
+            };
             let reload = reload.clone();
             let label_input = label_input.clone();
             let error = error.clone();

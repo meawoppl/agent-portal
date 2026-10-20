@@ -1,0 +1,10 @@
+{
+	email {$ACME_EMAIL}
+}
+
+# Caddy obtains and renews the certificate for PORTAL_DOMAIN automatically;
+# the domain's DNS must already point at this host on ports 80 and 443.
+# WebSockets (/ws/*) pass through reverse_proxy unchanged.
+{$PORTAL_DOMAIN} {
+	reverse_proxy portal:3000
+}

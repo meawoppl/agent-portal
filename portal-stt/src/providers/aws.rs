@@ -364,7 +364,7 @@ fn joined_transcript(document: &TranscriptDocument) -> String {
         .transcripts
         .iter()
         .map(|t| t.transcript.trim())
-        .filter(|t| !t.is_empty())
+        .filter(|t| shared::strings::is_non_empty(t))
         .collect::<Vec<_>>()
         .join(" ")
 }

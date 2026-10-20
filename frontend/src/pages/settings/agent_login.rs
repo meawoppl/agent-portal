@@ -13,7 +13,6 @@
 //! (fire-and-forget), so a parked PTY / app-server never lingers. A successful
 //! sign-in fires `on_success` so the matrix can re-probe.
 
-use gloo_net::http::Request;
 use shared::api::{StartAgentLoginRequest, StartAgentLoginResponse, SubmitAgentLoginCodeRequest};
 use shared::{AgentLoginOutcome, AgentType, LoginInteraction, LoginPresentable};
 use uuid::Uuid;
@@ -23,6 +22,7 @@ use yew::prelude::*;
 
 use crate::components::DismissibleBackdrop;
 
+use crate::portal_client::{portal_from_context, PortalClient};
 use crate::utils;
 
 /// How often to poll browser approval, in milliseconds.
@@ -84,8 +84,10 @@ impl Component for AgentLoginModal {
     fn create(ctx: &Context<Self>) -> Self {
         let launcher_id = ctx.props().launcher_id;
         let agent_type = ctx.props().agent_type;
-        ctx.link()
-            .send_future(async move { Msg::Started(start_login(launcher_id, agent_type).await) });
+        let portal = portal_from_context(ctx);
+        ctx.link().send_future(async move {
+            Msg::Started(start_login(portal, launcher_id, agent_type).await)
+        });
         Self {
             stage: Stage::Starting,
             flow_id: None,
@@ -125,8 +127,9 @@ impl Component for AgentLoginModal {
                 }
                 self.submitting = true;
                 let launcher_id = ctx.props().launcher_id;
+                let portal = portal_from_context(ctx);
                 ctx.link().send_future(async move {
-                    match submit_code(launcher_id, flow_id, code).await {
+                    match submit_code(portal, launcher_id, flow_id, code).await {
                         Ok(outcome) => Msg::Settled(outcome),
                         Err(e) => Msg::Settled(AgentLoginOutcome {
                             done: true,
@@ -145,8 +148,9 @@ impl Component for AgentLoginModal {
                     return false;
                 };
                 let launcher_id = ctx.props().launcher_id;
+                let portal = portal_from_context(ctx);
                 ctx.link().send_future(async move {
-                    Msg::Polled(poll_login(launcher_id, flow_id).await)
+                    Msg::Polled(poll_login(portal, launcher_id, flow_id).await)
                 });
                 false
             }
@@ -154,7 +158,7 @@ impl Component for AgentLoginModal {
             // removes completed flows, so the other request can report "gone";
             // preserve the confirmed approval regardless of response order.
             Msg::Polled(Ok(outcome)) if outcome.done && outcome.success => {
-                self.settle(ctx, outcome);
+                self.settle(outcome, &ctx.props().on_success, &ctx.props().on_close);
                 true
             }
             Msg::Polled(_)
@@ -164,7 +168,7 @@ impl Component for AgentLoginModal {
             }
             Msg::Polled(Ok(outcome)) => {
                 if outcome.done {
-                    self.settle(ctx, outcome);
+                    self.settle(outcome, &ctx.props().on_success, &ctx.props().on_close);
                     true
                 } else {
                     // Still waiting on the browser — poll again.
@@ -181,7 +185,7 @@ impl Component for AgentLoginModal {
             Msg::Settled(_) if matches!(self.stage, Stage::Settled(_)) => false,
             Msg::Settled(outcome) => {
                 self.submitting = false;
-                self.settle(ctx, outcome);
+                self.settle(outcome, &ctx.props().on_success, &ctx.props().on_close);
                 true
             }
             Msg::Close => {
@@ -224,13 +228,21 @@ impl AgentLoginModal {
         });
     }
 
-    /// Move to a settled outcome, firing `on_success` exactly once on success.
-    fn settle(&mut self, ctx: &Context<Self>, outcome: AgentLoginOutcome) {
-        if outcome.success && !self.notified_success {
-            self.notified_success = true;
-            ctx.props().on_success.emit(());
-        }
+    /// Settle before notifying the parent: success refreshes the matrix and
+    /// closes the modal, and must not be cancelled as an unfinished flow.
+    fn settle(
+        &mut self,
+        outcome: AgentLoginOutcome,
+        on_success: &Callback<()>,
+        on_close: &Callback<()>,
+    ) {
+        let notify = outcome.done && outcome.success && !self.notified_success;
         self.stage = Stage::Settled(outcome);
+        if notify {
+            self.notified_success = true;
+            on_success.emit(());
+            on_close.emit(());
+        }
     }
 
     /// Cancel the launcher-side flow if it's still parked (browser closed
@@ -240,7 +252,7 @@ impl AgentLoginModal {
             return;
         }
         if let Some(flow_id) = self.flow_id {
-            cancel_login(ctx.props().launcher_id, flow_id);
+            cancel_login(&portal_from_context(ctx), ctx.props().launcher_id, flow_id);
         }
     }
 
@@ -359,12 +371,13 @@ fn outcome_status(outcome: &AgentLoginOutcome) -> (&'static str, String) {
 }
 
 async fn start_login(
+    portal: PortalClient,
     launcher_id: Uuid,
     agent_type: AgentType,
 ) -> Result<StartAgentLoginResponse, String> {
-    let url = utils::api_url(&format!("/api/launchers/{launcher_id}/agent-login/start"));
+    let request = portal.post(&format!("/api/launchers/{launcher_id}/agent-login/start"));
     let body = StartAgentLoginRequest { agent_type };
-    let resp = utils::send_json(Request::post(&url), &body)
+    let resp = utils::send_json(request, &body)
         .await
         .map_err(|e| e.to_string())?;
     if !resp.ok() {
@@ -376,15 +389,16 @@ async fn start_login(
 }
 
 async fn submit_code(
+    portal: PortalClient,
     launcher_id: Uuid,
     flow_id: Uuid,
     code: String,
 ) -> Result<AgentLoginOutcome, String> {
-    let url = utils::api_url(&format!(
+    let request = portal.post(&format!(
         "/api/launchers/{launcher_id}/agent-login/{flow_id}/code"
     ));
     let body = SubmitAgentLoginCodeRequest { code };
-    let resp = utils::send_json(Request::post(&url), &body)
+    let resp = utils::send_json(request, &body)
         .await
         .map_err(|e| e.to_string())?;
     if !resp.ok() {
@@ -395,11 +409,18 @@ async fn submit_code(
         .map_err(|e| e.to_string())
 }
 
-async fn poll_login(launcher_id: Uuid, flow_id: Uuid) -> Result<AgentLoginOutcome, String> {
-    let url = utils::api_url(&format!(
-        "/api/launchers/{launcher_id}/agent-login/{flow_id}"
-    ));
-    let resp = Request::get(&url).send().await.map_err(|e| e.to_string())?;
+async fn poll_login(
+    portal: PortalClient,
+    launcher_id: Uuid,
+    flow_id: Uuid,
+) -> Result<AgentLoginOutcome, String> {
+    let resp = portal
+        .get(&format!(
+            "/api/launchers/{launcher_id}/agent-login/{flow_id}"
+        ))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
     if !resp.ok() {
         return Err(utils::error_body(resp).await);
     }
@@ -410,18 +431,62 @@ async fn poll_login(launcher_id: Uuid, flow_id: Uuid) -> Result<AgentLoginOutcom
 
 /// Best-effort fire-and-forget cancel; a dropped launcher flow reaps on its own
 /// deadline, so we don't surface failures here.
-fn cancel_login(launcher_id: Uuid, flow_id: Uuid) {
+fn cancel_login(portal: &PortalClient, launcher_id: Uuid, flow_id: Uuid) {
+    let request = portal.post(&format!(
+        "/api/launchers/{launcher_id}/agent-login/{flow_id}/cancel"
+    ));
     spawn_local(async move {
-        let url = utils::api_url(&format!(
-            "/api/launchers/{launcher_id}/agent-login/{flow_id}/cancel"
-        ));
-        let _ = Request::post(&url).send().await;
+        let _ = request.send().await;
     });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn successful_login_refreshes_then_closes_once_and_failure_stays_open() {
+        use std::{cell::RefCell, rc::Rc};
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let success = {
+            let events = events.clone();
+            Callback::from(move |_| events.borrow_mut().push("refresh"))
+        };
+        let close = {
+            let events = events.clone();
+            Callback::from(move |_| events.borrow_mut().push("close"))
+        };
+        let mut modal = AgentLoginModal {
+            stage: Stage::Starting,
+            flow_id: None,
+            code_input: String::new(),
+            submitting: false,
+            notified_success: false,
+        };
+        modal.settle(
+            AgentLoginOutcome {
+                done: true,
+                success: false,
+                message: None,
+            },
+            &success,
+            &close,
+        );
+        assert!(events.borrow().is_empty());
+        for _ in 0..2 {
+            modal.settle(
+                AgentLoginOutcome {
+                    done: true,
+                    success: true,
+                    message: None,
+                },
+                &success,
+                &close,
+            );
+        }
+        assert_eq!(*events.borrow(), vec!["refresh", "close"]);
+        assert!(matches!(modal.stage, Stage::Settled(_)));
+    }
 
     #[test]
     fn success_reads_cleanly() {

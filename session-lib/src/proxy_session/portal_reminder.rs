@@ -1,16 +1,15 @@
 //! Portal features reminder delivered to the agent at fresh-context start and
 //! after each compaction boundary.
 //!
-//! At fresh-context start the reminder is folded into the first real user
-//! input, rather than sent as a standalone turn. A resumed context already has
-//! the reminder in transcript history, so process restarts must not spend it
-//! again. The transcript keeps that first injection in a collapsed notice so
-//! the user can inspect exactly what the agent received without spending
-//! scrollback on it. After a compaction boundary it is injected directly to
-//! re-prime the shortened agent context. In both cases the agent-facing copy is
-//! wrapped in
-//! `<system-reminder>…</system-reminder>` tags so the agent treats it as
-//! out-of-band context.
+//! The reminder is never sent as a turn of its own. A fresh context, `/clear`,
+//! or a compaction boundary arms `reminder_pending`, and the next real user
+//! input claims it and carries the reminder in front of the user's words. A
+//! resumed context already has the reminder in transcript history, so process
+//! restarts must not spend it again. The transcript keeps the injection in a
+//! collapsed notice, above the user's message in the order the agent saw it,
+//! so the user can inspect exactly what the agent received. The agent-facing
+//! copy is wrapped in `<system-reminder>…</system-reminder>` tags so the agent
+//! treats it as out-of-band context.
 //!
 //! The reminder body lives in `session-lib/portal_reminder.md` as a
 //! readable markdown file and is baked into the binary via `include_str!`.
@@ -18,10 +17,7 @@
 //! readable path; on a missing or unreadable override we log a warning and
 //! fall back to the bundled default.
 
-use tracing::{error, info, warn};
-
-use crate::agent::Agent;
-use crate::session::Session;
+use tracing::{info, warn};
 
 /// Bundled fallback body (relative to this file).
 const DEFAULT_BODY: &str = include_str!("../../portal_reminder.md");
@@ -32,7 +28,7 @@ const DEFAULT_BODY: &str = include_str!("../../portal_reminder.md");
 const PORTAL_VERSION: &str = shared::VERSION;
 
 /// Resolve the reminder body. Honors `PORTAL_REMINDER_FILE` at call time so
-/// operators can hot-edit the file and have the next compaction pick it up
+/// operators can hot-edit the file and have the next injection pick it up
 /// without restarting the proxy.
 pub fn load_reminder_body() -> String {
     match std::env::var("PORTAL_REMINDER_FILE") {
@@ -63,13 +59,6 @@ fn reminder_contents(body: &str) -> String {
         "Agent Portal version {}.\n\n{}",
         PORTAL_VERSION,
         body.trim()
-    )
-}
-
-fn agent_facing(body: &str) -> String {
-    format!(
-        "<system-reminder>\n{}\n</system-reminder>",
-        reminder_contents(body)
     )
 }
 
@@ -127,34 +116,41 @@ pub fn fold_session_start_reminder(
 ) -> (String, Option<serde_json::Value>) {
     let body = body_with_plugin_skills(plugin_skill_reminder);
     let contents = reminder_contents(&body);
-    let display_event = display_event.or_else(|| {
-        Some(default_display(&visible_text_with_base_session_notice(
+    let display_event = match display_event {
+        Some(event) => Some(attach_base_notice_to_agent_message(event, &contents)),
+        None => Some(default_display(&visible_text_with_base_session_notice(
             &text, &contents,
-        )))
-    });
+        ))),
+    };
     let prefixed = format!("<system-reminder>\n{contents}\n</system-reminder>\n\n{text}");
     (prefixed, display_event)
 }
 
-fn visible_text_with_base_session_notice(text: &str, contents: &str) -> String {
-    format!("{text}\n\n<system-reminder>\n{contents}\n</system-reminder>")
+/// Keep an inter-agent input's typed provenance card while making the
+/// session-start injection durable and inspectable in that card's body.
+///
+/// Inter-agent sends arrive with an explicit `PortalMessage::AgentMessage`
+/// display event. Merely preserving that event hides the reminder which was
+/// folded into the agent-facing prompt, so stored history cannot explain what
+/// the agent actually received. Other explicit display-event shapes remain
+/// byte-for-byte unchanged.
+fn attach_base_notice_to_agent_message(
+    event: serde_json::Value,
+    contents: &str,
+) -> serde_json::Value {
+    let Ok(mut message) = serde_json::from_value::<shared::PortalMessage>(event.clone()) else {
+        return event;
+    };
+    let [shared::PortalContent::AgentMessage { text, .. }] = message.content.as_mut_slice() else {
+        return event;
+    };
+    *text = visible_text_with_base_session_notice(text, contents);
+    message.to_json()
 }
 
-/// Inject the reminder into the agent's stdin only. The user-bound copy was
-/// removed (#692): it bloated the scrollback for content the user already
-/// knew, and the agent-side reminder is the part that actually does work
-/// (re-priming the model after a compaction). The companion fix in the proxy
-/// output forwarder also filters Claude's user-message echo of the
-/// `<system-reminder>` text so the wrapper doesn't leak into the transcript.
-pub async fn inject_portal_reminder<A: Agent>(claude_session: &mut Session<A>) {
-    let body = body_with_plugin_skills(claude_session.config().plugin_skill_reminder.as_deref());
-
-    if let Err(e) = claude_session
-        .send_input(serde_json::Value::String(agent_facing(&body)))
-        .await
-    {
-        error!("Failed to inject portal reminder into agent stdin: {}", e);
-    }
+/// The transcript copy, in the order the agent received it: reminder first.
+fn visible_text_with_base_session_notice(text: &str, contents: &str) -> String {
+    format!("<system-reminder>\n{contents}\n</system-reminder>\n\n{text}")
 }
 
 #[cfg(test)]
@@ -212,6 +208,11 @@ mod tests {
 
         let display = display.expect("a display event is required, not optional");
         assert_eq!(display["type"], "user");
+        // The transcript shows the instructions where the agent saw them:
+        // before the user's words.
+        let shown = display["text"].as_str().expect("echo text");
+        assert!(shown.starts_with("<system-reminder>"), "got {shown}");
+        assert!(shown.ends_with("hello agent"), "got {shown}");
         assert!(
             display.to_string().contains("hello agent"),
             "display event must echo the user's text, got {display}"
@@ -226,20 +227,51 @@ mod tests {
         );
     }
 
-    /// An input that already has a display event (an inter-agent message card)
-    /// keeps it — folding must not overwrite provenance with a plain echo.
+    /// An inter-agent display event keeps its provenance while recording the
+    /// exact base instructions folded into the agent-facing prompt.
     #[test]
-    fn fold_preserves_an_existing_display_event() {
-        let provenance = serde_json::json!({"type": "portal", "content": [{"agent": "codex"}]});
-        let (text, display) = fold_session_start_reminder(
+    fn fold_enriches_an_inter_agent_display_event() {
+        let provenance = shared::PortalMessage::agent_message(
+            "codex".to_string(),
+            "11111111-1111-1111-1111-111111111111".to_string(),
             "relayed".to_string(),
-            Some(provenance.clone()),
+        )
+        .to_json();
+        let (text, display) =
+            fold_session_start_reminder("relayed".to_string(), Some(provenance), None, |_| {
+                unreachable!("display provided")
+            });
+
+        assert!(text.ends_with("relayed"));
+        let display: shared::PortalMessage =
+            serde_json::from_value(display.expect("display event")).expect("portal message");
+        let [shared::PortalContent::AgentMessage {
+            from_agent_type,
+            from_session_id,
+            text,
+        }] = display.content.as_slice()
+        else {
+            panic!("expected one agent-message block")
+        };
+        assert_eq!(from_agent_type, "codex");
+        assert_eq!(from_session_id, "11111111-1111-1111-1111-111111111111");
+        assert!(text.starts_with("<system-reminder>"));
+        assert!(text.ends_with("relayed"));
+        assert!(text.contains("Agent Portal version"));
+        assert!(text.contains("agent-portal show"));
+    }
+
+    #[test]
+    fn fold_preserves_other_explicit_display_events() {
+        let display_event = serde_json::json!({"type": "custom", "value": 7});
+        let (_, display) = fold_session_start_reminder(
+            "hello".to_string(),
+            Some(display_event.clone()),
             None,
             |_| unreachable!("display provided"),
         );
 
-        assert_eq!(display, Some(provenance));
-        assert!(text.ends_with("relayed"));
+        assert_eq!(display, Some(display_event));
     }
 
     #[test]
