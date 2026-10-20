@@ -236,6 +236,11 @@ impl SessionActivityState {
             Self::Throttled => "throttled",
         }
     }
+
+    /// Mid-turn: working, or waiting out a rate limit before working again.
+    pub fn is_active(self) -> bool {
+        matches!(self, Self::Busy | Self::Throttled)
+    }
 }
 
 /// One of the caller's sessions, as listed for the agent-messaging page/API
@@ -372,6 +377,15 @@ pub struct ShowMediaResponse {
 #[cfg(test)]
 mod agent_session_wire_tests {
     use super::*;
+
+    /// "Active" is one rule for `message list`'s busy flag and the Computers
+    /// tab's count: a rate-limited session is still mid-turn.
+    #[test]
+    fn busy_and_throttled_count_as_active() {
+        assert!(SessionActivityState::Busy.is_active());
+        assert!(SessionActivityState::Throttled.is_active());
+        assert!(!SessionActivityState::Idle.is_active());
+    }
 
     /// Widget/CLI consumers must be able to parse responses from backends
     /// that predate the status-surface fields: absent `awaiting_permission`

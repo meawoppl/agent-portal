@@ -23,12 +23,38 @@ use crate::handlers::websocket::{LauncherRpcError, LauncherRpcKind, SessionManag
 use crate::models::jsonb_string_vec;
 use crate::AppState;
 
-/// GET /api/launchers - List connected launchers for the current user
+/// GET /api/launchers - List connected launchers for the current user, each
+/// with how many of its running sessions are mid-turn.
 pub async fn list_launchers(
     State(app_state): State<Arc<AppState>>,
     CurrentUserId(user_id): CurrentUserId,
 ) -> Result<Json<Vec<LauncherInfo>>, AppError> {
-    let launchers = app_state.session_manager.get_launchers_for_user(&user_id);
+    let mut launchers = app_state.session_manager.get_launchers_for_user(&user_id);
+    let running: Vec<Vec<Uuid>> = launchers
+        .iter()
+        .map(|l| {
+            app_state
+                .session_manager
+                .launcher_running_sessions(l.launcher_id)
+        })
+        .collect();
+    let all: Vec<Uuid> = running.iter().flatten().copied().collect();
+    if !all.is_empty() {
+        let mut conn = app_state.conn()?;
+        let states =
+            crate::handlers::agent_comms::session_activity_states(&app_state, &mut conn, &all)?;
+        for (launcher, ids) in launchers.iter_mut().zip(&running) {
+            launcher.active_sessions = ids
+                .iter()
+                .filter(|id| {
+                    states
+                        .get(id)
+                        .copied()
+                        .is_some_and(shared::api::SessionActivityState::is_active)
+                })
+                .count() as u32;
+        }
+    }
     Ok(Json(launchers))
 }
 

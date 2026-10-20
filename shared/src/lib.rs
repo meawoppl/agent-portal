@@ -678,6 +678,10 @@ pub struct LauncherInfo {
     pub hostname: String,
     pub connected: bool,
     pub running_sessions: u32,
+    /// How many of `running_sessions` are mid-turn (busy or rate-limited), by
+    /// the same rule `agent-portal message list` uses.
+    #[serde(default)]
+    pub active_sessions: u32,
     /// Working directory where the launcher process is running
     #[serde(default)]
     pub working_directory: Option<String>,

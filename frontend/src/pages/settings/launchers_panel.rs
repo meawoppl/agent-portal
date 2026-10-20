@@ -417,7 +417,10 @@ fn launcher_row(props: &LauncherRowProps) -> Html {
                     }
                 </td>
                 <td>{ format!("v{}", &l.version) }</td>
-                <td>{ l.running_sessions }</td>
+                <td title="Running sessions, and how many are mid-turn (busy or rate-limited)">
+                    { l.running_sessions }
+                    <span class="launcher-active-count">{ format!(" · {} active", l.active_sessions) }</span>
+                </td>
                 <td class="token-actions">
                     <div class="launcher-update-actions">
                         <button

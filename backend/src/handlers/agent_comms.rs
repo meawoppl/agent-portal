@@ -68,7 +68,7 @@ pub async fn list_agent_sessions(
     let user_id = resolve_user(&app_state, &headers, &cookies)?;
     let mut conn = app_state.conn()?;
 
-    use crate::schema::{messages, pending_permission_requests, session_members, sessions};
+    use crate::schema::{pending_permission_requests, session_members, sessions};
     let rows: Vec<Session> = sessions::table
         .inner_join(session_members::table.on(session_members::session_id.eq(sessions::id)))
         .filter(session_members::user_id.eq(user_id))
@@ -88,24 +88,7 @@ pub async fn list_agent_sessions(
         .into_iter()
         .collect();
 
-    // One row per session: the newest event capable of changing turn state.
-    // Portal/system chatter is deliberately excluded so a reconnect notice or
-    // heartbeat cannot turn an otherwise-busy session idle. PostgreSQL's
-    // DISTINCT ON keeps this a single batched query rather than N+1 lookups.
-    let latest_signals: std::collections::HashMap<Uuid, (String, String)> = messages::table
-        .filter(messages::session_id.eq_any(&session_ids))
-        .filter(messages::role.eq_any(["user", "assistant", "result", "unknown", "error"]))
-        .distinct_on(messages::session_id)
-        .select((
-            messages::session_id,
-            messages::agent_type,
-            messages::content,
-        ))
-        .order((messages::session_id, messages::created_at.desc()))
-        .load::<(Uuid, String, String)>(&mut conn)?
-        .into_iter()
-        .map(|(id, agent_type, content)| (id, (agent_type, content)))
-        .collect();
+    let states = session_activity_states(&app_state, &mut conn, &session_ids)?;
 
     let sessions = rows
         .into_iter()
@@ -113,14 +96,14 @@ pub async fn list_agent_sessions(
             let connected = app_state
                 .session_manager
                 .is_proxy_connected(s.id.to_string().as_str());
-            let state = live_session_activity_state(connected, latest_signals.get(&s.id));
+            let state = states
+                .get(&s.id)
+                .copied()
+                .unwrap_or(SessionActivityState::Idle);
             AgentSessionInfo {
                 connected: Some(connected),
                 state: Some(state),
-                busy: Some(matches!(
-                    state,
-                    SessionActivityState::Busy | SessionActivityState::Throttled
-                )),
+                busy: Some(state.is_active()),
                 id: s.id,
                 awaiting_permission: awaiting.contains(&s.id),
                 last_activity: s.last_activity.and_utc().to_rfc3339(),
@@ -135,6 +118,45 @@ pub async fn list_agent_sessions(
         .collect();
 
     Ok(Json(AgentSessionsResponse { sessions }))
+}
+
+/// Live turn state for each of `session_ids`, from one batched query: the
+/// newest event capable of changing turn state, read against whether the
+/// session's proxy is connected. Portal/system chatter is deliberately excluded
+/// so a reconnect notice or heartbeat cannot turn an otherwise-busy session
+/// idle; PostgreSQL's DISTINCT ON keeps it a single query rather than N+1.
+pub(crate) fn session_activity_states(
+    app_state: &AppState,
+    conn: &mut crate::db::DbConnection,
+    session_ids: &[Uuid],
+) -> Result<std::collections::HashMap<Uuid, SessionActivityState>, AppError> {
+    use crate::schema::messages;
+    let latest_signals: std::collections::HashMap<Uuid, (String, String)> = messages::table
+        .filter(messages::session_id.eq_any(session_ids))
+        .filter(messages::role.eq_any(["user", "assistant", "result", "unknown", "error"]))
+        .distinct_on(messages::session_id)
+        .select((
+            messages::session_id,
+            messages::agent_type,
+            messages::content,
+        ))
+        .order((messages::session_id, messages::created_at.desc()))
+        .load::<(Uuid, String, String)>(conn)?
+        .into_iter()
+        .map(|(id, agent_type, content)| (id, (agent_type, content)))
+        .collect();
+    Ok(session_ids
+        .iter()
+        .map(|id| {
+            let connected = app_state
+                .session_manager
+                .is_proxy_connected(id.to_string().as_str());
+            (
+                *id,
+                live_session_activity_state(connected, latest_signals.get(id)),
+            )
+        })
+        .collect())
 }
 
 /// Interpret the latest significant durable event as turn state. The wire
@@ -319,10 +341,7 @@ pub async fn peek_agent_messages(
         session: AgentSessionInfo {
             connected: Some(connected),
             state: Some(state),
-            busy: Some(matches!(
-                state,
-                SessionActivityState::Busy | SessionActivityState::Throttled
-            )),
+            busy: Some(state.is_active()),
             id: session.id,
             awaiting_permission,
             last_activity: session.last_activity.and_utc().to_rfc3339(),

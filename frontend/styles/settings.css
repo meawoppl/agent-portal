@@ -1159,6 +1159,12 @@
     font-size: 0.8rem;
 }
 
+.launcher-active-count {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    white-space: nowrap;
+}
+
 /* Reserve the height of the tallest loaded state (badge + login line +
    sign-in button, plus cell padding under border-box sizing) in EVERY probe
    state. Probe results percolate in per machine, and without this each

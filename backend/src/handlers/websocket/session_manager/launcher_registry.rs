@@ -229,6 +229,9 @@ impl SessionManager {
                 hostname: entry.value().hostname.clone(),
                 connected: true,
                 running_sessions: entry.value().running_sessions.len() as u32,
+                // Needs transcript state from the database; filled in by
+                // `handlers::launchers::list_launchers`.
+                active_sessions: 0,
                 working_directory: entry.value().working_directory.clone(),
                 version: entry.value().version.clone(),
                 capabilities: entry.value().capabilities.clone(),
