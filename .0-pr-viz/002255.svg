@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="arr-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+  </defs>
+
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2255 · Show active session count per computer</text>
+
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">The Computers tab showed only how many sessions each computer runs;</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">now it also counts how many are mid-turn, by the rule message list uses.</text>
+  <line x1="55" y1="166" x2="1945" y2="166" stroke="#3d4666" stroke-width="1"/>
+
+  <text x="55" y="215" font-size="22" font-weight="bold" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1045" y="215" font-size="22" font-weight="bold" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1140" stroke="#3d4666" stroke-width="2" stroke-dasharray="10 8"/>
+
+  <!-- BEFORE -->
+  <rect x="55" y="245" width="900" height="150" rx="10" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+  <text x="79" y="285" font-size="26" fill="#c0caf5">get_launchers_for_user</text>
+  <text x="79" y="325" font-size="23" fill="#a9b1d6">LauncherInfo.running_sessions = reported ids .len()</text>
+  <text x="79" y="360" font-size="23" fill="#a9b1d6">no turn state: the registry has no transcript access</text>
+  <line x1="505" y1="395" x2="505" y2="440" stroke="#565f89" stroke-width="2" marker-end="url(#arr-dim)"/>
+
+  <rect x="55" y="445" width="900" height="150" rx="10" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+  <text x="79" y="485" font-size="26" fill="#c0caf5">list_launchers</text>
+  <text x="79" y="525" font-size="23" fill="#a9b1d6">returns the registry list as-is</text>
+  <text x="79" y="560" font-size="23" fill="#a9b1d6">busy state lived only inside list_agent_sessions</text>
+  <line x1="505" y1="595" x2="505" y2="640" stroke="#565f89" stroke-width="2" marker-end="url(#arr-dim)"/>
+
+  <rect x="55" y="645" width="900" height="210" rx="10" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+  <text x="79" y="685" font-size="26" fill="#c0caf5">Settings - Computers</text>
+  <text x="79" y="730" font-size="23" fill="#a9b1d6">Computer</text>
+  <text x="379" y="730" font-size="23" fill="#a9b1d6">Version</text>
+  <text x="599" y="730" font-size="23" fill="#a9b1d6">Sessions</text>
+  <text x="79" y="770" font-size="23" fill="#a9b1d6">cfl-test-bench</text>
+  <text x="379" y="770" font-size="23" fill="#a9b1d6">v2.15.1662</text>
+  <text x="599" y="770" font-size="23" fill="#a9b1d6">12</text>
+  <text x="79" y="820" font-size="23" fill="#f7768e">12 running - but how many are actually working?</text>
+
+  <!-- AFTER -->
+  <rect x="1045" y="245" width="900" height="150" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1069" y="285" font-size="26" fill="#c0caf5">agent_comms::session_activity_states</text>
+  <text x="1069" y="325" font-size="23" fill="#9ece6a">one batched DISTINCT ON query -> state per session</text>
+  <text x="1069" y="360" font-size="23" fill="#9ece6a">shared by list_agent_sessions and list_launchers</text>
+  <line x1="1495" y1="395" x2="1495" y2="440" stroke="#9ece6a" stroke-width="2" marker-end="url(#arr-green)"/>
+
+  <rect x="1045" y="445" width="900" height="150" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1069" y="485" font-size="26" fill="#c0caf5">list_launchers</text>
+  <text x="1069" y="525" font-size="23" fill="#9ece6a">active_sessions = running ids where is_active()</text>
+  <text x="1069" y="560" font-size="23" fill="#9ece6a">SessionActivityState::is_active: Busy or Throttled</text>
+  <line x1="1495" y1="595" x2="1495" y2="640" stroke="#9ece6a" stroke-width="2" marker-end="url(#arr-green)"/>
+
+  <rect x="1045" y="645" width="900" height="210" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1069" y="685" font-size="26" fill="#c0caf5">Settings - Computers</text>
+  <text x="1069" y="730" font-size="23" fill="#a9b1d6">Computer</text>
+  <text x="1369" y="730" font-size="23" fill="#a9b1d6">Version</text>
+  <text x="1589" y="730" font-size="23" fill="#a9b1d6">Sessions</text>
+  <text x="1069" y="770" font-size="23" fill="#9ece6a">cfl-test-bench</text>
+  <text x="1369" y="770" font-size="23" fill="#9ece6a">v2.15.1662</text>
+  <text x="1589" y="770" font-size="23" fill="#9ece6a">12 · 3 active</text>
+  <text x="1069" y="820" font-size="23" fill="#9ece6a">same rule as the busy flag in message list</text>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">Limitation: counts the ids the launcher reports, so a session it tracks under a pre-rotation id can be missed until that fix ships. Rows illustrative.</text>
+</svg>
