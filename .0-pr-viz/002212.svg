@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="sans-serif"><text x="55" y="55" font-size="24" fill="#a9b1d6">PR #2212 · Reasoning effort picker</text>
+<text x="55" y="110" font-size="34" fill="#e6e9f5">New sessions store Auto; now the dropdown displays it correctly.</text>
+<path d="M55 170H1945 M1000 190V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="55" y="240" font-size="22" fill="#f7768e">BEFORE</text><text x="1055" y="240" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="55" y="300" width="880" height="660" rx="18" fill="#1e202e" stroke="#565f89"/><rect x="1055" y="300" width="880" height="660" rx="18" fill="#1e202e" stroke="#565f89"/>
+<g font-size="30" fill="#c0caf5"><text x="90" y="365" font-size="30">render_reasoning_effort_select</text><text x="1090" y="365" font-size="30">render_reasoning_effort_select</text>
+<text x="90" y="465" font-size="30">State: Auto</text><text x="1090" y="465" font-size="30">State: Auto</text>
+<text x="90" y="565" font-size="30">select value is only an attribute</text><text x="1090" y="565" font-size="30">Each option sets selected explicitly</text>
+<text x="90" y="665" font-size="30">Options inserted in reverse order</text><text x="1090" y="665" font-size="30">Selection follows the session state</text></g>
+<text x="90" y="815" font-size="38" fill="#f7768e">Visible choice: XHigh</text><text x="1090" y="815" font-size="38" fill="#9ece6a">Visible choice: Auto</text>
+<text x="55" y="1172" font-size="22" fill="#a9b1d6">Scope: dropdown binding only; saved session preferences and the agent's Auto behavior are unchanged.</text></g></svg>

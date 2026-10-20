@@ -114,6 +114,7 @@ pub async fn launch_session(
         .register_launch_session(request_id, session_id);
 
     let launch_msg = ServerToLauncher::LaunchSession {
+        history_restore: None,
         request_id,
         user_id,
         auth_token,
@@ -308,6 +309,7 @@ pub async fn fork_session(
         .session_manager
         .register_launch_session(request_id, session_id);
     let launch = ServerToLauncher::LaunchSession {
+        history_restore: None,
         request_id,
         user_id,
         auth_token,
@@ -747,6 +749,7 @@ mod tests {
     fn launcher_for(user_id: Uuid, hostname: &str) -> LauncherConnection {
         let (sender, _rx) = crate::handlers::websocket::conn_channel(64);
         LauncherConnection {
+            system: None,
             sender,
             launcher_name: format!("launcher-{}", hostname),
             hostname: hostname.to_string(),

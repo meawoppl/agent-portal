@@ -139,8 +139,17 @@ pub fn set_plugin_enabled(name: &str, enabled: bool) -> anyhow::Result<()> {
 }
 
 pub fn plugin_skill_context(agent_type: AgentType, session_id: Uuid) -> PluginSkillContext {
+    let mut config = load_config();
+    match crate::session_plugins::apply_selection(&mut config, session_id) {
+        Ok(()) => {}
+        Err(error) => {
+            // Never silently re-enable excluded skills if the selection cannot be read.
+            tracing::error!("Could not read session plugin selection: {error:#}");
+            return PluginSkillContext::default();
+        }
+    }
     plugin_skill_context_from_config(
-        &load_config(),
+        &config,
         &config_dir()
             .join("plugin-skill-roots")
             .join(session_id.to_string()),
@@ -312,7 +321,7 @@ fn copy_dir_recursive(source: &Path, dest: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn write_config_atomic(path: &Path, contents: &str) -> anyhow::Result<()> {
+pub(crate) fn write_config_atomic(path: &Path, contents: &str) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -648,7 +657,7 @@ description: Route KiCad PCB layouts.
                 revision: None,
             },
         );
-        let config = LauncherConfig {
+        let mut config = LauncherConfig {
             plugins,
             ..Default::default()
         };
@@ -689,6 +698,16 @@ description: Route KiCad PCB layouts.
         assert!(context.cleanup_dir.is_none());
         let reminder = context.reminder.unwrap();
         assert!(reminder.contains("`kicad-pcb:kicad-layout`"));
+
+        let selection_path = dir.path().join("selection.json");
+        std::fs::write(&selection_path, r#"{"kicad-pcb":false}"#).unwrap();
+        crate::session_plugins::apply_selection_at(&mut config, &selection_path).unwrap();
+        for agent in [AgentType::Claude, AgentType::Codex, AgentType::Antigravity] {
+            let context = plugin_skill_context_from_config(&config, &generated_root, agent);
+            assert!(context.claude_plugin_dirs.is_empty());
+            assert!(context.reminder.is_none());
+        }
+        assert!(!generated_root.join("kicad-pcb").exists());
     }
 
     #[test]

@@ -43,6 +43,10 @@ pub enum SessionExitReason {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum LauncherToServer {
+    SessionPluginsResult {
+        request_id: Uuid,
+        result: Result<crate::api::PluginInventoryResponse, String>,
+    },
     /// Register a launcher daemon
     LauncherRegister {
         launcher_id: Uuid,
@@ -76,6 +80,18 @@ pub enum LauncherToServer {
         launcher_id: Uuid,
         running_sessions: Vec<Uuid>,
         uptime_secs: u64,
+        /// Resource reading of the launcher and its host. `None` from
+        /// launchers that predate the services monitor.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        system: Option<crate::SystemSample>,
+    },
+
+    /// Resource reading between heartbeats. Only sent to backends that
+    /// advertise [`crate::SERVER_CAPABILITY_SYSTEM_STATS`] in the register
+    /// ack, so an older backend never sees an undecodable frame.
+    SystemStats {
+        launcher_id: Uuid,
+        sample: crate::SystemSample,
     },
 
     /// Log output from a proxy process
@@ -95,6 +111,26 @@ pub enum LauncherToServer {
         /// as `Completed` (the neutral default).
         #[serde(default)]
         reason: SessionExitReason,
+    },
+
+    /// Native sessions on this launcher; owner-gated by the backend.
+    ExternalSessionsResult {
+        request_id: Uuid,
+        result: Result<crate::api::ExternalSessionList, String>,
+    },
+    CheckHistoryRestoreResult {
+        request_id: Uuid,
+        result: Result<String, String>,
+    },
+    PrepareSessionImportResult {
+        request_id: Uuid,
+        result: Result<crate::api::PreparedSessionImport, String>,
+    },
+    /// The archived session's native conversation is bound to the new
+    /// session id, or why it could not be.
+    PrepareSessionRestoreResult {
+        request_id: Uuid,
+        result: Result<(), String>,
     },
 
     /// Directory listing response
@@ -227,6 +263,13 @@ pub enum LauncherRejectReason {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ServerToLauncher {
+    /// Inventory or update the installed plugin skills selected for one session.
+    SessionPlugins {
+        request_id: Uuid,
+        session_id: Uuid,
+        working_directory: String,
+        selection: Option<crate::api::PluginOverride>,
+    },
     /// Acknowledge launcher registration
     LauncherRegisterAck {
         success: bool,
@@ -239,6 +282,10 @@ pub enum ServerToLauncher {
         /// issue #1237.)
         #[serde(default)]
         fatal: bool,
+        /// What this backend accepts beyond the base protocol (see the
+        /// `SERVER_CAPABILITY_*` constants). Absent from older backends.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        capabilities: Vec<String>,
         /// Machine-readable rejection category when `fatal` is set.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reject_reason: Option<LauncherRejectReason>,
@@ -246,6 +293,8 @@ pub enum ServerToLauncher {
 
     /// Request to launch a new proxy instance
     LaunchSession {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        history_restore: Option<crate::api::HistoryRestoreLaunch>,
         request_id: Uuid,
         user_id: Uuid,
         auth_token: String,
@@ -306,6 +355,34 @@ pub enum ServerToLauncher {
     /// Pause a running session without deleting the launcher's persisted
     /// expected-session metadata.
     PauseSession { session_id: Uuid },
+
+    ListExternalSessions {
+        request_id: Uuid,
+        agent_type: AgentType,
+        query: crate::api::ExternalSessionQuery,
+    },
+    CheckHistoryRestore {
+        request_id: Uuid,
+        agent_type: AgentType,
+        working_directory: String,
+        restore: crate::api::HistoryRestoreLaunch,
+    },
+    PrepareSessionImport {
+        request_id: Uuid,
+        agent_type: AgentType,
+        session_id: Uuid,
+        request: crate::api::ImportSessionRequest,
+    },
+    /// Restore an archived (deleted) session: check that its native agent
+    /// conversation still exists on this launcher and bind it to the new
+    /// `session_id`, so resuming the new session continues that conversation.
+    PrepareSessionRestore {
+        request_id: Uuid,
+        agent_type: AgentType,
+        source_session_id: Uuid,
+        session_id: Uuid,
+        working_directory: String,
+    },
 
     /// Request directory listing
     ListDirectories { request_id: Uuid, path: String },

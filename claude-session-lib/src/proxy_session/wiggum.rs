@@ -203,6 +203,7 @@ pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
     output_buffer: &Arc<Mutex<PendingOutputBuffer>>,
     claude_session: &mut Session<A>,
     agent_type: AgentType,
+    reminder_pending: &std::sync::atomic::AtomicBool,
 ) -> Option<ConnectionResult> {
     use session_lib::SessionEvent;
 
@@ -238,11 +239,9 @@ pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
                 false
             };
 
-            // If this is a compaction-boundary system message, the agent's
-            // context has just been reset to a summary. Re-inject the portal
-            // features reminder so the agent has it in the fresh context.
-            // We check before forwarding so the reminder lands logically
-            // after the compaction-completed notice in the user's transcript.
+            // A compaction boundary resets the agent's context to a summary,
+            // dropping the portal reminder. Re-arm it so the next real input
+            // carries it, rather than sending it as a turn of its own.
             let is_compaction_boundary = match &output {
                 ClaudeOutput::System(sys) => shared::is_compaction_boundary(sys),
                 _ => false,
@@ -255,7 +254,7 @@ pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
             }
 
             if is_compaction_boundary {
-                super::inject_portal_reminder(claude_session).await;
+                reminder_pending.store(true, std::sync::atomic::Ordering::SeqCst);
             }
 
             // Handle wiggum loop continuation
@@ -297,9 +296,22 @@ pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
                         state.loop_start = Instant::now();
 
                         // Resend the prompt
-                        let prompt = wiggum_prompt(&state.original_prompt);
-                        let display_event =
+                        let mut prompt = wiggum_prompt(&state.original_prompt);
+                        let mut display_event =
                             claude_user_echo_value(state.original_prompt.clone(), session_id);
+                        // A compaction mid-loop re-armed the reminder; this
+                        // resend is the next input, so it carries it.
+                        if reminder_pending.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                            let (text, display) =
+                                super::portal_reminder::fold_session_start_reminder(
+                                    prompt,
+                                    Some(display_event.clone()),
+                                    claude_session.config().plugin_skill_reminder.as_deref(),
+                                    |text| claude_user_echo_value(text.to_string(), session_id),
+                                );
+                            prompt = text;
+                            display_event = display.unwrap_or(display_event);
+                        }
                         if let Err(e) = claude_session
                             .send_input_with_display(
                                 serde_json::Value::String(prompt),
@@ -553,6 +565,19 @@ mod tests {
             turn_start_phases_ms: None,
             turn_start_control_requests_ms: None,
             api_error: None,
+            // 2.1.300 API provenance and hosted-worker diagnostics are absent locally.
+            api_error_origin: None,
+            interrupted_by_shutdown: None,
+            handoff_intake_phases_ms: None,
+            process_rss_mib_turn_start: None,
+            process_anon_mib_turn_start: None,
+            process_rss_mib_result: None,
+            process_anon_mib_result: None,
+            process_peak_rss_mib: None,
+            process_cpu_ms_between_turns: None,
+            process_wall_ms_between_turns: None,
+            process_cpu_ms_turn: None,
+            process_wall_ms_turn: None,
             num_turns: 1,
             result: Some(result.to_string()),
             subagent_stats: None,
@@ -567,7 +592,6 @@ mod tests {
             startup_failure_reason: None,
             // Remote timing and safety diagnostics are absent in synthetic results.
             resume_store_confirm_detail: None,
-            system_prompt_detail: None,
             safety_stops: None,
             stop_reason: None,
             terminal_reason: None,

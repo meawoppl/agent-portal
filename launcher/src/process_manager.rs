@@ -65,11 +65,145 @@ fn load_codex_threads() -> HashMap<Uuid, String> {
     load_sidecar_map(&codex_threads_path())
 }
 
-fn save_codex_threads(map: &HashMap<Uuid, String>) -> std::io::Result<()> {
-    save_sidecar_map(&codex_threads_path(), map)
+// All Codex map updates share a lock, including discoveries emitted by live
+// sessions. Atomic replacement keeps readers and restarts from seeing half JSON.
+static CODEX_MAP_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn update_codex_thread_map(
+    session_id: Uuid,
+    thread_id: &str,
+    importing: bool,
+) -> anyhow::Result<()> {
+    let _guard = CODEX_MAP_LOCK
+        .lock()
+        .map_err(|_| anyhow::anyhow!("Codex session map lock poisoned"))?;
+    update_codex_thread_map_at(&codex_threads_path(), session_id, thread_id, importing)
 }
 
-fn load_codex_thread_id(session_id: Uuid) -> Option<String> {
+fn update_codex_thread_map_at(
+    path: &std::path::Path,
+    session_id: Uuid,
+    thread_id: &str,
+    importing: bool,
+) -> anyhow::Result<()> {
+    let mut map: HashMap<Uuid, String> = match std::fs::read_to_string(path) {
+        Ok(body) => serde_json::from_str(&body)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => HashMap::new(),
+        Err(e) => return Err(e.into()),
+    };
+    if importing {
+        if map
+            .iter()
+            .any(|(id, thread)| thread == thread_id && *id != session_id)
+        {
+            anyhow::bail!("This Codex conversation is already managed by another Portal session");
+        }
+        if map
+            .get(&session_id)
+            .is_some_and(|thread| thread != thread_id)
+        {
+            anyhow::bail!("Portal session is already bound to another Codex conversation");
+        }
+    }
+    if importing {
+        // Separate additive metadata keeps codex_threads.json compatible with
+        // older launchers. Imported contexts need the Portal reminder on their
+        // first user input after resume; native history has never received it.
+        let imports_path = path.with_file_name("codex_imports.json");
+        let mut imports: HashMap<Uuid, String> = match std::fs::read_to_string(&imports_path) {
+            Ok(body) => serde_json::from_str(&body)?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => HashMap::new(),
+            Err(e) => return Err(e.into()),
+        };
+        imports.insert(session_id, thread_id.to_owned());
+        save_codex_map_atomically(&imports_path, &imports)?;
+    }
+    map.insert(session_id, thread_id.to_owned());
+    save_codex_map_atomically(path, &map)
+}
+
+fn save_codex_map_atomically(
+    path: &std::path::Path,
+    map: &HashMap<Uuid, String>,
+) -> anyhow::Result<()> {
+    let temp = path.with_extension(format!("{}.tmp", Uuid::new_v4()));
+    save_sidecar_map(&temp, map)?;
+    if let Err(e) = std::fs::rename(&temp, path) {
+        let _ = std::fs::remove_file(&temp);
+        return Err(e.into());
+    }
+    Ok(())
+}
+
+pub(crate) fn bind_imported_codex_thread(session_id: Uuid, thread_id: &str) -> anyhow::Result<()> {
+    update_codex_thread_map(session_id, thread_id, true)
+}
+
+/// Sidecar map of sessions restored from the history archive:
+/// `restored session id -> archived source session id`. Marks sessions whose
+/// whole point is to continue an existing native conversation, so a resume
+/// must fail rather than quietly start a fresh one.
+fn restored_sessions_path() -> PathBuf {
+    session_lib::paths::config_dir().join("restored_sessions.json")
+}
+
+fn is_restored_session(session_id: Uuid) -> bool {
+    load_sidecar_map::<Uuid>(&restored_sessions_path()).contains_key(&session_id)
+}
+
+/// Bind an archived session's native conversation to `session_id`.
+///
+/// The archived session no longer exists in Portal, but its Claude transcript
+/// or Codex thread usually survives on this host (deleting a session never
+/// touches native state). Point the new session at it: Claude via the
+/// conversation sidecar (`--resume` follows it), Codex by moving the thread
+/// binding. Idempotent, so a retried restore succeeds.
+pub(crate) fn bind_restored_session(
+    agent_type: shared::AgentType,
+    source_session_id: Uuid,
+    session_id: Uuid,
+    working_directory: &Path,
+) -> anyhow::Result<()> {
+    match agent_type {
+        shared::AgentType::Claude => {
+            // A repeat restore finds the binding already made.
+            let conversation = load_claude_conversation_id(session_id)
+                .unwrap_or_else(|| resolved_transcript_id(source_session_id));
+            if claude_transcript_status(working_directory, conversation)
+                == TranscriptStatus::Missing
+            {
+                anyhow::bail!("This session's Claude conversation is no longer on this computer");
+            }
+            let mut map = load_claude_conversations();
+            map.insert(session_id, conversation);
+            save_sidecar_map(&claude_conversations_path(), &map)?;
+        }
+        shared::AgentType::Codex => {
+            let _guard = CODEX_MAP_LOCK
+                .lock()
+                .map_err(|_| anyhow::anyhow!("Codex session map lock poisoned"))?;
+            let path = codex_threads_path();
+            let mut map: HashMap<Uuid, String> = load_sidecar_map(&path);
+            let thread = match map.get(&session_id) {
+                Some(thread) => thread.clone(),
+                None => map.remove(&source_session_id).ok_or_else(|| {
+                    anyhow::anyhow!("This session's Codex thread is no longer on this computer")
+                })?,
+            };
+            map.insert(session_id, thread);
+            save_codex_map_atomically(&path, &map)?;
+        }
+        shared::AgentType::Muse | shared::AgentType::Antigravity => {
+            anyhow::bail!("Only Claude and Codex sessions can be restored")
+        }
+    }
+    let mut restored: HashMap<Uuid, Uuid> = load_sidecar_map(&restored_sessions_path());
+    restored.insert(session_id, source_session_id);
+    save_sidecar_map(&restored_sessions_path(), &restored)?;
+    Ok(())
+}
+
+pub(crate) fn load_codex_thread_id(session_id: Uuid) -> Option<String> {
     load_codex_threads().get(&session_id).cloned()
 }
 
@@ -100,7 +234,7 @@ fn load_claude_conversation_id(session_id: Uuid) -> Option<Uuid> {
 /// Thin wrapper that feeds the sidecar into the shared rule the argv builder
 /// uses, so a gate and the spawn it guards can never check different files —
 /// see [`claude_session_lib::claude_transcript_id`] for why that matters.
-fn resolved_transcript_id(session_id: Uuid) -> Uuid {
+pub(crate) fn resolved_transcript_id(session_id: Uuid) -> Uuid {
     claude_transcript_id(session_id, load_claude_conversation_id(session_id))
 }
 
@@ -163,9 +297,7 @@ pub(crate) fn session_id_for_codex_thread(thread_id: &str) -> Option<Uuid> {
 
 fn make_codex_thread_id_sink(session_id: Uuid) -> CodexThreadIdSink {
     std::sync::Arc::new(move |thread_id: String| {
-        let mut map = load_codex_threads();
-        map.insert(session_id, thread_id);
-        if let Err(e) = save_codex_threads(&map) {
+        if let Err(e) = update_codex_thread_map(session_id, &thread_id, false) {
             warn!(
                 "Failed to persist codex thread id for session {}: {}",
                 session_id, e
@@ -191,9 +323,45 @@ struct TaskOutcome {
 struct ManagedTask {
     handle: tokio::task::JoinHandle<()>,
     cancel: CancellationToken,
+    /// The session id the task is *currently* running under. `run_session_task`
+    /// may rotate to a fresh id mid-flight (missing resume transcript, "No
+    /// conversation found"); the map key stays the id the spawn was asked for,
+    /// so the heartbeat, stop and dedup paths consult this instead.
+    live_id: LiveSessionId,
+}
+
+/// Shared handle to a task's current session id, updated on rotation.
+///
+/// Without this the launcher kept reporting the *original* id in its
+/// heartbeat after a rotation, the backend saw the rotated session as
+/// desired-but-not-running, relaunched it with `--resume`, the launcher
+/// rotated again, and every heartbeat minted another empty session until
+/// the launcher hit its session cap.
+#[derive(Clone, Debug)]
+pub(crate) struct LiveSessionId(std::sync::Arc<std::sync::Mutex<Uuid>>);
+
+impl LiveSessionId {
+    fn new(id: Uuid) -> Self {
+        Self(std::sync::Arc::new(std::sync::Mutex::new(id)))
+    }
+
+    pub(crate) fn get(&self) -> Uuid {
+        *self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn set(&self, id: Uuid) {
+        *self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = id;
+    }
 }
 
 pub struct SpawnParams {
+    pub history_restore: Option<shared::api::HistoryRestoreLaunch>,
     pub auth_token: String,
     pub working_directory: String,
     pub session_name: Option<String>,
@@ -248,11 +416,24 @@ impl ProcessManager {
         self.launcher_id = Some(id);
     }
 
+    /// Ids the backend should consider running: each task's *live* id, so a
+    /// session that rotated mid-flight is reported under the id it now holds.
     pub fn running_session_ids(&self) -> Vec<Uuid> {
-        self.tasks.keys().copied().collect()
+        self.tasks.values().map(|t| t.live_id.get()).collect()
     }
 
-    pub async fn spawn(&mut self, params: SpawnParams) -> anyhow::Result<Uuid> {
+    /// Map a session id (original or rotated) to the key of the task running it.
+    fn task_key(&self, session_id: &Uuid) -> Option<Uuid> {
+        if self.tasks.contains_key(session_id) {
+            return Some(*session_id);
+        }
+        self.tasks
+            .iter()
+            .find(|(_, t)| t.live_id.get() == *session_id)
+            .map(|(k, _)| *k)
+    }
+
+    pub async fn spawn(&mut self, mut params: SpawnParams) -> anyhow::Result<Uuid> {
         // Enforce the concurrency cap. Each session is a long-lived Claude CLI
         // process consuming memory, CPU, and a WebSocket connection. Without a
         // limit, a burst of launch requests could starve the host of resources
@@ -331,10 +512,31 @@ impl ProcessManager {
         // session (#1405). `None` (older backend) keeps the historical
         // "any id means resume" behavior. No id at all is always a fresh
         // session with a random id.
-        let (session_id, resume) = match params.resume_session_id {
+        let (session_id, mut resume) = match params.resume_session_id {
             Some(id) => (id, params.resume.unwrap_or(true)),
             None => (Uuid::new_v4(), false),
         };
+
+        // A restored session exists only to continue its native conversation.
+        // Refuse to launch it fresh if that conversation has since vanished,
+        // instead of the usual quiet fallback to a new one.
+        if resume && is_restored_session(session_id) {
+            let present = match params.agent_type {
+                shared::AgentType::Claude => {
+                    claude_transcript_status(
+                        Path::new(&working_directory),
+                        resolved_transcript_id(session_id),
+                    ) != TranscriptStatus::Missing
+                }
+                shared::AgentType::Codex => load_codex_thread_id(session_id).is_some(),
+                shared::AgentType::Muse | shared::AgentType::Antigravity => false,
+            };
+            if !present {
+                anyhow::bail!(
+                    "Cannot resume restored session: its native conversation is no longer on this computer"
+                );
+            }
+        }
 
         // Dedup guard: never spawn a second task for a session that's already
         // running. A reconcile/launch race (the backend's running/pending sets
@@ -342,7 +544,7 @@ impl ProcessManager {
         // in the map — orphaning the old task (its cancel token lost, so it can
         // never be stopped) and double-spawning the agent process. That's the
         // "two claude procs for one session id" symptom. Treat it as a no-op.
-        if self.tasks.contains_key(&session_id) {
+        if self.task_key(&session_id).is_some() {
             warn!(
                 "Session {} already running; ignoring duplicate launch request",
                 session_id
@@ -357,7 +559,27 @@ impl ProcessManager {
 
         let git_branch = get_git_branch(&working_directory);
 
+        if let Some(restore) = &params.history_restore {
+            if restore.mode == shared::api::HistoryRestoreMode::Native {
+                let has_native = match params.agent_type {
+                    shared::AgentType::Codex => load_codex_thread_id(session_id).is_some(),
+                    shared::AgentType::Claude => {
+                        load_claude_conversation_id(session_id).is_some()
+                            || claude_transcript_status(&base_dir, session_id)
+                                == TranscriptStatus::Present
+                    }
+                    _ => false,
+                };
+                if has_native {
+                    resume = true;
+                } else {
+                    resume = false;
+                    params.fork_from_session_id = Some(restore.source_session_id);
+                }
+            }
+        }
         let proxy_config = ProxySessionConfig {
+            history_restore: params.history_restore,
             backend_url: self.backend_url.clone(),
             session_id,
             session_name: name.clone(),
@@ -388,14 +610,18 @@ impl ProcessManager {
         let exit_tx = self.exit_tx.clone();
         let cancel = CancellationToken::new();
         let cancel_clone = cancel.clone();
+        let live_id = LiveSessionId::new(session_id);
+        let task_live_id = live_id.clone();
 
         let handle = tokio::spawn(async move {
-            let outcome = run_session_task(proxy_config, cancel_clone).await;
+            let outcome = run_session_task(proxy_config, cancel_clone, &task_live_id).await;
             if let Some(scratch) = scratch_cleanup {
                 crate::worktree::cleanup_scratch_worktree(scratch);
             }
+            // Report the id the task ended up running under, so the backend's
+            // backoff accounting lands on the live row, not a replaced one.
             let _ = exit_tx.send(SessionExited {
-                session_id,
+                session_id: task_live_id.get(),
                 exit_code: outcome.exit_code,
                 reason: outcome.reason,
             });
@@ -406,14 +632,23 @@ impl ProcessManager {
             session_id, name, working_directory
         );
 
-        self.tasks
-            .insert(session_id, ManagedTask { handle, cancel });
+        self.tasks.insert(
+            session_id,
+            ManagedTask {
+                handle,
+                cancel,
+                live_id,
+            },
+        );
 
         Ok(session_id)
     }
 
     pub async fn stop(&mut self, session_id: &Uuid) -> bool {
-        if let Some(mut task) = self.tasks.remove(session_id) {
+        let task = self
+            .task_key(session_id)
+            .and_then(|key| self.tasks.remove(&key));
+        if let Some(mut task) = task {
             info!("Stopping session task {}", session_id);
             task.cancel.cancel();
             // Give the task a moment to shut down gracefully before aborting
@@ -433,7 +668,9 @@ impl ProcessManager {
 
     /// Remove a finished task from tracking. Called when we receive a SessionExited notification.
     pub fn remove_finished(&mut self, session_id: &Uuid) {
-        self.tasks.remove(session_id);
+        if let Some(key) = self.task_key(session_id) {
+            self.tasks.remove(&key);
+        }
     }
 }
 
@@ -477,7 +714,35 @@ impl AnySession {
 async fn run_session_task(
     mut config: ProxySessionConfig,
     cancel: CancellationToken,
+    live_id: &LiveSessionId,
 ) -> TaskOutcome {
+    // A native-state probe can start a temporary app-server. Keep it inside
+    // the per-session task so slow probes never stall launcher heartbeats or
+    // other sessions, and a pause can cancel a pending probe immediately.
+    if let Some(restore) = config
+        .history_restore
+        .as_ref()
+        .filter(|r| r.mode == shared::api::HistoryRestoreMode::Native && !config.resume)
+    {
+        let result = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return TaskOutcome {
+                exit_code: Some(0),
+                reason: SessionExitReason::Stopped,
+            },
+            result = tokio::time::timeout(
+                std::time::Duration::from_secs(90),
+                crate::history_restore::check(config.agent_type, &config.working_directory, restore),
+            ) => result.map_err(|_| anyhow::anyhow!("Native restore check timed out")).and_then(|r| r),
+        };
+        if let Err(error) = result {
+            error!("Native restore preflight failed: {error:#}");
+            return TaskOutcome {
+                exit_code: Some(1),
+                reason: SessionExitReason::ResumeTargetMissing,
+            };
+        }
+    }
     loop {
         // Pre-flight: if we're about to `claude --resume <id>` but the local
         // transcript is gone, claude exits near-instantly and reconcile would
@@ -495,13 +760,45 @@ async fn run_session_task(
                 resolved_transcript_id(config.session_id),
             ) == TranscriptStatus::Missing
         {
+            if config
+                .history_restore
+                .as_ref()
+                .is_some_and(|r| r.mode == shared::api::HistoryRestoreMode::Native)
+            {
+                error!(
+                    "Native restored conversation is missing; refusing to start an empty session"
+                );
+                return TaskOutcome {
+                    exit_code: Some(1),
+                    reason: SessionExitReason::ResumeTargetMissing,
+                };
+            }
             let old_id = config.session_id;
+            if resolved_transcript_id(old_id) == old_id {
+                // Nothing to resume *and* no other transcript claims this id,
+                // so create the conversation under the id we already have
+                // (`--session-id`), exactly like a brand-new dialog launch.
+                // Keeping the id means the backend row, the dashboard focus
+                // and the launcher's running set all stay in agreement; the
+                // previous rotate-to-a-fresh-id here minted a new session row
+                // on every relaunch of a never-messaged session.
+                warn!(
+                    "Session {} resume target transcript missing; starting it fresh under the same id",
+                    old_id
+                );
+                config.resume = false;
+                continue;
+            }
+            // The id maps to a post-`/clear` conversation whose file is gone;
+            // `--session-id old_id` could collide with the pre-clear transcript,
+            // so rotate to a fresh id as before.
             let new_id = Uuid::new_v4();
             warn!(
                 "Session {} resume target transcript missing; rotating to fresh session {} without spawning",
                 old_id, new_id
             );
             config.session_id = new_id;
+            live_id.set(new_id);
             config.resume = false;
             config.replaces_session_id = Some(old_id);
             continue;
@@ -515,11 +812,27 @@ async fn run_session_task(
         } else {
             None
         };
-        config.prime_portal_reminder_on_first_input = should_prime_portal_reminder_on_first_input(
-            config.agent_type,
-            config.resume,
-            codex_thread_id.as_deref(),
-        );
+        // A fork carries the source conversation, which already holds the
+        // reminder, so its first input must not deliver a second copy.
+        config.prime_portal_reminder_on_first_input = config.fork_from_session_id.is_none()
+            && should_prime_portal_reminder_on_first_input(
+                config.agent_type,
+                config.resume,
+                codex_thread_id.as_deref(),
+            );
+        let mut codex_require_resume = config.resume
+            && config
+                .history_restore
+                .as_ref()
+                .is_some_and(|r| r.mode == shared::api::HistoryRestoreMode::Native);
+        if config.agent_type == shared::AgentType::Codex && config.resume {
+            let imports: HashMap<Uuid, String> =
+                load_sidecar_map(&codex_threads_path().with_file_name("codex_imports.json"));
+            let imported = imports.get(&config.session_id);
+            config.prime_portal_reminder_on_first_input |=
+                imported == codex_thread_id.as_ref() && codex_thread_id.is_some();
+            codex_require_resume |= imported.is_some() || is_restored_session(config.session_id);
+        }
 
         // The portal's established dangerous-permissions wire format is the
         // agent argument list. Consume Muse's token here and carry it as typed
@@ -550,6 +863,10 @@ async fn run_session_task(
         let plugin_skill_reminder = plugin_skill.reminder;
 
         let session_config = SessionConfig {
+            recovery_context: config
+                .history_restore
+                .as_ref()
+                .and_then(|r| r.context.clone()),
             session_id: config.session_id,
             working_directory: PathBuf::from(&config.working_directory),
             session_name: config.session_name.clone(),
@@ -560,6 +877,7 @@ async fn run_session_task(
             muse_yolo,
             agent_type: config.agent_type,
             codex_thread_id,
+            codex_require_resume,
             fork_from_session_id: config.fork_from_session_id,
             codex_fork_from_thread_id: config.fork_from_session_id.and_then(load_codex_thread_id),
             claude_conversation_id: load_claude_conversation_id(config.session_id),
@@ -659,7 +977,8 @@ async fn run_session_task(
                     // the conversation we actually resumed, or a stale pre-clear
                     // file reading `Present` suppresses the rotation and we
                     // crash-loop on exactly the case this exists to break.
-                    if config.resume
+                    if config.history_restore.is_none()
+                        && config.resume
                         && config.agent_type == shared::AgentType::Claude
                         && claude_transcript_status(
                             std::path::Path::new(&config.working_directory),
@@ -674,6 +993,7 @@ async fn run_session_task(
                             old_id, alive, new_id
                         );
                         config.session_id = new_id;
+                        live_id.set(new_id);
                         config.resume = false;
                         config.replaces_session_id = Some(old_id);
                         continue;
@@ -712,6 +1032,13 @@ async fn run_session_task(
                     reason: SessionExitReason::RegistrationRejected,
                 };
             }
+            Ok(LoopResult::SessionNotFound) if config.history_restore.is_some() => {
+                error!("Restored native conversation was not found; preserving the restored session ID");
+                return TaskOutcome {
+                    exit_code: Some(1),
+                    reason: SessionExitReason::ResumeTargetMissing,
+                };
+            }
             Ok(LoopResult::SessionNotFound) => {
                 if !config.resume {
                     info!("Session {} not found, not resuming", config.session_id);
@@ -728,6 +1055,7 @@ async fn run_session_task(
                     old_id, alive, new_id
                 );
                 config.session_id = new_id;
+                live_id.set(new_id);
                 config.resume = false;
                 config.replaces_session_id = Some(old_id);
             }
@@ -742,6 +1070,59 @@ async fn run_session_task(
                 };
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod live_id_tests {
+    use super::*;
+
+    fn manager_with_task(key: Uuid) -> (ProcessManager, LiveSessionId) {
+        let (mut pm, _rx) = ProcessManager::new("http://127.0.0.1:1".into(), 4);
+        let cancel = CancellationToken::new();
+        let c = cancel.clone();
+        let handle = tokio::spawn(async move { c.cancelled().await });
+        let live_id = LiveSessionId::new(key);
+        pm.tasks.insert(
+            key,
+            ManagedTask {
+                handle,
+                cancel,
+                live_id: live_id.clone(),
+            },
+        );
+        (pm, live_id)
+    }
+
+    #[tokio::test]
+    async fn heartbeat_stop_and_dedup_follow_a_rotated_id() {
+        let original = Uuid::new_v4();
+        let rotated = Uuid::new_v4();
+        let (mut pm, live_id) = manager_with_task(original);
+
+        assert_eq!(pm.running_session_ids(), vec![original]);
+        live_id.set(rotated);
+
+        // The heartbeat reports the id the task now runs under, so the backend
+        // never sees the rotated session as "desired but not running".
+        assert_eq!(pm.running_session_ids(), vec![rotated]);
+        assert_eq!(pm.task_key(&rotated), Some(original));
+        assert_eq!(pm.task_key(&original), Some(original));
+        assert_eq!(pm.task_key(&Uuid::new_v4()), None);
+
+        // Stopping by the rotated id finds and cancels the task.
+        assert!(pm.stop(&rotated).await);
+        assert!(pm.running_session_ids().is_empty());
+    }
+
+    #[tokio::test]
+    async fn remove_finished_accepts_the_live_id() {
+        let original = Uuid::new_v4();
+        let rotated = Uuid::new_v4();
+        let (mut pm, live_id) = manager_with_task(original);
+        live_id.set(rotated);
+        pm.remove_finished(&rotated);
+        assert!(pm.tasks.is_empty());
     }
 }
 
@@ -862,5 +1243,42 @@ mod tests {
             assert_eq!(policy.extra_args, vec!["--some-arg"]);
             assert_eq!(policy.reminder.as_deref(), Some("plugin skills reminder"));
         }
+    }
+}
+
+#[cfg(test)]
+mod import_binding_tests {
+    use super::*;
+
+    #[test]
+    fn binding_is_idempotent_rejects_aliases_and_preserves_other_sessions() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("threads.json");
+        let first = Uuid::new_v4();
+        let second = Uuid::new_v4();
+        update_codex_thread_map_at(&path, first, "thread-a", true).unwrap();
+        update_codex_thread_map_at(&path, first, "thread-a", true).unwrap();
+        assert!(update_codex_thread_map_at(&path, second, "thread-a", true).is_err());
+        assert!(update_codex_thread_map_at(&path, first, "thread-b", true).is_err());
+        update_codex_thread_map_at(&path, second, "thread-b", false).unwrap();
+        let imports: HashMap<Uuid, String> = serde_json::from_str(
+            &std::fs::read_to_string(path.with_file_name("codex_imports.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(imports.get(&first).map(String::as_str), Some("thread-a"));
+        assert!(!imports.contains_key(&second));
+        let map: HashMap<Uuid, String> =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(map.get(&first).unwrap(), "thread-a");
+        assert_eq!(map.get(&second).unwrap(), "thread-b");
+    }
+
+    #[test]
+    fn corrupt_map_is_reported_without_overwriting_recoverable_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("threads.json");
+        std::fs::write(&path, "broken JSON").unwrap();
+        assert!(update_codex_thread_map_at(&path, Uuid::new_v4(), "thread", true).is_err());
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "broken JSON");
     }
 }

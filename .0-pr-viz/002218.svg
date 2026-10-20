@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="Arial, sans-serif" font-size="24" font-weight="normal" fill="#a9b1d6">PR #2218 · Import existing Codex conversations into Portal</text>
+<text x="55" y="105" font-family="Arial, sans-serif" font-size="34" font-weight="normal" fill="#e6e9f5">Saved Codex conversations become paused Portal sessions with their native context.</text>
+<text x="55" y="148" font-family="Arial, sans-serif" font-size="34" font-weight="normal" fill="#e6e9f5">Native APIs preserve continuity; retries do not duplicate sessions or history.</text>
+<path d="M 55 175 H 1945" stroke="#3d4666"/><path d="M 1000 190 V 1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="55" y="223" font-family="Arial, sans-serif" font-size="22" font-weight="bold" fill="#f7768e">BEFORE</text>
+<text x="1055" y="223" font-family="Arial, sans-serif" font-size="22" font-weight="bold" fill="#9ece6a">AFTER</text>
+<rect x="55" y="260" width="850" height="134" rx="14" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+<text x="81" y="300" font-family="Arial, sans-serif" font-size="26" font-weight="bold" fill="#7aa2f7">Saved Codex conversation</text>
+<text x="81" y="338" font-family="Arial, sans-serif" font-size="23" font-weight="normal" fill="#c0caf5">CLI / IDE owns the thread and working directory.</text>
+<text x="81" y="368" font-family="Arial, sans-serif" font-size="23" font-weight="normal" fill="#c0caf5">Portal has no external conversation picker.</text>
+<rect x="1055" y="260" width="850" height="134" rx="14" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1081" y="300" font-family="Arial, sans-serif" font-size="26" font-weight="bold" fill="#7aa2f7">Import existing</text>
+<text x="1081" y="338" font-family="Arial, sans-serif" font-size="23" font-weight="normal" fill="#c0caf5">Search by conversation or exact workspace.</text>
+<text x="1081" y="368" font-family="Arial, sans-serif" font-size="23" font-weight="normal" fill="#c0caf5">Select multiple; copying history is optional.</text>
+<path d="M 480 404 v 28 m -8 -8 l 8 8 l 8 -8" fill="none" stroke="#f7768e" stroke-width="3"/>
+<path d="M 1480 404 v 28 m -8 -8 l 8 8 l 8 -8" fill="none" stroke="#9ece6a" stroke-width="3"/>
+<rect x="55" y="448" width="850" height="134" rx="14" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="81" y="488" font-family="Arial, sans-serif" font-size="26" font-weight="bold" fill="#7aa2f7">Launch Session</text>
+<text x="81" y="526" font-family="Arial, sans-serif" font-size="23" font-weight="normal" fill="#c0caf5">LaunchRequest describes a new conversation.</text>
+<text x="81" y="556" font-family="Arial, sans-serif" font-size="23" font-weight="normal" fill="#c0caf5">No native source ID enters the launch flow.</text>
+<rect x="1055" y="448" width="850" height="134" rx="14" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1081" y="488" font-family="Arial, sans-serif" font-size="26" font-weight="bold" fill="#7aa2f7">Codex app-server API</text>
+<text x="1081" y="526" font-family="Arial, sans-serif" font-size="23" font-weight="normal" fill="#c0caf5">thread/list, thread/read, thread/turns/list</text>
+<text x="1081" y="556" font-family="Arial, sans-serif" font-size="23" font-weight="normal" fill="#c0caf5">Owner and capability checks gate native reads.</text>
+<path d="M 480 592 v 28 m -8 -8 l 8 8 l 8 -8" fill="none" stroke="#f7768e" stroke-width="3"/>
+<path d="M 1480 592 v 28 m -8 -8 l 8 8 l 8 -8" fill="none" stroke="#9ece6a" stroke-width="3"/>
+<rect x="55" y="636" width="850" height="134" rx="14" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+<text x="81" y="676" font-family="Arial, sans-serif" font-size="26" font-weight="bold" fill="#7aa2f7">codex_threads.json</text>
+<text x="81" y="714" font-family="Arial, sans-serif" font-size="23" font-weight="normal" fill="#c0caf5">Existing mappings can resume Portal sessions.</text>
+<text x="81" y="744" font-family="Arial, sans-serif" font-size="23" font-weight="normal" fill="#c0caf5">Bringing external threads requires manual setup.</text>
+<rect x="1055" y="636" width="850" height="134" rx="14" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1081" y="676" font-family="Arial, sans-serif" font-size="26" font-weight="bold" fill="#7aa2f7">imported_session_id + store_import</text>
+<text x="1081" y="714" font-family="Arial, sans-serif" font-size="23" font-weight="normal" fill="#c0caf5">Stable identity and atomic thread binding.</text>
+<text x="1081" y="744" font-family="Arial, sans-serif" font-size="23" font-weight="normal" fill="#c0caf5">Paused session, owner and history commit together.</text>
+<path d="M 480 780 v 28 m -8 -8 l 8 8 l 8 -8" fill="none" stroke="#f7768e" stroke-width="3"/>
+<path d="M 1480 780 v 28 m -8 -8 l 8 8 l 8 -8" fill="none" stroke="#9ece6a" stroke-width="3"/>
+<rect x="55" y="824" width="850" height="134" rx="14" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="81" y="864" font-family="Arial, sans-serif" font-size="26" font-weight="bold" fill="#7aa2f7">thread/resume failure</text>
+<text x="81" y="902" font-family="Arial, sans-serif" font-size="23" font-weight="normal" fill="#c0caf5">Falls back to thread/start.</text>
+<text x="81" y="932" font-family="Arial, sans-serif" font-size="23" font-weight="normal" fill="#c0caf5">A visible session can lose its native context.</text>
+<rect x="1055" y="824" width="850" height="134" rx="14" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1081" y="864" font-family="Arial, sans-serif" font-size="26" font-weight="bold" fill="#7aa2f7">Review, close original client, Resume</text>
+<text x="1081" y="902" font-family="Arial, sans-serif" font-size="23" font-weight="normal" fill="#c0caf5">Continue the saved native conversation.</text>
+<text x="1081" y="932" font-family="Arial, sans-serif" font-size="23" font-weight="normal" fill="#c0caf5">Imported resumes never silently start a new thread.</text>
+<text x="81" y="1014" font-family="Arial, sans-serif" font-size="25" font-weight="normal" fill="#f7768e">No supported discovery or import handoff.</text>
+<text x="1081" y="1014" font-family="Arial, sans-serif" font-size="25" font-weight="normal" fill="#9ece6a">Retries reuse the session; history is never input.</text>
+<text x="55" y="1172" font-family="Arial, sans-serif" font-size="22" font-weight="normal" fill="#a9b1d6">Codex only. Same computer and files; running processes are not moved. History copying is optional and bounded.</text>
+</svg>

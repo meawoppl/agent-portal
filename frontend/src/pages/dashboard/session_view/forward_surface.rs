@@ -4,7 +4,7 @@ use shared::api::ForwardInfo;
 use uuid::Uuid;
 use yew::prelude::*;
 
-use crate::utils;
+use crate::portal_client::use_portal;
 
 use super::session_surface::{SessionSurface, SessionSurfaceMode};
 
@@ -20,7 +20,7 @@ pub struct ForwardSurfaceProps {
 
 #[function_component(ForwardSurface)]
 pub fn forward_surface(props: &ForwardSurfaceProps) -> Html {
-    let open_url = utils::api_url(&format!("/api/sessions/{}/forwards/open", props.session_id));
+    let open_url = use_portal().url(&format!("/api/sessions/{}/forwards/open", props.session_id));
     let title = match &props.forward.process {
         Some(process) => format!("{process} :{} — {}", props.forward.port, props.forward.url),
         None => format!(":{} — {}", props.forward.port, props.forward.url),

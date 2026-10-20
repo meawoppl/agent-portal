@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="arr-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+    <marker id="arr-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/>
+    </marker>
+  </defs>
+
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2224 · Restore a deleted session from History</text>
+
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">An archived session could only be read, though its agent conversation survived;</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">now Restore rebinds that conversation to a new paused session with full context.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <!-- BEFORE -->
+  <g>
+    <rect x="80" y="250" width="860" height="150" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="290" font-size="26" fill="#7aa2f7">HistoryTranscriptPage</text>
+    <text x="104" y="330" font-size="23" fill="#a9b1d6">manifest card + archived transcript</text>
+    <text x="104" y="366" font-size="22" fill="#565f89">only action: "All sessions"</text>
+  </g>
+
+  <g>
+    <rect x="80" y="440" width="860" height="190" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="480" font-size="26" fill="#7aa2f7">launcher host</text>
+    <text x="104" y="520" font-size="23" fill="#a9b1d6">claude_conversations.json, codex_threads.json</text>
+    <text x="104" y="556" font-size="23" fill="#a9b1d6">~/.claude/projects/*.jsonl, Codex threads</text>
+    <text x="104" y="592" font-size="22" fill="#565f89">untouched when the Portal session is deleted</text>
+  </g>
+
+  <line x1="510" y1="630" x2="510" y2="955" stroke="#f7768e" stroke-width="1.5" marker-end="url(#arr-red)"/>
+  <text x="530" y="790" font-size="22" fill="#565f89">resume / fork need a live sessions row</text>
+
+  <g>
+    <rect x="80" y="960" width="860" height="120" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="1006" font-size="26" fill="#c0caf5">surviving conversation unreachable from Portal</text>
+    <text x="104" y="1046" font-size="23" fill="#f7768e">read-only history, no way to continue</text>
+  </g>
+
+  <!-- AFTER -->
+  <g>
+    <rect x="1065" y="250" width="860" height="150" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1089" y="290" font-size="26" fill="#9ece6a">Restore session (owner, Claude/Codex)</text>
+    <text x="1089" y="330" font-size="23" fill="#a9b1d6">POST /api/history/sessions/{user}/{session}/restore</text>
+    <text x="1089" y="366" font-size="22" fill="#565f89">id = restored_session_id(owner, source)</text>
+  </g>
+
+  <line x1="1495" y1="400" x2="1495" y2="435" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+
+  <g>
+    <rect x="1065" y="440" width="860" height="190" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1089" y="480" font-size="26" fill="#7aa2f7">PrepareSessionRestore -> bind_restored_session</text>
+    <text x="1089" y="520" font-size="23" fill="#a9b1d6">Claude: conversation sidecar -> archived transcript</text>
+    <text x="1089" y="556" font-size="23" fill="#a9b1d6">Codex: thread moved from source id to new id</text>
+    <text x="1089" y="592" font-size="22" fill="#e0af68">missing native conversation: refused (full only)</text>
+  </g>
+
+  <line x1="1495" y1="630" x2="1495" y2="665" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+
+  <g>
+    <rect x="1065" y="670" width="860" height="150" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1089" y="710" font-size="26" fill="#7aa2f7">store_restore (one transaction)</text>
+    <text x="1089" y="750" font-size="23" fill="#a9b1d6">create_desired_session + pause + transcript copy</text>
+    <text x="1089" y="786" font-size="22" fill="#565f89">spawn re-checks restored sessions on every resume</text>
+  </g>
+
+  <line x1="1495" y1="820" x2="1495" y2="955" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+
+  <g>
+    <rect x="1065" y="960" width="860" height="120" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1089" y="1006" font-size="26" fill="#c0caf5">paused session in the dashboard</text>
+    <text x="1089" y="1046" font-size="23" fill="#9ece6a">Resume continues the original conversation</text>
+  </g>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">No transcript-only fallback: if the agent pruned its conversation or the computer changed, restore is refused. Muse/Antigravity unsupported.</text>
+</svg>

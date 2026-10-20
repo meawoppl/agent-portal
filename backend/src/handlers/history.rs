@@ -96,7 +96,7 @@ fn manifest_has_member(manifest: &SessionArchiveManifest, user_id: Uuid) -> bool
 /// Per-session read check for the manifest/messages/media endpoints. Cheap
 /// paths first (admin, owner-by-path, live membership); the manifest is only
 /// fetched for the archived-share case. Every failure is a 404.
-async fn verify_history_reader(
+pub(super) async fn verify_history_reader(
     app_state: &AppState,
     runtime: &Arc<ArchiveRuntime>,
     user: &User,

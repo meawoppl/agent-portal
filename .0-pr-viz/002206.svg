@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200" font-family="'Segoe UI','Noto Sans',sans-serif">
+  <rect width="2000" height="1200" fill="#16161e"/>
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2206 · Route session-scoped network access through a PortalClient</text>
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">Session UI built every URL from window.location, so it could only reach one portal.</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">Now each SessionView provides a PortalClient context its whole subtree resolves against.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="2"/>
+
+  <text x="105" y="235" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1090" y="235" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1140" stroke="#3d4666" stroke-width="2" stroke-dasharray="12 14"/>
+
+  <!-- BEFORE -->
+  <rect x="105" y="270" width="840" height="150" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+  <text x="129" y="312" font-size="26" fill="#7aa2f7">utils::get_base_url / api_url / ws_url</text>
+  <text x="129" y="350" font-size="23" fill="#a9b1d6">Read window.location on every call: the origin</text>
+  <text x="129" y="385" font-size="23" fill="#a9b1d6">that served the page is the only reachable portal.</text>
+  <line x1="525" y1="420" x2="525" y2="465" stroke="#565f89" stroke-width="3"/>
+  <rect x="105" y="465" width="840" height="230" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+  <text x="129" y="507" font-size="26" fill="#c0caf5">Session subtree, each call site on its own</text>
+  <text x="129" y="545" font-size="23" fill="#a9b1d6">SessionView history, turn-metrics, edit-stack, plugins</text>
+  <text x="129" y="580" font-size="23" fill="#a9b1d6">connect_websocket, ForwardChips, ForwardSurface</text>
+  <text x="129" y="615" font-size="23" fill="#a9b1d6">ShareDialog, ForkDialog, VoiceInput transcribe</text>
+  <text x="129" y="650" font-size="23" fill="#a9b1d6">PortalFileLink, ImageViewer / VideoViewer src</text>
+  <line x1="525" y1="695" x2="525" y2="740" stroke="#565f89" stroke-width="3"/>
+  <rect x="105" y="740" width="840" height="150" rx="8" fill="#1e202e" stroke="#f7768e" stroke-width="3"/>
+  <text x="129" y="782" font-size="26" fill="#f7768e">Raw relative paths bypass api_url entirely</text>
+  <text x="129" y="820" font-size="23" fill="#a9b1d6">fork POST, file pull, /api/images and /api/media src:</text>
+  <text x="129" y="855" font-size="23" fill="#a9b1d6">no single seam to point a session at another origin.</text>
+
+  <!-- AFTER -->
+  <rect x="1055" y="270" width="840" height="150" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1079" y="312" font-size="26" fill="#9ece6a">PortalClient (portal_client.rs)</text>
+  <text x="1079" y="350" font-size="23" fill="#a9b1d6">url, ws_url, resolve, get/post/patch/delete, fetch_json.</text>
+  <text x="1079" y="385" font-size="23" fill="#a9b1d6">App root provides PortalClient::home() as context.</text>
+  <line x1="1475" y1="420" x2="1475" y2="465" stroke="#565f89" stroke-width="3"/>
+  <rect x="1055" y="465" width="840" height="230" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1079" y="507" font-size="26" fill="#9ece6a">SessionViewProps.portal re-provides the context</text>
+  <text x="1079" y="545" font-size="23" fill="#a9b1d6">SessionView calls use props.portal; connect_websocket</text>
+  <text x="1079" y="580" font-size="23" fill="#a9b1d6">takes it. Descendants read use_portal() (function</text>
+  <text x="1079" y="615" font-size="23" fill="#a9b1d6">components) or portal_from_context (struct ones).</text>
+  <text x="1079" y="650" font-size="23" fill="#a9b1d6">ForwardChips refetches when the portal changes too.</text>
+  <line x1="1475" y1="695" x2="1475" y2="740" stroke="#565f89" stroke-width="3"/>
+  <rect x="1055" y="740" width="840" height="150" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1079" y="782" font-size="26" fill="#9ece6a">resolve(): root-relative refs land on the session portal</text>
+  <text x="1079" y="820" font-size="23" fill="#a9b1d6">Absolute and data: URLs pass through; today every</text>
+  <text x="1079" y="855" font-size="23" fill="#a9b1d6">session is on home, so behavior is unchanged.</text>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">Refactor only. Rail actions, the session list, settings/admin and markdown image src stay on home helpers; bearer auth and per-portal keys come later.</text>
+</svg>

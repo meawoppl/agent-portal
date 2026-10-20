@@ -280,3 +280,47 @@
 .history-owner-filter:hover {
     text-decoration: underline;
 }
+
+.history-root .history-restore {
+    margin: 1rem 0;
+    padding: 1rem;
+    border: 1px solid var(--border, #292e42);
+    border-radius: 8px;
+    background: var(--bg-darker, #16161e);
+}
+
+.history-root .history-restore p {
+    margin: 0.65rem 0;
+    line-height: 1.45;
+}
+
+.history-root .history-restore-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+    gap: 1rem;
+}
+
+.history-root .history-restore-fields label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    min-width: 0;
+}
+
+.history-root .history-restore-fields input,
+.history-root .history-restore-fields select {
+    padding: 0.5rem;
+    color: var(--text, #c0caf5);
+    background: var(--bg-dark, #1a1b26);
+    border: 1px solid var(--border, #292e42);
+    border-radius: 4px;
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.history-root .history-restore-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}

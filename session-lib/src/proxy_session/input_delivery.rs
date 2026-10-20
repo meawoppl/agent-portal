@@ -53,12 +53,26 @@ where
     if slash_command && portal_reminder::is_clear_command(&input.text) {
         reminder_pending.store(true, Ordering::SeqCst);
     }
-    let (text, display_event) = if !slash_command && reminder_pending.swap(false, Ordering::SeqCst)
-    {
+    let recovery = if slash_command {
+        None
+    } else {
+        claude_session.take_recovery_context()
+    };
+    let inject_reminder = !slash_command && reminder_pending.swap(false, Ordering::SeqCst);
+    let (text, display_event) = if inject_reminder || recovery.is_some() {
+        let mut context = claude_session
+            .config()
+            .plugin_skill_reminder
+            .clone()
+            .unwrap_or_default();
+        if let Some(recovery) = recovery {
+            context.push_str("\n\n");
+            context.push_str(&recovery);
+        }
         portal_reminder::fold_session_start_reminder(
             input.text,
             input.display_event,
-            claude_session.config().plugin_skill_reminder.as_deref(),
+            Some(&context),
             default_display,
         )
     } else {

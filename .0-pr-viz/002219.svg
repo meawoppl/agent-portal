@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="arr-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+    <marker id="arr-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/>
+    </marker>
+  </defs>
+
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2219 · Refuse empty and unconfirmed uploads instead of announcing them</text>
+
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">An empty or never-sent upload still produced "I've uploaded ... (0 B)";</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">now each hop refuses it, and the prompt goes out only for confirmed bytes.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <!-- BEFORE -->
+  <g>
+    <rect x="80" y="250" width="860" height="150" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="290" font-size="26" fill="#7aa2f7">InputBar::start_upload</text>
+    <text x="104" y="330" font-size="23" fill="#f7768e">pasted File with size() == 0 is uploaded</text>
+    <text x="104" y="366" font-size="22" fill="#565f89">total_size = file.size(), one empty chunk</text>
+  </g>
+
+  <line x1="510" y1="400" x2="510" y2="490" stroke="#565f89" stroke-width="1.5" marker-end="url(#arr-dim)"/>
+
+  <g>
+    <rect x="80" y="495" width="860" height="190" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="535" font-size="26" fill="#7aa2f7">SessionViewMsg::SendFrame / UploadCommitTimeout</text>
+    <text x="104" y="575" font-size="23" fill="#f7768e">ws_sender None: upload frames silently dropped</text>
+    <text x="104" y="611" font-size="23" fill="#f7768e">45s later: "sending prompt anyway"</text>
+    <text x="104" y="647" font-size="22" fill="#565f89">new sessions accept input before the socket connects</text>
+  </g>
+
+  <g>
+    <rect x="80" y="720" width="860" height="150" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="760" font-size="26" fill="#7aa2f7">handle_file_upload (proxy)</text>
+    <text x="104" y="800" font-size="23" fill="#f7768e">all chunks in -> rename + success, any size</text>
+    <text x="104" y="836" font-size="22" fill="#565f89">0 bytes received == 0 declared passes</text>
+  </g>
+
+  <g>
+    <rect x="80" y="960" width="860" height="120" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="1006" font-size="26" fill="#c0caf5">agent told about a 0-byte or missing file</text>
+    <text x="104" y="1046" font-size="23" fill="#f7768e">first-message image "doesn't get through"</text>
+  </g>
+
+  <!-- AFTER -->
+  <g>
+    <rect x="1065" y="250" width="860" height="150" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1089" y="290" font-size="26" fill="#7aa2f7">InputBar::start_upload</text>
+    <text x="1089" y="330" font-size="23" fill="#9ece6a">size() == 0 -> on_upload_error, composer kept</text>
+    <text x="1089" y="366" font-size="22" fill="#565f89">empty read refused; total_size = bytes.len()</text>
+  </g>
+
+  <line x1="1495" y1="400" x2="1495" y2="490" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+
+  <g>
+    <rect x="1065" y="495" width="860" height="190" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1089" y="535" font-size="26" fill="#7aa2f7">SessionViewMsg::SendFrame / UploadCommitTimeout</text>
+    <text x="1089" y="575" font-size="23" fill="#9ece6a">no socket: early_upload_results gets a failure</text>
+    <text x="1089" y="611" font-size="23" fill="#9ece6a">timeout: push_upload_error, prompt not sent</text>
+    <text x="1089" y="647" font-size="22" fill="#565f89">SessionViewMsg::UploadError shows bar errors</text>
+  </g>
+
+  <g>
+    <rect x="1065" y="720" width="860" height="150" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1089" y="760" font-size="26" fill="#7aa2f7">handle_file_upload (proxy)</text>
+    <text x="1089" y="800" font-size="23" fill="#9ece6a">received 0 or != total_size -> fail_upload</text>
+    <text x="1089" y="836" font-size="22" fill="#565f89">temp file removed, never renamed into place</text>
+  </g>
+
+  <g>
+    <rect x="1065" y="960" width="860" height="120" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1089" y="1006" font-size="26" fill="#c0caf5">"File upload failed: ..." in the transcript</text>
+    <text x="1089" y="1046" font-size="23" fill="#9ece6a">the agent is only told about confirmed bytes</text>
+  </g>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">Does not make the browser produce the image: an empty clipboard File is refused with a retry hint, and an offline upload fails rather than queueing.</text>
+</svg>

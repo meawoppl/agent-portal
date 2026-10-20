@@ -210,6 +210,11 @@ impl<A: Agent> Session<A> {
         &self.config
     }
 
+    /// Claim recovered reference text for a real input, preserving slash commands.
+    pub fn take_recovery_context(&mut self) -> Option<String> {
+        self.config.recovery_context.take()
+    }
+
     /// Poll for the next event.
     ///
     /// Returns `None` if the session has exited and no more events are
@@ -668,6 +673,43 @@ mod tests {
             GUARD_DROPPED.load(Ordering::SeqCst),
             "stop() should abort the io task and reap it"
         );
+    }
+
+    #[tokio::test]
+    async fn recovered_context_is_claimed_once_without_sending_an_input() {
+        // No command is sent by constructing a recovered session or claiming
+        // its reference text. Only handle_input can enqueue a user's work.
+        struct NoInputAgent;
+        impl Agent for NoInputAgent {
+            fn spawn_io_task(
+                _config: SessionConfig,
+                mut commands: mpsc::UnboundedReceiver<IoCommand>,
+                _events: mpsc::UnboundedSender<IoEvent>,
+            ) -> Result<tokio::task::JoinHandle<()>, SessionError> {
+                Ok(tokio::spawn(async move {
+                    if let Some(command) = commands.recv().await {
+                        match command {
+                            IoCommand::Shutdown { completed } => {
+                                let _ = completed.send(());
+                            }
+                            _ => panic!("Recovery must not enqueue historical work"),
+                        }
+                    }
+                }))
+            }
+        }
+        let mut session = Session::<NoInputAgent>::new(SessionConfig {
+            recovery_context: Some("quoted past request".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            session.take_recovery_context().as_deref(),
+            Some("quoted past request")
+        );
+        assert_eq!(session.take_recovery_context(), None);
+        session.stop().await.unwrap();
     }
 
     #[tokio::test]

@@ -15,7 +15,43 @@ use std::sync::Arc;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-pub async fn handle_web_client_socket(socket: WebSocket, app_state: Arc<AppState>, user_id: Uuid) {
+const LINKED_RECHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Only outbound reads may reuse successful authorization. Incoming commands
+/// always validate freshly, and the idle timer forces validation even under load.
+#[derive(Default)]
+struct OutboundAuthorization {
+    last_success: Option<std::time::Instant>,
+}
+
+impl OutboundAuthorization {
+    fn check<E>(
+        &mut self,
+        now: std::time::Instant,
+        force: bool,
+        validate: impl FnOnce() -> Result<(), E>,
+    ) -> Result<(), E> {
+        if !force
+            && self
+                .last_success
+                .is_some_and(|last| now.duration_since(last) < LINKED_RECHECK_INTERVAL)
+        {
+            return Ok(());
+        }
+        // Never retain a success across a failed forced check.
+        self.last_success = None;
+        validate()?;
+        self.last_success = Some(now);
+        Ok(())
+    }
+}
+
+pub async fn handle_web_client_socket(
+    socket: WebSocket,
+    app_state: Arc<AppState>,
+    user_id: Uuid,
+    linked: Option<crate::handlers::federation::LinkedAuth>,
+) {
     let session_manager = app_state.session_manager.clone();
     let db_pool = app_state.db_pool.clone();
     let initial_replay_limit = app_state.message_retention_count;
@@ -29,6 +65,11 @@ pub async fn handle_web_client_socket(socket: WebSocket, app_state: Arc<AppState
     let mut pending_uploads: HashMap<String, PendingUpload> = HashMap::new();
 
     session_manager.add_user_client_with_progress(user_id, tx.clone());
+    // Seed the services monitor so the header shows figures before the
+    // first periodic broadcast lands.
+    let _ = tx.send(ServerToClient::ServiceStatsUpdate {
+        services: crate::service_stats::table_for_user(&app_state, user_id),
+    });
 
     let ctx = WebClientCtx {
         app_state: &app_state,
@@ -39,36 +80,33 @@ pub async fn handle_web_client_socket(socket: WebSocket, app_state: Arc<AppState
         initial_replay_limit,
     };
 
-    let send_task = tokio::spawn(async move {
-        while let Some(msg) = rx.recv().await {
-            if ws_sender.send(msg).await.is_err() {
-                break;
+    // Streaming output shares a two-second authorization window per socket;
+    // every incoming command still checks live authority. Forced idle checks
+    // close revoked sockets even when no traffic is flowing.
+    let mut outbound_auth = OutboundAuthorization::default();
+    let mut recheck = tokio::time::interval(LINKED_RECHECK_INTERVAL);
+    loop {
+        tokio::select! {
+            _ = recheck.tick(), if linked.is_some() => {
+                if linked.as_ref().is_some_and(|auth| outbound_auth.check(std::time::Instant::now(), true, || auth.authorize(&app_state, shared::api::TokenScope::Read)).is_err()) { break; }
             }
-        }
-    });
-
-    while let Some(result) = ws_receiver.recv().await {
-        match result {
-            Ok(client_msg) => {
-                let should_break = handle_web_client_message(
-                    client_msg,
-                    ctx,
-                    &mut session_key,
-                    &mut verified_session_id,
-                    &mut pending_uploads,
-                );
-                if should_break {
-                    break;
+            msg = rx.recv() => {
+                let Some(msg) = msg else { break; };
+                if linked.as_ref().is_some_and(|auth| outbound_auth.check(std::time::Instant::now(), false, || auth.authorize(&app_state, shared::api::TokenScope::Read)).is_err()) { break; }
+                if ws_sender.send(msg).await.is_err() { break; }
+            }
+            result = ws_receiver.recv() => {
+                let Some(result) = result else { break; };
+                match result {
+                    Ok(client_msg) => {
+                        if linked.as_ref().is_some_and(|auth| auth.authorize(&app_state, crate::handlers::federation::message_scope(&client_msg)).is_err()) { break; }
+                        if handle_web_client_message(client_msg, ctx, &mut session_key, &mut verified_session_id, &mut pending_uploads) { break; }
+                    }
+                    Err(e) => { warn!("WebSocket decode error: {}", e); }
                 }
-            }
-            Err(e) => {
-                warn!("WebSocket decode error: {}", e);
-                continue;
             }
         }
     }
-
-    send_task.abort();
 
     // Eagerly drop this connection's senders from the presence registries.
     // All exit paths of the loop above (client close, decode-fatal break,
@@ -535,5 +573,42 @@ fn handle_web_input(
             "Failed to send to session '{}', session not found in SessionManager (input queued)",
             key
         );
+    }
+}
+
+#[cfg(test)]
+mod outbound_authorization_tests {
+    use super::*;
+
+    #[test]
+    fn streaming_reuses_success_but_expiry_and_idle_force_validation() {
+        let mut cache = OutboundAuthorization::default();
+        let start = std::time::Instant::now();
+        let calls = std::cell::Cell::new(0);
+        let validate = || {
+            calls.set(calls.get() + 1);
+            Ok::<_, ()>(())
+        };
+        for _ in 0..1000 {
+            cache.check(start, false, validate).unwrap();
+        }
+        assert_eq!(calls.get(), 1);
+        cache
+            .check(start + LINKED_RECHECK_INTERVAL, false, validate)
+            .unwrap();
+        assert_eq!(calls.get(), 2);
+        cache
+            .check(start + LINKED_RECHECK_INTERVAL, true, validate)
+            .unwrap();
+        assert_eq!(calls.get(), 3);
+    }
+
+    #[test]
+    fn failed_forced_check_invalidates_previous_success() {
+        let mut cache = OutboundAuthorization::default();
+        let now = std::time::Instant::now();
+        cache.check(now, false, || Ok::<_, ()>(())).unwrap();
+        assert!(cache.check(now, true, || Err(())).is_err());
+        assert!(cache.check(now, false, || Err(())).is_err());
     }
 }

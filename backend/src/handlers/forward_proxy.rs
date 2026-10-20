@@ -444,7 +444,11 @@ fn create_and_send_forward_edit_stack(
             items: response.items.clone(),
         },
     );
-    Ok(response)
+    // The plugin that posted only needs to see its items queued; echoing the
+    // captured image back down the tunnel is what made submits feel slow.
+    Ok(shared::api::EditStackResponse {
+        items: crate::handlers::edit_stack::without_images(response.items),
+    })
 }
 
 /// Missing/expired cookie: bounce navigations through the portal origin (the

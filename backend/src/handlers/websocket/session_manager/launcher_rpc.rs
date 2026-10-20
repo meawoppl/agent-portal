@@ -93,6 +93,7 @@ mod tests {
             .try_register_launcher(
                 host,
                 LauncherConnection {
+                    system: None,
                     sender,
                     launcher_name: "rpc-test".into(),
                     hostname: "rpc-host".into(),

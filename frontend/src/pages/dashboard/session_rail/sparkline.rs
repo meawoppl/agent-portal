@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use uuid::Uuid;
+use crate::portal_client::SessionKey;
 use yew::prelude::*;
 
 use crate::pages::dashboard::session_view::ActivityTag;
@@ -37,7 +37,7 @@ impl SparklineView {
     }
 }
 
-type EventStore = HashMap<Uuid, Vec<(f64, ActivityTag)>>;
+type EventStore = HashMap<SessionKey, Vec<(f64, ActivityTag)>>;
 
 /// Shared activity event buffer.
 ///
@@ -50,7 +50,7 @@ pub struct ActivityRef(Rc<RefCell<EventStore>>);
 impl ActivityRef {
     /// Record a new event, evicting any entries that have fallen outside the
     /// rolling window relative to `timestamp`.
-    pub fn push(&self, session_id: Uuid, tag: ActivityTag, timestamp: f64) {
+    pub fn push(&self, session_id: SessionKey, tag: ActivityTag, timestamp: f64) {
         let cutoff = timestamp - SPARKLINE_WINDOW_MS;
         let mut map = self.0.borrow_mut();
         let events = map.entry(session_id).or_default();
@@ -61,7 +61,7 @@ impl ActivityRef {
     /// True if a compaction event occurred within `window_ms` of `now` for
     /// this session. Drives the context-usage bar's brief compaction flash —
     /// reuses the same compaction markers the bottom sparkline already plots.
-    pub fn recent_compaction(&self, session_id: Uuid, now: f64, window_ms: f64) -> bool {
+    pub fn recent_compaction(&self, session_id: SessionKey, now: f64, window_ms: f64) -> bool {
         let map = self.0.borrow();
         map.get(&session_id).is_some_and(|events| {
             events.iter().any(|(t, tag)| {
@@ -71,7 +71,7 @@ impl ActivityRef {
     }
 
     /// Compute the sparkline view for one session at the given wall-clock time.
-    fn view_for(&self, session_id: Uuid, now: f64) -> SparklineView {
+    fn view_for(&self, session_id: SessionKey, now: f64) -> SparklineView {
         let cutoff = now - SPARKLINE_WINDOW_MS;
         let map = self.0.borrow();
         let Some(events) = map.get(&session_id) else {
@@ -129,7 +129,7 @@ impl Default for ActivityRef {
 /// range-pairing at draw time.
 pub fn render_activity_sparkline(
     activity_timestamps: &ActivityRef,
-    session_id: Uuid,
+    session_id: SessionKey,
     render_time: f64,
 ) -> Html {
     let view = activity_timestamps.view_for(session_id, render_time);

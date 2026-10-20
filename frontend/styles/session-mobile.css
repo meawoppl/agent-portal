@@ -91,7 +91,7 @@
     /* Per-turn metrics remain on each result card and in Performance. Hiding
        this desktop summary also avoids clipping its dropdown inside a compact
        one-row mobile toolbar. */
-    .turn-metrics-pill {
+    .service-monitor {
         display: none;
     }
 
@@ -260,6 +260,18 @@
        was the main cause of the metadata chips wrapping onto a second row. */
     .session-view-header .session-name {
         display: none;
+    }
+
+    .session-view-header .session-name-button {
+        display: inline-flex;
+    }
+
+    .session-view-header .session-name-label {
+        display: none;
+    }
+
+    .session-view-header .session-rename-label {
+        display: inline;
     }
 
     .session-view-header .session-hostname {

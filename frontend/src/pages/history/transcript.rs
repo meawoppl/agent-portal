@@ -23,6 +23,14 @@ pub struct HistoryTranscriptProps {
     /// place instead of navigating. `None` keeps the standalone route's link.
     #[prop_or_default]
     pub on_back: Option<Callback<()>>,
+    /// The signed-in user. Restore is owner-only, so the button shows only
+    /// when this matches the archived session's owner.
+    #[prop_or_default]
+    pub current_user_id: Option<Uuid>,
+    /// Open a restored (or still-live) session in the dashboard. Without it
+    /// the page reports the result in place.
+    #[prop_or_default]
+    pub on_restored: Option<Callback<Uuid>>,
 }
 
 #[function_component(HistoryTranscriptPage)]
@@ -80,6 +88,12 @@ pub fn history_transcript_page(props: &HistoryTranscriptProps) -> Html {
                 }
             </nav>
             { header_card(&manifest) }
+            if let Some(Ok(m)) = &*manifest {
+              if m.session_id == props.session && m.user_id == props.user {
+                <super::restore::HistoryRestore key={format!("{}:{}", props.user, props.session)} manifest={m.clone()} on_open={props.on_restored.clone()} />
+              }
+            }
+
             { transcript_body(&messages, &props.user, &props.session, agent_type, session_id) }
         </div>
     }

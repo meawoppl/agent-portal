@@ -286,6 +286,7 @@ pub async fn close() -> Result<()> {
     let (base, token) = crate::message::api_base()?;
     let client = reqwest::Client::new();
     let session = session_id(&client, &base, &token).await?;
+    crate::managed_forward::remove(session.parse()?)?;
 
     let resp = client
         .delete(format!("{base}/api/agent/sessions/{session}/forwards"))
