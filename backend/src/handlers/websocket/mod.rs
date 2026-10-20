@@ -12,13 +12,15 @@ mod turn_metrics;
 mod uploads;
 mod web_client_socket;
 
-pub(crate) use session_manager::EnqueueInput;
 pub use session_manager::{
     conn_channel, ConnSender, DataPlaneConnection, DataPlaneSender, ForwardHealth,
     LauncherConnection, ProxySender, SessionId, SessionManager, TunnelError, TunnelIn,
     WebClientSender, DATA_PLANE_CHANNEL_CAPACITY, LAUNCHER_CHANNEL_CAPACITY,
     LAUNCHER_LIVENESS_DEADLINE_SECS, LIVENESS_SWEEP_INTERVAL_SECS, PROGRESS_BAR_TTL,
     PROXY_CHANNEL_CAPACITY, PROXY_LIVENESS_DEADLINE_SECS, WEB_CLIENT_CHANNEL_CAPACITY,
+};
+pub(crate) use session_manager::{
+    CompactionGate, CompactionPhase, EnqueueInput, LauncherRpcError, LauncherRpcKind,
 };
 
 /// Mint a port-forward data-plane ticket (#1506). Re-exported so the proxy
@@ -42,7 +44,7 @@ pub(crate) fn mint_tunnel_ticket(
 }
 
 use axum::{
-    extract::{ws::WebSocketUpgrade, State},
+    extract::{ws::WebSocketUpgrade, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
@@ -94,12 +96,40 @@ pub async fn handle_launcher_websocket(
     ws.on_upgrade(|socket| launcher_socket::handle_launcher_socket(socket, app_state))
 }
 
+// Deliberately no Debug: a query ticket is a credential.
+#[derive(serde::Deserialize)]
+pub struct ClientSocketQuery {
+    ticket: Option<String>,
+    /// Narrows cookie authority for a browser view; never authenticates it.
+    account: Option<String>,
+}
+
 pub async fn handle_web_client_websocket(
     ws: WebSocketUpgrade,
     State(app_state): State<Arc<AppState>>,
     headers: HeaderMap,
     cookies: Cookies,
+    Query(query): Query<ClientSocketQuery>,
 ) -> Response {
+    if let Some(ticket) = query.ticket {
+        if query.account.is_some() || headers.contains_key(axum::http::header::AUTHORIZATION) {
+            return StatusCode::BAD_REQUEST.into_response();
+        }
+        return match crate::handlers::federation::tickets::consume(&app_state, &ticket, &headers) {
+            Ok(auth) => {
+                let user_id = auth.user_id;
+                ws.on_upgrade(move |socket| {
+                    web_client_socket::handle_web_client_socket(
+                        socket,
+                        app_state,
+                        user_id,
+                        Some(auth),
+                    )
+                })
+            }
+            Err(error) => error.into_response(),
+        };
+    }
     let user_id = match crate::auth::extract_user_id(&app_state, Some(&headers), &cookies).ok() {
         Some(id) => id,
         None => {
@@ -108,8 +138,19 @@ pub async fn handle_web_client_websocket(
         }
     };
 
+    // Bind every home reconnect to the account that rendered the view.
+    // A cookie changed in another tab must not authorize queued input as
+    // a different user, even when both users can edit the same session.
+    if query
+        .account
+        .as_deref()
+        .is_some_and(|expected| expected.parse::<uuid::Uuid>().ok() != Some(user_id))
+    {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+
     info!("Authenticated WebSocket upgrade for user: {}", user_id);
     ws.on_upgrade(move |socket| {
-        web_client_socket::handle_web_client_socket(socket, app_state, user_id)
+        web_client_socket::handle_web_client_socket(socket, app_state, user_id, None)
     })
 }

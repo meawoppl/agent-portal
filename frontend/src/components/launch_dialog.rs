@@ -302,6 +302,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     // When true the dialog shows ProxyTokenSetup instead of the launch form.
     // Auto-set to true when no launchers are connected; set by the dropdown sentinel.
     let show_install = use_state(|| false);
+    let importing = use_state(|| false);
     let dir = DirBrowser {
         // Default to `~`; the remembered directory is per-launcher (#1326) and
         // can only be resolved once a launcher is chosen, so the mount effect
@@ -752,6 +753,13 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
 
                 { launcher_select_html }
 
+                if !*show_install {
+                    <div class="launch-source-tabs" role="group" aria-label="Session source">
+                        <button type="button" class="launch-button-cancel" aria-pressed={(!*importing).to_string()} onclick={let importing = importing.clone(); Callback::from(move |_| importing.set(false))}>{"New session"}</button>
+                        <button type="button" class="launch-button-cancel" aria-pressed={importing.to_string()} onclick={let importing = importing.clone(); Callback::from(move |_| importing.set(true))}>{"Import existing"}</button>
+                    </div>
+                }
+
                 if *show_install {
                     // Install mode: show setup instructions
                     <ProxyTokenSetup />
@@ -767,6 +775,15 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                             { "Close" }
                         </button>
                     </div>
+                } else if *importing {
+                    if let Some(launcher_id) = *selected_launcher {
+                        <super::session_import::SessionImport
+                            key={launcher_id.to_string()}
+                            {launcher_id}
+                            supported={launchers.iter().find(|l| l.launcher_id == launcher_id).is_some_and(|l| l.capabilities.iter().any(|c| c == shared::LAUNCHER_CAPABILITY_IMPORT_CODEX))}
+                            on_open={let opened = props.on_launched.clone(); let close = props.on_close.clone(); Callback::from(move |id| { opened.emit(id); close.emit(()); })}
+                        />
+                    }
                 } else {
                     // Launch mode: agent selector, directory browser, args, actions
                     <AgentTargetSelect

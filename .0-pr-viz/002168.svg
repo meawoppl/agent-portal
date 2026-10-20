@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2168 - Preserve base instructions on first inter-agent message</text>
+<text x="55" y="108" font-family="sans-serif" font-size="34" fill="#e6e9f5">The agent already received the injection, but its typed peer-message</text>
+<text x="55" y="148" font-family="sans-serif" font-size="34" fill="#e6e9f5">display event hid that fact from durable history and the transcript.</text>
+<path d="M55 190 H1945 M1000 207 V1130" stroke="#565f89" fill="none"/>
+<text x="55" y="235" font-family="sans-serif" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1055" y="235" font-family="sans-serif" font-size="22" fill="#9ece6a">AFTER</text>
+
+<rect x="55" y="275" width="870" height="205" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="317" font-family="sans-serif" font-size="26" fill="#f7768e">fold_session_start_reminder</text>
+<text x="79" y="363" font-family="sans-serif" font-size="23" fill="#c0caf5">Preserved an existing display_event verbatim.</text>
+<text x="79" y="401" font-family="sans-serif" font-size="23" fill="#c0caf5">PortalMessage::AgentMessage kept provenance,</text>
+<text x="79" y="439" font-family="sans-serif" font-size="23" fill="#c0caf5">but carried only the peer's message text.</text>
+
+<rect x="1055" y="275" width="870" height="205" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="317" font-family="sans-serif" font-size="26" fill="#9ece6a">attach_base_notice_to_agent_message</text>
+<text x="1079" y="363" font-family="sans-serif" font-size="23" fill="#c0caf5">Parses the typed PortalMessage and retains its</text>
+<text x="1079" y="401" font-family="sans-serif" font-size="23" fill="#c0caf5">sender fields while appending the exact folded</text>
+<text x="1079" y="439" font-family="sans-serif" font-size="23" fill="#c0caf5">base-instructions reminder to display text.</text>
+
+<path d="M490 500 V555" stroke="#7aa2f7" stroke-width="4" fill="none"/>
+<path d="M1490 500 V555" stroke="#7aa2f7" stroke-width="4" fill="none"/>
+
+<rect x="55" y="575" width="870" height="205" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="617" font-family="sans-serif" font-size="26" fill="#f7768e">Stored transcript</text>
+<text x="79" y="663" font-family="sans-serif" font-size="23" fill="#c0caf5">The backend provenance sidecar stored the sender,</text>
+<text x="79" y="701" font-family="sans-serif" font-size="23" fill="#c0caf5">but there was no durable evidence that Portal</text>
+<text x="79" y="739" font-family="sans-serif" font-size="23" fill="#c0caf5">instructions accompanied the first turn.</text>
+
+<rect x="1055" y="575" width="870" height="205" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="617" font-family="sans-serif" font-size="26" fill="#9ece6a">Stored transcript</text>
+<text x="1079" y="663" font-family="sans-serif" font-size="23" fill="#c0caf5">Normalization keeps provenance and the enriched</text>
+<text x="1079" y="701" font-family="sans-serif" font-size="23" fill="#c0caf5">text. Reconnect and history replay now preserve</text>
+<text x="1079" y="739" font-family="sans-serif" font-size="23" fill="#c0caf5">the same evidence as live delivery.</text>
+
+<path d="M490 800 V855" stroke="#7aa2f7" stroke-width="4" fill="none"/>
+<path d="M1490 800 V855" stroke="#7aa2f7" stroke-width="4" fill="none"/>
+
+<rect x="55" y="875" width="870" height="205" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="917" font-family="sans-serif" font-size="26" fill="#f7768e">Visible result</text>
+<text x="79" y="963" font-family="sans-serif" font-size="23" fill="#c0caf5">Only the Message from agent card appeared, making</text>
+<text x="79" y="1001" font-family="sans-serif" font-size="23" fill="#c0caf5">a correctly primed session look unprimed.</text>
+
+<rect x="1055" y="875" width="870" height="205" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="917" font-family="sans-serif" font-size="26" fill="#9ece6a">Visible result</text>
+<text x="1079" y="963" font-family="sans-serif" font-size="23" fill="#c0caf5">The peer card shows Base Portal Instructions</text>
+<text x="1079" y="1001" font-family="sans-serif" font-size="23" fill="#c0caf5">Injection plus the separate reply guidance.</text>
+</svg>

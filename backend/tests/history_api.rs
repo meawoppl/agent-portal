@@ -149,6 +149,12 @@ fn build_fixture(pool: backend::db::DbPool) -> Fixture {
     };
     let mut ndjson = serde_json::to_vec(&line).unwrap();
     ndjson.push(b'\n');
+    m1.transcript = Some(archive_format::ArchiveTranscriptInfo {
+        object_key: archive_format::transcript_key(owner.id, own_session),
+        compression: archive_format::TRANSCRIPT_COMPRESSION.into(),
+        message_count: 1,
+        bytes: ndjson.len() as u64,
+    });
     runtime
         .store
         .put_session_archive(&SessionArchiveBundle {
@@ -496,4 +502,539 @@ async fn close_session_takes_final_archive_before_delete() {
         .unwrap();
     let text = String::from_utf8(body.to_vec()).unwrap();
     assert!(text.contains("remember me"), "archived transcript: {text}");
+}
+
+fn restore_launcher(
+    f: &Fixture,
+    owner: Uuid,
+    capable: bool,
+) -> (Uuid, tokio::sync::mpsc::Receiver<shared::ServerToLauncher>) {
+    use backend::handlers::websocket::{conn_channel, LauncherConnection};
+    let id = Uuid::new_v4();
+    let (sender, receiver) = conn_channel(8);
+    f.state
+        .session_manager
+        .try_register_launcher(
+            id,
+            LauncherConnection {
+                sender,
+                launcher_name: format!("restore test {id}"),
+                hostname: if capable {
+                    "host-1".into()
+                } else {
+                    format!("old-{id}")
+                },
+                user_id: owner,
+                running_sessions: vec![],
+                working_directory: None,
+                version: "test".into(),
+                capabilities: if capable {
+                    vec![shared::LAUNCHER_CAPABILITY_HISTORY_RESTORE.into()]
+                } else {
+                    vec![]
+                },
+                cancel: tokio_util::sync::CancellationToken::new(),
+                gen: 0,
+                last_seen: std::sync::atomic::AtomicU64::new(0),
+                system: None,
+            },
+        )
+        .unwrap();
+    (id, receiver)
+}
+
+async fn restore_post(
+    f: &Fixture,
+    auth: &str,
+    source: Uuid,
+    launcher: Uuid,
+    mode: shared::api::HistoryRestoreMode,
+) -> axum::response::Response {
+    let body = shared::api::HistoryRestoreRequest {
+        launcher_id: launcher,
+        working_directory: "/repo".into(),
+        mode,
+    };
+    let request = Request::builder()
+        .method("POST")
+        .uri(format!(
+            "/api/history/sessions/{}/{source}/recovery",
+            f.owner_id
+        ))
+        .header(header::AUTHORIZATION, auth)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    backend::routes::build_router(f.state.clone())
+        .unwrap()
+        .oneshot(request)
+        .await
+        .unwrap()
+}
+
+async fn restore_response(response: axum::response::Response) -> Uuid {
+    let status = response.status();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    serde_json::from_slice::<shared::api::HistoryRestoreResponse>(&body)
+        .unwrap()
+        .session_id
+}
+
+#[tokio::test]
+async fn restore_after_deletion_is_atomic_retry_safe_and_preserves_archive() {
+    use shared::{api::HistoryRestoreMode, ServerToLauncher};
+    let Some(pool) = test_pool() else { return };
+    let mut f = build_fixture(pool);
+    let source = backend::test_support::insert_session(
+        &mut f.state.conn().unwrap(),
+        f.owner_id,
+        "restore-after-close",
+    );
+    diesel::insert_into(backend::schema::messages::table)
+        .values(backend::models::NewMessage {
+            session_id: source.id,
+            user_id: f.owner_id,
+            role: "user".into(),
+            agent_type: "claude".into(),
+            content: serde_json::to_string("hello archive").unwrap(),
+            provenance_kind: None,
+            provenance_session_id: None,
+            provenance_agent_type: None,
+        })
+        .execute(&mut *f.state.conn().unwrap())
+        .unwrap();
+    let original_timestamp = chrono::Utc::now().naive_utc() - chrono::Duration::days(5);
+    diesel::update(
+        backend::schema::messages::table
+            .filter(backend::schema::messages::session_id.eq(source.id)),
+    )
+    .set(backend::schema::messages::created_at.eq(original_timestamp))
+    .execute(&mut *f.state.conn().unwrap())
+    .unwrap();
+    let original_timestamp = backend::schema::messages::table
+        .filter(backend::schema::messages::session_id.eq(source.id))
+        .select(backend::schema::messages::created_at)
+        .first::<chrono::NaiveDateTime>(&mut *f.state.conn().unwrap())
+        .unwrap();
+    f.own_session = source.id;
+    let delete = Request::builder()
+        .method("DELETE")
+        .uri(format!("/api/sessions/{}", source.id))
+        .header(header::AUTHORIZATION, &f.owner_auth)
+        .body(Body::empty())
+        .unwrap();
+    let deleted = backend::routes::build_router(f.state.clone())
+        .unwrap()
+        .oneshot(delete)
+        .await
+        .unwrap();
+    assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        backend::schema::sessions::table
+            .find(source.id)
+            .count()
+            .get_result::<i64>(&mut *f.state.conn().unwrap())
+            .unwrap(),
+        0
+    );
+    let (launcher, mut receiver) = restore_launcher(&f, f.owner_id, true);
+    let archive = f.state.archive.as_ref().unwrap();
+    let before = archive
+        .store
+        .get_object(&archive_format::manifest_key(f.owner_id, f.own_session))
+        .unwrap()
+        .unwrap();
+    let transcript_before = archive
+        .store
+        .get_object(&archive_format::transcript_key(f.owner_id, f.own_session))
+        .unwrap()
+        .unwrap();
+    // Archive has outlived its hot session row. Two clicks race through native
+    // preflight, but exactly one transaction can create the stable recovery ID.
+    let reply = async {
+        let mut pending = Vec::new();
+        for _ in 0..2 {
+            if let Ok(Some(request)) =
+                tokio::time::timeout(std::time::Duration::from_secs(10), receiver.recv()).await
+            {
+                pending.push(request);
+            } else {
+                break;
+            }
+        }
+        for msg in pending {
+            let ServerToLauncher::CheckHistoryRestore {
+                request_id,
+                restore,
+                ..
+            } = msg
+            else {
+                panic!("unexpected launcher request")
+            };
+            assert_eq!(restore.mode, HistoryRestoreMode::Context);
+            assert!(restore.context.unwrap().contains("hello archive"));
+            backend::test_support::reply_history_restore(&f.state, request_id, Ok("/repo".into()));
+        }
+    };
+    let (first, second, ()) = tokio::join!(
+        restore_post(
+            &f,
+            &f.owner_auth,
+            f.own_session,
+            launcher,
+            HistoryRestoreMode::Context
+        ),
+        restore_post(
+            &f,
+            &f.owner_auth,
+            f.own_session,
+            launcher,
+            HistoryRestoreMode::Context
+        ),
+        reply
+    );
+    let id = restore_response(first).await;
+    assert_eq!(restore_response(second).await, id);
+    assert_ne!(id, f.own_session);
+    // Older clients still POST the bodyless endpoint. A recovery created by
+    // the new form must be reopened there, not duplicated or relaunched.
+    let legacy = Request::builder()
+        .method("POST")
+        .uri(format!(
+            "/api/history/sessions/{}/{}/restore",
+            f.owner_id, f.own_session
+        ))
+        .header(header::AUTHORIZATION, &f.owner_auth)
+        .body(Body::empty())
+        .unwrap();
+    let legacy = backend::routes::build_router(f.state.clone())
+        .unwrap()
+        .oneshot(legacy)
+        .await
+        .unwrap();
+    assert_eq!(legacy.status(), StatusCode::OK);
+    let legacy: shared::api::RestoreSessionResponse = serde_json::from_slice(
+        &axum::body::to_bytes(legacy.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(legacy.session_id, id);
+    assert!(legacy.already_restored);
+
+    assert_eq!(
+        id,
+        shared::api::restored_session_id(f.owner_id, f.own_session)
+    );
+    let mut conn = f.state.conn().unwrap();
+    let row = backend::schema::sessions::table
+        .find(id)
+        .first::<backend::models::Session>(&mut conn)
+        .unwrap();
+    assert!(row.paused);
+    assert_eq!(row.input_seq, 0);
+    assert_eq!(row.total_cost_usd, 0.0);
+    assert_eq!(row.scheduled_task_id, None);
+    assert_eq!(row.claude_args, serde_json::Value::Array(vec![]));
+    assert!(row.history_restore.is_some());
+    assert_eq!(
+        backend::schema::messages::table
+            .filter(backend::schema::messages::session_id.eq(id))
+            .filter(backend::schema::messages::role.eq("user"))
+            .select(backend::schema::messages::content)
+            .first::<String>(&mut conn)
+            .unwrap(),
+        "hello archive"
+    );
+    use backend::schema::{messages, pending_inputs, session_members};
+    assert_eq!(
+        messages::table
+            .filter(messages::session_id.eq(id))
+            .filter(messages::role.eq("user"))
+            .select(messages::created_at)
+            .first::<chrono::NaiveDateTime>(&mut conn)
+            .unwrap(),
+        original_timestamp
+    );
+    assert_eq!(
+        messages::table
+            .filter(messages::session_id.eq(id))
+            .count()
+            .get_result::<i64>(&mut conn)
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        pending_inputs::table
+            .filter(pending_inputs::session_id.eq(id))
+            .count()
+            .get_result::<i64>(&mut conn)
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        session_members::table
+            .filter(session_members::session_id.eq(id))
+            .select((session_members::user_id, session_members::role))
+            .load::<(Uuid, String)>(&mut conn)
+            .unwrap(),
+        vec![(f.owner_id, "owner".into())]
+    );
+    // Retry does not need a launcher and cannot switch the established mode.
+    assert_eq!(
+        restore_response(
+            restore_post(
+                &f,
+                &f.owner_auth,
+                f.own_session,
+                Uuid::new_v4(),
+                HistoryRestoreMode::Native
+            )
+            .await
+        )
+        .await,
+        id
+    );
+    assert!(receiver.try_recv().is_err());
+    assert_eq!(
+        archive
+            .store
+            .get_object(&archive_format::manifest_key(f.owner_id, f.own_session))
+            .unwrap()
+            .unwrap(),
+        before
+    );
+    assert_eq!(
+        archive
+            .store
+            .get_object(&archive_format::transcript_key(f.owner_id, f.own_session))
+            .unwrap()
+            .unwrap(),
+        transcript_before
+    );
+}
+
+#[tokio::test]
+async fn restore_requires_owner_and_capable_owned_host_and_never_falls_back() {
+    use shared::{api::HistoryRestoreMode, ServerToLauncher};
+    let Some(pool) = test_pool() else { return };
+    let f = build_fixture(pool);
+    let (launcher, mut receiver) = restore_launcher(&f, f.owner_id, true);
+    // Read permission, including admin, never implies permission to recover.
+    for (auth, source, expected) in [
+        (&f.outsider_auth, f.own_session, StatusCode::NOT_FOUND),
+        (&f.admin_auth, f.own_session, StatusCode::FORBIDDEN),
+        (
+            &f.manifest_member_auth,
+            f.shared_session,
+            StatusCode::FORBIDDEN,
+        ),
+        (
+            &f.live_member_auth,
+            f.live_shared_session,
+            StatusCode::FORBIDDEN,
+        ),
+    ] {
+        assert_eq!(
+            restore_post(&f, auth, source, launcher, HistoryRestoreMode::Context)
+                .await
+                .status(),
+            expected
+        );
+    }
+    let (foreign, _) = restore_launcher(&f, Uuid::new_v4(), true);
+    assert_eq!(
+        restore_post(
+            &f,
+            &f.owner_auth,
+            f.own_session,
+            foreign,
+            HistoryRestoreMode::Context
+        )
+        .await
+        .status(),
+        StatusCode::FORBIDDEN
+    );
+    let (old, _) = restore_launcher(&f, f.owner_id, false);
+    assert_eq!(
+        restore_post(
+            &f,
+            &f.owner_auth,
+            f.own_session,
+            old,
+            HistoryRestoreMode::Context
+        )
+        .await
+        .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        restore_post(
+            &f,
+            &f.owner_auth,
+            f.own_session,
+            Uuid::new_v4(),
+            HistoryRestoreMode::Context
+        )
+        .await
+        .status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        restore_post(
+            &f,
+            &f.owner_auth,
+            f.shared_session,
+            launcher,
+            HistoryRestoreMode::Context
+        )
+        .await
+        .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert!(receiver.try_recv().is_err());
+    // A missing directory or native state error commits nothing; it is relayed
+    // verbatim so the user can correct the path/mode and retry.
+    let reply = async {
+        let msg = receiver.recv().await.unwrap();
+        let ServerToLauncher::CheckHistoryRestore { request_id, .. } = msg else {
+            panic!("unexpected request")
+        };
+        backend::test_support::reply_history_restore(
+            &f.state,
+            request_id,
+            Err("Directory is missing; choose an existing directory".into()),
+        );
+    };
+    let (response, ()) = tokio::join!(
+        restore_post(
+            &f,
+            &f.owner_auth,
+            f.own_session,
+            launcher,
+            HistoryRestoreMode::Context
+        ),
+        reply
+    );
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    let id = shared::api::restored_session_id(f.owner_id, f.own_session);
+    assert_eq!(
+        backend::schema::sessions::table
+            .find(id)
+            .count()
+            .get_result::<i64>(&mut *f.state.conn().unwrap())
+            .unwrap(),
+        0
+    );
+}
+
+#[tokio::test]
+async fn restore_reopens_live_or_paused_session_without_new_launch_or_copy() {
+    let Some(pool) = test_pool() else { return };
+    let f = build_fixture(pool);
+    let id = restore_response(
+        restore_post(
+            &f,
+            &f.owner_auth,
+            f.live_shared_session,
+            Uuid::new_v4(),
+            shared::api::HistoryRestoreMode::Native,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(id, f.live_shared_session);
+    let uri = format!(
+        "/api/history/sessions/{}/{}/recovery",
+        f.owner_id, f.live_shared_session
+    );
+    let r = get(&f, Some(&f.owner_auth), &uri).await;
+    let body = axum::body::to_bytes(r.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let status: shared::api::HistoryRestoreStatus = serde_json::from_slice(&body).unwrap();
+    assert_eq!(status.existing_session_id, Some(id));
+    assert!(status.can_restore);
+}
+
+#[tokio::test]
+async fn native_restore_checks_state_before_commit_and_carries_recipe_on_resume() {
+    use shared::{api::HistoryRestoreMode, ServerToLauncher};
+    let Some(pool) = test_pool() else { return };
+    let f = build_fixture(pool);
+    let (launcher, mut receiver) = restore_launcher(&f, f.owner_id, true);
+    for available in [false, true] {
+        let reply = async {
+            let ServerToLauncher::CheckHistoryRestore {
+                request_id,
+                restore,
+                ..
+            } = receiver.recv().await.unwrap()
+            else {
+                panic!("unexpected request")
+            };
+            assert_eq!(restore.mode, HistoryRestoreMode::Native);
+            assert_eq!(restore.source_session_id, f.own_session);
+            assert!(restore.context.is_none());
+            backend::test_support::reply_history_restore(
+                &f.state,
+                request_id,
+                if available {
+                    Ok("/repo".into())
+                } else {
+                    Err("Saved native state is missing; choose archived context".into())
+                },
+            );
+        };
+        let (response, ()) = tokio::join!(
+            restore_post(
+                &f,
+                &f.owner_auth,
+                f.own_session,
+                launcher,
+                HistoryRestoreMode::Native
+            ),
+            reply
+        );
+        if !available {
+            assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+            assert_eq!(
+                backend::schema::sessions::table
+                    .find(shared::api::restored_session_id(f.owner_id, f.own_session))
+                    .count()
+                    .get_result::<i64>(&mut *f.state.conn().unwrap())
+                    .unwrap(),
+                0
+            );
+            assert!(receiver.try_recv().is_err());
+            continue;
+        }
+        let id = restore_response(response).await;
+        let resume = Request::builder()
+            .method("POST")
+            .uri(format!("/api/sessions/{id}/resume"))
+            .header(header::AUTHORIZATION, &f.owner_auth)
+            .body(Body::empty())
+            .unwrap();
+        let response = backend::routes::build_router(f.state.clone())
+            .unwrap()
+            .oneshot(resume)
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let ServerToLauncher::LaunchSession {
+            history_restore: Some(recipe),
+            resume_session_id,
+            ..
+        } = receiver.recv().await.unwrap()
+        else {
+            panic!("missing restore recipe")
+        };
+        assert_eq!(resume_session_id, Some(id));
+        assert_eq!(recipe.source_session_id, f.own_session);
+        assert_eq!(recipe.mode, HistoryRestoreMode::Native);
+    }
 }

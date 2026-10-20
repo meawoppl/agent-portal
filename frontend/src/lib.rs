@@ -1,10 +1,15 @@
 pub mod audio;
 mod components;
+mod federation;
 mod health_timer;
 mod hooks;
+mod linked_credentials;
+mod linked_media;
 mod pages;
+mod portal_client;
 #[cfg(test)]
 pub mod test_fixtures;
+mod ui_theme;
 pub mod utils;
 
 /// Application version — derived at build time from the git commit count
@@ -26,6 +31,8 @@ pub enum Route {
     Home,
     #[at("/dashboard")]
     Dashboard,
+    #[at("/aperture")]
+    Aperture,
     #[at("/demo")]
     Demo,
     #[at("/settings")]
@@ -67,6 +74,7 @@ fn switch(routes: Route) -> Html {
         Route::Home => html! { <SplashPage /> },
         Route::Dashboard => html! { <DashboardPage /> },
         Route::Demo => html! { <DemoPage /> },
+        Route::Aperture => html! { <pages::aperture::AperturePage /> },
         Route::Settings => html! { <SettingsRoute /> },
         Route::History => html! { <HistoryBrowserPage /> },
         Route::HistorySession { user, session } => html! {
@@ -81,10 +89,12 @@ fn switch(routes: Route) -> Html {
 #[function_component(App)]
 fn app() -> Html {
     html! {
-        <BrowserRouter>
-            <Switch<Route> render={switch} />
-            <HealthTimerReminder />
-        </BrowserRouter>
+        <federation::FederationProvider>
+            <BrowserRouter>
+                <Switch<Route> render={switch} />
+                <HealthTimerReminder />
+            </BrowserRouter>
+        </federation::FederationProvider>
     }
 }
 

@@ -125,6 +125,7 @@ pub fn history_browser_page(props: &HistoryBrowserProps) -> Html {
             <header class="history-header">
                 <h1>{ "Session History" }</h1>
             </header>
+            <p>{ "Open a conversation to view or restore it." }</p>
             { body }
         </div>
     }

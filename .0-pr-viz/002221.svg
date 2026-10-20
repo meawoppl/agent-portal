@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<defs><marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8" fill="none" stroke="#565f89" stroke-width="1.5"/></marker></defs>
+<text x="55" y="52" fill="#a9b1d6" font-family="sans-serif" font-size="24">PR #2221 · Restore archived conversations from History</text>
+<text x="55" y="104" fill="#e6e9f5" font-family="sans-serif" font-size="34">History could show a deleted session but could not reopen it.</text>
+<text x="55" y="149" fill="#e6e9f5" font-family="sans-serif" font-size="34">Owner-gated recovery now creates one paused session and preserves the source archive.</text>
+<path d="M55,175 H1945" stroke="#3d4666"/><path d="M1000,190 V1140" stroke="#3d4666" stroke-dasharray="8 10"/>
+<text x="55" y="222" fill="#f7768e" font-family="sans-serif" font-size="22">BEFORE</text>
+<text x="1050" y="222" fill="#9ece6a" font-family="sans-serif" font-size="22">AFTER</text>
+<rect x="55" y="255" width="885" height="165" rx="12" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+<text x="81" y="295" fill="#7aa2f7" font-family="sans-serif" font-size="27">History transcript</text>
+<text x="81" y="335" fill="#c0caf5" font-family="sans-serif" font-size="23">Archived messages remain readable after live-row deletion.</text>
+<text x="81" y="367" fill="#c0caf5" font-family="sans-serif" font-size="23">No restore action connects the archive to a usable session.</text>
+<path d="M495,420 V457" stroke="#565f89" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+<rect x="55" y="467" width="885" height="165" rx="12" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+<text x="81" y="507" fill="#7aa2f7" font-family="sans-serif" font-size="27">resume_session needs a live row</text>
+<text x="81" y="547" fill="#c0caf5" font-family="sans-serif" font-size="23">Paused sessions can resume from the dashboard.</text>
+<text x="81" y="579" fill="#c0caf5" font-family="sans-serif" font-size="23">Deleted sessions have no row to resume.</text>
+<path d="M495,632 V669" stroke="#565f89" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+<rect x="55" y="679" width="885" height="165" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="81" y="719" fill="#f7768e" font-family="sans-serif" font-size="27">Deleted conversation: dead end</text>
+<text x="81" y="759" fill="#c0caf5" font-family="sans-serif" font-size="23">Viewing the transcript does not recover agent context.</text>
+<text x="81" y="791" fill="#c0caf5" font-family="sans-serif" font-size="23">Native state may still exist only on the original host.</text>
+<rect x="55" y="909" width="885" height="170" rx="12" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+<text x="81" y="949" fill="#7aa2f7" font-family="sans-serif" font-size="27">Archive remains reference material</text>
+<text x="81" y="989" fill="#c0caf5" font-family="sans-serif" font-size="23">Saved transcript and native agent state are separate.</text>
+<text x="81" y="1021" fill="#c0caf5" font-family="sans-serif" font-size="23">Reading an archive cannot guarantee exact continuity.</text>
+<rect x="1050" y="255" width="895" height="165" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1076" y="295" fill="#9ece6a" font-family="sans-serif" font-size="27">Restore from History</text>
+<text x="1076" y="335" fill="#c0caf5" font-family="sans-serif" font-size="23">Existing live or paused session: Open existing session.</text>
+<text x="1076" y="367" fill="#c0caf5" font-family="sans-serif" font-size="23">Deleted row: choose native continuation or archived context.</text>
+<path d="M1495,420 V457" stroke="#565f89" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+<rect x="1050" y="467" width="895" height="165" rx="12" fill="#1e202e" stroke="#e0af68" stroke-width="2"/>
+<text x="1076" y="507" fill="#e0af68" font-family="sans-serif" font-size="27">Owner + host + directory preflight</text>
+<text x="1076" y="547" fill="#c0caf5" font-family="sans-serif" font-size="23">Native: require saved Claude/Codex state on original host.</text>
+<text x="1076" y="579" fill="#c0caf5" font-family="sans-serif" font-size="23">Context: quote a recent excerpt, explicitly as a new conversation.</text>
+<path d="M1495,632 V669" stroke="#565f89" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+<rect x="1050" y="679" width="895" height="165" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1076" y="719" fill="#9ece6a" font-family="sans-serif" font-size="27">One durable, paused recovery</text>
+<text x="1076" y="759" fill="#c0caf5" font-family="sans-serif" font-size="23">Stable recovery ID + one database transaction make retries safe.</text>
+<text x="1076" y="791" fill="#c0caf5" font-family="sans-serif" font-size="23">Copy display history; retain the launch recipe; preserve archive.</text>
+<path d="M1495,844 V881" stroke="#565f89" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+<rect x="1050" y="891" width="895" height="188" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1076" y="931" fill="#9ece6a" font-family="sans-serif" font-size="27">Resume, then send a new instruction</text>
+<text x="1076" y="971" fill="#c0caf5" font-family="sans-serif" font-size="23">Native state branches through the existing fork path.</text>
+<text x="1076" y="1003" fill="#c0caf5" font-family="sans-serif" font-size="23">Archived context accompanies the first real user input.</text>
+<text x="1076" y="1035" fill="#c0caf5" font-family="sans-serif" font-size="23">Historical requests never enter the pending-input queue.</text>
+<text x="55" y="1171" fill="#a9b1d6" font-family="sans-serif" font-size="22">Limit: context recovery uses at most 64 KiB; files, attachments, running tools and unsaved native state are not recovered.</text>
+</svg>

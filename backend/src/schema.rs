@@ -25,10 +25,70 @@ diesel::table! {
 }
 
 diesel::table! {
+    federation_policy (singleton) {
+        singleton -> Bool,
+        policy -> Jsonb,
+    }
+}
+
+diesel::table! {
     forward_subdomains (label) {
         label -> Text,
         session_id -> Uuid,
         created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    linked_client_enrollments (device_code_hash) {
+        #[max_length = 64]
+        device_code_hash -> Varchar,
+        #[max_length = 32]
+        user_code -> Varchar,
+        #[max_length = 255]
+        client_origin -> Varchar,
+        #[max_length = 16]
+        requested_scope -> Varchar,
+        #[max_length = 128]
+        device_label -> Nullable<Varchar>,
+        created_at -> Timestamp,
+        expires_at -> Timestamp,
+        #[max_length = 16]
+        status -> Varchar,
+        user_id -> Nullable<Uuid>,
+        #[max_length = 32]
+        denial_reason -> Nullable<Varchar>,
+    }
+}
+
+diesel::table! {
+    linked_client_grants (id) {
+        id -> Uuid,
+        user_id -> Uuid,
+        #[max_length = 255]
+        client_origin -> Varchar,
+        #[max_length = 16]
+        scope -> Varchar,
+        #[max_length = 128]
+        device_label -> Nullable<Varchar>,
+        created_at -> Timestamp,
+        expires_at -> Timestamp,
+        revoked_at -> Nullable<Timestamp>,
+    }
+}
+
+diesel::table! {
+    linked_ws_tickets (ticket_hash) {
+        #[max_length = 64]
+        ticket_hash -> Varchar,
+        token_id -> Uuid,
+        grant_id -> Uuid,
+        user_id -> Uuid,
+        #[max_length = 255]
+        client_origin -> Varchar,
+        #[max_length = 16]
+        scope -> Varchar,
+        expires_at -> Timestamp,
     }
 }
 
@@ -81,6 +141,33 @@ diesel::table! {
 }
 
 diesel::table! {
+    portal_connections (id) {
+        id -> Uuid,
+        user_id -> Uuid,
+        #[max_length = 255]
+        portal_origin -> Varchar,
+        instance_id -> Uuid,
+        remote_user_id -> Uuid,
+        #[max_length = 255]
+        remote_email -> Varchar,
+        #[max_length = 64]
+        label -> Varchar,
+        #[max_length = 16]
+        scope -> Varchar,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    portal_instance (singleton) {
+        singleton -> Bool,
+        instance_id -> Uuid,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     proxy_auth_tokens (id) {
         id -> Uuid,
         user_id -> Uuid,
@@ -93,6 +180,9 @@ diesel::table! {
         expires_at -> Nullable<Timestamp>,
         revoked -> Bool,
         session_id -> Nullable<Uuid>,
+        #[max_length = 16]
+        scope -> Nullable<Varchar>,
+        linked_grant_id -> Nullable<Uuid>,
     }
 }
 
@@ -169,16 +259,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    session_forwards (id) {
-        id -> Uuid,
-        session_id -> Uuid,
-        port -> Int4,
-        created_at -> Timestamp,
-        public -> Bool,
-    }
-}
-
-diesel::table! {
     session_edit_stack_items (id) {
         id -> Uuid,
         session_id -> Uuid,
@@ -194,6 +274,16 @@ diesel::table! {
         sent_at -> Nullable<Timestamp>,
         created_at -> Timestamp,
         updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    session_forwards (id) {
+        id -> Uuid,
+        session_id -> Uuid,
+        port -> Int4,
+        created_at -> Timestamp,
+        public -> Bool,
     }
 }
 
@@ -258,6 +348,7 @@ diesel::table! {
         fork_launch_pending -> Bool,
         fork_create_worktree -> Bool,
         last_messaged_at -> Timestamp,
+        history_restore -> Nullable<Jsonb>,
     }
 }
 
@@ -332,10 +423,16 @@ diesel::joinable!(custom_subdomains -> sessions (session_id));
 diesel::joinable!(custom_subdomains -> users (created_by));
 diesel::joinable!(deleted_session_costs -> users (user_id));
 diesel::joinable!(forward_subdomains -> sessions (session_id));
+diesel::joinable!(linked_client_enrollments -> users (user_id));
+diesel::joinable!(linked_client_grants -> users (user_id));
+diesel::joinable!(linked_ws_tickets -> linked_client_grants (grant_id));
+diesel::joinable!(linked_ws_tickets -> proxy_auth_tokens (token_id));
+diesel::joinable!(linked_ws_tickets -> users (user_id));
 diesel::joinable!(messages -> sessions (session_id));
 diesel::joinable!(messages -> users (user_id));
 diesel::joinable!(pending_inputs -> sessions (session_id));
 diesel::joinable!(pending_permission_requests -> sessions (session_id));
+diesel::joinable!(portal_connections -> users (user_id));
 diesel::joinable!(proxy_auth_tokens -> sessions (session_id));
 diesel::joinable!(proxy_auth_tokens -> users (user_id));
 diesel::joinable!(push_subscriptions -> users (user_id));
@@ -356,10 +453,16 @@ diesel::joinable!(user_identities -> users (user_id));
 diesel::allow_tables_to_appear_in_same_query!(
     custom_subdomains,
     deleted_session_costs,
+    federation_policy,
     forward_subdomains,
+    linked_client_enrollments,
+    linked_client_grants,
+    linked_ws_tickets,
     messages,
     pending_inputs,
     pending_permission_requests,
+    portal_connections,
+    portal_instance,
     proxy_auth_tokens,
     push_subscriptions,
     scheduled_tasks,
