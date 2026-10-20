@@ -97,6 +97,16 @@ pub fn condense_thinking(rows: Vec<(PeekMessage, Option<u64>)>) -> Vec<PeekMessa
     out
 }
 
+/// Condense chronological rows, then keep the newest `limit` entries (still
+/// oldest first). Trimming after condensing is what makes `limit` count
+/// entries rather than raw markers.
+pub fn newest_entries(rows: Vec<(PeekMessage, Option<u64>)>, limit: usize) -> Vec<PeekMessage> {
+    let mut entries = condense_thinking(rows);
+    let excess = entries.len().saturating_sub(limit);
+    entries.drain(..excess);
+    entries
+}
+
 /// One line, whitespace-collapsed, capped, with an ellipsis when truncated.
 fn cap(text: &str) -> String {
     let one_line = shared::strings::collapse_whitespace(text);
@@ -438,6 +448,64 @@ mod tests {
             summarize_row(agent_type, role, content),
             thinking_estimate(agent_type, content),
         )
+    }
+
+    /// A row with its own id and timestamp (`n` seconds after a base time),
+    /// so tests can tell which raw row an entry kept.
+    fn row_at(n: u8, content: &str) -> (PeekMessage, Option<u64>) {
+        let message = summarize_message(
+            Uuid::from_bytes([n; 16]),
+            "claude",
+            "system",
+            content,
+            chrono::DateTime::from_timestamp(1_700_000_000 + i64::from(n), 0)
+                .expect("valid timestamp")
+                .naive_utc(),
+        );
+        (message, thinking_estimate("claude", content))
+    }
+
+    const TOOL: &str = r#"{"type":"assistant","session_id":"s","message":{"id":"m1","role":"assistant","model":"claude-fable-5","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}"#;
+
+    #[test]
+    fn a_condensed_run_keeps_its_newest_row_and_peak_estimate() {
+        // The peak is not the last value: a later marker can report less.
+        let out = condense_thinking(vec![
+            row_at(1, &thinking_marker(300)),
+            row_at(2, &thinking_marker(900)),
+            row_at(3, &thinking_marker(120)),
+        ]);
+        assert_eq!(out.len(), 1);
+        assert_eq!(
+            out[0].id,
+            Uuid::from_bytes([3; 16]),
+            "newest row represents the run"
+        );
+        assert_eq!(
+            out[0].created_at,
+            chrono::DateTime::from_timestamp(1_700_000_003, 0)
+                .expect("valid timestamp")
+                .to_rfc3339()
+        );
+        assert_eq!(out[0].summary, "thinking × 3 (~900 tokens)");
+    }
+
+    /// `limit` counts entries after condensing: a tool call followed by a long
+    /// burst is still in a two-entry window.
+    #[test]
+    fn newest_entries_trims_after_condensing() {
+        let mut rows = vec![row_at(1, TOOL), row_at(2, TOOL)];
+        rows.extend((3..83).map(|n| row_at(n, &thinking_marker(u64::from(n) * 10))));
+        let out = newest_entries(rows, 2);
+        let kinds: Vec<_> = out.iter().map(|m| m.kind.as_str()).collect();
+        assert_eq!(kinds, vec!["tool_use", "thinking"]);
+        assert_eq!(
+            out[0].id,
+            Uuid::from_bytes([2; 16]),
+            "keeps the newest tool call"
+        );
+        assert_eq!(out[1].summary, "thinking × 80 (~820 tokens)");
+        assert_eq!(newest_entries(vec![row_at(1, TOOL)], 10).len(), 1);
     }
 
     #[test]

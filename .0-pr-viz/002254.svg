@@ -49,7 +49,7 @@
   <!-- AFTER -->
   <rect x="1045" y="245" width="900" height="150" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
   <text x="1069" y="285" font-size="26" fill="#c0caf5">peek_agent_messages</text>
-  <text x="1069" y="325" font-size="23" fill="#9ece6a">loads limit x PEEK_OVERFETCH (8), cap 400 rows</text>
+  <text x="1069" y="325" font-size="23" fill="#9ece6a">reads a fixed PEEK_RAW_ROWS budget (400 rows)</text>
   <text x="1069" y="360" font-size="23" fill="#9ece6a">condense_thinking, then keep the newest `limit` lines</text>
   <line x1="1495" y1="395" x2="1495" y2="440" stroke="#9ece6a" stroke-width="2" marker-end="url(#arr-green)"/>
 

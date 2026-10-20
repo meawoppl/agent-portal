@@ -285,9 +285,15 @@ pub struct AgentSessionsResponse {
     pub sessions: Vec<AgentSessionInfo>,
 }
 
-/// One summarized transcript message in a peek (#1406). Deliberately compact:
+/// One summarized transcript entry in a peek (#1406). Deliberately compact:
 /// peeks feed *agent context windows*, so `summary` is a single line hard-capped
 /// server-side — never a raw wire-JSON dump.
+///
+/// A `thinking` entry can stand for a run of consecutive thinking rows
+/// (`thinking × N`). It carries the `id` and `created_at` of the run's newest
+/// row, and the run depends on the peek window, so the same `id` can come back
+/// with a different summary under another `limit` or `since`. Treat entries as
+/// a recent-activity snapshot, not immutable raw messages or a pagination key.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PeekMessage {
     pub id: Uuid,

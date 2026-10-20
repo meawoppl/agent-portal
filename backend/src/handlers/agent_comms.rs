@@ -43,11 +43,11 @@ pub(crate) fn resolve_user(
     crate::auth::extract_user_id(app_state, Some(headers), cookies)
 }
 
-/// Raw rows read per requested peek line. Condensing thinking bursts can turn
-/// many rows into one, and the request counts the condensed lines.
-const PEEK_OVERFETCH: i64 = 8;
-/// Upper bound on raw rows a single peek reads, whatever the limit.
-const PEEK_MAX_RAW_ROWS: i64 = 400;
+/// Raw rows a peek reads before condensing thinking bursts. The request counts
+/// condensed entries, and one burst can be hundreds of markers, so the read is
+/// a fixed budget rather than a multiple of the limit: a tool call followed by
+/// a long burst still shows up. Older history is `message history`'s job.
+const PEEK_RAW_ROWS: i64 = 400;
 
 /// Look up a display name for `user_id`, keeping this path's `"portal"`
 /// fallback for unknown users. Resolution itself lives in
@@ -266,11 +266,10 @@ pub async fn peek_agent_messages(
     if let Some(since) = since {
         rows_query = rows_query.filter(messages::created_at.gt(since));
     }
-    // Thinking bursts condense to one line each, so read past the requested
-    // count; `limit` then counts condensed lines rather than raw markers.
+    // `limit` counts condensed entries, so read the fixed raw budget.
     let rows: Vec<crate::models::Message> = rows_query
         .order(messages::created_at.desc())
-        .limit((limit * PEEK_OVERFETCH).min(PEEK_MAX_RAW_ROWS))
+        .limit(PEEK_RAW_ROWS)
         .load(&mut conn)?;
 
     let total_messages: i64 = messages::table
@@ -294,9 +293,7 @@ pub async fn peek_agent_messages(
             (message, estimate)
         })
         .collect();
-    let mut peek_messages = super::peek_summary::condense_thinking(summarized);
-    let excess = peek_messages.len().saturating_sub(limit as usize);
-    peek_messages.drain(..excess);
+    let peek_messages = super::peek_summary::newest_entries(summarized, limit as usize);
 
     // Status header — same signals as the list endpoint, scoped to one session.
     let connected = app_state
