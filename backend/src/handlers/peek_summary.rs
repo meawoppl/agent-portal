@@ -35,6 +35,68 @@ pub fn summarize_message(
     }
 }
 
+/// Running thinking-token estimate a row carries: the Claude CLI's
+/// `thinking_tokens` markers report a cumulative estimate for the burst.
+pub fn thinking_estimate(agent_type: &str, content: &str) -> Option<u64> {
+    if agent_type != "claude" {
+        return None;
+    }
+    match serde_json::from_str::<claude_codes::ClaudeOutput>(content).ok()? {
+        claude_codes::ClaudeOutput::System(s) => s.as_thinking_tokens().map(|t| t.estimated_tokens),
+        _ => None,
+    }
+}
+
+fn thinking_label(steps: usize, estimated_tokens: u64) -> String {
+    let mut label = if steps > 1 {
+        format!("thinking × {steps}")
+    } else {
+        "thinking…".to_string()
+    };
+    if estimated_tokens > 0 {
+        label.push_str(&format!(" (~{} tokens)", compact_count(estimated_tokens)));
+    }
+    label
+}
+
+fn compact_count(n: u64) -> String {
+    if n >= 1000 {
+        format!("{:.1}k", n as f64 / 1000.0)
+    } else {
+        n.to_string()
+    }
+}
+
+/// Collapse each consecutive run of `thinking` rows into one line, so a burst
+/// of reasoning steps reads as a single entry instead of pushing everything
+/// else out of the peek window. The run keeps its newest row's id and time and
+/// reports the peak running token estimate.
+pub fn condense_thinking(rows: Vec<(PeekMessage, Option<u64>)>) -> Vec<PeekMessage> {
+    let mut out: Vec<PeekMessage> = Vec::with_capacity(rows.len());
+    let mut run: Vec<(PeekMessage, Option<u64>)> = Vec::new();
+    let flush = |run: &mut Vec<(PeekMessage, Option<u64>)>, out: &mut Vec<PeekMessage>| {
+        let steps = run.len();
+        let tokens = run.iter().filter_map(|(_, t)| *t).max().unwrap_or(0);
+        if let Some((mut last, _)) = run.pop() {
+            if steps > 1 {
+                last.summary = thinking_label(steps, tokens);
+            }
+            out.push(last);
+        }
+        run.clear();
+    };
+    for row in rows {
+        if row.0.kind == "thinking" {
+            run.push(row);
+        } else {
+            flush(&mut run, &mut out);
+            out.push(row.0);
+        }
+    }
+    flush(&mut run, &mut out);
+    out
+}
+
 /// One line, whitespace-collapsed, capped, with an ellipsis when truncated.
 fn cap(text: &str) -> String {
     let one_line = shared::strings::collapse_whitespace(text);
@@ -124,7 +186,10 @@ fn summarize_claude(content: &str) -> (&'static str, String) {
                 format!("turn complete ({} turns)", r.num_turns)
             },
         ),
-        ClaudeOutput::System(s) => ("system", format!("system: {:?}", s.subtype)),
+        ClaudeOutput::System(s) => match s.as_thinking_tokens() {
+            Some(t) => ("thinking", thinking_label(1, t.estimated_tokens)),
+            None => ("system", format!("system: {:?}", s.subtype)),
+        },
         ClaudeOutput::Error(e) => (
             "error",
             format!(
@@ -360,6 +425,71 @@ mod tests {
                 .expect("valid timestamp")
                 .naive_utc(),
         )
+    }
+
+    fn thinking_marker(estimated_tokens: u64) -> String {
+        format!(
+            r#"{{"type":"system","subtype":"thinking_tokens","estimated_tokens":{estimated_tokens},"estimated_tokens_delta":50,"session_id":"s","uuid":"u{estimated_tokens}"}}"#
+        )
+    }
+
+    fn row(agent_type: &str, role: &str, content: &str) -> (PeekMessage, Option<u64>) {
+        (
+            summarize_row(agent_type, role, content),
+            thinking_estimate(agent_type, content),
+        )
+    }
+
+    #[test]
+    fn claude_thinking_markers_read_as_thinking_with_their_estimate() {
+        let m = summarize_row("claude", "system", &thinking_marker(1250));
+        assert_eq!(m.kind, "thinking");
+        assert_eq!(m.summary, "thinking… (~1.2k tokens)");
+        assert_eq!(
+            thinking_estimate("claude", &thinking_marker(1250)),
+            Some(1250)
+        );
+        assert_eq!(thinking_estimate("codex", &thinking_marker(1250)), None);
+    }
+
+    /// A burst of thinking markers is one peek line, so it can't push the
+    /// actual activity out of a short window.
+    #[test]
+    fn consecutive_thinking_rows_condense_into_one_line() {
+        let tool = r#"{"type":"assistant","session_id":"s","message":{"id":"m1","role":"assistant","model":"claude-fable-5","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}"#;
+        let rows = vec![
+            row("claude", "system", &thinking_marker(50)),
+            row("claude", "system", &thinking_marker(400)),
+            row("claude", "system", &thinking_marker(1300)),
+            row("claude", "assistant", tool),
+            row("claude", "system", &thinking_marker(80)),
+        ];
+        let out = condense_thinking(rows);
+        let lines: Vec<_> = out
+            .iter()
+            .map(|m| (m.kind.as_str(), m.summary.as_str()))
+            .collect();
+        assert_eq!(
+            lines,
+            vec![
+                ("thinking", "thinking × 3 (~1.3k tokens)"),
+                ("tool_use", "Bash: ls"),
+                ("thinking", "thinking… (~80 tokens)"),
+            ]
+        );
+    }
+
+    /// Codex reasoning items carry no estimate; the run is still one line.
+    #[test]
+    fn thinking_runs_without_estimates_condense_to_a_count() {
+        let reasoning =
+            r#"{"type":"item.completed","item":{"type":"reasoning","id":"r1","text":""}}"#;
+        let out = condense_thinking(vec![
+            row("codex", "assistant", reasoning),
+            row("codex", "assistant", reasoning),
+        ]);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].summary, "thinking × 2");
     }
 
     /// The context-safety invariant: no summary ever exceeds the cap or spans

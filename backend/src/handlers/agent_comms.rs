@@ -43,6 +43,12 @@ pub(crate) fn resolve_user(
     crate::auth::extract_user_id(app_state, Some(headers), cookies)
 }
 
+/// Raw rows read per requested peek line. Condensing thinking bursts can turn
+/// many rows into one, and the request counts the condensed lines.
+const PEEK_OVERFETCH: i64 = 8;
+/// Upper bound on raw rows a single peek reads, whatever the limit.
+const PEEK_MAX_RAW_ROWS: i64 = 400;
+
 /// Look up a display name for `user_id`, keeping this path's `"portal"`
 /// fallback for unknown users. Resolution itself lives in
 /// [`crate::handlers::helpers::user_display_name`] (single query,
@@ -260,9 +266,11 @@ pub async fn peek_agent_messages(
     if let Some(since) = since {
         rows_query = rows_query.filter(messages::created_at.gt(since));
     }
+    // Thinking bursts condense to one line each, so read past the requested
+    // count; `limit` then counts condensed lines rather than raw markers.
     let rows: Vec<crate::models::Message> = rows_query
         .order(messages::created_at.desc())
-        .limit(limit)
+        .limit((limit * PEEK_OVERFETCH).min(PEEK_MAX_RAW_ROWS))
         .load(&mut conn)?;
 
     let total_messages: i64 = messages::table
@@ -271,19 +279,24 @@ pub async fn peek_agent_messages(
         .get_result(&mut conn)?;
 
     // Newest-first from the query; the wire contract is oldest → newest.
-    let peek_messages: Vec<shared::api::PeekMessage> = rows
+    let summarized = rows
         .into_iter()
         .rev()
         .map(|m| {
-            super::peek_summary::summarize_message(
+            let estimate = super::peek_summary::thinking_estimate(&m.agent_type, &m.content);
+            let message = super::peek_summary::summarize_message(
                 m.id,
                 &m.agent_type,
                 &m.role,
                 &m.content,
                 m.created_at,
-            )
+            );
+            (message, estimate)
         })
         .collect();
+    let mut peek_messages = super::peek_summary::condense_thinking(summarized);
+    let excess = peek_messages.len().saturating_sub(limit as usize);
+    peek_messages.drain(..excess);
 
     // Status header — same signals as the list endpoint, scoped to one session.
     let connected = app_state
