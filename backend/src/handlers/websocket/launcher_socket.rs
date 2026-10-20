@@ -209,6 +209,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                                     // backoff.
                                     let _ = ws_sender
                                         .send(ServerToLauncher::LauncherRegisterAck {
+                                            capabilities: Vec::new(),
                                             success: false,
                                             fatal: false,
                                             launcher_id,
@@ -228,6 +229,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                                             None => {
                                                 let _ = ws_sender
                                                     .send(ServerToLauncher::LauncherRegisterAck {
+                                                        capabilities: Vec::new(),
                                                         success: false,
                                                         fatal: true,
                                                         launcher_id,
@@ -243,6 +245,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                                     } else {
                                         let _ = ws_sender
                                             .send(ServerToLauncher::LauncherRegisterAck {
+                                                capabilities: Vec::new(),
                                                 success: false,
                                                 fatal: true,
                                                 launcher_id,
@@ -260,6 +263,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                         Err(_) => {
                             let _ = ws_sender
                                 .send(ServerToLauncher::LauncherRegisterAck {
+                                    capabilities: Vec::new(),
                                     success: false,
                                     fatal: false,
                                     launcher_id,
@@ -276,6 +280,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                         None => {
                             let _ = ws_sender
                                 .send(ServerToLauncher::LauncherRegisterAck {
+                                    capabilities: Vec::new(),
                                     success: false,
                                     fatal: true,
                                     launcher_id,
@@ -289,6 +294,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                 } else {
                     let _ = ws_sender
                         .send(ServerToLauncher::LauncherRegisterAck {
+                            capabilities: Vec::new(),
                             success: false,
                             fatal: true,
                             launcher_id,
@@ -330,6 +336,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
         );
         let _ = ws_sender
             .send(ServerToLauncher::LauncherRegisterAck {
+                capabilities: Vec::new(),
                 success: false,
                 launcher_id,
                 fatal: true,
@@ -362,6 +369,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
     let register_result = app_state.session_manager.try_register_launcher(
         launcher_id,
         LauncherConnection {
+            system: None,
             sender: tx,
             launcher_name: launcher_name.clone(),
             hostname: hostname.clone(),
@@ -385,6 +393,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
             );
             let _ = ws_sender
                 .send(ServerToLauncher::LauncherRegisterAck {
+                    capabilities: Vec::new(),
                     success: false,
                     launcher_id,
                     fatal: true,
@@ -403,6 +412,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
     // Send RegisterAck
     let _ = ws_sender
         .send(ServerToLauncher::LauncherRegisterAck {
+            capabilities: vec![shared::SERVER_CAPABILITY_SYSTEM_STATS.to_string()],
             success: true,
             launcher_id,
             error: None,
@@ -650,11 +660,20 @@ fn handle_launcher_message(
             );
         }
         LauncherToServer::LauncherHeartbeat {
-            running_sessions, ..
+            running_sessions,
+            system,
+            ..
         } => {
             app_state
                 .session_manager
                 .update_launcher_running_sessions(launcher_id, running_sessions);
+            if let Some(sample) = system {
+                tracing::debug!(%launcher_id, cpu = sample.host_cpu_percent, "launcher heartbeat sample");
+                app_state
+                    .session_manager
+                    .update_launcher_system(launcher_id, sample);
+                crate::service_stats::push_to_user(app_state, user_id);
+            }
             // Echo the heartbeat so a launcher that supports it can detect a
             // half-open control socket and reconnect (#1366). Gated on the
             // capability so older launchers never receive an undecodable frame.
@@ -667,6 +686,15 @@ fn handle_launcher_message(
                     .send_to_launcher(&launcher_id, ServerToLauncher::LauncherHeartbeatAck);
             }
             reconcile_desired_sessions(app_state, launcher_id, user_id);
+        }
+        LauncherToServer::SystemStats { sample, .. } => {
+            tracing::debug!(%launcher_id, cpu = sample.host_cpu_percent, "launcher system sample");
+            if app_state
+                .session_manager
+                .update_launcher_system(launcher_id, sample)
+            {
+                crate::service_stats::push_to_user(app_state, user_id);
+            }
         }
         LauncherToServer::ProxyLog {
             session_id,
@@ -707,22 +735,33 @@ fn handle_launcher_message(
             );
         }
         LauncherToServer::ListDirectoriesResult { request_id, .. } => {
-            app_state
-                .session_manager
-                .complete_dir_request(request_id, msg);
+            app_state.session_manager.complete_launcher_request(
+                super::LauncherRpcKind::Directory,
+                request_id,
+                msg,
+            );
         }
-        LauncherToServer::ProbeAgentsResult { request_id, .. } => {
-            app_state
-                .session_manager
-                .complete_probe_request(request_id, msg);
+        LauncherToServer::SessionPluginsResult { request_id, .. }
+        | LauncherToServer::ProbeAgentsResult { request_id, .. }
+        | LauncherToServer::ExternalSessionsResult { request_id, .. }
+        | LauncherToServer::PrepareSessionImportResult { request_id, .. }
+        | LauncherToServer::PrepareSessionRestoreResult { request_id, .. }
+        | LauncherToServer::CheckHistoryRestoreResult { request_id, .. } => {
+            app_state.session_manager.complete_launcher_request(
+                super::LauncherRpcKind::Agent,
+                request_id,
+                msg,
+            );
         }
         LauncherToServer::AgentLoginStartResult { request_id, .. }
         | LauncherToServer::AgentLoginOutcomeResult { request_id, .. }
         | LauncherToServer::InstallAgentResult { request_id, .. } => {
             // Same request/response correlation as the probe path.
-            app_state
-                .session_manager
-                .complete_probe_request(request_id, msg);
+            app_state.session_manager.complete_launcher_request(
+                super::LauncherRpcKind::Agent,
+                request_id,
+                msg,
+            );
         }
         LauncherToServer::RequestLaunch {
             request_id,
@@ -790,6 +829,7 @@ fn handle_launcher_message(
             match crate::handlers::launchers::mint_launch_token(app_state, user_id) {
                 Ok(auth_token) => {
                     let launch_msg = ServerToLauncher::LaunchSession {
+                        history_restore: None,
                         request_id,
                         user_id,
                         auth_token,
@@ -1049,8 +1089,6 @@ pub(crate) fn load_desired_sessions(
 
 fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: Uuid) {
     use crate::models::Session;
-    use crate::schema::sessions;
-    use diesel::prelude::*;
 
     let running_sessions = app_state
         .session_manager
@@ -1075,6 +1113,26 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
     let now = chrono::Utc::now().naive_utc();
 
     for session in desired {
+        if session.history_restore.is_some()
+            && !app_state.session_manager.launcher_supports_capability(
+                launcher_id,
+                shared::LAUNCHER_CAPABILITY_HISTORY_RESTORE,
+            )
+        {
+            continue;
+        }
+        let history_restore = match crate::handlers::history_restore::launch_recipe(&session) {
+            Ok(recipe) => recipe,
+            Err(error) => {
+                warn!(
+                    "{}: session {}: {:?}",
+                    crate::markers::HISTORY_RESTORE_INVALID,
+                    session.id,
+                    error
+                );
+                continue;
+            }
+        };
         // Skip sessions the launcher last reported as running. The launch lease
         // below (not the in-memory pending set) is the authoritative guard for
         // the in-flight window.
@@ -1111,16 +1169,12 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
         // mid-launch doesn't wedge the session out of reconcile — unlike the old
         // no-TTL pending set. Registration and launch-failure both clear it.
         let lease_until = now + chrono::Duration::seconds(LAUNCH_LEASE_SECS);
-        match diesel::update(
-            sessions::table.find(session.id).filter(
-                sessions::launch_lease_until
-                    .is_null()
-                    .or(sessions::launch_lease_until.lt(now)),
-            ),
-        )
-        .set(sessions::launch_lease_until.eq(Some(lease_until)))
-        .execute(&mut conn)
-        {
+        match crate::db::session_lifecycle::claim_launch_lease(
+            &mut conn,
+            session.id,
+            now,
+            lease_until,
+        ) {
             Ok(1) => {}
             Ok(_) => {
                 debug!(
@@ -1151,6 +1205,7 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
 
         let pending_fork = session.fork_launch_pending;
         let create_worktree = pending_fork && session.fork_create_worktree;
+        let resume = reconcile_resume_flag(pending_fork, session.input_seq);
 
         info!(
             "Reconcile relaunching session {} ({}) on launcher {}: {}, \
@@ -1160,14 +1215,17 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
             launcher_id,
             if pending_fork {
                 "initial fork"
-            } else {
+            } else if resume {
                 "resume"
+            } else {
+                "fresh start (never messaged)"
             },
             session.launch_failure_count,
             session.working_directory
         );
 
         let launch_msg = ServerToLauncher::LaunchSession {
+            history_restore,
             request_id,
             user_id,
             auth_token,
@@ -1177,10 +1235,7 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
             agent_type,
             scheduled_task_id: None,
             resume_session_id: Some(session.id),
-            // A desired fork may be reconciled before its first proxy registers
-            // (for example after a backend restart). Keep replaying the durable
-            // fork recipe until registration clears `fork_launch_pending`.
-            resume: Some(!pending_fork),
+            resume: Some(resume),
             create_worktree,
             worktree_branch: create_worktree.then(|| session.session_name.clone()),
             scratch_worktree: false,
@@ -1203,6 +1258,21 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
             );
         }
     }
+}
+
+/// Whether a reconcile relaunch should `--resume` the session or create it
+/// fresh under the same id.
+///
+/// A desired fork may be reconciled before its first proxy registers (for
+/// example after a backend restart); keep replaying the durable fork recipe
+/// until registration clears `fork_launch_pending`. A session that has never
+/// been sent any input (`input_seq == 0`) has no transcript to resume: claude
+/// only writes one on the first turn. Resuming it anyway made the launcher
+/// rotate to a fresh id, which minted a new session row on every heartbeat
+/// until the launcher hit its session cap. Starting it fresh under the id the
+/// row already has is exactly what the original dialog launch did.
+fn reconcile_resume_flag(pending_fork: bool, input_seq: i64) -> bool {
+    !pending_fork && input_seq > 0
 }
 
 /// Consecutive failed launches after which reconcile gives up and auto-pauses
@@ -1343,6 +1413,20 @@ fn get_dev_user_id(app_state: &AppState) -> Option<Uuid> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn never_messaged_sessions_restart_fresh_instead_of_resuming() {
+        use super::reconcile_resume_flag;
+        assert!(
+            !reconcile_resume_flag(true, 5),
+            "pending fork replays the fork"
+        );
+        assert!(
+            !reconcile_resume_flag(false, 0),
+            "no input yet: nothing to resume"
+        );
+        assert!(reconcile_resume_flag(false, 1), "one turn in: resume it");
+    }
+
     /// Stopping a session must take it out of the launcher's desired set.
     ///
     /// Regression for #1776: `stop_session` used to write `paused = false`,

@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+    <marker id="arr-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/>
+    </marker>
+  </defs>
+
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2223 · Group dormant sessions at the bottom of the mobile picker</text>
+
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">The mobile picker mixed paused and hidden sessions in with live ones;</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">now they sit in their own group at the bottom, and picking one resumes it.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <!-- BEFORE: one flat select -->
+  <g>
+    <rect x="80" y="250" width="860" height="440" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="290" font-size="26" fill="#7aa2f7">select#mobile-session-select</text>
+    <text x="104" y="330" font-size="22" fill="#565f89">active_sessions in rail order, one flat list</text>
+    <text x="104" y="390" font-size="23" fill="#a9b1d6">api-server - devbox (connected)</text>
+    <text x="104" y="430" font-size="23" fill="#f7768e">old-spike - devbox (paused)</text>
+    <text x="104" y="470" font-size="23" fill="#a9b1d6">frontend - laptop (connected)</text>
+    <text x="104" y="510" font-size="23" fill="#f7768e">scratch - devbox (hidden, shown as status)</text>
+    <text x="104" y="550" font-size="23" fill="#a9b1d6">docs - laptop (connected)</text>
+    <text x="104" y="620" font-size="22" fill="#565f89">stopped = paused (stop_session calls pause)</text>
+  </g>
+
+  <line x1="510" y1="690" x2="510" y2="955" stroke="#f7768e" stroke-width="1.5" marker-end="url(#arr-red)"/>
+  <text x="530" y="820" font-size="22" fill="#565f89">on_select_session only</text>
+
+  <g>
+    <rect x="80" y="960" width="860" height="120" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+    <text x="104" y="1006" font-size="26" fill="#c0caf5">picking a paused session opens it still paused</text>
+    <text x="104" y="1046" font-size="23" fill="#f7768e">resuming needs the desktop rail</text>
+  </g>
+
+  <!-- AFTER: grouped -->
+  <g>
+    <rect x="1065" y="250" width="860" height="440" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1089" y="290" font-size="26" fill="#7aa2f7">select#mobile-session-select</text>
+    <text x="1089" y="330" font-size="22" fill="#565f89">partition on effective_hidden_sessions (hidden + paused)</text>
+    <text x="1089" y="390" font-size="23" fill="#a9b1d6">api-server - devbox (connected)</text>
+    <text x="1089" y="430" font-size="23" fill="#a9b1d6">frontend - laptop (connected)</text>
+    <text x="1089" y="470" font-size="23" fill="#a9b1d6">docs - laptop (connected)</text>
+    <text x="1089" y="530" font-size="22" font-style="italic" fill="#9ece6a">optgroup: Paused, stopped &amp; hidden - selecting resumes</text>
+    <text x="1089" y="570" font-size="23" fill="#565f89">old-spike - devbox (paused)</text>
+    <text x="1089" y="610" font-size="23" fill="#565f89">scratch - devbox (hidden)</text>
+  </g>
+
+  <line x1="1495" y1="690" x2="1495" y2="955" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+  <text x="1515" y="790" font-size="22" fill="#9ece6a">paused: on_toggle_pause((key, false))</text>
+  <text x="1515" y="824" font-size="22" fill="#9ece6a">hidden: on_toggle_hidden(key)</text>
+  <text x="1515" y="858" font-size="22" fill="#565f89">then on_select_session(index)</text>
+
+  <g>
+    <rect x="1065" y="960" width="860" height="120" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+    <text x="1089" y="1006" font-size="26" fill="#c0caf5">picking a dormant session brings it back</text>
+    <text x="1089" y="1046" font-size="23" fill="#9ece6a">resumed (which also unhides) or unhidden, then opened</text>
+  </g>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">Mobile picker only; the desktop rail is unchanged. A failed resume request is only logged, as it already is from the rail.</text>
+</svg>

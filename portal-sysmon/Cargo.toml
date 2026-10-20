@@ -1,0 +1,9 @@
+[package]
+name = "portal-sysmon"
+version = "0.1.0"
+edition = "2021"
+description = "Host and own-process CPU/memory/load sampling for portal services"
+
+[dependencies]
+shared = { path = "../shared" }
+sysinfo = { version = "0.38", default-features = false, features = ["system"] }

@@ -92,7 +92,7 @@ fn joined_transcription(body: &InferBody) -> String {
     body.transcription
         .iter()
         .map(|segment| segment.trim())
-        .filter(|segment| !segment.is_empty())
+        .filter(|segment| shared::strings::is_non_empty(segment))
         .collect::<Vec<_>>()
         .join(" ")
 }

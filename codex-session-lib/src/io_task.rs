@@ -378,13 +378,18 @@ pub(crate) async fn codex_io_task(
                     let model = started_thread_model(resp.model, &configured_model_fallback);
                     resumed_thread = Some((prior.clone(), model));
                 }
+                Err(e) if config.codex_require_resume => {
+                    let _ = event_tx.send(IoEvent::Error(SessionError::CommunicationError(format!(
+                        "Could not resume Codex conversation {prior}: {e}. No new conversation was created."
+                    ))));
+                    return;
+                }
                 Err(e) => {
-                    // Fall through to `thread_start`. Common failure
-                    // modes: the codex binary upgraded across a thread
-                    // storage breaking change, or the thread was archived
-                    // out of band. Don't lose the session — just strip
-                    // server-side context. The transcript is rehydrated
-                    // by the backend's message-replay path independently.
+                    // Fall through to `thread_start`. Common failure modes: the
+                    // codex binary upgraded across a thread storage breaking
+                    // change, or the thread was archived out of band. The
+                    // portal transcript is rehydrated by the backend's replay
+                    // path independently, so the session stays usable.
                     tracing::warn!(
                         "Codex thread/resume of {} failed: {} — falling back to fresh thread_start",
                         prior,
@@ -392,6 +397,11 @@ pub(crate) async fn codex_io_task(
                     );
                 }
             }
+        } else if config.codex_require_resume {
+            let _ = event_tx.send(IoEvent::Error(SessionError::CommunicationError(
+                "Cannot resume: the saved Codex thread mapping is missing. No new conversation was created.".into()
+            )));
+            return;
         } else {
             tracing::info!(
                 "Codex resume requested but no prior thread_id is known — starting fresh thread"
@@ -905,6 +915,10 @@ pub(crate) async fn codex_io_task(
                                 }
                             }
                         }
+                        IoCommand::Shutdown { completed } => {
+                            let _ = completed.send(());
+                            break;
+                        }
                     }
                 }
             }
@@ -950,6 +964,10 @@ pub(crate) async fn codex_io_task(
                     }
                     Some(IoCommand::Interrupt) => {
                         // No active turn — nothing to interrupt.
+                    }
+                    Some(IoCommand::Shutdown { completed }) => {
+                        let _ = completed.send(());
+                        break;
                     }
                     None => {
                         let _ = event_tx.send(IoEvent::Exited { code: 0 });
@@ -1058,6 +1076,10 @@ pub(crate) async fn codex_io_task(
                     }
                     Some(IoCommand::Interrupt) => {
                         // No active turn — nothing to interrupt.
+                    }
+                    Some(IoCommand::Shutdown { completed }) => {
+                        let _ = completed.send(());
+                        break;
                     }
                     None => {
                         let _ = event_tx.send(IoEvent::Exited { code: 0 });
@@ -1235,13 +1257,17 @@ fn approval_response_kind(msg: &ServerMessage) -> Option<(String, CodexApprovalR
     Some((format_request_id(id), kind))
 }
 
+/// Keep a model name only when it is usable: non-blank and not the `"unknown"`
+/// placeholder the server sends when it has nothing to report.
+///
+/// Blank handling lives in `shared::strings` (single home for the trim-check
+/// shape); only the codex-specific `"unknown"` rejection stays here. This
+/// rejects a narrower set than `TurnMetrics::has_known_model`, which also
+/// rejects `"<synthetic>"` — the two guard different things (model resolution
+/// vs telemetry validity), so keep them separate.
 fn non_empty_string(value: String) -> Option<String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("unknown") {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
+    shared::strings::owned_non_blank(&value)
+        .filter(|trimmed| !trimmed.eq_ignore_ascii_case("unknown"))
 }
 
 /// Resolve the model a freshly resumed/started thread reports, falling back to

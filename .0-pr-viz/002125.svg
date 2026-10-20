@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-labelledby="pr2125-title pr2125-desc">
+  <title id="pr2125-title">PR 2125 Route edit-stack truncation via shared helper</title>
+  <desc id="pr2125-desc">Before and after: edit-stack previews carried their own truncation copy that could exceed its cap by one; now they share the helper every other surface uses.</desc>
+  <rect width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="pr2125-arr-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#f7768e"/>
+    </marker>
+    <marker id="pr2125-arr-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#9ece6a"/>
+    </marker>
+  </defs>
+
+  <text x="55" y="62" fill="#a9b1d6" font-family="sans-serif" font-size="24" letter-spacing="1">PR #2125 - Route edit-stack truncation via shared helper</text>
+  <text x="55" y="116" fill="#e6e9f5" font-family="sans-serif" font-size="34" font-weight="700">Edit-stack previews carried their own truncation copy that could exceed its cap by one;</text>
+  <text x="55" y="158" fill="#e6e9f5" font-family="sans-serif" font-size="34" font-weight="700">now both previews share the helper every other surface already uses.</text>
+  <line x1="55" y1="178" x2="1945" y2="178" stroke="#3d4666" stroke-width="2"/>
+
+  <text x="55" y="225" fill="#f7768e" font-family="sans-serif" font-size="22" font-weight="700" letter-spacing="4">BEFORE</text>
+  <text x="1055" y="225" fill="#9ece6a" font-family="sans-serif" font-size="22" font-weight="700" letter-spacing="4">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1140" stroke="#565f89" stroke-width="3" stroke-dasharray="14 16"/>
+
+  <g font-family="sans-serif">
+    <rect x="70" y="280" width="830" height="150" rx="18" fill="#1a1b26" stroke="#f7768e" stroke-width="3"/>
+    <text x="100" y="324" fill="#f7768e" font-size="26" font-weight="700">Local copy in component.rs</text>
+    <text x="100" y="365" fill="#c0caf5" font-size="23" font-family="monospace">fn truncate_chars(value, max)</text>
+    <text x="100" y="399" fill="#c0caf5" font-size="23" font-family="monospace">take(max) then push('...'): up to max + 1</text>
+
+    <rect x="70" y="480" width="830" height="160" rx="18" fill="#1a1b26" stroke="#f7768e" stroke-width="3"/>
+    <text x="100" y="524" fill="#f7768e" font-size="26" font-weight="700">Two previews fed by the copy</text>
+    <text x="100" y="565" fill="#c0caf5" font-size="23">body preview, cap 260 - context preview, cap 700</text>
+    <text x="100" y="599" fill="#c0caf5" font-size="23">same text, looser cap than everywhere else</text>
+
+    <rect x="70" y="690" width="830" height="150" rx="18" fill="#1a1b26" stroke="#f7768e" stroke-width="3"/>
+    <text x="100" y="734" fill="#f7768e" font-size="26" font-weight="700">Everywhere else already shared</text>
+    <text x="100" y="775" fill="#c0caf5" font-size="23" font-family="monospace">truncate_with_ellipsis: cap means cap</text>
+    <text x="100" y="809" fill="#c0caf5" font-size="23">peek_summary, push, io_task - one surface drifts</text>
+
+    <rect x="70" y="890" width="830" height="150" rx="18" fill="#1a1b26" stroke="#f7768e" stroke-width="3"/>
+    <text x="100" y="934" fill="#f7768e" font-size="26" font-weight="700">Cost of the drift</text>
+    <text x="100" y="975" fill="#c0caf5" font-size="23">two copies of one rule in the tree</text>
+    <text x="100" y="1009" fill="#c0caf5" font-size="23">a fix to one misses the other</text>
+
+    <rect x="1100" y="280" width="780" height="150" rx="18" fill="#1a1b26" stroke="#9ece6a" stroke-width="3"/>
+    <text x="1130" y="324" fill="#9ece6a" font-size="26" font-weight="700">One shared helper</text>
+    <text x="1130" y="365" fill="#c0caf5" font-size="23" font-family="monospace">shared::strings::truncate_with_ellipsis</text>
+    <text x="1130" y="399" fill="#c0caf5" font-size="23" font-family="monospace">take(MAX - 1) then push('...'): at most MAX</text>
+
+    <rect x="1100" y="480" width="780" height="160" rx="18" fill="#1a1b26" stroke="#9ece6a" stroke-width="3"/>
+    <text x="1130" y="524" fill="#9ece6a" font-size="26" font-weight="700">Same two previews, routed over</text>
+    <text x="1130" y="565" fill="#c0caf5" font-size="23">body preview (260), context preview (700)</text>
+    <text x="1130" y="599" fill="#c0caf5" font-size="23">local fn deleted: 9 lines gone</text>
+
+    <rect x="1100" y="690" width="780" height="150" rx="18" fill="#1a1b26" stroke="#9ece6a" stroke-width="3"/>
+    <text x="1130" y="734" fill="#9ece6a" font-size="26" font-weight="700">Five surfaces, zero drift</text>
+    <text x="1130" y="775" fill="#c0caf5" font-size="23">peek, push, io_task plus both previews</text>
+    <text x="1130" y="809" fill="#c0caf5" font-size="23">a single home holds the MAX - 1 rule</text>
+
+    <rect x="1100" y="890" width="780" height="150" rx="18" fill="#1a1b26" stroke="#9ece6a" stroke-width="3"/>
+    <text x="1130" y="934" fill="#9ece6a" font-size="26" font-weight="700">Future edits land everywhere</text>
+    <text x="1130" y="975" fill="#c0caf5" font-size="23">one rule, one home, docs cover previews</text>
+    <text x="1130" y="1009" fill="#c0caf5" font-size="23">no second copy left to forget</text>
+  </g>
+
+  <g stroke-width="3" fill="none">
+    <line x1="485" y1="438" x2="485" y2="472" stroke="#f7768e" marker-end="url(#pr2125-arr-red)"/>
+    <line x1="485" y1="648" x2="485" y2="682" stroke="#f7768e" marker-end="url(#pr2125-arr-red)"/>
+    <line x1="485" y1="848" x2="485" y2="882" stroke="#f7768e" marker-end="url(#pr2125-arr-red)"/>
+    <line x1="1490" y1="438" x2="1490" y2="472" stroke="#9ece6a" marker-end="url(#pr2125-arr-green)"/>
+    <line x1="1490" y1="648" x2="1490" y2="682" stroke="#9ece6a" marker-end="url(#pr2125-arr-green)"/>
+    <line x1="1490" y1="848" x2="1490" y2="882" stroke="#9ece6a" marker-end="url(#pr2125-arr-green)"/>
+  </g>
+
+  <text x="55" y="1174" fill="#a9b1d6" font-family="sans-serif" font-size="22">Scope caveat: truncated previews render at most one char shorter than before; display-only, no logic change.</text>
+</svg>

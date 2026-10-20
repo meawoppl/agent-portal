@@ -131,6 +131,12 @@
     background: var(--accent);
 }
 
+.chart-legend-swatch.dashed {
+    height: 0;
+    border-top: 3px dashed var(--text-secondary);
+    background: transparent;
+}
+
 .performance-chart-svg {
     width: 100%;
     height: auto;

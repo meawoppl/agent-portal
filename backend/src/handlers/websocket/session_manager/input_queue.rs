@@ -138,6 +138,9 @@ impl SessionManager {
                 },
             )
         };
+        if delivered {
+            self.mark_turn_input_delivered(session_id);
+        }
 
         EnqueueOutcome {
             seq,

@@ -10,7 +10,6 @@ mod wiggum;
 // Re-exported here so internal call sites keep their `super::` paths.
 use session_lib::proxy_session::heartbeat_watchdog;
 pub(crate) use session_lib::proxy_session::portal_reminder;
-pub(crate) use session_lib::proxy_session::portal_reminder::inject_portal_reminder;
 pub use session_lib::proxy_session::{ack_portal_input, emit_input_progress};
 
 pub use session_lib::proxy_session::ws_reader::{classify_portal_input, RoutedPortalInput};
@@ -60,12 +59,17 @@ pub type ClaudeConversationIdSink = Arc<dyn Fn(uuid::Uuid) + Send + Sync>;
 /// Configuration for a proxy session
 #[derive(Clone)]
 pub struct ProxySessionConfig {
+    pub history_restore: Option<shared::api::HistoryRestoreLaunch>,
     pub backend_url: String,
     pub session_id: Uuid,
     pub session_name: String,
     pub auth_token: Option<String>,
     pub working_directory: String,
     pub resume: bool,
+    /// Whether the next non-slash user input should carry the Portal feature
+    /// reminder. Fresh contexts need it; real resumes already have it in their
+    /// transcript, so re-sending it just burns context on every process restart.
+    pub prime_portal_reminder_on_first_input: bool,
     pub git_branch: Option<String>,
     /// Extra arguments to pass through to the claude CLI
     pub claude_args: Vec<String>,
@@ -88,6 +92,26 @@ pub struct ProxySessionConfig {
     pub fork_from_session_id: Option<Uuid>,
     /// Optional Codex native turn id; `None` forks the latest turn.
     pub fork_point_turn_id: Option<String>,
+}
+
+/// Decide whether a launch needs the Portal reminder folded onto its first
+/// user input.
+///
+/// Most agents can answer this from `resume`: a resumed context should already
+/// contain the reminder, while a fresh launch has never seen it. Codex is the
+/// one wrinkle: a `resume` launch without a persisted app-server thread id
+/// starts a fresh thread, so it still needs the reminder. Imported contexts
+/// are primed separately by the launcher.
+pub fn should_prime_portal_reminder_on_first_input(
+    agent_type: shared::AgentType,
+    resume: bool,
+    codex_thread_id: Option<&str>,
+) -> bool {
+    if !resume {
+        return true;
+    }
+
+    agent_type == shared::AgentType::Codex && codex_thread_id.is_none()
 }
 
 /// The local hostname, or `"unknown"` when the OS lookup fails.
@@ -215,8 +239,6 @@ pub struct SessionState<'a, A: Agent> {
     pub reminder_pending: Arc<AtomicBool>,
     /// When the last disconnect occurred (for reporting reconnect duration)
     pub disconnected_at: Option<Instant>,
-    /// Wall-clock UTC paired with `disconnected_at` for the reconnect text
-    pub disconnected_at_utc: Option<chrono::DateTime<chrono::Utc>>,
     /// Whether the last disconnect was a graceful server shutdown
     pub last_disconnect_graceful: bool,
     /// Consecutive replay failures on the same pending messages
@@ -241,9 +263,10 @@ impl<'a, A: Agent> SessionState<'a, A> {
             output_buffer,
             backoff: Backoff::new(),
             first_connection: true,
-            reminder_pending: Arc::new(AtomicBool::new(true)),
+            reminder_pending: Arc::new(AtomicBool::new(
+                config.prime_portal_reminder_on_first_input,
+            )),
             disconnected_at: None,
-            disconnected_at_utc: None,
             last_disconnect_graceful: false,
             replay_failures: 0,
         })
@@ -342,13 +365,11 @@ struct ConnectionState {
 /// what kind of outage this is; later calls just keep waiting.
 fn note_disconnect(
     disconnected_at: &mut Option<Instant>,
-    disconnected_at_utc: &mut Option<chrono::DateTime<chrono::Utc>>,
     last_disconnect_graceful: &mut bool,
     graceful: bool,
 ) {
     if disconnected_at.is_none() {
         *disconnected_at = Some(Instant::now());
-        *disconnected_at_utc = Some(chrono::Utc::now());
         *last_disconnect_graceful = graceful;
     }
 }
@@ -385,7 +406,6 @@ pub async fn run_connection_loop<A: Agent>(
             ConnectionResult::Disconnected(duration) => {
                 note_disconnect(
                     &mut session.disconnected_at,
-                    &mut session.disconnected_at_utc,
                     &mut session.last_disconnect_graceful,
                     false,
                 );
@@ -405,7 +425,6 @@ pub async fn run_connection_loop<A: Agent>(
             ConnectionResult::ServerShutdown(delay) => {
                 note_disconnect(
                     &mut session.disconnected_at,
-                    &mut session.disconnected_at_utc,
                     &mut session.last_disconnect_graceful,
                     true,
                 );
@@ -526,83 +545,20 @@ async fn run_single_connection<A: Agent>(session: &mut SessionState<'_, A>) -> C
         }
     }
 
-    // Send a portal message with session details
-    {
-        let hostname = hostname_or_unknown();
-
-        // A reconnect the server announced. `first_connection` is never one.
-        let expected_cycle = !session.first_connection && session.last_disconnect_graceful;
-        let reconnect_duration = session.disconnected_at.map(|t| {
-            let secs = t.elapsed().as_secs();
-            if secs < 60 {
-                format!("{}s", secs)
-            } else {
-                format!("{}m {}s", secs / 60, secs % 60)
-            }
-        });
-
-        let status_line = if session.first_connection {
-            "**Session started**".to_string()
-        } else {
-            let duration_str = session
-                .disconnected_at
-                .map(|t| {
-                    let secs = t.elapsed().as_secs();
-                    if secs < 60 {
-                        format!("{}s", secs)
-                    } else {
-                        format!("{}m {}s", secs / 60, secs % 60)
-                    }
-                })
-                .unwrap_or_default();
-            let reason = if session.last_disconnect_graceful {
-                "server restart"
-            } else {
-                "unexpected disconnect"
-            };
-            let now_utc = chrono::Utc::now();
-            let header = if duration_str.is_empty() {
-                format!("**Proxy reconnected** ({})", reason)
-            } else {
-                format!("**Proxy reconnected** after {} ({})", duration_str, reason)
-            };
-            match session.disconnected_at_utc {
-                Some(disc_utc) => format!(
-                    "{}\n  disconnected at {} (UTC)\n  reconnected  at {} (UTC)",
-                    header,
-                    disc_utc.format("%Y-%m-%dT%H:%M:%SZ"),
-                    now_utc.format("%Y-%m-%dT%H:%M:%SZ"),
-                ),
-                None => format!(
-                    "{}\n  reconnected at {} (UTC)",
-                    header,
-                    now_utc.format("%Y-%m-%dT%H:%M:%SZ"),
-                ),
-            }
-        };
-
-        // An expected cycle — the backend told us it was restarting — is
-        // routine and gets a one-line seam chip instead of a full card with
-        // host, cwd and agent id. An unexpected drop keeps the card: that one
-        // is worth interrupting the reader for.
-        let portal_content = if expected_cycle {
-            shared::PortalMessage::with_content(vec![shared::PortalContent::ConnectionCycle {
-                duration: reconnect_duration,
-            }])
-            .to_json()
-        } else {
-            let short_id = shared::short_uuid(&session.config.session_id);
-            let text = format!(
-                "{} — `{}` on `{}` in `{}` ({} `{}…`)",
-                status_line,
-                session.config.session_name,
-                hostname,
-                session.config.working_directory,
-                config_with_branch.agent_type,
-                short_id,
-            );
-            shared::PortalMessage::text(text).to_json()
-        };
+    // Announce the session once. Reconnects are routine transport churn and
+    // only go to the log — posting them filled idle transcripts with walls of
+    // "reconnected" lines.
+    if session.first_connection {
+        let short_id = shared::short_uuid(&session.config.session_id);
+        let text = format!(
+            "**Session started** — `{}` on `{}` in `{}` ({} `{}…`)",
+            session.config.session_name,
+            hostname_or_unknown(),
+            session.config.working_directory,
+            config_with_branch.agent_type,
+            short_id,
+        );
+        let portal_content = shared::PortalMessage::text(text).to_json();
         let seq = {
             let mut buf = session.output_buffer.lock().await;
             buf.push(portal_content.clone())
@@ -616,12 +572,18 @@ async fn run_single_connection<A: Agent>(session: &mut SessionState<'_, A>) -> C
             error!("Failed to send connection portal message");
             return ConnectionResult::Disconnected(Duration::ZERO);
         }
-    }
-
-    if !session.first_connection {
-        info!("Connection restored");
+    } else {
+        let after = session
+            .disconnected_at
+            .map(|t| format!(" after {}s", t.elapsed().as_secs()))
+            .unwrap_or_default();
+        let reason = if session.last_disconnect_graceful {
+            "server restart"
+        } else {
+            "unexpected disconnect"
+        };
+        info!("Connection restored{after} ({reason})");
         session.disconnected_at = None;
-        session.disconnected_at_utc = None;
     }
 
     // Run the message loop - split connection for concurrent read/write
@@ -1313,6 +1275,16 @@ async fn handle_file_upload(upload_event: FileUploadEvent, state: &mut Connectio
 
                 let filename = recv_state.filename.clone();
                 let received_bytes = recv_state.received_bytes;
+                // Every chunk arrived, but an empty or short file must not be
+                // committed and reported as delivered.
+                if received_bytes == 0 || received_bytes != recv_state.total_size {
+                    let reason = format!(
+                        "received {received_bytes} of {} declared bytes",
+                        recv_state.total_size
+                    );
+                    fail_upload(state, upload_id, reason).await;
+                    return;
+                }
                 let final_path = recv_state.final_path.clone();
                 let temp_path = recv_state.temp_path.clone();
                 if let Err(e) = tokio::fs::rename(&temp_path, &final_path).await {
@@ -1441,15 +1413,15 @@ mod tests {
     /// backoff was being reported to the user as an "unexpected disconnect".
     #[test]
     fn retries_during_a_restart_do_not_relabel_a_graceful_outage() {
-        let (mut at, mut at_utc, mut graceful) = (None, None, false);
+        let (mut at, mut graceful) = (None, false);
 
-        note_disconnect(&mut at, &mut at_utc, &mut graceful, true);
+        note_disconnect(&mut at, &mut graceful, true);
         assert!(graceful, "the server told us it was restarting");
         let first_seen = at;
 
         // 35 seconds of failed reconnect attempts, each reporting Disconnected.
         for _ in 0..8 {
-            note_disconnect(&mut at, &mut at_utc, &mut graceful, false);
+            note_disconnect(&mut at, &mut graceful, false);
         }
 
         assert!(graceful, "retries must not turn a restart into a surprise");
@@ -1457,13 +1429,57 @@ mod tests {
     }
 
     /// The converse still has to work: a genuinely unexpected drop stays
-    /// unexpected, and keeps the louder card.
+    /// unexpected.
     #[test]
     fn an_unannounced_drop_stays_unexpected() {
-        let (mut at, mut at_utc, mut graceful) = (None, None, false);
-        note_disconnect(&mut at, &mut at_utc, &mut graceful, false);
+        let (mut at, mut graceful) = (None, false);
+        note_disconnect(&mut at, &mut graceful, false);
         assert!(!graceful);
         assert!(at.is_some());
+    }
+
+    #[test]
+    fn portal_reminder_primes_fresh_contexts_only() {
+        assert!(should_prime_portal_reminder_on_first_input(
+            shared::AgentType::Claude,
+            false,
+            None,
+        ));
+        assert!(should_prime_portal_reminder_on_first_input(
+            shared::AgentType::Codex,
+            false,
+            None,
+        ));
+        assert!(should_prime_portal_reminder_on_first_input(
+            shared::AgentType::Muse,
+            false,
+            None,
+        ));
+
+        assert!(!should_prime_portal_reminder_on_first_input(
+            shared::AgentType::Claude,
+            true,
+            None,
+        ));
+        assert!(!should_prime_portal_reminder_on_first_input(
+            shared::AgentType::Muse,
+            true,
+            None,
+        ));
+    }
+
+    #[test]
+    fn codex_resume_without_a_thread_is_fresh_context_for_reminder() {
+        assert!(should_prime_portal_reminder_on_first_input(
+            shared::AgentType::Codex,
+            true,
+            None,
+        ));
+        assert!(!should_prime_portal_reminder_on_first_input(
+            shared::AgentType::Codex,
+            true,
+            Some("thread-123"),
+        ));
     }
 
     use super::*;

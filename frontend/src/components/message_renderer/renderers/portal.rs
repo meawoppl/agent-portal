@@ -56,21 +56,8 @@ fn render_portal_content(
 ) -> Html {
     match content {
         shared::PortalContent::Text { text } => render_markdown_for_session(text, session_id),
-        shared::PortalContent::ConnectionCycle { duration } => {
-            // One line, no badge, no host/cwd/agent id. A planned redeploy is
-            // routine — it should read as a seam in the transcript, not as an
-            // event competing with the conversation for attention.
-            let label = match duration {
-                Some(d) => format!("reconnected after {d}"),
-                None => "reconnected".to_string(),
-            };
-            html! {
-                <div class="connection-cycle">
-                    <span class="connection-cycle-dot" />
-                    { label }
-                </div>
-            }
-        }
+        // Hidden by `group_messages`; only present in older transcripts.
+        shared::PortalContent::ConnectionCycle { .. } => html! {},
         shared::PortalContent::Image {
             media_type,
             data,
@@ -176,11 +163,10 @@ fn render_portal_content(
 }
 
 fn agent_label(agent_type: &str) -> &'static str {
-    match agent_type.to_ascii_lowercase().as_str() {
-        "claude" => "Claude",
-        "codex" => "Codex",
-        _ => "agent",
-    }
+    agent_type
+        .parse::<shared::AgentType>()
+        .map(|agent| agent.display_name())
+        .unwrap_or("agent")
 }
 
 pub(crate) fn render_agent_message_from_source(
@@ -233,8 +219,17 @@ fn render_agent_message_event_card(
 }
 
 fn agent_message_reply_reminder(event: &AgentMessageEvent) -> Option<String> {
-    (!shared::system_reminder::has_system_reminder(&event.text))
-        .then(|| shared::agent_message_reply_reminder(&event.from_session_id))
+    let reply = shared::agent_message_reply_reminder(&event.from_session_id);
+    let has_non_base_reminder = shared::system_reminder::split_system_reminders(&event.text)
+        .iter()
+        .any(|segment| {
+            matches!(
+                segment,
+                shared::system_reminder::Segment::Reminder(body)
+                    if !shared::system_reminder::is_base_portal_instructions(body)
+            )
+        });
+    (!has_non_base_reminder).then_some(reply)
 }
 
 pub(crate) fn render_agent_message_body(text: &str, session_id: Uuid) -> Html {
@@ -489,6 +484,31 @@ mod tests {
             "11111111-1111-1111-1111-111111111111"
         );
         assert_eq!(event.text, "hello from stale proxy");
+    }
+
+    #[test]
+    fn base_instructions_do_not_hide_the_agent_reply_reminder() {
+        let event = AgentMessageEvent {
+            from_agent_type: "codex".to_string(),
+            from_session_id: "11111111-1111-1111-1111-111111111111".to_string(),
+            text: "hello\n\n<system-reminder>\nAgent Portal version 2.15.16.\n</system-reminder>"
+                .to_string(),
+        };
+
+        assert!(agent_message_reply_reminder(&event).is_some());
+    }
+
+    #[test]
+    fn existing_agent_reply_reminder_is_not_duplicated() {
+        let from_session_id = "11111111-1111-1111-1111-111111111111";
+        let reply = shared::agent_message_reply_reminder(from_session_id);
+        let event = AgentMessageEvent {
+            from_agent_type: "codex".to_string(),
+            from_session_id: from_session_id.to_string(),
+            text: format!("hello\n\n<system-reminder>\n{reply}\n</system-reminder>"),
+        };
+
+        assert!(agent_message_reply_reminder(&event).is_none());
     }
 
     #[test]

@@ -187,11 +187,11 @@ fn run_flow(
         Err(e) => {
             let mut message = e.to_string();
             if matches!(e, claude_codes::Error::CodeRejected { .. }) {
-                message.push_str(
-                    " — the code may have expired, been used already, or come \
-                     from an earlier sign-in window. Start a new sign-in and \
-                     paste the fresh code promptly.",
-                );
+                // Every rejection looks the same to us, and a code that is
+                // expired, reused, or from an earlier window is only one of
+                // several causes; naming one sent users down the wrong path
+                // when the real fault was elsewhere. Say what to do, not why.
+                message.push_str(" — start a new sign-in and paste the new code.");
             }
             failed(&message)
         }
@@ -210,17 +210,7 @@ fn failed(message: &str) -> AgentLoginOutcome {
 /// Keep the tail of a CLI transcript for a failure message — the end carries
 /// the error, and it's char-safe against multi-byte output.
 fn transcript_tail(transcript: &str) -> String {
-    let trimmed = transcript.trim();
-    let chars: Vec<char> = trimmed.chars().collect();
-    if chars.len() <= MESSAGE_TAIL {
-        return trimmed.to_string();
-    }
-    format!(
-        "…{}",
-        chars[chars.len() - MESSAGE_TAIL..]
-            .iter()
-            .collect::<String>()
-    )
+    shared::strings::tail_with_ellipsis(transcript.trim(), MESSAGE_TAIL)
 }
 
 #[cfg(test)]

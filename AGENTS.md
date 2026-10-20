@@ -277,11 +277,45 @@ and a row here.**
 | `ARCHIVE_SWEEP_FAILED` | Archive sweep task returning an error before processing any sessions (e.g. no DB connection) | Persistent DB/archive-subsystem problem; nothing archived, retention globally held | Check DB-pool health + archive backend; sweep self-recovers |
 | `RETENTION_TRIM_HELD` | Retention cleanup (`background.rs`) when it holds sessions' trims because their pre-trim archive didn't succeed | An archive outage is silently blocking retention; watch hot-DB size (expect alongside the archive markers) | Treat a rising count as an archive incident; retention drains once archiving succeeds (empty when archive disabled — normal) |
 | `MEDIA_ARCHIVE_FAILED` | Media write-through (`handlers/media_archive.rs`) when an `agent-portal show` blob can't be copied to the archive at upload time (best-effort; the upload itself still succeeds) | Archive backend unhealthy (same fault class as `SESSION_ARCHIVE_FAILED`, seen earlier — write-through runs at upload, well before the sweep); media uploaded during the outage won't survive in backups | Check archive-backend reachability, credentials/permissions, and `PORTAL_SESSION_ARCHIVE_*` (same triage as `SESSION_ARCHIVE_FAILED`) |
+| `HISTORY_RESTORE_INVALID` | Launcher reconcile cannot decode `sessions.history_restore`; holds launch rather than dropping recovered context | Incompatible backend version or damaged restoration metadata | Inspect the recipe and run compatible code; preserve the source archive and recipe during repair |
 | `SESSION_LAUNCH_CRASHLOOP_PAUSED` | Launcher reconcile (`launcher_socket.rs::record_exit_for_backoff`) auto-pausing a session after `LAUNCH_CRASHLOOP_GIVEUP` consecutive failed launches (it sets `paused = true` and stops relaunching) | Bad/expired agent credentials or config on a launcher host (`401 Invalid authentication credentials` from the `claude` binary) making every launch fail in seconds; many distinct sessions on one host parking points at a host-wide problem | Fix the credentials/config on that host, then resume the paused session(s); the auto-pause itself is the desired outcome — it is what stops the relaunch/log flood |
 
 A recurring `PENDING_INPUT_PERSIST_FAILED` right after a deploy almost always
 means schema drift (a migration recorded-but-not-applied) — see above. A one-off
 of any marker is usually a transient DB/network blip.
+
+### Agent progress bars (`agent-portal progress`)
+
+Live-only status an agent drives from the shell: `launcher/src/progress.rs` →
+`POST /api/agent/sessions/{id}/progress` → `SessionManager` in-memory store
+(`session_manager/agent_progress.rs`) → `ServerToClient::AgentProgress` →
+`render_agent_progress` above the input bar. Never persisted, so it is absent
+from `HistoryBatch`, the archive and retention.
+
+- **Full snapshots, no revision.** Every frame is the session's complete bar
+  set, so delivery order *is* state order. Mutations broadcast **while holding
+  the session's `agent_progress` entry**, and a connecting client is registered
+  and sent its snapshot under that same entry (`add_web_client_with_progress`).
+  Lock order is always `agent_progress` entry → `web_clients` shard. Don't
+  release the entry before fanning out — two writers could then deliver
+  snapshots out of order and the browser can't tell.
+- **The rail pill fill is a second frame.** `ServerToClient::SessionProgress`
+  carries `pill_fraction` (mean of the determinate bars) to every member's
+  *user* channel — the same route as `TurnMetrics`, so the rail needs no
+  per-session socket. It is sent only when the whole percent changes, members
+  are remembered from the last post (the sweep has no DB) and diffed on each
+  post — joiners get the current value, leavers a clear, even at an unchanged
+  percent. A user client connecting gets `SessionProgressReset` and then its
+  sessions' values (`add_user_client_with_progress`); the reset is the boundary
+  that stops a fill learned before a reconnect outliving its bar.
+  The frontend keeps it in `ClientWsState::session_progress`.
+- **Connect always sends a snapshot, empty included**, so a still-mounted view
+  drops bars that expired while it was disconnected.
+- **Posting needs `verify_session_mutator`** (owner/editor); a viewer must not
+  be able to forge or clear the session UI.
+- Bars expire after `PROGRESS_BAR_TTL` (10 min) via `run_liveness_sweep`; the
+  cap is `MAX_PROGRESS_BARS`. The agent-facing description lives in
+  `session-lib/portal_reminder.md` — keep it in step with the CLI.
 
 ### Adding a New API Endpoint
 
@@ -733,6 +767,19 @@ fn custom_answer_input(props: &CustomAnswerInputProps) -> Html {
 
 See `frontend/src/pages/dashboard/permission_dialog.rs` (`CustomAnswerInput`) for
 the live example.
+
+### Yew events are delegated: `current_target()` is the app root
+
+Yew attaches listeners at the app root, not on the element a handler is written
+on, so inside a handler `event.current_target()` is the **root** (`<body>`), not
+that element. Anything that needs the element itself — `set_pointer_capture`,
+focus, measuring — must go through a `NodeRef` on it. Capturing on
+`current_target()` routes the pointer's later events to the body, from which
+none of the component's handlers are reachable, so a drag stops tracking and a
+release is never seen. Likewise a `style` string is written verbatim as the
+whole attribute, so it must be a full `property: value` declaration; a bare
+value is silently dropped. See the image lightbox
+(`renderers/media.rs`, `renderers/lightbox_gesture.rs`) for both done right.
 
 ### Diagram / SVG backgrounds
 

@@ -53,7 +53,7 @@ pub fn create_worktree(base_dir: &Path, branch: Option<&str>) -> Result<PathBuf>
 
     let branch_name = branch
         .map(sanitize_branch_name)
-        .filter(|b| !b.is_empty())
+        .filter(|b| shared::strings::is_non_empty(b))
         .unwrap_or_else(default_branch_name);
 
     let worktree_path = repo_root.join(".worktrees").join(&branch_name);

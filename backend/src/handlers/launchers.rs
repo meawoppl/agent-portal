@@ -9,19 +9,18 @@ use shared::api::{
     InstallAgentResponse, LaunchRequest, ProbeAgentsResponse, StartAgentLoginRequest,
     StartAgentLoginResponse, SubmitAgentLoginCodeRequest,
 };
-use shared::{
-    AgentLoginOutcome, AgentType, LauncherInfo, LauncherToServer, ServerToLauncher, SessionRole,
-    SessionStatus,
-};
+use shared::{AgentLoginOutcome, AgentType, LauncherInfo, LauncherToServer, ServerToLauncher};
 use std::sync::Arc;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::auth::CurrentUserId;
+use crate::db::session_lifecycle::{create_desired_session, DesiredSessionDraft};
 use crate::errors::AppError;
+use crate::handlers::launcher_rpc::{launcher_rpc, require_launcher_owner};
 use crate::handlers::responses::EmptyResponse;
-use crate::handlers::websocket::SessionManager;
-use crate::models::{jsonb_string_vec, NewSessionMember, NewSessionWithId};
+use crate::handlers::websocket::{LauncherRpcError, LauncherRpcKind, SessionManager};
+use crate::models::jsonb_string_vec;
 use crate::AppState;
 
 /// GET /api/launchers - List connected launchers for the current user
@@ -91,7 +90,7 @@ pub async fn launch_session(
     let request_id = Uuid::new_v4();
     let session_id = Uuid::new_v4();
     create_desired_session(
-        &app_state,
+        &mut *app_state.conn()?,
         DesiredSessionDraft {
             session_id,
             user_id,
@@ -100,10 +99,14 @@ pub async fn launch_session(
             hostname,
             launcher_id: Some(launcher_id),
             client_version: Some(version),
+            launcher_version: app_state
+                .session_manager
+                .launcher_version(Some(launcher_id)),
             agent_type: req.launch.agent_type,
             claude_args: req.launch.claude_args.clone(),
             forked_from_session_id: None,
             fork_point_turn_id: None,
+            fork_create_worktree: false,
         },
     )?;
     app_state
@@ -111,6 +114,7 @@ pub async fn launch_session(
         .register_launch_session(request_id, session_id);
 
     let launch_msg = ServerToLauncher::LaunchSession {
+        history_restore: None,
         request_id,
         user_id,
         auth_token,
@@ -183,80 +187,6 @@ fn default_session_name(working_directory: &str) -> String {
         .to_string()
 }
 
-pub(crate) struct DesiredSessionDraft {
-    session_id: Uuid,
-    user_id: Uuid,
-    working_directory: String,
-    session_name: String,
-    hostname: String,
-    launcher_id: Option<Uuid>,
-    client_version: Option<String>,
-    agent_type: shared::AgentType,
-    claude_args: Vec<String>,
-    forked_from_session_id: Option<Uuid>,
-    fork_point_turn_id: Option<String>,
-}
-
-pub(crate) fn create_desired_session(
-    app_state: &AppState,
-    draft: DesiredSessionDraft,
-) -> Result<(), AppError> {
-    let mut conn = app_state.conn()?;
-
-    use crate::schema::{session_members, sessions};
-    use diesel::prelude::*;
-
-    let new_session = NewSessionWithId {
-        id: draft.session_id,
-        user_id: draft.user_id,
-        session_name: draft.session_name,
-        session_key: draft.session_id.to_string(),
-        working_directory: draft.working_directory,
-        status: SessionStatus::Disconnected.as_str().to_string(),
-        git_branch: None,
-        client_version: draft.client_version,
-        hostname: draft.hostname,
-        launcher_id: draft.launcher_id,
-        agent_type: draft.agent_type.as_str().to_string(),
-        repo_url: None,
-        scheduled_task_id: None,
-        paused: false,
-        claude_args: serde_json::to_value(&draft.claude_args)
-            .unwrap_or_else(|_| serde_json::Value::Array(Vec::new())),
-        // Stamp the launcher's live version now — the registry entry that
-        // holds it is gone by archive time (see
-        // `NewSessionWithId::launcher_version`).
-        launcher_version: app_state
-            .session_manager
-            .launcher_version(draft.launcher_id),
-    };
-
-    diesel::insert_into(sessions::table)
-        .values(&new_session)
-        .execute(&mut conn)?;
-
-    if draft.forked_from_session_id.is_some() || draft.fork_point_turn_id.is_some() {
-        diesel::update(sessions::table.find(draft.session_id))
-            .set((
-                sessions::forked_from_session_id.eq(draft.forked_from_session_id),
-                sessions::fork_point_turn_id.eq(draft.fork_point_turn_id),
-                sessions::fork_launch_pending.eq(true),
-                sessions::fork_create_worktree.eq(false),
-            ))
-            .execute(&mut conn)?;
-    }
-
-    diesel::insert_into(session_members::table)
-        .values(NewSessionMember {
-            session_id: draft.session_id,
-            user_id: draft.user_id,
-            role: SessionRole::Owner.as_str().to_string(),
-        })
-        .execute(&mut conn)?;
-
-    Ok(())
-}
-
 /// POST /api/sessions/:session_id/fork — create a divergent session on the
 /// source session's launcher, where the agent-native conversation state lives.
 pub async fn fork_session(
@@ -287,8 +217,10 @@ pub async fn fork_session(
         ));
     }
     let agent_type = AgentType::parse_or_default(&source.agent_type);
-    if agent_type == AgentType::Muse {
-        return Err(AppError::BadRequest("Muse sessions cannot be forked"));
+    if matches!(agent_type, AgentType::Muse | AgentType::Antigravity) {
+        return Err(AppError::BadRequest(
+            "Muse and Antigravity sessions cannot be forked",
+        ));
     }
     if agent_type != AgentType::Codex && req.fork_point_turn_id.is_some() {
         return Err(AppError::BadRequest(
@@ -335,7 +267,7 @@ pub async fn fork_session(
     let request_id = Uuid::new_v4();
     let session_id = Uuid::new_v4();
     create_desired_session(
-        &app_state,
+        &mut conn,
         DesiredSessionDraft {
             session_id,
             user_id,
@@ -344,17 +276,16 @@ pub async fn fork_session(
             hostname,
             launcher_id: Some(launcher_id),
             client_version: Some(version),
+            launcher_version: app_state
+                .session_manager
+                .launcher_version(Some(launcher_id)),
             agent_type,
             claude_args: claude_args.clone(),
             forked_from_session_id: Some(source_id),
             fork_point_turn_id: req.fork_point_turn_id.clone(),
+            fork_create_worktree: create_worktree,
         },
     )?;
-    if create_worktree {
-        diesel::update(sessions::table.find(session_id))
-            .set(sessions::fork_create_worktree.eq(true))
-            .execute(&mut conn)?;
-    }
     let fork_notice = fork_child_notice(
         &source.session_name,
         source_id,
@@ -378,6 +309,7 @@ pub async fn fork_session(
         .session_manager
         .register_launch_session(request_id, session_id);
     let launch = ServerToLauncher::LaunchSession {
+        history_restore: None,
         request_id,
         user_id,
         auth_token,
@@ -427,7 +359,7 @@ fn apply_model_override(args: Vec<String>, agent_type: AgentType, model: String)
         }
     }
     match agent_type {
-        AgentType::Claude => next.extend(["--model".to_string(), model]),
+        AgentType::Claude | AgentType::Antigravity => next.extend(["--model".to_string(), model]),
         AgentType::Codex => next.extend(["-c".to_string(), format!("model={model}")]),
         AgentType::Muse => {}
     }
@@ -488,31 +420,26 @@ pub async fn list_directories(
     require_launcher_owner(&app_state, launcher_id, user_id)?;
 
     let request_id = Uuid::new_v4();
-    let rx = app_state.session_manager.register_dir_request(request_id);
-
-    let sent = app_state.session_manager.send_to_launcher(
-        &launcher_id,
-        ServerToLauncher::ListDirectories {
+    let reply = app_state
+        .session_manager
+        .request_launcher(
+            launcher_id,
+            LauncherRpcKind::Directory,
             request_id,
-            path: query.path.clone(),
-        },
-    );
-
-    if !sent {
-        app_state.session_manager.cancel_dir_request(request_id);
-        error!("Failed to send ListDirectories to launcher {}", launcher_id);
-        return Err(AppError::BadGateway(
-            "Failed to send directory listing request",
-        ));
-    }
-
-    match tokio::time::timeout(std::time::Duration::from_secs(5), rx).await {
-        Ok(Ok(LauncherToServer::ListDirectoriesResult {
+            ServerToLauncher::ListDirectories {
+                request_id,
+                path: query.path.clone(),
+            },
+            std::time::Duration::from_secs(5),
+        )
+        .await;
+    match reply {
+        Ok(LauncherToServer::ListDirectoriesResult {
             entries,
             error,
             resolved_path,
             ..
-        })) => {
+        }) => {
             if let Some(err) = error {
                 warn!("Directory listing error: {}", err);
                 return Err(AppError::BadRequest("Directory listing failed"));
@@ -522,14 +449,19 @@ pub async fn list_directories(
                 resolved_path,
             }))
         }
-        Ok(Ok(_)) => Err(AppError::Internal(
-            "Unexpected launcher directory response".to_string(),
+        Ok(_) => Err(AppError::Internal(
+            "Unexpected launcher directory response".into(),
         )),
-        Ok(Err(_)) => Err(AppError::Internal(
-            "Directory listing response channel closed".to_string(),
+        Err(LauncherRpcError::Closed) => Err(AppError::Internal(
+            "Directory listing response channel closed".into(),
         )),
-        Err(_) => {
-            app_state.session_manager.cancel_dir_request(request_id);
+        Err(LauncherRpcError::Disconnected) => {
+            error!("Failed to send ListDirectories to launcher {}", launcher_id);
+            Err(AppError::BadGateway(
+                "Failed to send directory listing request",
+            ))
+        }
+        Err(LauncherRpcError::Timeout) => {
             warn!("Directory listing timed out for launcher {}", launcher_id);
             Err(AppError::GatewayTimeout("Directory listing timed out"))
         }
@@ -629,79 +561,33 @@ pub async fn probe_agents(
     require_launcher_owner(&app_state, launcher_id, user_id)?;
 
     let request_id = Uuid::new_v4();
-    let rx = app_state.session_manager.register_probe_request(request_id);
-
-    // Evicting send (not a cloned raw sender): a dead channel tears the
-    // stale connection down instead of lingering.
-    if !app_state
+    let reply = app_state
         .session_manager
-        .send_to_launcher(&launcher_id, ServerToLauncher::ProbeAgents { request_id })
-    {
-        app_state.session_manager.cancel_probe_request(request_id);
-        warn!("Launcher {} disconnected while probing agents", launcher_id);
-        return Err(AppError::BadGateway("Failed to send agent probe request"));
-    }
-
-    match tokio::time::timeout(std::time::Duration::from_secs(5), rx).await {
-        Ok(Ok(LauncherToServer::ProbeAgentsResult { agents, .. })) => {
+        .request_launcher(
+            launcher_id,
+            LauncherRpcKind::Agent,
+            request_id,
+            ServerToLauncher::ProbeAgents { request_id },
+            std::time::Duration::from_secs(5),
+        )
+        .await;
+    match reply {
+        Ok(LauncherToServer::ProbeAgentsResult { agents, .. }) => {
             Ok(Json(ProbeAgentsResponse { agents }))
         }
-        Ok(Ok(_)) => Err(AppError::Internal(
-            "Unexpected launcher probe response".to_string(),
+        Ok(_) => Err(AppError::Internal(
+            "Unexpected launcher probe response".into(),
         )),
-        Ok(Err(_)) => Err(AppError::Internal(
-            "Agent probe response channel closed".to_string(),
+        Err(LauncherRpcError::Closed) => Err(AppError::Internal(
+            "Agent probe response channel closed".into(),
         )),
-        Err(_) => {
-            app_state.session_manager.cancel_probe_request(request_id);
+        Err(LauncherRpcError::Disconnected) => {
+            warn!("Launcher {} disconnected while probing agents", launcher_id);
+            Err(AppError::BadGateway("Failed to send agent probe request"))
+        }
+        Err(LauncherRpcError::Timeout) => {
             warn!("Probe agents timed out for launcher {}", launcher_id);
             Err(AppError::GatewayTimeout("Agent probe timed out"))
-        }
-    }
-}
-
-/// Confirm the caller owns `launcher_id` (agent logins run credentials on that
-/// host, so only its owner may drive them). 404 on unknown so we don't leak
-/// launcher existence to non-owners.
-fn require_launcher_owner(
-    app_state: &AppState,
-    launcher_id: Uuid,
-    user_id: Uuid,
-) -> Result<(), AppError> {
-    let owner = app_state
-        .session_manager
-        .launcher_owner(launcher_id)
-        .ok_or(AppError::NotFound("Launcher not found"))?;
-    if owner != user_id {
-        return Err(AppError::Forbidden);
-    }
-    Ok(())
-}
-
-/// Relay one request/response RPC to a launcher, reusing the probe correlation.
-async fn launcher_rpc(
-    app_state: &AppState,
-    launcher_id: Uuid,
-    request_id: Uuid,
-    message: ServerToLauncher,
-    timeout_secs: u64,
-) -> Result<LauncherToServer, AppError> {
-    let rx = app_state.session_manager.register_probe_request(request_id);
-    if !app_state
-        .session_manager
-        .send_to_launcher(&launcher_id, message)
-    {
-        app_state.session_manager.cancel_probe_request(request_id);
-        return Err(AppError::BadGateway("Launcher is not connected"));
-    }
-    match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), rx).await {
-        Ok(Ok(reply)) => Ok(reply),
-        Ok(Err(_)) => Err(AppError::Internal(
-            "Launcher response channel closed".into(),
-        )),
-        Err(_) => {
-            app_state.session_manager.cancel_probe_request(request_id);
-            Err(AppError::GatewayTimeout("Launcher did not respond in time"))
         }
     }
 }
@@ -863,6 +749,7 @@ mod tests {
     fn launcher_for(user_id: Uuid, hostname: &str) -> LauncherConnection {
         let (sender, _rx) = crate::handlers::websocket::conn_channel(64);
         LauncherConnection {
+            system: None,
             sender,
             launcher_name: format!("launcher-{}", hostname),
             hostname: hostname.to_string(),
@@ -976,6 +863,13 @@ mod tests {
             "new".into(),
         );
         assert_eq!(codex, ["--yolo", "-c", "model=new"]);
+
+        let antigravity = apply_model_override(
+            vec!["--model".into(), "old".into(), "--flag".into()],
+            AgentType::Antigravity,
+            "new".into(),
+        );
+        assert_eq!(antigravity, ["--flag", "--model", "new"]);
     }
 
     #[test]

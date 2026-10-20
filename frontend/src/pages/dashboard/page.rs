@@ -12,10 +12,10 @@ use super::session_view::SessionView;
 use super::types::{
     load_group_by_host, load_header_collapsed, load_hidden_sessions, load_inactive_hidden,
     load_rail_position, save_header_collapsed, save_hidden_sessions, save_inactive_hidden,
+    PortalSession,
 };
 use crate::components::{
-    ConfirmModal, ConfirmModalStyle, HelpOverlay, LaunchDialog, OnboardingTutorial,
-    TurnMetricsHeaderPill,
+    ConfirmModal, ConfirmModalStyle, HelpOverlay, LaunchDialog, OnboardingTutorial, ServiceMonitor,
 };
 use crate::hooks::{
     use_client_websocket, use_interrupt_hotkey, use_keyboard_nav, use_sessions, KeyboardNavConfig,
@@ -23,11 +23,10 @@ use crate::hooks::{
 use crate::pages::admin::AdminPage;
 use crate::pages::history::{HistoryBrowserPage, HistoryTranscriptPage};
 use crate::pages::settings::SettingsPage;
+use crate::portal_client::{use_portal, PortalClient, SessionKey};
 use crate::utils;
 use gloo::events::EventListener;
-use gloo_net::http::Request;
 use serde::Deserialize;
-use shared::SessionInfo;
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
@@ -79,6 +78,24 @@ fn use_mobile_dashboard() -> bool {
     *is_mobile
 }
 
+/// The session behind `key`, for page-level actions that must reach the
+/// portal it lives on.
+fn find_session(sessions: &[PortalSession], key: SessionKey) -> Option<&PortalSession> {
+    sessions.iter().find(|s| s.key == key)
+}
+
+/// The home portal plus each other portal the dashboard holds sessions on,
+/// once each.
+fn distinct_portals(home: PortalClient, sessions: &[PortalSession]) -> Vec<PortalClient> {
+    let mut portals = vec![home];
+    for session in sessions {
+        if !portals.iter().any(|p| p.conn() == session.portal.conn()) {
+            portals.push(session.portal.clone());
+        }
+    }
+    portals
+}
+
 #[function_component(DashboardPage)]
 pub fn dashboard_page() -> Html {
     let is_mobile_dashboard = use_mobile_dashboard();
@@ -88,6 +105,9 @@ pub fn dashboard_page() -> Html {
     let loading = sessions_hook.loading;
 
     let ws_hook = use_client_websocket();
+    let federation = use_context::<crate::federation::Federation>();
+    let home_portal = use_portal();
+    let home_user = home_portal.account_id();
     let server_shutdown_reason = ws_hook.shutdown_reason.clone();
     let update_available = ws_hook.update_available.clone();
     let bootstrap = use_dashboard_bootstrap();
@@ -132,7 +152,8 @@ pub fn dashboard_page() -> Html {
     // index — see `session_order` / issue #1094. The display index is derived
     // from this each render, so a reordered poll never bounces focus onto a
     // different session.
-    let session_state = use_reducer_eq(|| DashboardSessionState::new(load_hidden_sessions()));
+    let session_state =
+        use_reducer_eq(|| DashboardSessionState::new(load_hidden_sessions(home_user)));
     // Activity buffer: mutations don't trigger page re-renders.
     // SessionRail reads this on its own 100 ms tick instead.
     let activity_timestamps = use_memo((), |_| ActivityRef::default());
@@ -143,27 +164,32 @@ pub fn dashboard_page() -> Html {
     // desired-running and should stay visible while the launcher reconciles it.
     // Live model overlay for the pill's model watermark. The persisted
     // `last_model` remains the durable fallback when this trend window rolls.
-    let live_models: HashMap<Uuid, String> = ws_hook
+    // The metrics arrive on the home user channel, so they name home sessions.
+    let live_models: HashMap<SessionKey, String> = ws_hook
         .recent_turn_metrics
         .iter()
-        .filter_map(|m| m.model.clone().map(|model| (m.session_id, model)))
+        .filter_map(|m| {
+            m.model
+                .clone()
+                .map(|model| (SessionKey::home(m.session_id), model))
+        })
         .collect();
 
     // Per-session context-window fill from the dedicated durable latest-value
     // map. Rows without a usable window never erase a prior known gauge.
-    let context_fractions: HashMap<Uuid, f64> = ws_hook
+    let context_fractions: HashMap<SessionKey, f64> = ws_hook
         .latest_session_metrics
-        .values()
-        .filter_map(|m| m.context_fraction().map(|frac| (m.session_id, frac)))
+        .iter()
+        .filter_map(|(key, m)| m.context_fraction().map(|frac| (*key, frac)))
         .collect();
 
-    let active_sessions: Vec<SessionInfo> = {
-        let mut sorted: Vec<SessionInfo> = sessions.to_vec();
+    let active_sessions: Vec<PortalSession> = {
+        let mut sorted: Vec<PortalSession> = sessions.to_vec();
         // Overlay the live model onto the polled row so the watermark reflects
         // the current turn without waiting for the poll to catch up.
         for session in sorted.iter_mut() {
-            if let Some(model) = live_models.get(&session.id) {
-                session.last_model = Some(model.clone());
+            if let Some(model) = live_models.get(&session.key) {
+                session.info.last_model = Some(model.clone());
             }
         }
         // Total, deterministic order keyed down to the unique session id, so
@@ -177,9 +203,19 @@ pub fn dashboard_page() -> Html {
         // visible top-to-bottom rail (grouped when the pref is on). The rail's
         // host headers are inserted purely visually and carry no display index.
         if ui_state.group_by_host {
-            sorted.sort_by(session_order::session_display_cmp_grouped);
+            sorted.sort_by(|a, b| {
+                a.key
+                    .conn
+                    .cmp(&b.key.conn)
+                    .then_with(|| session_order::session_display_cmp_grouped(a, b))
+            });
         } else {
-            sorted.sort_by(session_order::session_display_cmp);
+            sorted.sort_by(|a, b| {
+                a.key
+                    .conn
+                    .cmp(&b.key.conn)
+                    .then_with(|| session_order::session_display_cmp(a, b))
+            });
         }
         sorted
     };
@@ -187,9 +223,14 @@ pub fn dashboard_page() -> Html {
     // Paused sessions follow the same frontend convention as manually hidden
     // sessions: they remain available in the hidden rail section but do not
     // participate in focus, activation, waiting counts, or keyboard rotation.
-    let effective_hidden_sessions: HashSet<Uuid> = {
+    let effective_hidden_sessions: HashSet<SessionKey> = {
         let mut hidden = session_state.hidden_sessions.clone();
-        hidden.extend(active_sessions.iter().filter(|s| s.paused).map(|s| s.id));
+        hidden.extend(
+            active_sessions
+                .iter()
+                .filter(|s| s.info.paused)
+                .map(|s| s.key),
+        );
         hidden
     };
 
@@ -205,31 +246,42 @@ pub fn dashboard_page() -> Html {
     // list lands (#1915). The per-view `is_awaiting` signal only exists once a
     // session hydrates, and background sessions now hydrate on a drip — without
     // this seed, a session blocked on a permission wouldn't show its red flag
-    // until its turn in the queue. One batched request; each view's own signal
-    // refines (and can clear) the flag as it hydrates.
+    // until its turn in the queue. One batched request per portal; each view's
+    // own signal refines (and can clear) the flag as it hydrates.
     {
         let session_state = session_state.clone();
-        use_effect_with(loading, move |is_loading| {
-            if !*is_loading {
-                spawn_local(async move {
-                    if let Ok(data) = utils::fetch_json::<shared::api::AgentSessionsResponse>(
-                        "/api/agent/sessions",
-                        utils::On401::Ignore,
-                    )
-                    .await
-                    {
-                        for session in data.sessions {
-                            if session.awaiting_permission {
-                                session_state.dispatch(DashboardSessionAction::SetAwaiting {
-                                    session_id: session.id,
-                                    awaiting: true,
-                                });
+        let portals = distinct_portals(home_portal.clone(), &sessions);
+        let loaded_connections = sessions_hook.loaded_connections.clone();
+        use_effect_with((portals.clone(), loaded_connections), move |(_, loaded)| {
+            let cancelled = std::rc::Rc::new(std::cell::Cell::new(false));
+            {
+                for portal in portals.into_iter().filter(|p| loaded.contains(&p.conn())) {
+                    let cancelled = cancelled.clone();
+                    let session_state = session_state.clone();
+                    spawn_local(async move {
+                        if let Ok(data) = portal
+                            .fetch_json::<shared::api::AgentSessionsResponse>(
+                                "/api/agent/sessions",
+                                utils::On401::Ignore,
+                            )
+                            .await
+                        {
+                            if cancelled.get() {
+                                return;
+                            }
+                            for session in data.sessions {
+                                if session.awaiting_permission {
+                                    session_state.dispatch(DashboardSessionAction::SetAwaiting {
+                                        session_id: portal.session_key(session.id),
+                                        awaiting: true,
+                                    });
+                                }
                             }
                         }
-                    }
-                });
+                    });
+                }
             }
-            || ()
+            move || cancelled.set(true)
         });
     }
 
@@ -240,7 +292,8 @@ pub fn dashboard_page() -> Html {
     // via the same `on_select_session` path a rail click uses, then clear the
     // target *and* strip the query (`navigator.replace(Route::Dashboard)`) so a
     // refresh or back-nav can't re-fire a stale selection. An unknown or
-    // inaccessible id simply never matches and is silently ignored.
+    // inaccessible id simply never matches and is silently ignored. Push
+    // notifications come from the home portal, so the id names a home session.
     let navigator = use_navigator();
     let location = use_location();
     let deep_link_target = use_state(move || {
@@ -248,6 +301,7 @@ pub fn dashboard_page() -> Html {
             .and_then(|loc| loc.query::<DeepLinkQuery>().ok())
             .and_then(|q| q.session)
             .and_then(|s| Uuid::parse_str(&s).ok())
+            .map(SessionKey::home)
     });
     {
         let on_select = focus.on_select_session.clone();
@@ -282,11 +336,15 @@ pub fn dashboard_page() -> Html {
     // the rail when the refresh lands.
     let on_delete = {
         let refresh = sessions_hook.refresh.clone();
-        Callback::from(move |session_id: Uuid| {
+        let sessions = sessions.clone();
+        Callback::from(move |key: SessionKey| {
+            let Some(portal) = find_session(&sessions, key).map(|s| s.portal.clone()) else {
+                return;
+            };
             let refresh = refresh.clone();
             spawn_local(async move {
-                let api_endpoint = utils::api_url(&format!("/api/sessions/{}", session_id));
-                match Request::delete(&api_endpoint).send().await {
+                let path = format!("/api/sessions/{}", key.id);
+                match portal.delete(&path).send().await {
                     Ok(response) if response.status() == 204 => {
                         refresh.emit(());
                     }
@@ -312,7 +370,7 @@ pub fn dashboard_page() -> Html {
     // rail kebab menu and the nav-mode `c` shortcut; persists to localStorage.
     let on_toggle_hidden = {
         let session_state = session_state.clone();
-        Callback::from(move |session_id: Uuid| {
+        Callback::from(move |session_id: SessionKey| {
             let hidden = !session_state.hidden_sessions.contains(&session_id);
             let mut set = session_state.hidden_sessions.clone();
             if hidden {
@@ -320,7 +378,7 @@ pub fn dashboard_page() -> Html {
             } else {
                 set.remove(&session_id);
             }
-            save_hidden_sessions(&set);
+            save_hidden_sessions(&set, home_user);
             session_state.dispatch(DashboardSessionAction::SetHidden { session_id, hidden });
         })
     };
@@ -388,6 +446,19 @@ pub fn dashboard_page() -> Html {
         let ui_state = ui_state.clone();
         Callback::from(move |_| ui_state.dispatch(DashboardUiAction::CloseHistorySession))
     };
+    // A restore from the history overlay lands on the restored session.
+    let on_history_restored = {
+        let ui_state = ui_state.clone();
+        let session_state = session_state.clone();
+        let refresh = sessions_hook.refresh.clone();
+        Callback::from(move |session_id: Uuid| {
+            refresh.emit(());
+            ui_state.dispatch(DashboardUiAction::CloseHistory);
+            session_state.dispatch(DashboardSessionAction::FocusAndActivate(SessionKey::home(
+                session_id,
+            )));
+        })
+    };
 
     let close_settings = {
         let ui_state = ui_state.clone();
@@ -406,7 +477,7 @@ pub fn dashboard_page() -> Html {
     // Leave session callbacks
     let on_leave = {
         let ui_state = ui_state.clone();
-        Callback::from(move |session_id: Uuid| {
+        Callback::from(move |session_id: SessionKey| {
             ui_state.dispatch(DashboardUiAction::RequestLeave(session_id));
         })
     };
@@ -421,18 +492,20 @@ pub fn dashboard_page() -> Html {
     let on_confirm_leave = {
         let ui_state = ui_state.clone();
         let refresh = sessions_hook.refresh.clone();
+        let sessions = sessions.clone();
         Callback::from(move |_| {
-            if let Some(session_id) = ui_state.pending_leave {
+            if let Some(key) = ui_state.pending_leave {
+                let Some(portal) = find_session(&sessions, key).map(|s| s.portal.clone()) else {
+                    ui_state.dispatch(DashboardUiAction::ClearPendingLeave);
+                    return;
+                };
                 let refresh = refresh.clone();
                 let ui_state = ui_state.clone();
-                let user_id = current_user_id;
+                let user_id = portal.account_id();
                 spawn_local(async move {
                     if let Some(user_id) = user_id {
-                        let api_endpoint = utils::api_url(&format!(
-                            "/api/sessions/{}/members/{}",
-                            session_id, user_id
-                        ));
-                        match Request::delete(&api_endpoint).send().await {
+                        let path = format!("/api/sessions/{}/members/{}", key.id, user_id);
+                        match portal.delete(&path).send().await {
                             Ok(response) if response.status() == 204 => {
                                 refresh.emit(());
                             }
@@ -477,17 +550,20 @@ pub fn dashboard_page() -> Html {
         })
     };
 
+    // The launch dialog launches on the home portal.
     let on_launch_success = {
         let session_state = session_state.clone();
         Callback::from(move |session_id: Uuid| {
-            session_state.dispatch(DashboardSessionAction::FocusAndActivate(session_id));
+            session_state.dispatch(DashboardSessionAction::FocusAndActivate(SessionKey::home(
+                session_id,
+            )));
         })
     };
 
     // Session state callbacks
     let on_awaiting_change = {
         let session_state = session_state.clone();
-        Callback::from(move |(session_id, is_awaiting): (Uuid, bool)| {
+        Callback::from(move |(session_id, is_awaiting): (SessionKey, bool)| {
             let currently_awaiting = session_state.awaiting_sessions.contains(&session_id);
             if currently_awaiting == is_awaiting {
                 return;
@@ -504,7 +580,7 @@ pub fn dashboard_page() -> Html {
 
     let on_connected_change = {
         let session_state = session_state.clone();
-        Callback::from(move |(session_id, connected): (Uuid, bool)| {
+        Callback::from(move |(session_id, connected): (SessionKey, bool)| {
             session_state.dispatch(DashboardSessionAction::SetConnected {
                 session_id,
                 connected,
@@ -513,12 +589,19 @@ pub fn dashboard_page() -> Html {
     };
 
     let on_stop = {
-        Callback::from(move |session_id: Uuid| {
+        let sessions = sessions.clone();
+        Callback::from(move |key: SessionKey| {
+            let Some(portal) = find_session(&sessions, key).map(|s| s.portal.clone()) else {
+                return;
+            };
+            if !portal.can_write() {
+                return;
+            }
             spawn_local(async move {
-                let url = utils::api_url(&format!("/api/sessions/{}/stop", session_id));
-                match Request::post(&url).send().await {
+                let path = format!("/api/sessions/{}/stop", key.id);
+                match portal.post(&path).send().await {
                     Ok(resp) if resp.status() == 202 => {
-                        log::info!("Stop request sent for session {}", session_id);
+                        log::info!("Stop request sent for session {}", key.id);
                     }
                     Ok(resp) => {
                         log::error!("Failed to stop session: status {}", resp.status());
@@ -534,13 +617,20 @@ pub fn dashboard_page() -> Html {
     let on_toggle_pause = {
         let refresh = sessions_hook.refresh.clone();
         let session_state = session_state.clone();
-        Callback::from(move |(session_id, pause): (Uuid, bool)| {
+        let sessions = sessions.clone();
+        Callback::from(move |(session_id, pause): (SessionKey, bool)| {
+            let Some(portal) = find_session(&sessions, session_id).map(|s| s.portal.clone()) else {
+                return;
+            };
+            if !portal.can_write() {
+                return;
+            }
             let refresh = refresh.clone();
             let session_state = session_state.clone();
             spawn_local(async move {
                 let action = if pause { "pause" } else { "resume" };
-                let url = utils::api_url(&format!("/api/sessions/{}/{}", session_id, action));
-                match Request::post(&url).send().await {
+                let path = format!("/api/sessions/{}/{}", session_id.id, action);
+                match portal.post(&path).send().await {
                     Ok(resp) if resp.status() == 202 => {
                         let mut set = session_state.hidden_sessions.clone();
                         if pause {
@@ -548,7 +638,7 @@ pub fn dashboard_page() -> Html {
                         } else {
                             set.remove(&session_id);
                         }
-                        save_hidden_sessions(&set);
+                        save_hidden_sessions(&set, home_user);
                         session_state.dispatch(DashboardSessionAction::SetHidden {
                             session_id,
                             hidden: pause,
@@ -559,12 +649,12 @@ pub fn dashboard_page() -> Html {
                         log::error!(
                             "Failed to {} session {}: status {}",
                             action,
-                            session_id,
+                            session_id.id,
                             resp.status()
                         );
                     }
                     Err(e) => {
-                        log::error!("Failed to {} session {}: {:?}", action, session_id, e);
+                        log::error!("Failed to {} session {}: {:?}", action, session_id.id, e);
                     }
                 }
             });
@@ -582,7 +672,7 @@ pub fn dashboard_page() -> Html {
 
     let on_message_sent = {
         let session_state = session_state.clone();
-        Callback::from(move |current_session_id: Uuid| {
+        Callback::from(move |current_session_id: SessionKey| {
             session_state.dispatch(DashboardSessionAction::MessageSent(current_session_id));
         })
     };
@@ -591,7 +681,7 @@ pub fn dashboard_page() -> Html {
         let activity_timestamps = (*activity_timestamps).clone();
         Callback::from(
             move |(session_id, tag, timestamp): (
-                Uuid,
+                SessionKey,
                 crate::pages::dashboard::session_view::ActivityTag,
                 f64,
             )| {
@@ -603,7 +693,7 @@ pub fn dashboard_page() -> Html {
     let on_agent_message = {
         let broadcasts = (*agent_message_broadcasts).clone();
         Callback::from(
-            move |(from_session_id, to_session_id, timestamp): (Uuid, Uuid, f64)| {
+            move |(from_session_id, to_session_id, timestamp): (SessionKey, SessionKey, f64)| {
                 broadcasts.push(AgentMessageBroadcast {
                     from_session_id,
                     to_session_id,
@@ -618,18 +708,18 @@ pub fn dashboard_page() -> Html {
         let sessions = sessions.clone();
         Callback::from(
             move |(session_id, branch, pr_url, repo_url, open_prs): (
-                Uuid,
+                SessionKey,
                 Option<String>,
                 Option<String>,
                 Option<String>,
                 Vec<shared::PrRef>,
             )| {
                 let mut updated = sessions.clone();
-                if let Some(session) = updated.iter_mut().find(|s| s.id == session_id) {
-                    session.git_branch = branch;
-                    session.pr_url = pr_url;
-                    session.repo_url = repo_url;
-                    session.open_prs = open_prs;
+                if let Some(session) = updated.iter_mut().find(|s| s.key == session_id) {
+                    session.info.git_branch = branch;
+                    session.info.pr_url = pr_url;
+                    session.info.repo_url = repo_url;
+                    session.info.open_prs = open_prs;
                 }
                 set_sessions.emit(updated);
             },
@@ -637,12 +727,12 @@ pub fn dashboard_page() -> Html {
     };
 
     // Computed values.
-    // The rail's red "needs response" outline and this count show sessions still
-    // awaiting a reply that the user hasn't looked at yet — awaiting minus the
+    // The rail's red "needs response" outline and the tab-title count show sessions
+    // still awaiting a reply that the user hasn't looked at yet — awaiting minus the
     // ones whose current awaiting state has been seen (see DashboardSessionState
     // `seen_awaiting`). Viewing a session clears it here without disturbing the
     // underlying "agent is parked" flag.
-    let effective_awaiting: HashSet<Uuid> = session_state
+    let effective_awaiting: HashSet<SessionKey> = session_state
         .awaiting_sessions
         .difference(&session_state.seen_awaiting)
         .copied()
@@ -663,7 +753,7 @@ pub fn dashboard_page() -> Html {
             .and_then(|focused_id| {
                 active_sessions
                     .iter()
-                    .position(|session| session.id == focused_id)
+                    .position(|session| session.key == focused_id)
             })
             .into_iter()
             .collect()
@@ -699,8 +789,57 @@ pub fn dashboard_page() -> Html {
         });
     }
 
+    // Mobile picker: live sessions first, then paused/stopped/hidden ones in
+    // their own group at the bottom. Stopping a session pauses it, so
+    // `effective_hidden_sessions` (hidden ∪ paused) covers all three.
+    let (mobile_live, mobile_dormant): (Vec<&PortalSession>, Vec<&PortalSession>) = active_sessions
+        .iter()
+        .partition(|entry| !effective_hidden_sessions.contains(&entry.key));
+    let mobile_option = |entry: &&PortalSession| {
+        let session = &entry.info;
+        let connection = if session.paused {
+            "paused"
+        } else if effective_hidden_sessions.contains(&entry.key) {
+            "hidden"
+        } else if session_state.connected_sessions.contains(&entry.key) {
+            "connected"
+        } else {
+            session.status.as_str()
+        };
+        let location = if session.hostname.is_empty() {
+            session.working_directory.as_str()
+        } else {
+            session.hostname.as_str()
+        };
+        html! {
+            <option value={entry.key.to_string()}>
+                { format!("{} — {} ({connection}){}", session.session_name, location, if entry.portal.is_linked() { format!(" · {} · {}", entry.portal.origin(), entry.portal.account_label().unwrap_or("")) } else { String::new() }) }
+            </option>
+        }
+    };
+    let mobile_options = html! {
+        <>
+            { for mobile_live.iter().map(mobile_option) }
+            if !mobile_dormant.is_empty() {
+                <optgroup label="Paused, stopped & hidden — selecting resumes">
+                    { for mobile_dormant.iter().map(mobile_option) }
+                </optgroup>
+            }
+        </>
+    };
+
     html! {
         <div class="focus-flow-container" onkeydown={keyboard_nav.on_keydown.clone()} tabindex="0">
+            if let Some(registry) = &federation {
+                if !registry.rows.is_empty() {
+                    <aside class="linked-connections" aria-label="Linked portal connections">
+                        { for registry.rows.iter().map(|row| html! {
+                            <div class="linked-connection-status"><strong>{&row.origin}</strong>{" · "}{&row.email}{" — "}{row.display_status()}</div>
+                        }) }
+                    </aside>
+                }
+            }
+
             // Update-available banner (post-reconnect, server version advanced)
             // takes precedence over the transient shutdown banner.
             {
@@ -740,26 +879,19 @@ pub fn dashboard_page() -> Html {
 
             // Header. The collapse toggle shrinks it to a slim full-width
             // pull strip (title and actions hidden) for vertical space —
-            // most valuable on phones, available everywhere. The strip tints
-            // when sessions await permission so the collapsed header never
-            // hides that signal.
+            // most valuable on phones, available everywhere.
             <header class={classes!(
                 "focus-flow-header",
                 ui_state.header_collapsed.then_some("collapsed"),
-                (ui_state.header_collapsed && waiting_count > 0).then_some("has-waiting"),
             )}>
                 <h1>{ app_title.clone() }</h1>
                 <div class="header-actions">
-                    <TurnMetricsHeaderPill metrics={ws_hook.recent_turn_metrics.clone()} />
                     {
-                        if waiting_count > 0 {
-                            html! {
-                                <span class="waiting-badge">
-                                    { format!("{} waiting", waiting_count) }
-                                </span>
-                            }
-                        } else {
+                        // Machine stats are a desktop affordance; phones get the header space back.
+                        if is_mobile_dashboard {
                             html! {}
+                        } else {
+                            html! { <ServiceMonitor services={ws_hook.service_stats.clone()} cpu_history={ws_hook.service_cpu_history.clone()} /> }
                         }
                     }
                     <button
@@ -767,7 +899,15 @@ pub fn dashboard_page() -> Html {
                         onclick={toggle_launch_dialog.clone()}
                         title={if ui_state.show_launch_dialog { "Close" } else { "Launch a session or install agent-portal" }}
                     >
-                        { if ui_state.show_launch_dialog { "Close" } else { "+ Launch Session" } }
+                        {
+                            if ui_state.show_launch_dialog {
+                                "Close"
+                            } else if is_mobile_dashboard {
+                                "+ New"
+                            } else {
+                                "+ Launch Session"
+                            }
+                        }
                     </button>
                     {
                         if is_admin {
@@ -808,17 +948,7 @@ pub fn dashboard_page() -> Html {
                     title={if ui_state.header_collapsed { "Expand header" } else { "Collapse header" }}
                     aria-label={if ui_state.header_collapsed { "Expand header" } else { "Collapse header" }}
                 >
-                    {
-                        if ui_state.header_collapsed {
-                            if waiting_count > 0 {
-                                format!("▾ {waiting_count} waiting")
-                            } else {
-                                "▾".to_string()
-                            }
-                        } else {
-                            "▴".to_string()
-                        }
-                    }
+                    { if ui_state.header_collapsed { "▾" } else { "▴" } }
                 </button>
             </header>
 
@@ -858,44 +988,36 @@ pub fn dashboard_page() -> Html {
                             </label>
                             <select
                                 id="mobile-session-select"
-                                value={session_state.focused_id.map(|id| id.to_string()).unwrap_or_default()}
+                                value={session_state.focused_id.map(|key| key.to_string()).unwrap_or_default()}
                                 onchange={{
                                     let sessions = active_sessions.clone();
+                                    let hidden = session_state.hidden_sessions.clone();
                                     let on_select = focus.on_select_session.clone();
                                     let on_clear = focus.on_clear_selection.clone();
+                                    let on_toggle_pause = on_toggle_pause.clone();
+                                    let on_toggle_hidden = on_toggle_hidden.clone();
                                     Callback::from(move |event: Event| {
                                         let value = event.target_unchecked_into::<HtmlSelectElement>().value();
                                         if value.is_empty() {
                                             on_clear.emit(());
-                                        } else if let Ok(id) = Uuid::parse_str(&value) {
-                                            if let Some(index) = sessions.iter().position(|session| session.id == id) {
-                                                on_select.emit(index);
+                                        } else if let Some(index) = sessions.iter().position(|session| session.key.to_string() == value) {
+                                            // Picking a dormant session brings it back: resume
+                                            // a paused/stopped one (which also unhides it),
+                                            // or just unhide a hidden one.
+                                            let entry = &sessions[index];
+                                            if entry.info.paused {
+                                                on_toggle_pause.emit((entry.key, false));
+                                            } else if hidden.contains(&entry.key) {
+                                                on_toggle_hidden.emit(entry.key);
                                             }
+                                            on_select.emit(index);
                                         }
                                     })
                                 }}
                                 aria-label="Select a session to open"
                             >
                                 <option value="">{ "Select a session…" }</option>
-                                { for active_sessions.iter().map(|session| {
-                                    let connection = if session.paused {
-                                        "paused"
-                                    } else if session_state.connected_sessions.contains(&session.id) {
-                                        "connected"
-                                    } else {
-                                        session.status.as_str()
-                                    };
-                                    let location = if session.hostname.is_empty() {
-                                        session.working_directory.as_str()
-                                    } else {
-                                        session.hostname.as_str()
-                                    };
-                                    html! {
-                                        <option value={session.id.to_string()}>
-                                            { format!("{} — {} ({connection})", session.session_name, location) }
-                                        </option>
-                                    }
-                                }) }
+                                { mobile_options }
                             </select>
                             if session_state.focused_id.is_none() {
                                 <p>{ "Select a session to load its history and connect to its live stream." }</p>
@@ -903,6 +1025,7 @@ pub fn dashboard_page() -> Html {
                         </div>
                     } else {
                     <SessionRail
+                        on_renamed={sessions_hook.refresh.clone()}
                         sessions={active_sessions.clone()}
                         focused_index={focus.focused_index}
                         awaiting_sessions={effective_awaiting.clone()}
@@ -913,6 +1036,7 @@ pub fn dashboard_page() -> Html {
                         nav_mode={keyboard_nav.nav_mode}
                         activity_timestamps={(*activity_timestamps).clone()}
                         context_fractions={context_fractions.clone()}
+                        progress_fractions={ws_hook.session_progress.clone()}
                         broadcasts={(*agent_message_broadcasts).clone()}
                         rail_position={ui_state.rail_position}
                         server_version={server_version.clone()}
@@ -941,15 +1065,17 @@ pub fn dashboard_page() -> Html {
                             session_view_order.iter().filter_map(|&index| {
                                 let session = active_sessions.get(index)?;
                                 let is_focused = index == focus.focused_index;
-                                let is_activated = session_state.activated_sessions.contains(&session.id);
+                                let is_activated = session_state.activated_sessions.contains(&session.key);
                                 Some(if is_activated {
                                     html! {
                                         <div
-                                            key={session.id.to_string()}
+                                            key={session.key.to_string()}
                                             class={classes!("session-view-wrapper", if is_focused { "focused" } else { "hidden" })}
                                         >
                                             <SessionView
-                                                session={session.clone()}
+                                                on_renamed={sessions_hook.refresh.clone()}
+                                                session={session.info.clone()}
+                                                portal={session.portal.clone()}
                                                 focused={is_focused}
                                                 on_awaiting_change={on_awaiting_change.clone()}
                                                 on_connected_change={on_connected_change.clone()}
@@ -957,7 +1083,7 @@ pub fn dashboard_page() -> Html {
                                                 on_branch_change={on_branch_change.clone()}
                                                 on_activity={on_activity.clone()}
                                                 on_agent_message={on_agent_message.clone()}
-                                                current_user_id={current_user_id.map(|id| id.to_string())}
+                                                current_user_id={session.portal.account_id().map(|id| id.to_string())}
                                                 interrupt_signal={focus.interrupt_signal}
                                                 jump_to_latest_signal={focus.jump_to_latest_signal}
                                                 stt_enabled={stt_enabled}
@@ -967,7 +1093,7 @@ pub fn dashboard_page() -> Html {
                                 } else {
                                     html! {
                                         <div
-                                            key={session.id.to_string()}
+                                            key={session.key.to_string()}
                                             class="session-view-wrapper hidden"
                                         />
                                     }
@@ -1070,6 +1196,8 @@ pub fn dashboard_page() -> Html {
                             {user}
                             {session}
                             on_back={close_history_session.clone()}
+                            {current_user_id}
+                            on_restored={on_history_restored.clone()}
                         />
                     } else {
                         <HistoryBrowserPage
@@ -1088,9 +1216,8 @@ pub fn dashboard_page() -> Html {
             // Leave confirmation modal
             {
                 if let Some(session_id) = ui_state.pending_leave {
-                    let session_name = sessions.iter()
-                        .find(|s| s.id == session_id)
-                        .map(|s| s.session_name.as_str())
+                    let session_name = find_session(&sessions, session_id)
+                        .map(|s| s.info.session_name.as_str())
                         .unwrap_or("this session");
 
                     html! {

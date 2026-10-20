@@ -1,5 +1,4 @@
 use gloo::events::EventListener;
-use gloo_net::http::Request;
 use shared::api::{
     AddMemberRequest, SessionMemberInfo, SessionMembersResponse, UpdateMemberRoleRequest,
 };
@@ -11,6 +10,7 @@ use yew::prelude::*;
 
 use crate::components::DismissibleBackdrop;
 use crate::hooks::escape_listener;
+use crate::portal_client::portal_from_context;
 use crate::utils::{self, On401};
 
 #[derive(Properties, PartialEq)]
@@ -72,12 +72,14 @@ impl Component for ShareDialog {
                 self.loading = true;
                 let session_id = ctx.props().session_id;
                 let link = ctx.link().clone();
+                let portal = portal_from_context(ctx);
                 spawn_local(async move {
-                    match utils::fetch_json::<SessionMembersResponse>(
-                        &format!("/api/sessions/{}/members", session_id),
-                        On401::Ignore,
-                    )
-                    .await
+                    match portal
+                        .fetch_json::<SessionMembersResponse>(
+                            &format!("/api/sessions/{}/members", session_id),
+                            On401::Ignore,
+                        )
+                        .await
                     {
                         Ok(data) => {
                             link.send_message(ShareDialogMsg::MembersLoaded(data.members));
@@ -110,11 +112,12 @@ impl Component for ShareDialog {
                 let email = self.email_input.trim().to_string();
                 let role = self.new_role;
                 let link = ctx.link().clone();
+                let request =
+                    portal_from_context(ctx).post(&format!("/api/sessions/{}/members", session_id));
 
                 spawn_local(async move {
-                    let url = utils::api_url(&format!("/api/sessions/{}/members", session_id));
                     let body = AddMemberRequest { email, role };
-                    match utils::send_json(Request::post(&url), &body).await {
+                    match utils::send_json(request, &body).await {
                         Ok(response) if response.status() == 201 => {
                             link.send_message(ShareDialogMsg::MemberAdded);
                         }
@@ -128,7 +131,7 @@ impl Component for ShareDialog {
                                 .text()
                                 .await
                                 .ok()
-                                .filter(|t| !t.is_empty())
+                                .filter(|t| shared::strings::is_non_empty(t))
                                 .unwrap_or_else(|| "Failed to add member".to_string());
                             link.send_message(ShareDialogMsg::SetError(msg));
                         }
@@ -151,12 +154,10 @@ impl Component for ShareDialog {
             ShareDialogMsg::RemoveMember(user_id) => {
                 let session_id = ctx.props().session_id;
                 let link = ctx.link().clone();
+                let request = portal_from_context(ctx)
+                    .delete(&format!("/api/sessions/{}/members/{}", session_id, user_id));
                 spawn_local(async move {
-                    let url = utils::api_url(&format!(
-                        "/api/sessions/{}/members/{}",
-                        session_id, user_id
-                    ));
-                    match Request::delete(&url).send().await {
+                    match request.send().await {
                         Ok(response) if response.status() == 204 => {
                             link.send_message(ShareDialogMsg::MemberRemoved(user_id));
                         }
@@ -183,13 +184,11 @@ impl Component for ShareDialog {
                 let session_id = ctx.props().session_id;
                 let link = ctx.link().clone();
                 let role = new_role;
+                let request = portal_from_context(ctx)
+                    .patch(&format!("/api/sessions/{}/members/{}", session_id, user_id));
                 spawn_local(async move {
-                    let url = utils::api_url(&format!(
-                        "/api/sessions/{}/members/{}",
-                        session_id, user_id
-                    ));
                     let body = UpdateMemberRoleRequest { role };
-                    match utils::send_json(Request::patch(&url), &body).await {
+                    match utils::send_json(request, &body).await {
                         Ok(response) if response.ok() => {
                             link.send_message(ShareDialogMsg::RoleChanged(user_id, role));
                         }

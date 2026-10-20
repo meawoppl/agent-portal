@@ -11,7 +11,7 @@ use std::sync::Arc;
 use axum::{
     body::Bytes,
     extract::{Path, Query, State},
-    http::{header, HeaderMap, HeaderValue},
+    http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
@@ -21,8 +21,9 @@ use tracing::{error, info};
 use uuid::Uuid;
 
 use shared::api::{
-    AgentSessionInfo, AgentSessionsResponse, SendAgentMessageRequest, SendAgentMessageResponse,
-    SessionActivityState, ShowMediaResponse,
+    AgentProgressRequest, AgentSessionInfo, AgentSessionsResponse, ProgressBar,
+    SendAgentMessageRequest, SendAgentMessageResponse, SessionActivityState, ShowMediaResponse,
+    MAX_PROGRESS_ID_LEN, MAX_PROGRESS_LABEL_LEN,
 };
 use shared::media::MediaKind;
 use shared::{AgentType, PortalContent, PortalMessage, ServerToClient, SessionStatus};
@@ -41,6 +42,12 @@ pub(crate) fn resolve_user(
 ) -> Result<Uuid, AppError> {
     crate::auth::extract_user_id(app_state, Some(headers), cookies)
 }
+
+/// Raw rows a peek reads before condensing thinking bursts. The request counts
+/// condensed entries, and one burst can be hundreds of markers, so the read is
+/// a fixed budget rather than a multiple of the limit: a tool call followed by
+/// a long burst still shows up. Older history is `message history`'s job.
+const PEEK_RAW_ROWS: i64 = 400;
 
 /// Look up a display name for `user_id`, keeping this path's `"portal"`
 /// fallback for unknown users. Resolution itself lives in
@@ -146,7 +153,7 @@ fn live_session_activity_state(
     })
 }
 
-fn turn_signal_activity_state(agent_type: &str, content: &str) -> SessionActivityState {
+pub(crate) fn turn_signal_activity_state(agent_type: &str, content: &str) -> SessionActivityState {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(content) else {
         return SessionActivityState::Busy;
     };
@@ -172,9 +179,16 @@ fn turn_signal_value_is_busy(agent_type: &str, value: &serde_json::Value) -> boo
             .get("payload_type")
             .and_then(|value| value.as_str())
             .is_some_and(|kind| kind.starts_with("run.terminal.")),
+        "antigravity" => kind != Some("antigravity_turn_completed"),
         _ => !matches!(
             kind,
-            Some("result" | "turn.completed" | "turn.failed" | "error")
+            Some(
+                "result"
+                    | "turn.completed"
+                    | "turn.failed"
+                    | "antigravity_turn_completed"
+                    | "error"
+            )
         ),
     }
 }
@@ -252,9 +266,10 @@ pub async fn peek_agent_messages(
     if let Some(since) = since {
         rows_query = rows_query.filter(messages::created_at.gt(since));
     }
+    // `limit` counts condensed entries, so read the fixed raw budget.
     let rows: Vec<crate::models::Message> = rows_query
         .order(messages::created_at.desc())
-        .limit(limit)
+        .limit(PEEK_RAW_ROWS)
         .load(&mut conn)?;
 
     let total_messages: i64 = messages::table
@@ -263,19 +278,22 @@ pub async fn peek_agent_messages(
         .get_result(&mut conn)?;
 
     // Newest-first from the query; the wire contract is oldest → newest.
-    let peek_messages: Vec<shared::api::PeekMessage> = rows
+    let summarized = rows
         .into_iter()
         .rev()
         .map(|m| {
-            super::peek_summary::summarize_message(
+            let estimate = super::peek_summary::thinking_estimate(&m.agent_type, &m.content);
+            let message = super::peek_summary::summarize_message(
                 m.id,
                 &m.agent_type,
                 &m.role,
                 &m.content,
                 m.created_at,
-            )
+            );
+            (message, estimate)
         })
         .collect();
+    let peek_messages = super::peek_summary::newest_entries(summarized, limit as usize);
 
     // Status header — same signals as the list endpoint, scoped to one session.
     let connected = app_state
@@ -450,12 +468,7 @@ pub async fn send_agent_message(
     // agent-facing text, and the frontend renders the typed event directly.
     // The human web page sends no `from`, so fall back to a plain text portal
     // message with the sender display name in the prompt text.
-    let content = match req
-        .from
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| shared::strings::is_non_empty(s))
-    {
+    let content = match shared::strings::trimmed_non_blank(req.from.as_deref()) {
         Some(from) => {
             let sender_agent = from
                 .parse::<Uuid>()
@@ -697,6 +710,63 @@ pub async fn show_media(
         content_type,
         persisted,
     }))
+}
+
+/// `POST /api/agent/sessions/{id}/progress` — `agent-portal progress`. Creates,
+/// updates, or clears one of the session's live progress bars and pushes the
+/// resulting set to its web clients. Restricted to owners/editors: a viewer
+/// must not be able to forge or clear another user's session UI. Nothing is persisted: bars are live
+/// status, held in memory by the session manager.
+pub async fn post_agent_progress(
+    State(app_state): State<Arc<AppState>>,
+    Path(target_id): Path<Uuid>,
+    headers: HeaderMap,
+    cookies: Cookies,
+    Json(req): Json<AgentProgressRequest>,
+) -> Result<StatusCode, AppError> {
+    let user_id = resolve_user(&app_state, &headers, &cookies)?;
+
+    let id = shared::strings::trimmed_non_blank(Some(&req.id))
+        .ok_or(AppError::BadRequest("progress id must not be blank"))?
+        .to_string();
+    if id.len() > MAX_PROGRESS_ID_LEN {
+        return Err(AppError::BadRequest("progress id is too long"));
+    }
+    let label = shared::strings::trimmed_non_blank(req.label.as_deref()).map(str::to_string);
+    if label
+        .as_ref()
+        .is_some_and(|l| l.len() > MAX_PROGRESS_LABEL_LEN)
+    {
+        return Err(AppError::BadRequest("progress label is too long"));
+    }
+    if req.fraction.is_some_and(|f| !f.is_finite()) {
+        return Err(AppError::BadRequest("progress fraction must be finite"));
+    }
+
+    let mut conn = app_state.conn()?;
+    crate::handlers::session_access::verify_session_mutator(&mut conn, target_id, user_id)?;
+    // The store remembers who to tell about the rail pill; it has no DB of its
+    // own for the sweep to look members up with.
+    let members: Vec<Uuid> = crate::schema::session_members::table
+        .filter(crate::schema::session_members::session_id.eq(target_id))
+        .select(crate::schema::session_members::user_id)
+        .load(&mut conn)?;
+    drop(conn);
+
+    let manager = &app_state.session_manager;
+    if req.clear {
+        manager.clear_agent_progress(target_id, members, &id);
+    } else {
+        let bar = ProgressBar {
+            id,
+            label,
+            fraction: req.fraction.map(|f| f.clamp(0.0, 1.0)),
+        };
+        manager
+            .set_agent_progress(target_id, members, bar)
+            .map_err(|_| AppError::Conflict("too many progress bars; clear one first"))?;
+    }
+    Ok(StatusCode::NO_CONTENT)
 }
 
 fn pending_input_count(

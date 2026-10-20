@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2107 - Show performance charts per model</text>
+<text x="55" y="108" font-family="sans-serif" font-size="34" fill="#e6e9f5">All groups used to average models together; now the SVG chart builds one series per model/tier.</text>
+<path d="M55 178 H1945 M1000 195 V1130" stroke="#565f89" fill="none"/>
+<text x="55" y="235" font-family="sans-serif" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1055" y="235" font-family="sans-serif" font-size="22" fill="#9ece6a">AFTER</text>
+
+<g>
+<rect x="55" y="285" width="870" height="215" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="327" font-family="sans-serif" font-size="26" fill="#f7768e">metric_points grouped only by time</text>
+<text x="79" y="371" font-family="monospace" font-size="23" fill="#c0caf5">BTreeMap&lt;bucket_start, Vec&lt;MetricBucket&gt;&gt;</text>
+<text x="79" y="407" font-family="sans-serif" font-size="23" fill="#c0caf5">All models in the same bucket became one weighted average.</text>
+<path d="M150 455 H850" stroke="#565f89" fill="none"/>
+<path d="M170 448 C340 410 570 438 820 396" stroke="#e0af68" fill="none" stroke-width="7" stroke-linecap="round"/>
+<text x="170" y="482" font-family="sans-serif" font-size="22" fill="#e0af68">single aggregate trace</text>
+</g>
+
+<g>
+<rect x="1055" y="285" width="870" height="215" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="327" font-family="sans-serif" font-size="26" fill="#9ece6a">metric_series groups by model key</text>
+<text x="1079" y="371" font-family="monospace" font-size="23" fill="#c0caf5">(GroupKey, bucket_start) -> Vec&lt;MetricBucket&gt;</text>
+<text x="1079" y="407" font-family="sans-serif" font-size="23" fill="#c0caf5">All groups renders separate colored lines per model/tier.</text>
+<path d="M1150 455 H1850" stroke="#565f89" fill="none"/>
+<path d="M1170 448 C1340 410 1570 438 1820 396" stroke="#7aa2f7" fill="none" stroke-width="6" stroke-linecap="round"/>
+<path d="M1170 420 C1340 460 1570 405 1820 450" stroke="#9ece6a" fill="none" stroke-width="6" stroke-linecap="round"/>
+<text x="1170" y="482" font-family="sans-serif" font-size="22" fill="#7aa2f7">model A</text>
+<text x="1300" y="482" font-family="sans-serif" font-size="22" fill="#9ece6a">model B</text>
+</g>
+
+<g>
+<rect x="55" y="585" width="870" height="215" rx="12" fill="#1e202e" stroke="#e0af68"/>
+<text x="79" y="627" font-family="sans-serif" font-size="26" fill="#e0af68">All groups hid model differences</text>
+<text x="79" y="671" font-family="sans-serif" font-size="23" fill="#c0caf5">Throughput, TTFT, cache, and cost each received one</text>
+<text x="79" y="707" font-family="sans-serif" font-size="23" fill="#c0caf5">Point vector after scoped_buckets(..., GroupBy::All).</text>
+<path d="M245 750 H735" stroke="#e0af68" fill="none" stroke-width="5"/>
+<path d="M245 750 l18 -12 M245 750 l18 12 M735 750 l-18 -12 M735 750 l-18 12" stroke="#e0af68" fill="none" stroke-width="5"/>
+</g>
+
+<g>
+<rect x="1055" y="585" width="870" height="215" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="627" font-family="sans-serif" font-size="26" fill="#9ece6a">Shared x-axis, sparse points preserved</text>
+<text x="1079" y="671" font-family="sans-serif" font-size="23" fill="#c0caf5">A sorted BTreeSet of bucket_start values aligns every</text>
+<text x="1079" y="707" font-family="sans-serif" font-size="23" fill="#c0caf5">series even when one model is missing a bucket.</text>
+<path d="M1245 750 H1735" stroke="#565f89" fill="none" stroke-width="3"/>
+<circle cx="1290" cy="735" r="8" fill="#7aa2f7"/>
+<circle cx="1430" cy="728" r="8" fill="#7aa2f7"/>
+<circle cx="1710" cy="715" r="8" fill="#7aa2f7"/>
+<circle cx="1290" cy="775" r="8" fill="#9ece6a"/>
+<circle cx="1570" cy="768" r="8" fill="#9ece6a"/>
+<circle cx="1710" cy="760" r="8" fill="#9ece6a"/>
+</g>
+
+<g>
+<rect x="55" y="900" width="870" height="140" rx="12" fill="#1e202e" stroke="#a9b1d6"/>
+<text x="79" y="942" font-family="sans-serif" font-size="26" fill="#a9b1d6">Selected model filter already worked</text>
+<text x="79" y="986" font-family="sans-serif" font-size="23" fill="#c0caf5">GroupBy::Pair scoped the input buckets before plotting.</text>
+</g>
+
+<g>
+<rect x="1055" y="900" width="870" height="140" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="942" font-family="sans-serif" font-size="26" fill="#9ece6a">Tests lock both modes</text>
+<text x="1079" y="986" font-family="sans-serif" font-size="23" fill="#c0caf5">All groups returns two series; GroupBy::Pair returns one.</text>
+</g>
+
+<text x="55" y="1172" font-family="sans-serif" font-size="22" fill="#a9b1d6">Scope: chart rendering only; the metrics API and bucket aggregation query remain unchanged.</text>
+</svg>

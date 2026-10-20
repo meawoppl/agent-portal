@@ -72,7 +72,7 @@ pub(crate) fn handle_codex_server_message(
     (ok, false)
 }
 
-fn turn_status_label(status: &codex_codes::TurnStatus) -> &'static str {
+pub(crate) fn turn_status_label(status: &codex_codes::TurnStatus) -> &'static str {
     match status {
         codex_codes::TurnStatus::Completed => "completed",
         codex_codes::TurnStatus::Interrupted => "interrupted",
@@ -178,6 +178,35 @@ mod tests {
                     assert_eq!(value["type"], "turn.completed");
                     assert_eq!(value["status"], status);
                     assert_eq!(value["turn_id"], "turn-1");
+                }
+                other => panic!("expected turn completion, got {other:?}"),
+            }
+        }
+    }
+
+    /// A newer app-server error code must not discard the terminal frame:
+    /// the error stays visible and the session still leaves its active turn.
+    #[test]
+    fn unknown_terminal_error_codes_still_end_the_turn() {
+        for code in [r#""futureError""#, r#"{"futureError":{"detail":"new"}}"#] {
+            let wire = format!(
+                r#"{{"method":"turn/completed","params":{{"threadId":"thread-1","turn":{{"id":"turn-1","status":"failed","items":[],"error":{{"message":"Future server failure","codexErrorInfo":{code}}}}}}}}}"#
+            );
+            let msg = ServerMessage::from_json_str(&wire).unwrap();
+            let (outputs, sent, ended) = classified(msg, None);
+            assert!(sent && ended);
+            assert_eq!(outputs.len(), 2);
+            match &outputs[0] {
+                AgentOutput::Visible(value) => {
+                    assert_eq!(value["type"], "error");
+                    assert_eq!(value["message"], "Future server failure");
+                }
+                other => panic!("expected visible terminal error, got {other:?}"),
+            }
+            match &outputs[1] {
+                AgentOutput::Visible(value) => {
+                    assert_eq!(value["type"], "turn.completed");
+                    assert_eq!(value["status"], "failed");
                 }
                 other => panic!("expected turn completion, got {other:?}"),
             }

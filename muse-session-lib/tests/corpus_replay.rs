@@ -11,11 +11,12 @@ use muse_session_lib::{classify_record, MuseClassifier};
 use session_lib::adapter::{AgentOutput, AgentOutputClassifier};
 use std::collections::HashSet;
 
-const SUPPRESSED_BOOKKEEPING: [&str; 4] = [
+const SUPPRESSED_BOOKKEEPING: [&str; 5] = [
     "runtime.command.accepted",
     "session.run.linked",
     "run.model.configured",
     "run.lifecycle.started",
+    "run.usage",
 ];
 
 fn is_suppressed_bookkeeping(payload_type: &str) -> bool {
@@ -41,7 +42,11 @@ fn load(name: &str) -> Vec<MuseRecord> {
 /// composite identity a consumer needs.
 #[test]
 fn every_captured_record_classifies_with_identity() {
-    for fixture in ["corpus_echo_turn.jsonl", "corpus_meta_tool_use.jsonl"] {
+    for fixture in [
+        "corpus_echo_turn.jsonl",
+        "corpus_meta_tool_use.jsonl",
+        "corpus_echo_1_4_11.jsonl",
+    ] {
         let records = load(fixture);
         assert!(!records.is_empty(), "{fixture} is empty");
         for r in &records {
@@ -75,7 +80,11 @@ fn every_captured_record_classifies_with_identity() {
 /// though neither half is alone — the property the persistence key rests on.
 #[test]
 fn composite_identity_is_unique_within_a_capture() {
-    for fixture in ["corpus_echo_turn.jsonl", "corpus_meta_tool_use.jsonl"] {
+    for fixture in [
+        "corpus_echo_turn.jsonl",
+        "corpus_meta_tool_use.jsonl",
+        "corpus_echo_1_4_11.jsonl",
+    ] {
         let records = load(fixture);
         let composite: HashSet<(String, String)> = records
             .iter()
@@ -139,7 +148,8 @@ fn live_capture_covers_provider_only_payloads() {
 /// that stops both useless setup rows and live-status from reaching `messages`.
 #[test]
 fn wire_durability_decides_routing_on_real_captures() {
-    let records = load("corpus_meta_tool_use.jsonl");
+    let mut records = load("corpus_meta_tool_use.jsonl");
+    records.extend(load("corpus_echo_1_4_11.jsonl"));
     let mut ephemeral = 0usize;
     let mut durable = 0usize;
     let mut suppressed = HashSet::new();
@@ -300,4 +310,39 @@ fn screening_cuts_the_durable_record_volume() {
         "screen should remove the measured ~40%+ reminder share of durable \
          records (before={durable_before}, after={durable_after})"
     );
+}
+
+/// 1.4.11 emits usage on exec.usage with the session id and sequence 1.
+/// It is consumed as telemetry, never rendered under a colliding session key.
+#[test]
+fn exec_usage_stream_is_decoded_and_suppressed_before_terminal() {
+    let records = load("corpus_echo_1_4_11.jsonl");
+    let usage_index = records
+        .iter()
+        .position(|r| r.payload_type == "run.usage")
+        .unwrap();
+    let usage = &records[usage_index];
+    assert_eq!(usage.stream.kind, muse_codes::StreamKind::ExecUsage);
+    assert_eq!(usage.stream.id, records[0].stream.id);
+    assert_eq!(usage.sequence, 1);
+    assert!(matches!(
+        usage.typed_payload().unwrap(),
+        muse_codes::MusePayload::RunUsage(_)
+    ));
+    let mut classifier = MuseClassifier::default();
+    for r in &records[..usage_index] {
+        classifier.classify(r.clone());
+    }
+    assert!(matches!(
+        classifier.classify(usage.clone())[..],
+        [AgentOutput::Noop]
+    ));
+    assert_eq!(
+        records[usage_index + 1].payload_type,
+        "run.terminal.completed"
+    );
+    assert!(matches!(
+        classifier.classify(records[usage_index + 1].clone()).last(),
+        Some(AgentOutput::Visible(_))
+    ));
 }

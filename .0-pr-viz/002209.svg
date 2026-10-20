@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200" font-family="'Segoe UI','Noto Sans',sans-serif">
+  <rect width="2000" height="1200" fill="#16161e"/>
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2209 · Add a production self-hosting stack and guide</text>
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">Self-hosting meant a dev compose with sample secrets and a published Postgres port.</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">deploy/ now runs a pinned image behind Caddy HTTPS with generated secrets and backups.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="2"/>
+
+  <text x="105" y="235" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1090" y="235" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1140" stroke="#3d4666" stroke-width="2" stroke-dasharray="12 14"/>
+
+  <!-- BEFORE -->
+  <rect x="105" y="270" width="840" height="190" rx="8" fill="#1e202e" stroke="#f7768e" stroke-width="3"/>
+  <text x="129" y="312" font-size="26" fill="#f7768e">docker-compose.yml: a development stack</text>
+  <text x="129" y="350" font-size="23" fill="#a9b1d6">Builds from source, publishes db on 5432, ships</text>
+  <text x="129" y="385" font-size="23" fill="#a9b1d6">dev_password and a localhost OAuth callback;</text>
+  <text x="129" y="420" font-size="23" fill="#a9b1d6">no TLS, no backups, Google described as required.</text>
+  <line x1="525" y1="460" x2="525" y2="505" stroke="#565f89" stroke-width="3"/>
+  <rect x="105" y="505" width="840" height="150" rx="8" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+  <text x="129" y="547" font-size="26" fill="#7aa2f7">container.yml tags :short_sha and :latest</text>
+  <text x="129" y="585" font-size="23" fill="#a9b1d6">Nothing ties an image to the version the portal</text>
+  <text x="129" y="620" font-size="23" fill="#a9b1d6">reports, so there is no sane pin.</text>
+  <line x1="525" y1="655" x2="525" y2="700" stroke="#565f89" stroke-width="3"/>
+  <rect x="105" y="700" width="840" height="150" rx="8" fill="#1e202e" stroke="#f7768e" stroke-width="3"/>
+  <text x="129" y="742" font-size="26" fill="#f7768e">Image /data/archive owned by root</text>
+  <text x="129" y="780" font-size="23" fill="#a9b1d6">The backend runs as appuser (1001): a mounted local</text>
+  <text x="129" y="815" font-size="23" fill="#a9b1d6">archive volume could not be written.</text>
+
+  <!-- AFTER -->
+  <rect x="1055" y="270" width="840" height="190" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1079" y="312" font-size="26" fill="#9ece6a">deploy/compose.yaml + Caddyfile + setup.sh</text>
+  <text x="1079" y="350" font-size="23" fill="#a9b1d6">db on an internal network, only Caddy on 80/443 with</text>
+  <text x="1079" y="385" font-size="23" fill="#a9b1d6">automatic Let's Encrypt; setup.sh writes .env (600) with</text>
+  <text x="1079" y="420" font-size="23" fill="#a9b1d6">generated secrets and prints the exact callback URL.</text>
+  <line x1="1475" y1="460" x2="1475" y2="505" stroke="#565f89" stroke-width="3"/>
+  <rect x="1055" y="505" width="840" height="150" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1079" y="547" font-size="26" fill="#9ece6a">Also tags :major.minor.commit-count</text>
+  <text x="1079" y="585" font-size="23" fill="#a9b1d6">Same string as /api/health; compose pins it via</text>
+  <text x="1079" y="620" font-size="23" fill="#a9b1d6">PORTAL_VERSION, so up -d never upgrades by surprise.</text>
+  <line x1="1475" y1="655" x2="1475" y2="700" stroke="#565f89" stroke-width="3"/>
+  <rect x="1055" y="700" width="840" height="190" rx="8" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1079" y="742" font-size="26" fill="#9ece6a">Dockerfile chowns /data; backup.sh / restore.sh</text>
+  <text x="1079" y="780" font-size="23" fill="#a9b1d6">pg_dump + archive tarball; restore swaps both and</text>
+  <text x="1079" y="815" font-size="23" fill="#a9b1d6">restarts. Round trip verified locally; documented in</text>
+  <text x="1079" y="850" font-size="23" fill="#a9b1d6">docs/SELF_HOSTING.md with upgrade and rollback.</text>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">Single-host only. Wildcard TLS for port forwarding is documented, not automated; launchers still self-update from GitHub, not the portal's version.</text>
+</svg>

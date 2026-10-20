@@ -200,7 +200,10 @@ fn permanent_error(status: reqwest::StatusCode, body: &str) -> anyhow::Error {
 /// 404, and — when `idempotent` — 5xx). Returns the successful response, or a
 /// concise error including the attempt count and last status/body once retries
 /// are exhausted or a permanent status is hit.
-async fn request_with_retry<F, Fut>(idempotent: bool, mut build: F) -> Result<reqwest::Response>
+pub(crate) async fn request_with_retry<F, Fut>(
+    idempotent: bool,
+    mut build: F,
+) -> Result<reqwest::Response>
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = reqwest::Result<reqwest::Response>>,
@@ -292,8 +295,12 @@ fn format_session_row(
     )
 }
 
-fn full_agent_name(session: &shared::api::AgentSessionInfo) -> String {
-    let Some(model) = session.model.as_deref().filter(|model| !model.is_empty()) else {
+pub(crate) fn full_agent_name(session: &shared::api::AgentSessionInfo) -> String {
+    let Some(model) = session
+        .model
+        .as_deref()
+        .filter(|model| shared::strings::is_non_empty(model))
+    else {
         return session.agent_type.clone();
     };
     if model.starts_with(&session.agent_type) {
@@ -303,7 +310,7 @@ fn full_agent_name(session: &shared::api::AgentSessionInfo) -> String {
     }
 }
 
-fn session_activity_label(session: &shared::api::AgentSessionInfo) -> &'static str {
+pub(crate) fn session_activity_label(session: &shared::api::AgentSessionInfo) -> &'static str {
     session.state.map_or_else(
         || {
             if session.busy.unwrap_or(false) {
@@ -319,13 +326,13 @@ fn session_activity_label(session: &shared::api::AgentSessionInfo) -> &'static s
 /// New backends report live proxy presence explicitly. Falling back to the
 /// legacy status keeps a newly-updated CLI useful against an older backend
 /// during rolling deploys.
-fn session_is_connected(session: &shared::api::AgentSessionInfo) -> bool {
+pub(crate) fn session_is_connected(session: &shared::api::AgentSessionInfo) -> bool {
     session
         .connected
         .unwrap_or_else(|| session.status == shared::SessionStatus::Active.as_str())
 }
 
-async fn fetch_sessions(
+pub(crate) async fn fetch_sessions(
     client: &reqwest::Client,
     base: &str,
     token: &str,
@@ -639,7 +646,7 @@ fn format_peek(data: &PeekMessagesResponse, now: chrono::DateTime<chrono::Utc>) 
         return out;
     }
     out.push_str(&format!(
-        "Last {} of {} messages (oldest first):\n",
+        "Last {} entries of {} messages (oldest first; thinking bursts are one entry):\n",
         data.messages.len(),
         data.total_messages
     ));
@@ -657,7 +664,7 @@ fn format_peek(data: &PeekMessagesResponse, now: chrono::DateTime<chrono::Utc>) 
 
 /// Compact relative age (`12s`, `5m`, `3h`, `2d`) for a backend RFC3339
 /// timestamp; the raw timestamp when it doesn't parse.
-fn relative_age(rfc3339: &str, now: chrono::DateTime<chrono::Utc>) -> String {
+pub(crate) fn relative_age(rfc3339: &str, now: chrono::DateTime<chrono::Utc>) -> String {
     let Ok(then) = chrono::DateTime::parse_from_rfc3339(rfc3339) else {
         return rfc3339.to_string();
     };
@@ -672,7 +679,7 @@ fn relative_age(rfc3339: &str, now: chrono::DateTime<chrono::Utc>) -> String {
     }
 }
 
-fn display_session_id(
+pub(crate) fn display_session_id(
     session: &shared::api::AgentSessionInfo,
     sessions: &[shared::api::AgentSessionInfo],
 ) -> String {
@@ -689,7 +696,7 @@ fn display_session_id(
     }
 }
 
-fn resolve_session_id(
+pub(crate) fn resolve_session_id(
     input: &str,
     sessions: &[shared::api::AgentSessionInfo],
 ) -> Result<uuid::Uuid> {
@@ -811,7 +818,7 @@ mod tests {
         assert!(out.starts_with(
             "0c24805b  claude / connected / busy / awaiting permission: Bash  host  session  /repo"
         ));
-        assert!(out.contains("Last 2 of 42 messages (oldest first):"));
+        assert!(out.contains("Last 2 entries of 42 messages (oldest first"));
         assert!(out.contains("[     5m] text        fix the bug"));
         assert!(out.contains("[    12s] tool_use    Bash: cargo test"));
     }

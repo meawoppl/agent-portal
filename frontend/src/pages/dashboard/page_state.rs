@@ -4,18 +4,17 @@
 //! network calls. This reducer keeps the id/set bookkeeping in one tested
 //! place so the page component can stay focused on orchestration.
 
-use shared::SessionInfo;
+use crate::portal_client::SessionKey;
 use std::collections::HashSet;
 use std::rc::Rc;
-use uuid::Uuid;
 use yew::Reducible;
 
-use super::types::RailPosition;
+use super::types::{PortalSession, RailPosition};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct DashboardSessionState {
-    pub focused_id: Option<Uuid>,
-    pub awaiting_sessions: HashSet<Uuid>,
+    pub focused_id: Option<SessionKey>,
+    pub awaiting_sessions: HashSet<SessionKey>,
     /// Sessions whose *current* "needs response" state the user has already
     /// looked at. The rail's red outline (and the waiting count) show
     /// `awaiting_sessions - seen_awaiting`, so once you view an awaiting session
@@ -23,16 +22,16 @@ pub(super) struct DashboardSessionState {
     /// awaiting cycle (the agent finishing another turn) re-lights it. Kept as a
     /// separate set rather than mutating `awaiting_sessions` so the underlying
     /// "agent is parked" truth stays intact for other consumers.
-    pub seen_awaiting: HashSet<Uuid>,
-    pub hidden_sessions: HashSet<Uuid>,
-    pub connected_sessions: HashSet<Uuid>,
-    pub activated_sessions: HashSet<Uuid>,
+    pub seen_awaiting: HashSet<SessionKey>,
+    pub hidden_sessions: HashSet<SessionKey>,
+    pub connected_sessions: HashSet<SessionKey>,
+    pub activated_sessions: HashSet<SessionKey>,
     pub initial_focus_set: bool,
-    pub sessions_at_launch: Option<HashSet<Uuid>>,
+    pub sessions_at_launch: Option<HashSet<SessionKey>>,
 }
 
 impl DashboardSessionState {
-    pub fn new(hidden_sessions: HashSet<Uuid>) -> Self {
+    pub fn new(hidden_sessions: HashSet<SessionKey>) -> Self {
         Self {
             focused_id: None,
             awaiting_sessions: HashSet::new(),
@@ -49,30 +48,30 @@ impl DashboardSessionState {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum DashboardSessionAction {
     InitializeFocus {
-        focus_id: Option<Uuid>,
-        activate_ids: Vec<Uuid>,
+        focus_id: Option<SessionKey>,
+        activate_ids: Vec<SessionKey>,
     },
-    FocusAndActivate(Uuid),
+    FocusAndActivate(SessionKey),
     /// Focus one session and make it the only mounted session view. Mobile
     /// uses this to ensure changing the selector tears down the old history
     /// request and websocket subscription instead of accumulating them.
-    FocusExclusively(Uuid),
+    FocusExclusively(SessionKey),
     ClearFocusAndActivation,
-    Activate(Uuid),
+    Activate(SessionKey),
     SetAwaiting {
-        session_id: Uuid,
+        session_id: SessionKey,
         awaiting: bool,
     },
     SetConnected {
-        session_id: Uuid,
+        session_id: SessionKey,
         connected: bool,
     },
     SetHidden {
-        session_id: Uuid,
+        session_id: SessionKey,
         hidden: bool,
     },
-    MessageSent(Uuid),
-    FocusNewlyLaunched(Vec<Uuid>),
+    MessageSent(SessionKey),
+    FocusNewlyLaunched(Vec<SessionKey>),
 }
 
 impl Reducible for DashboardSessionState {
@@ -181,11 +180,11 @@ impl Reducible for DashboardSessionState {
     }
 }
 
-pub(super) fn active_session_ids(sessions: &[SessionInfo]) -> Vec<Uuid> {
-    sessions.iter().map(|s| s.id).collect()
+pub(super) fn active_session_ids(sessions: &[PortalSession]) -> Vec<SessionKey> {
+    sessions.iter().map(|s| s.key).collect()
 }
 
-fn set_membership(set: &mut HashSet<Uuid>, id: Uuid, present: bool) -> bool {
+fn set_membership(set: &mut HashSet<SessionKey>, id: SessionKey, present: bool) -> bool {
     if present {
         set.insert(id)
     } else {
@@ -210,7 +209,7 @@ pub(super) struct DashboardUiState {
     /// Header collapsed to its slim pull strip (any viewport). The strip is
     /// itself the expand affordance, so the header can never be lost.
     pub header_collapsed: bool,
-    pub pending_leave: Option<Uuid>,
+    pub pending_leave: Option<SessionKey>,
 }
 
 impl DashboardUiState {
@@ -254,7 +253,7 @@ pub(super) enum DashboardUiAction {
     SetRailPosition(RailPosition),
     SetGroupByHost(bool),
     ToggleHeaderCollapsed,
-    RequestLeave(Uuid),
+    RequestLeave(SessionKey),
     ClearPendingLeave,
 }
 
@@ -329,9 +328,53 @@ impl Reducible for DashboardUiState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::portal_client::ConnId;
+    use uuid::Uuid;
 
-    fn id(n: u128) -> Uuid {
-        Uuid::from_u128(n)
+    fn id(n: u128) -> SessionKey {
+        SessionKey::home(Uuid::from_u128(n))
+    }
+
+    /// The same session id on another portal is a different session: its
+    /// awaiting/seen/connected/hidden state never bleeds into the home one.
+    #[test]
+    fn same_id_on_different_connections_is_tracked_independently() {
+        let home = id(1);
+        let linked = SessionKey {
+            conn: ConnId::linked(1),
+            id: home.id,
+        };
+
+        let state = reduce(
+            DashboardSessionState::new(HashSet::from([linked])),
+            DashboardSessionAction::SetAwaiting {
+                session_id: linked,
+                awaiting: true,
+            },
+        );
+        let state = state.reduce(DashboardSessionAction::SetConnected {
+            session_id: home,
+            connected: true,
+        });
+        let state = state.reduce(DashboardSessionAction::FocusAndActivate(home));
+
+        assert!(state.awaiting_sessions.contains(&linked));
+        assert!(!state.awaiting_sessions.contains(&home));
+        assert!(
+            !state.seen_awaiting.contains(&linked),
+            "focusing the home session must not acknowledge the linked one"
+        );
+        assert!(state.connected_sessions.contains(&home));
+        assert!(!state.connected_sessions.contains(&linked));
+        assert!(state.hidden_sessions.contains(&linked));
+        assert!(!state.hidden_sessions.contains(&home));
+        assert_eq!(state.activated_sessions, HashSet::from([home]));
+
+        let state = state.reduce(DashboardSessionAction::MessageSent(home));
+        assert!(
+            state.awaiting_sessions.contains(&linked),
+            "a message sent to the home session leaves the linked one awaiting"
+        );
     }
 
     fn reduce(

@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-labelledby="title desc">
+  <title id="title">PR 2140 - Route backend empty filters via shared helper</title>
+  <desc id="desc">Six backend find and filter sites spelling !_.is_empty() now route through shared::strings::is_non_empty.</desc>
+  <rect width="2000" height="1200" fill="#16161e"/>
+
+  <text x="55" y="68" fill="#565f89" font-family="Inter, Arial, sans-serif" font-size="24" letter-spacing="1">PR #2140 - Route backend empty filters via shared helper</text>
+  <text x="55" y="122" fill="#e6e9f5" font-family="Inter, Arial, sans-serif" font-size="34" font-weight="700">Six backend find/filter sites spelled out !_.is_empty().</text>
+  <text x="55" y="164" fill="#e6e9f5" font-family="Inter, Arial, sans-serif" font-size="34" font-weight="700">Now all six route through shared::strings::is_non_empty.</text>
+  <line x1="55" y1="192" x2="1945" y2="192" stroke="#3d4666" stroke-width="2"/>
+
+  <text x="55" y="244" fill="#f7768e" font-family="Inter, Arial, sans-serif" font-size="22" font-weight="700" letter-spacing="4">BEFORE</text>
+  <text x="1055" y="244" fill="#9ece6a" font-family="Inter, Arial, sans-serif" font-size="22" font-weight="700" letter-spacing="4">AFTER</text>
+  <line x1="1000" y1="210" x2="1000" y2="1140" stroke="#3d4666" stroke-width="3" stroke-dasharray="14 16"/>
+
+  <rect x="70" y="285" width="850" height="750" rx="26" fill="#1a1b26" stroke="#3d4666" stroke-width="3"/>
+  <rect x="115" y="340" width="760" height="150" rx="16" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="145" y="386" fill="#c0caf5" font-family="Inter, Arial, sans-serif" font-size="28" font-weight="700">plugins.rs skill_description</text>
+  <text x="145" y="430" fill="#a9b1d6" font-family="Inter, Arial, sans-serif" font-size="24">.find(|line| !line.is_empty())</text>
+  <text x="145" y="468" fill="#a9b1d6" font-family="Inter, Arial, sans-serif" font-size="24">.filter(|line| !line.is_empty())</text>
+
+  <rect x="115" y="555" width="760" height="150" rx="16" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="145" y="601" fill="#c0caf5" font-family="Inter, Arial, sans-serif" font-size="28" font-weight="700">peek_summary.rs excerpt + error</text>
+  <text x="145" y="645" fill="#a9b1d6" font-family="Inter, Arial, sans-serif" font-size="24">.find(|line| !line.is_empty())</text>
+  <text x="145" y="683" fill="#a9b1d6" font-family="Inter, Arial, sans-serif" font-size="24">.filter(|message| !message.is_empty())</text>
+
+  <rect x="115" y="770" width="760" height="190" rx="16" fill="#1e202e" stroke="#f7768e" stroke-width="3"/>
+  <text x="145" y="819" fill="#f7768e" font-family="Inter, Arial, sans-serif" font-size="28" font-weight="700">helpers.rs + edit_stack.rs</text>
+  <text x="145" y="863" fill="#c0caf5" font-family="Inter, Arial, sans-serif" font-size="24">.find(|s| !s.is_empty())</text>
+  <text x="145" y="901" fill="#c0caf5" font-family="Inter, Arial, sans-serif" font-size="24">.filter(|value| !value.is_empty())</text>
+  <text x="145" y="939" fill="#a9b1d6" font-family="Inter, Arial, sans-serif" font-size="24">Same predicate, spelled six ways</text>
+
+  <path d="M495 505 L495 540" fill="none" stroke="#f7768e" stroke-width="4" stroke-dasharray="10 12"/>
+  <path d="M495 720 L495 755" fill="none" stroke="#f7768e" stroke-width="4" stroke-dasharray="10 12"/>
+  <text x="205" y="742" fill="#a9b1d6" font-family="Inter, Arial, sans-serif" font-size="22">find here, filter there: drift risk</text>
+
+  <rect x="1085" y="285" width="850" height="750" rx="26" fill="#1a1b26" stroke="#3d4666" stroke-width="3"/>
+  <rect x="1125" y="335" width="765" height="125" rx="16" fill="#1e202e" stroke="#7aa2f7" stroke-width="3"/>
+  <text x="1155" y="382" fill="#7aa2f7" font-family="Inter, Arial, sans-serif" font-size="27" font-weight="700">shared::strings::is_non_empty</text>
+  <text x="1155" y="424" fill="#c0caf5" font-family="Inter, Arial, sans-serif" font-size="23">Single home for !s.is_empty() filters</text>
+  <text x="1645" y="424" fill="#565f89" font-family="Inter, Arial, sans-serif" font-size="23">shared/src/strings.rs</text>
+
+  <rect x="1125" y="520" width="365" height="185" rx="16" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1152" y="568" fill="#9ece6a" font-family="Inter, Arial, sans-serif" font-size="25" font-weight="700">4 files</text>
+  <text x="1152" y="610" fill="#c0caf5" font-family="Inter, Arial, sans-serif" font-size="22">plugins, peek_summary</text>
+  <text x="1152" y="648" fill="#a9b1d6" font-family="Inter, Arial, sans-serif" font-size="21">helpers, edit_stack routed</text>
+
+  <rect x="1515" y="520" width="375" height="185" rx="16" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1542" y="568" fill="#9ece6a" font-family="Inter, Arial, sans-serif" font-size="25" font-weight="700">history.rs stays</text>
+  <text x="1542" y="610" fill="#c0caf5" font-family="Inter, Arial, sans-serif" font-size="22">filters byte slices,</text>
+  <text x="1542" y="648" fill="#a9b1d6" font-family="Inter, Arial, sans-serif" font-size="21">not &amp;str: out of scope</text>
+
+  <rect x="1125" y="765" width="765" height="185" rx="16" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <text x="1152" y="813" fill="#9ece6a" font-family="Inter, Arial, sans-serif" font-size="25" font-weight="700">Zero string-shape sites remain</text>
+  <text x="1152" y="855" fill="#c0caf5" font-family="Inter, Arial, sans-serif" font-size="22">in backend; neighbors already used it</text>
+  <text x="1152" y="893" fill="#a9b1d6" font-family="Inter, Arial, sans-serif" font-size="21">identical predicate, no behavior change</text>
+
+  <path d="M1505 460 L1300 510" fill="none" stroke="#7aa2f7" stroke-width="4"/>
+  <polygon points="1284,514 1312,494 1318,523" fill="#7aa2f7"/>
+  <path d="M1515 460 L1715 510" fill="none" stroke="#7aa2f7" stroke-width="4"/>
+  <polygon points="1731,514 1697,523 1704,494" fill="#7aa2f7"/>
+  <path d="M1300 705 L1300 752" fill="none" stroke="#7aa2f7" stroke-width="4"/>
+  <polygon points="1300,765 1284,736 1316,736" fill="#7aa2f7"/>
+  <path d="M1715 705 L1715 752" fill="none" stroke="#7aa2f7" stroke-width="4"/>
+  <polygon points="1715,765 1699,736 1731,736" fill="#7aa2f7"/>
+
+  <rect x="110" y="1068" width="770" height="54" rx="12" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="138" y="1103" fill="#a9b1d6" font-family="Inter, Arial, sans-serif" font-size="22">Six copies of one predicate invite silent drift.</text>
+  <rect x="1125" y="1068" width="770" height="54" rx="12" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="1153" y="1103" fill="#a9b1d6" font-family="Inter, Arial, sans-serif" font-size="22">One helper owns the predicate; call sites just ask.</text>
+
+  <text x="55" y="1172" fill="#565f89" font-family="Inter, Arial, sans-serif" font-size="22">Scope: backend find/filter emptiness checks; no API or behavior change.</text>
+</svg>

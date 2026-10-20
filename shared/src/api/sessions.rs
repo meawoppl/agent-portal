@@ -18,6 +18,36 @@ pub struct SessionsResponse {
     pub sessions: Vec<SessionInfo>,
 }
 
+/// Portal display names use the existing VARCHAR(255) column's character limit.
+pub const MAX_SESSION_NAME_CHARS: usize = 255;
+
+/// Normalize a display name consistently in the browser and at the API boundary.
+pub fn validate_session_name(name: &str) -> Result<&str, &'static str> {
+    if name.chars().any(char::is_control) {
+        return Err("Session names cannot contain control characters");
+    }
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Enter a session name");
+    }
+    if name.chars().count() > MAX_SESSION_NAME_CHARS {
+        return Err("Session names must be 255 characters or fewer");
+    }
+    Ok(name)
+}
+
+/// PATCH /api/sessions/{id}/name. Renames the Portal label, not the native thread.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenameSessionRequest {
+    pub session_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenameSessionResponse {
+    pub session_id: Uuid,
+    pub session_name: String,
+}
+
 /// Request from a proxy before it spawns the agent process. The backend uses
 /// this to choose the latest resumable session for the authenticated user and
 /// local machine/path, so clients don't need to persist directory -> session_id
@@ -94,9 +124,6 @@ pub struct MessagesListResponse<T> {
 
 // ---- Session edit stack -----------------------------------------------------
 
-/// Message type surfaces post to Portal when adding visual/text annotations.
-pub const EDIT_STACK_MESSAGE_TYPE: &str = "agent-portal:queue-prompts";
-
 /// Captured image payload for an edit-stack item.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -124,14 +151,12 @@ pub struct EditStackItemInput {
     pub image_data_url: Option<String>,
 }
 
-/// Body for `POST /api/sessions/{id}/edit-stack`. The same shape is also used
-/// by forwarded surfaces via `postMessage`; the `type` field is optional on
-/// REST so trusted Portal UI can reuse it without pretending to be a surface.
+/// Body for edit-stack submissions. Forwarded surfaces post this shape to
+/// `POST /__portal/edit-stack`; Portal UI and agent tooling use the
+/// session-scoped REST endpoints directly.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateEditStackRequest {
-    #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
-    pub message_type: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<serde_json::Value>,
     #[serde(default)]
@@ -163,8 +188,16 @@ pub struct EditStackItem {
     pub source: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<serde_json::Value>,
+    /// The captured image inline. List payloads carry it only for `pending`
+    /// items (the dashboard composes those into the agent's prompt itself);
+    /// every other item points at [`Self::image_url`] instead, so a session
+    /// with a long annotation history is not re-sent in full on each change.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_data_url: Option<String>,
+    /// `GET /api/sessions/{id}/edit-stack/{item_id}/image`, present whenever
+    /// the item has a captured image.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_url: Option<String>,
     pub status: String,
     pub created_at: String,
     pub updated_at: String,
@@ -252,9 +285,15 @@ pub struct AgentSessionsResponse {
     pub sessions: Vec<AgentSessionInfo>,
 }
 
-/// One summarized transcript message in a peek (#1406). Deliberately compact:
+/// One summarized transcript entry in a peek (#1406). Deliberately compact:
 /// peeks feed *agent context windows*, so `summary` is a single line hard-capped
 /// server-side — never a raw wire-JSON dump.
+///
+/// A `thinking` entry can stand for a run of consecutive thinking rows
+/// (`thinking × N`). It carries the `id` and `created_at` of the run's newest
+/// row, and the run depends on the peek window, so the same `id` can come back
+/// with a different summary under another `limit` or `since`. Treat entries as
+/// a recent-activity snapshot, not immutable raw messages or a pagination key.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PeekMessage {
     pub id: Uuid,

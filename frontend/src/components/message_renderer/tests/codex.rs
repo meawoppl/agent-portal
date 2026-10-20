@@ -235,3 +235,71 @@ fn a_codex_card_keeps_one_identity_across_its_lifecycle() {
          (an expanded preview would collapse): {keys:?}"
     );
 }
+
+/// A traceless reasoning item must leave nothing visible in any group, even
+/// when its completion lands in a later group (a steering message split the
+/// run) or never arrives (an interrupted turn). A per-group "in progress"
+/// marker would otherwise be stranded in history.
+#[test]
+fn traceless_reasoning_leaves_no_part_across_groups_or_without_completion() {
+    use std::collections::HashMap;
+    let reasoning = |stage: &str| {
+        serde_json::json!({
+            "type": stage,
+            "item": {"type": "reasoning", "id": "rs_1", "summary": [], "content": []},
+        })
+        .to_string()
+    };
+    let split = vec![
+        reasoning("item.started"),
+        portal_text_message("steering message"),
+        reasoning("item.completed"),
+    ];
+    let unfinished = vec![
+        reasoning("item.started"),
+        r#"{"type":"turn.failed","error":{"message":"interrupted"}}"#.to_string(),
+    ];
+    for messages in [split, unfinished] {
+        for message in rendered_vec(&messages) {
+            if classify_codex_category(&message.content).is_none() {
+                continue;
+            }
+            if !message.content.contains("\"reasoning\"") {
+                continue;
+            }
+            let part = super::super::dispatch::render_identity_group_part(
+                &message,
+                shared::AgentType::Codex,
+                uuid::Uuid::nil(),
+                &HashMap::new(),
+                yew::Callback::noop(),
+            );
+            assert!(
+                part.is_none(),
+                "traceless reasoning rendered a part: {}",
+                message.content
+            );
+        }
+    }
+}
+
+/// The exec shape (`text`) and the app-server shape (`summary`/`content`)
+/// deserialize to different variants but share the raw item id, so a
+/// started/completed pair mixing them still dedups to the completed frame.
+#[test]
+fn mixed_shape_reasoning_lifecycle_dedupes_to_completed() {
+    let messages = vec![
+        r#"{"type":"item.started","item":{"type":"reasoning","id":"rs_7","text":""}}"#.to_string(),
+        r#"{"type":"item.completed","item":{"type":"reasoning","id":"rs_7","summary":["done"],"content":[]}}"#
+            .to_string(),
+    ];
+    let visible = indices(&visible_group_indices(
+        GroupCategory::Codex,
+        &rendered_vec(&messages),
+    ));
+    assert_eq!(
+        visible,
+        vec![1],
+        "mixed-shape lifecycle must dedup, got {visible:?}"
+    );
+}

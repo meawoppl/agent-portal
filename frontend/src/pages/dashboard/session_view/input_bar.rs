@@ -18,8 +18,10 @@ use super::vim::{self, VimState};
 use crate::components::build_upload_message;
 use crate::components::VoiceInput;
 use crate::pages::dashboard::load_vim_mode;
+use crate::portal_client::{portal_from_context, PortalClient, SessionKey};
 use crate::utils::format_file_size;
 use gloo::timers::callback::Timeout;
+use shared::api::{CreateEditStackRequest, EditStackItem, EditStackItemInput, EditStackResponse};
 use shared::protocol::UPLOAD_CHUNK_SIZE;
 use shared::{ClientToServer, ReasoningEffort, SendMode};
 use std::cell::RefCell;
@@ -56,6 +58,8 @@ pub struct InputBarProps {
     /// Plain-text submit. Parent packages into `ClientToServer::ClaudeInput`
     /// and emits the optimistic local echo.
     pub on_send_text: Callback<(String, SendMode, Option<ReasoningEffort>)>,
+    /// Refresh the work queue after a durable composer submission.
+    pub on_queued: Callback<Vec<EditStackItem>>,
     /// Raw WS frame emitted by the bar. Used by the file-upload pipeline
     /// to stream `FileUploadStart` / `FileUploadChunk` frames.
     pub on_send_frame: Callback<ClientToServer>,
@@ -68,6 +72,9 @@ pub struct InputBarProps {
     /// Composer contents streamed as an opaque secret drop. The callback only
     /// carries the upload id and byte count; secret bytes stay on upload frames.
     pub on_secret_drop: Callback<(String, u64, Option<ReasoningEffort>)>,
+    /// An upload the bar refused or could not read; the parent shows it in
+    /// the transcript, since the bar's progress strip only clears.
+    pub on_upload_error: Callback<String>,
     /// Fires once per submit (text or upload) so the parent can bump its
     /// per-session "I sent something" bookkeeping.
     pub on_message_sent: Callback<()>,
@@ -88,7 +95,25 @@ fn dashboard_in_nav_mode() -> bool {
         .is_some()
 }
 
-const REASONING_EFFORT_KEY: &str = "agent-portal-reasoning-effort";
+/// The empty-composer hint. Touch-first devices have no Shift key to hold, so
+/// the new-line hint is dropped there; it also kept the placeholder wrapping
+/// across several lines in a narrow textarea.
+fn composer_placeholder() -> &'static str {
+    let touch_first = web_sys::window()
+        .and_then(|window| window.match_media("(pointer: coarse)").ok().flatten())
+        .is_some_and(|query| query.matches());
+    if touch_first {
+        "Type your message..."
+    } else {
+        "Type your message... (Shift+Enter for new line)"
+    }
+}
+
+const REASONING_EFFORT_KEY_PREFIX: &str = "agent-portal-reasoning-effort";
+
+fn reasoning_effort_key(session_id: Uuid) -> String {
+    format!("{REASONING_EFFORT_KEY_PREFIX}-{session_id}")
+}
 
 fn reasoning_effort_from_str(value: &str) -> Option<ReasoningEffort> {
     match value {
@@ -101,22 +126,26 @@ fn reasoning_effort_from_str(value: &str) -> Option<ReasoningEffort> {
     }
 }
 
-fn load_reasoning_effort() -> Option<ReasoningEffort> {
+fn load_reasoning_effort(session_id: Uuid, portal: &PortalClient) -> Option<ReasoningEffort> {
+    let key = portal.storage_key(&reasoning_effort_key(session_id))?;
     gloo::utils::window()
         .local_storage()
         .ok()
         .flatten()
-        .and_then(|storage| storage.get_item(REASONING_EFFORT_KEY).ok().flatten())
+        .and_then(|storage| storage.get_item(&key).ok().flatten())
         .and_then(|value| reasoning_effort_from_str(&value))
 }
 
-fn save_reasoning_effort(effort: Option<ReasoningEffort>) {
+fn save_reasoning_effort(session_id: Uuid, effort: Option<ReasoningEffort>, portal: &PortalClient) {
+    let Some(key) = portal.storage_key(&reasoning_effort_key(session_id)) else {
+        return;
+    };
     if let Ok(Some(storage)) = gloo::utils::window().local_storage() {
-        if let Some(effort) = effort {
-            let _ = storage.set_item(REASONING_EFFORT_KEY, effort.as_str());
-        } else {
-            let _ = storage.remove_item(REASONING_EFFORT_KEY);
-        }
+        // Keep this preference scoped to the session. A browser-global value
+        // made every newly launched session inherit whichever concrete effort
+        // was selected elsewhere (often XHigh), instead of starting on Auto.
+        let value = effort.map_or("auto", |effort| effort.as_str());
+        let _ = storage.set_item(&key, value);
     }
 }
 
@@ -153,6 +182,8 @@ pub enum InputBarMsg {
     SendInput,
     /// User picked "Wiggum" from the send-mode dropdown.
     SendWiggum,
+    QueueInput,
+    QueueFinished(SessionKey, String, Result<EditStackResponse, String>),
     SendSecretDrop,
     SetReasoningEffort(Option<ReasoningEffort>),
     HistoryUp,
@@ -187,6 +218,8 @@ pub struct InputBar {
     input_text: String,
     command_history: CommandHistory,
     send_mode_dropdown_open: bool,
+    queue_pending: Option<SessionKey>,
+    queue_notice: Option<(bool, String)>,
     file_input_ref: NodeRef,
     upload_progress: Option<f32>,
     upload_files: Vec<(String, u64)>,
@@ -261,8 +294,13 @@ impl Component for InputBar {
         Self {
             input_ref: NodeRef::default(),
             input_text: String::new(),
-            command_history: CommandHistory::for_session(ctx.props().session_id),
+            command_history: CommandHistory::for_session(
+                ctx.props().session_id,
+                &portal_from_context(ctx),
+            ),
             send_mode_dropdown_open: false,
+            queue_pending: None,
+            queue_notice: None,
             file_input_ref: NodeRef::default(),
             upload_progress: None,
             upload_files: Vec::new(),
@@ -272,7 +310,10 @@ impl Component for InputBar {
             is_recording: false,
             interim_transcription: None,
             pending_suggestion: None,
-            reasoning_effort: load_reasoning_effort(),
+            reasoning_effort: load_reasoning_effort(
+                ctx.props().session_id,
+                &portal_from_context(ctx),
+            ),
             voice_button_ref: NodeRef::default(),
             was_focused: ctx.props().focused,
             was_ws_connected: ctx.props().ws_connected,
@@ -284,6 +325,11 @@ impl Component for InputBar {
     }
 
     fn changed(&mut self, ctx: &Context<Self>, _old_props: &Self::Properties) -> bool {
+        let key = portal_from_context(ctx).session_key(ctx.props().session_id);
+        if self.queue_pending.is_some_and(|pending| pending != key) {
+            self.queue_pending = None;
+            self.queue_notice = None;
+        }
         let now_focused = ctx.props().focused;
         let became_focused = now_focused && !self.was_focused;
         self.was_focused = now_focused;
@@ -358,7 +404,8 @@ impl Component for InputBar {
                 // Textarea is uncontrolled — the DOM already has the new
                 // value. Track in state so we can restore after re-renders.
                 self.input_text = value;
-                self.pending_suggestion.take().is_some()
+                let had_suggestion = self.pending_suggestion.take().is_some();
+                self.queue_notice.take().is_some() || had_suggestion
             }
             InputBarMsg::AcceptSuggestion => {
                 let mut accepted = false;
@@ -377,13 +424,81 @@ impl Component for InputBar {
                 self.send_mode_dropdown_open = false;
                 self.dispatch_text_send(ctx, SendMode::Wiggum)
             }
+            InputBarMsg::QueueInput => {
+                self.send_mode_dropdown_open = false;
+                if self.queue_pending.is_some() {
+                    return true;
+                }
+                let input = self.get_input_text();
+                if input.trim().chars().count() > 16_000 {
+                    self.queue_notice = Some((
+                        true,
+                        "Work queue messages must be 16,000 characters or fewer".into(),
+                    ));
+                    return true;
+                }
+                let Some(body) = queued_text_request(&input) else {
+                    return true;
+                };
+                let portal = portal_from_context(ctx);
+                let session_id = ctx.props().session_id;
+                let key = portal.session_key(session_id);
+                self.queue_pending = Some(key);
+                self.queue_notice = None;
+                let link = ctx.link().clone();
+                spawn_local(async move {
+                    let result = async {
+                        let response = crate::utils::send_json(
+                            portal.post(&format!("/api/sessions/{session_id}/edit-stack")),
+                            &body,
+                        )
+                        .await
+                        .map_err(|err| err.to_string())?;
+                        if !response.ok() {
+                            return Err(crate::utils::error_body(response).await);
+                        }
+                        response
+                            .json::<EditStackResponse>()
+                            .await
+                            .map_err(|err| err.to_string())
+                    }
+                    .await;
+                    link.send_message(InputBarMsg::QueueFinished(key, input, result));
+                });
+                true
+            }
+            InputBarMsg::QueueFinished(key, input, result) => {
+                if key != portal_from_context(ctx).session_key(ctx.props().session_id) {
+                    return false;
+                }
+                self.queue_pending = None;
+                match result {
+                    Ok(data) => {
+                        self.command_history.push(input.trim().to_string());
+                        // The user can keep composing while the request runs.
+                        // Only clear the exact draft the server accepted.
+                        if self.get_input_text() == input {
+                            self.set_input_text("");
+                            self.input_text.clear();
+                            self.pending_suggestion = None;
+                        }
+                        self.queue_notice = Some((false, "Added to work queue".into()));
+                        ctx.props().on_queued.emit(data.items);
+                    }
+                    Err(err) => {
+                        self.queue_notice =
+                            Some((true, format!("Could not add to work queue: {err}")));
+                    }
+                }
+                true
+            }
             InputBarMsg::SendSecretDrop => {
                 self.start_secret_drop(ctx);
                 true
             }
             InputBarMsg::SetReasoningEffort(effort) => {
                 self.reasoning_effort = effort;
-                save_reasoning_effort(effort);
+                save_reasoning_effort(ctx.props().session_id, effort, &portal_from_context(ctx));
                 true
             }
             InputBarMsg::HistoryUp => {
@@ -685,6 +800,12 @@ impl Component for InputBar {
         html! {
             <>
                 { self.render_upload_bar() }
+                if self.queue_pending.is_some() {
+                    <div class="composer-queue-status" role="status">{ "Adding to work queue…" }</div>
+                } else if let Some((failed, notice)) = &self.queue_notice {
+                    <div class={classes!("composer-queue-status", failed.then_some("error"))}
+                        role={if *failed { "alert" } else { "status" }}>{notice}</div>
+                }
                 <form
                     class={drag_hint}
                     onsubmit={handle_submit}
@@ -713,7 +834,7 @@ impl Component for InputBar {
                                     .then_some("vim-normal")
                             )}
                             placeholder={self.pending_suggestion.clone().unwrap_or_else(|| if ctx.props().ws_connected {
-                                "Type your message... (Shift+Enter for new line)".into()
+                                composer_placeholder().into()
                             } else {
                                 // The composer stays usable through a server
                                 // restart: sends queue in the outbox and flush on
@@ -783,6 +904,14 @@ impl InputBar {
     /// typed `(text, mode)` event up to the parent — which packages it into
     /// `ClientToServer::ClaudeInput` and emits the optimistic local echo.
     fn dispatch_text_send(&mut self, ctx: &Context<Self>, mode: SendMode) -> bool {
+        if portal_from_context(ctx).is_linked() && !ctx.props().ws_connected {
+            self.queue_notice = Some((
+                true,
+                "Remote connection is offline. Your draft is preserved; reconnect before sending."
+                    .into(),
+            ));
+            return true;
+        }
         let input = self.get_input_text().trim().to_string();
         if input.is_empty() {
             return false;
@@ -881,6 +1010,17 @@ impl InputBar {
     fn start_upload(&mut self, ctx: &Context<Self>, files: Vec<web_sys::File>) {
         self.send_mode_dropdown_open = false;
         self.drag_hover = false;
+        // A pasted image can arrive as an empty `File` (the clipboard had not
+        // finished populating it). Refuse before clearing the composer, so the
+        // user keeps their text and the agent is never told about a 0-byte
+        // file.
+        if let Some(empty) = files.iter().find(|f| f.size() == 0.0) {
+            ctx.props().on_upload_error.emit(format!(
+                "{} is empty. Try pasting or attaching it again",
+                empty.name()
+            ));
+            return;
+        }
         self.upload_progress = Some(0.0);
         self.upload_files = files.iter().map(|f| (f.name(), f.size() as u64)).collect();
 
@@ -896,6 +1036,7 @@ impl InputBar {
         let link = ctx.link().clone();
         let on_send_frame = ctx.props().on_send_frame.clone();
         let on_upload_prompt = ctx.props().on_upload_prompt.clone();
+        let on_upload_error = ctx.props().on_upload_error.clone();
         let reasoning_effort = self.reasoning_effort;
 
         spawn_local(async move {
@@ -905,7 +1046,6 @@ impl InputBar {
 
             for (file_idx, file) in files.iter().enumerate() {
                 let file_name = file.name();
-                let file_size = file.size() as u64;
                 let content_type = file.type_();
 
                 let array_buffer =
@@ -921,6 +1061,18 @@ impl InputBar {
                     };
                 let uint8_array = js_sys::Uint8Array::new(&array_buffer);
                 let bytes = uint8_array.to_vec();
+                // `File::size()` was non-zero above, but the read can still
+                // come back empty if the browser revoked the file meanwhile.
+                if bytes.is_empty() {
+                    on_upload_error.emit(format!(
+                        "{file_name} could not be read. Try pasting or attaching it again"
+                    ));
+                    link.send_message(InputBarMsg::FileUploadError(file_name));
+                    return;
+                }
+                // Declare what was actually read, not `File::size()`, so the
+                // receiver's completeness check compares like with like.
+                let file_size = bytes.len() as u64;
 
                 let total_chunks = bytes.len().div_ceil(UPLOAD_CHUNK_SIZE).max(1) as u32;
                 let upload_id = Uuid::new_v4().to_string();
@@ -1015,20 +1167,22 @@ impl InputBar {
             .reasoning_effort
             .map(|effort| effort.as_str())
             .unwrap_or("auto");
+        // A select has no HTML value attribute. Yew inserts options in reverse
+        // order, so leaving selection implicit can display XHigh even on Auto.
+        // Set selected on each option, as in the model picker.
         html! {
             <select
                 class="reasoning-effort-select"
                 title="Reasoning effort for the next turn"
                 aria-label="Reasoning effort"
-                value={selected}
                 {onchange}
             >
-                <option value="auto">{ "Auto" }</option>
-                <option value="minimal">{ "Minimal" }</option>
-                <option value="low">{ "Low" }</option>
-                <option value="medium">{ "Medium" }</option>
-                <option value="high">{ "High" }</option>
-                <option value="xhigh">{ "XHigh" }</option>
+                <option value="auto" selected={selected == "auto"}>{ "Auto" }</option>
+                <option value="minimal" selected={selected == "minimal"}>{ "Minimal" }</option>
+                <option value="low" selected={selected == "low"}>{ "Low" }</option>
+                <option value="medium" selected={selected == "medium"}>{ "Medium" }</option>
+                <option value="high" selected={selected == "high"}>{ "High" }</option>
+                <option value="xhigh" selected={selected == "xhigh"}>{ "XHigh" }</option>
             </select>
         }
     }
@@ -1189,6 +1343,15 @@ impl InputBar {
                     </button>
                     <button
                         type="button"
+                        class="dropdown-option"
+                        disabled={self.queue_pending.is_some() || is_uploading}
+                        onclick={link.callback(|_| InputBarMsg::QueueInput)}
+                    >
+                        { "Send to queue" }
+                        <span class="option-hint">{ "Save for later in the work queue" }</span>
+                    </button>
+                    <button
+                        type="button"
                         class="dropdown-option attachment"
                         disabled={!ws_connected}
                         title={if ws_connected { "" } else { "File uploads need the live connection" }}
@@ -1211,6 +1374,24 @@ impl InputBar {
     }
 }
 
+fn queued_text_request(input: &str) -> Option<CreateEditStackRequest> {
+    let text = input.trim();
+    if text.is_empty() {
+        return None;
+    }
+    Some(CreateEditStackRequest {
+        items: vec![EditStackItemInput {
+            title: Some(shared::strings::truncate_with_ellipsis(
+                text.lines().next().unwrap_or(text),
+                100,
+            )),
+            body: Some(text.to_string()),
+            ..Default::default()
+        }],
+        ..Default::default()
+    })
+}
+
 /// Add agent-facing context to text produced by speech recognition. The
 /// reminder stays out of the textarea and command history, while the shared
 /// markdown path renders it as the established compact reminder bumper in the
@@ -1224,6 +1405,36 @@ fn voice_transcription_prompt(visible_input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn queue_submission_keeps_multiline_body_and_bounds_unicode_title() {
+        let heading = "界".repeat(150);
+        let text = format!("  {heading}\n\n/clear should be reviewed, not run now\n  ");
+        let request = queued_text_request(&text).unwrap();
+        assert_eq!(request.items.len(), 1);
+        assert_eq!(request.items[0].body.as_deref(), Some(text.trim()));
+        assert!(request.items[0].title.as_ref().unwrap().chars().count() <= 100);
+        assert!(request.items[0].image.is_none());
+        assert!(request.items[0].context.is_none());
+        assert!(queued_text_request(" \n\t ").is_none());
+    }
+
+    #[test]
+    fn reasoning_effort_preferences_are_scoped_to_the_session() {
+        let first = Uuid::from_u128(1);
+        let second = Uuid::from_u128(2);
+
+        assert_eq!(
+            reasoning_effort_key(first),
+            "agent-portal-reasoning-effort-00000000-0000-0000-0000-000000000001"
+        );
+        assert_ne!(reasoning_effort_key(first), reasoning_effort_key(second));
+    }
+
+    #[test]
+    fn auto_is_the_absence_of_a_reasoning_effort_override() {
+        assert_eq!(reasoning_effort_from_str("auto"), None);
+    }
 
     #[test]
     fn voice_transcription_adds_a_small_agent_reminder() {

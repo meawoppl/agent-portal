@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2099 - Direct edit-stack submissions from forwarded surfaces</text>
+<text x="55" y="108" font-family="sans-serif" font-size="34" fill="#e6e9f5">Forwarded plugin annotations now POST to Portal directly, then Portal</text>
+<text x="55" y="148" font-family="sans-serif" font-size="34" fill="#e6e9f5">persists the work item, enqueues it, and refreshes open session views.</text>
+<path d="M55 190 H1945 M1000 207 V1130" stroke="#565f89" fill="none"/>
+<text x="55" y="235" font-family="sans-serif" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1055" y="235" font-family="sans-serif" font-size="22" fill="#9ece6a">AFTER</text>
+<g>
+<rect x="55" y="285" width="870" height="180" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="327" font-family="sans-serif" font-size="26" fill="#f7768e">window.postMessage bridge</text>
+<text x="79" y="371" font-family="sans-serif" font-size="23" fill="#c0caf5">SessionView listened for a browser message and</text>
+<text x="79" y="407" font-family="sans-serif" font-size="23" fill="#c0caf5">trusted only the active in-frame surface origin.</text>
+</g>
+<g>
+<rect x="1055" y="285" width="870" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="327" font-family="sans-serif" font-size="26" fill="#9ece6a">POST /__portal/edit-stack</text>
+<text x="1079" y="371" font-family="sans-serif" font-size="23" fill="#c0caf5">forward_proxy intercepts the reserved path before</text>
+<text x="1079" y="407" font-family="sans-serif" font-size="23" fill="#c0caf5">the request reaches the plugin service.</text>
+</g>
+<g>
+<rect x="55" y="570" width="870" height="180" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="612" font-family="sans-serif" font-size="26" fill="#f7768e">CreateEditStackRequest.type</text>
+<text x="79" y="656" font-family="sans-serif" font-size="23" fill="#c0caf5">Surfaces carried agent-portal:queue-prompts</text>
+<text x="79" y="692" font-family="sans-serif" font-size="23" fill="#c0caf5">plus a version field through the bridge payload.</text>
+</g>
+<g>
+<rect x="1055" y="570" width="870" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="612" font-family="sans-serif" font-size="26" fill="#9ece6a">CreateEditStackRequest items only</text>
+<text x="1079" y="656" font-family="sans-serif" font-size="23" fill="#c0caf5">The request is source + items; ForwardClaims.user_id</text>
+<text x="1079" y="692" font-family="sans-serif" font-size="23" fill="#c0caf5">is required from the forward session cookie.</text>
+</g>
+<g>
+<rect x="55" y="855" width="870" height="180" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="897" font-family="sans-serif" font-size="26" fill="#f7768e">Dashboard did the save</text>
+<text x="79" y="941" font-family="sans-serif" font-size="23" fill="#c0caf5">The plugin depended on a visible Portal host</text>
+<text x="79" y="977" font-family="sans-serif" font-size="23" fill="#c0caf5">to convert annotation messages into REST calls.</text>
+</g>
+<g>
+<rect x="1055" y="855" width="870" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="897" font-family="sans-serif" font-size="26" fill="#9ece6a">Portal owns save + enqueue</text>
+<text x="1079" y="941" font-family="sans-serif" font-size="23" fill="#c0caf5">create_edit_stack_items_for_user_with_inserted</text>
+<text x="1079" y="977" font-family="sans-serif" font-size="23" fill="#c0caf5">feeds enqueue_input and EditStackUpdated.</text>
+</g>
+<text x="55" y="1120" font-family="sans-serif" font-size="22" fill="#e0af68">Direct-only path: plugin submissions require the modern forward session cookie.</text>
+</svg>

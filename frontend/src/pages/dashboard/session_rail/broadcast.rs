@@ -1,8 +1,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::portal_client::SessionKey;
 use shared::AgentType;
-use uuid::Uuid;
 use web_sys::Element;
 use yew::prelude::*;
 
@@ -10,8 +10,8 @@ const BROADCAST_WINDOW_MS: f64 = 2_400.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AgentMessageBroadcast {
-    pub from_session_id: Uuid,
-    pub to_session_id: Uuid,
+    pub from_session_id: SessionKey,
+    pub to_session_id: SessionKey,
     pub timestamp: f64,
 }
 
@@ -32,8 +32,8 @@ impl RailAxis {
 
 #[derive(Clone, Debug)]
 pub(super) struct BroadcastView {
-    pub from_session_id: Uuid,
-    pub to_session_id: Uuid,
+    pub from_session_id: SessionKey,
+    pub to_session_id: SessionKey,
     pub timestamp: f64,
     pub start: f64,
     pub end: f64,
@@ -50,7 +50,7 @@ pub(super) enum BroadcastUnits {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct RenderedSessionPosition {
-    pub id: Uuid,
+    pub id: SessionKey,
     pub agent_type: AgentType,
     /// Center along the travel axis (x horizontal, y vertical), relative to the
     /// rail container origin — where the orb starts/ends.
@@ -73,7 +73,7 @@ impl BroadcastRef {
         events.push(event);
     }
 
-    pub(super) fn active_session_ids(&self, now: f64) -> (Vec<Uuid>, Vec<Uuid>) {
+    pub(super) fn active_session_ids(&self, now: f64) -> (Vec<SessionKey>, Vec<SessionKey>) {
         let cutoff = now - BROADCAST_WINDOW_MS;
         let mut senders = Vec::new();
         let mut receivers = Vec::new();
@@ -85,7 +85,11 @@ impl BroadcastRef {
     }
 
     #[cfg(test)]
-    pub(super) fn view_for(&self, rendered_session_ids: &[Uuid], now: f64) -> Vec<BroadcastView> {
+    pub(super) fn view_for(
+        &self,
+        rendered_session_ids: &[SessionKey],
+        now: f64,
+    ) -> Vec<BroadcastView> {
         let rendered_sessions: Vec<_> = rendered_session_ids
             .iter()
             .map(|id| (*id, AgentType::Claude))
@@ -95,10 +99,11 @@ impl BroadcastRef {
 
     pub(super) fn view_for_sessions(
         &self,
-        rendered_sessions: &[(Uuid, AgentType)],
+        rendered_sessions: &[(SessionKey, AgentType)],
         now: f64,
     ) -> Vec<BroadcastView> {
-        let rendered_session_ids: Vec<Uuid> = rendered_sessions.iter().map(|(id, _)| *id).collect();
+        let rendered_session_ids: Vec<SessionKey> =
+            rendered_sessions.iter().map(|(id, _)| *id).collect();
         if rendered_session_ids.len() < 2 {
             return Vec::new();
         }
@@ -191,7 +196,7 @@ impl Default for BroadcastRef {
 pub(super) fn render_broadcasts(
     broadcasts: &BroadcastRef,
     rail_ref: &NodeRef,
-    rendered_sessions: &[(Uuid, AgentType)],
+    rendered_sessions: &[(SessionKey, AgentType)],
     axis: RailAxis,
     render_time: f64,
 ) -> Html {
@@ -233,6 +238,7 @@ pub(super) fn render_broadcasts(
                     AgentType::Claude => "claude",
                     AgentType::Codex => "codex",
                     AgentType::Muse => "muse",
+                    AgentType::Antigravity => "antigravity",
                 };
                 let (s1, s2, s3) = plasma_seeds(&view);
                 let style =
@@ -268,7 +274,7 @@ impl BroadcastUnits {
 
 fn measure_rendered_positions(
     rail_ref: &NodeRef,
-    rendered_sessions: &[(Uuid, AgentType)],
+    rendered_sessions: &[(SessionKey, AgentType)],
     axis: RailAxis,
 ) -> Option<Vec<RenderedSessionPosition>> {
     let rail = rail_ref.cast::<Element>()?;
@@ -283,7 +289,7 @@ fn measure_rendered_positions(
 
     let mut positions = Vec::with_capacity(rendered_sessions.len());
     for (id, agent_type) in rendered_sessions {
-        let selector = format!("[data-session-id=\"{id}\"]");
+        let selector = format!("[data-session-key=\"{id}\"]");
         let pill = rail.query_selector(&selector).ok().flatten()?;
         let rect = pill.get_bounding_client_rect();
         let (center, cross) = match axis {
@@ -327,15 +333,15 @@ fn fnv1a(bytes: &[u8], mut hash: u64) -> u64 {
 /// of the event keeps rendering deterministic for tests.
 fn plasma_seeds(view: &BroadcastView) -> (f64, f64, f64) {
     const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-    let mut hash = fnv1a(view.from_session_id.as_bytes(), FNV_OFFSET);
-    hash = fnv1a(view.to_session_id.as_bytes(), hash);
+    let mut hash = fnv1a(view.from_session_id.id.as_bytes(), FNV_OFFSET);
+    hash = fnv1a(view.to_session_id.id.as_bytes(), hash);
     hash = fnv1a(&(view.timestamp as i64).to_le_bytes(), hash);
     // Three widely-separated bit windows so the values don't correlate.
     let unit = |bits: u64| (bits % 10_000) as f64 / 10_000.0;
     (unit(hash), unit(hash >> 21), unit(hash >> 42))
 }
 
-fn push_unique(values: &mut Vec<Uuid>, id: Uuid) {
+fn push_unique(values: &mut Vec<SessionKey>, id: SessionKey) {
     if !values.contains(&id) {
         values.push(id);
     }
@@ -344,9 +350,10 @@ fn push_unique(values: &mut Vec<Uuid>, id: Uuid) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uuid::Uuid;
 
-    fn id(n: u128) -> Uuid {
-        Uuid::from_u128(n)
+    fn id(n: u128) -> SessionKey {
+        SessionKey::home(Uuid::from_u128(n))
     }
 
     #[test]
@@ -402,7 +409,7 @@ mod tests {
         assert_eq!(view[0].agent_type, AgentType::Codex);
     }
 
-    fn view_at(from: Uuid, to: Uuid, timestamp: f64) -> BroadcastView {
+    fn view_at(from: SessionKey, to: SessionKey, timestamp: f64) -> BroadcastView {
         BroadcastView {
             from_session_id: from,
             to_session_id: to,

@@ -18,7 +18,7 @@
 //!   `(stream_id, record_id)` identity composite safe — record ids repeat
 //!   across sessions.
 
-use muse_codes::{ExecRun, MuseExecBuilder, MusePayload, MuseRecord, Provider};
+use muse_codes::{ExecRun, MuseExecBuilder, MusePayload, MuseRecord, Provider, RunUsage};
 use session_lib::adapter::AgentOutputClassifier;
 use session_lib::io::{IoCommand, IoEvent};
 use session_lib::snapshot::SessionConfig;
@@ -43,11 +43,9 @@ pub async fn muse_io_task(
 
     // Per-turn performance metrics (#1798), same machinery as claude/codex:
     // `start`ed on each user input, first-token latched on the first streamed
-    // output, finalized on `run.terminal.*`. Muse's wire carries no token
-    // usage or cost, so those fields stay at their explicit "not reported"
-    // values (zeros / None) rather than fabricated numbers — what muse does
-    // measure (model identity, timing, tool calls, terminal state) flows into
-    // the same views as the other agents.
+    // output, finalized on `run.terminal.*`. The preceding `run.usage`
+    // snapshot supplies token totals; cost and context occupancy remain
+    // unknown because the wire does not report them.
     let mut turn_tracker = TurnTracker::new(config.session_id);
 
     while let Some(command) = command_rx.recv().await {
@@ -92,6 +90,10 @@ pub async fn muse_io_task(
             IoCommand::Interrupt => {
                 tracing::debug!("muse: interrupt outside an active turn — no child to kill");
             }
+            IoCommand::Shutdown { completed } => {
+                let _ = completed.send(());
+                break;
+            }
         }
     }
 }
@@ -113,6 +115,7 @@ async fn run_turn(
 
     // Turn-scoped telemetry inputs, filled from the journal as it streams.
     let mut model: Option<String> = None;
+    let mut usage: Option<RunUsage> = None;
 
     while let Some(record) = run.next_record().await? {
         let mut terminal = false;
@@ -128,9 +131,14 @@ async fn run_turn(
             Ok(MusePayload::ToolResult(_)) => {
                 turn_tracker.record_tool_call();
             }
+            Ok(MusePayload::RunUsage(snapshot)) => {
+                // A run-level snapshot, not a delta: retain only the latest
+                // frame so a replay cannot count the same tokens twice.
+                usage = Some(snapshot);
+            }
             Ok(MusePayload::RunTerminal(t)) => {
                 terminal = true;
-                finalize_turn_metrics(turn_tracker, model.take(), &t, event_tx);
+                finalize_turn_metrics(turn_tracker, model.take(), usage.as_ref(), &t, event_tx);
             }
             _ => {}
         }
@@ -146,29 +154,36 @@ async fn run_turn(
 /// Project a finished muse run into the agent-neutral [`TurnOutcome`] and emit
 /// the resulting metrics (#1798).
 ///
-/// What muse's wire measures maps directly: model identity from
-/// `run.model.configured`, wall-clock/TTFT/tool-call counts from the tracker,
-/// terminal state onto `stop_reason`/`is_error`. What it does NOT measure —
-/// token usage, cost, context window/occupancy — is reported explicitly as
-/// absent (zeros for the non-optional token fields, `None` elsewhere), never
-/// fabricated. Runs that never configured a model (the echo test provider) are
-/// dropped like claude's model-less results: the performance views key on the
-/// model, and a row without one is unattributable noise.
+/// `run.usage` totals span all model calls (and children when the wire says
+/// `children_included`), so sum each per-model row once. Cached and reasoning
+/// tokens remain separate diagnostic counters; no separate child breakdown,
+/// cost or context snapshot is available. Older CLIs without a usage frame
+/// retain zero token counters. Model-less echo runs emit no metrics.
 fn finalize_turn_metrics(
     turn_tracker: &mut TurnTracker,
     model: Option<String>,
+    usage: Option<&RunUsage>,
     terminal: &muse_codes::RunTerminal,
     event_tx: &mpsc::UnboundedSender<IoEvent>,
 ) {
+    // Clamp wire u64 counters to the signed metrics range instead of wrapping.
+    let total = |field: fn(&muse_codes::RunUsageModel) -> u64| -> i64 {
+        usage
+            .into_iter()
+            .flat_map(|snapshot| &snapshot.models)
+            .fold(0i64, |sum, row| {
+                sum.saturating_add(i64::try_from(field(row)).unwrap_or(i64::MAX))
+            })
+    };
     let outcome = TurnOutcome {
         agent_type: shared::AgentType::Muse,
         model,
         service_tier: None,
-        input_tokens: 0,
-        output_tokens: 0,
+        input_tokens: total(|row| row.input_tokens),
+        output_tokens: total(|row| row.output_tokens),
         cache_creation_tokens: 0,
-        cache_read_tokens: 0,
-        thinking_tokens: 0,
+        cache_read_tokens: total(|row| row.cached_tokens),
+        thinking_tokens: total(|row| row.reasoning_tokens),
         subagent_tokens: 0,
         context_snapshot_tokens: None,
         stop_reason: Some(terminal.terminal.clone()),
@@ -256,9 +271,7 @@ mod tests {
         .expect("RunTerminal fixture")
     }
 
-    /// #1798: a completed muse run projects into the agent-neutral metrics —
-    /// model + timing + tool calls + terminal state carried; token/cost fields
-    /// explicitly absent (zero / None), never fabricated.
+    /// Older CLIs without a usage frame still report timing and terminal state.
     #[test]
     fn muse_run_projects_into_turn_metrics() {
         let (tx, mut rx) = mpsc::unbounded_channel();
@@ -271,6 +284,7 @@ mod tests {
         finalize_turn_metrics(
             &mut tracker,
             Some("muse-spark-1.3".to_string()),
+            None,
             &run_terminal("completed"),
             &tx,
         );
@@ -284,7 +298,7 @@ mod tests {
         assert!(!metrics.is_error);
         assert_eq!(metrics.tool_call_count, 2);
         assert!(metrics.ttft_ms.is_some(), "content frame latched TTFT");
-        // Not measured by the muse wire — explicitly absent, not fabricated.
+        // No usage snapshot on this older-CLI path.
         assert_eq!(metrics.input_tokens, 0);
         assert_eq!(metrics.total_cost_usd, None);
         assert_eq!(metrics.model_context_window, None);
@@ -302,6 +316,7 @@ mod tests {
         finalize_turn_metrics(
             &mut tracker,
             Some("muse-spark-1.3".to_string()),
+            None,
             &run_terminal("failed"),
             &tx,
         );
@@ -312,8 +327,66 @@ mod tests {
         assert_eq!(metrics.stop_reason.as_deref(), Some("failed"));
 
         tracker.start(Instant::now(), chrono::Utc::now());
-        finalize_turn_metrics(&mut tracker, None, &run_terminal("completed"), &tx);
+        finalize_turn_metrics(&mut tracker, None, None, &run_terminal("completed"), &tx);
         assert!(rx.try_recv().is_err(), "model-less run emits no metrics");
+    }
+
+    #[test]
+    fn usage_snapshot_sums_models_without_double_counting_cached_or_child_tokens() {
+        let usage: RunUsage = serde_json::from_value(serde_json::json!({
+            "kind": "run_usage", "command_id": "cmd-1",
+            "run_stream": {"kind": "run", "id": "r-1"},
+            "calls": 3, "completed_calls": 2, "failed_calls": 1,
+            "cancelled_calls": 0, "children_included": true, "allowance": null,
+            "models": [
+                {"model": "muse-spark-1.3-contributor", "calls": 2,
+                 "input_tokens": 100, "cached_tokens": 40,
+                 "output_tokens": 20, "reasoning_tokens": 5},
+                {"model": "muse-wonder-1.0", "calls": 1,
+                 "input_tokens": 50, "cached_tokens": 10,
+                 "output_tokens": 8, "reasoning_tokens": 2}
+            ]
+        }))
+        .expect("typed usage");
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut tracker = TurnTracker::new(uuid::Uuid::nil());
+        tracker.start(Instant::now(), chrono::Utc::now());
+        finalize_turn_metrics(
+            &mut tracker,
+            Some("muse-spark-1.3-contributor".into()),
+            Some(&usage),
+            &run_terminal("completed"),
+            &tx,
+        );
+        let IoEvent::TurnMetricsReady(metrics) = rx.try_recv().expect("metrics") else {
+            panic!("expected metrics");
+        };
+        assert_eq!(metrics.input_tokens, 150);
+        assert_eq!(metrics.cache_read_tokens, 50);
+        assert_eq!(metrics.output_tokens, 28);
+        assert_eq!(metrics.thinking_tokens, 7);
+        // Child usage is already included in the wire totals, with no separate breakdown.
+        assert_eq!(metrics.subagent_tokens, 0);
+        assert_eq!(metrics.cache_creation_tokens, 0);
+        assert_eq!(metrics.total_cost_usd, None);
+        assert_eq!(metrics.context_snapshot_tokens, None);
+        assert_eq!(metrics.model_context_window, None);
+
+        // A later turn without a usage frame must not inherit these totals.
+        tracker.start(Instant::now(), chrono::Utc::now());
+        finalize_turn_metrics(
+            &mut tracker,
+            Some("muse-spark-1.3-contributor".into()),
+            None,
+            &run_terminal("failed"),
+            &tx,
+        );
+        let IoEvent::TurnMetricsReady(metrics) = rx.try_recv().expect("metrics") else {
+            panic!("expected metrics");
+        };
+        assert_eq!(metrics.input_tokens, 0);
+        assert_eq!(metrics.output_tokens, 0);
+        assert!(metrics.is_error);
     }
 
     fn corpus_record(payload_type: &str) -> MuseRecord {

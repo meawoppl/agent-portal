@@ -230,6 +230,7 @@
     --pill-visual-height: 2.5rem;
 
     position: relative;
+    isolation: isolate;
     display: flex;
     align-items: center;
     gap: 0.35rem;
@@ -268,6 +269,20 @@
 }
 .pill-watermark.claude { background-image: url('/anthropic-mark.svg'); }
 .pill-watermark.codex  { background-image: url('/openai-mark.png'); }
+
+.pill-watermark.antigravity {
+    color: #bb9af7;
+    display: grid;
+    font-family: monospace;
+    font-size: 46px;
+    font-weight: 700;
+    line-height: 1;
+    place-items: center;
+}
+
+.pill-watermark.antigravity::before {
+    content: "A";
+}
 
 /* Muse watermark 30% larger (64×1.3 = 83.2) — recentered so horizontal center stays at x=16 (left = 16 - 83.2/2 = -25.6) */
 .pill-watermark.muse {
@@ -579,6 +594,16 @@
 .agent-broadcast-orb.codex {
     --pl-core: #b9a8ff;
     --pl-edge: #5b57fb;
+}
+
+.agent-broadcast-orb.muse {
+    --pl-core: #b7d9ff;
+    --pl-edge: #7aa2f7;
+}
+
+.agent-broadcast-orb.antigravity {
+    --pl-core: #e7d7ff;
+    --pl-edge: #bb9af7;
 }
 
 .agent-broadcast-orb {
@@ -1102,6 +1127,23 @@
 .session-pill.hidden .sparkline-tick,
 .session-pill.hidden .sparkline-range {
     opacity: 0.2;
+}
+
+/* Agent progress fill (`agent-portal progress`) — a gentle green wash behind
+   the pill content, growing left→right. z-index -1 inside the pill's own stacking
+   context (`isolation: isolate` on `.session-pill`) keeps it beneath every
+   foreground child — text, badges, status dot, activity ticks — without
+   each one needing a z-index; the pill's overflow:hidden clips it to the
+   rounded shape. */
+.pill-progress-fill {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    background: rgba(158, 206, 106, 0.16);
+    pointer-events: none;
+    z-index: -1;
+    transition: width 0.4s ease;
 }
 
 /* Top context-usage bar: the counterpart to the bottom activity ticks, but a

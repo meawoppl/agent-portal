@@ -28,6 +28,10 @@ pub struct MessageGroupRendererProps {
     pub on_schedule_continuation: Callback<Uuid>,
     #[prop_or_default]
     pub on_claude_login: Option<Callback<()>>,
+    /// The session's latest model id. Codex frames carry no model of their own,
+    /// so this is what turns the plain `Codex` name tag into `Codex - Sol 5.6`.
+    #[prop_or_default]
+    pub model: Option<String>,
     /// Odometer seed for `Thinking` groups: the running thinking-token max
     /// across earlier bursts in the same turn (see
     /// `grouping::thinking_chip_starts`). Keeps the count continuous when a
@@ -40,58 +44,19 @@ pub struct MessageGroupRendererProps {
     pub muse_live_events: Vec<serde_json::Value>,
 }
 
-/// The reconnect durations in a group whose members are *all* connection
-/// cycles, or `None` if any member is something else.
-///
-/// An idle session reconnects on a slow loop, so these arrive as a long run of
-/// otherwise-identical one-liners. Collapsing the run to a single line is the
-/// whole point of the frame being typed.
-pub(super) fn connection_cycle_run(
-    messages: &[super::types::RenderedMessage],
-) -> Option<Vec<String>> {
-    let mut durations = Vec::with_capacity(messages.len());
-    for message in messages {
-        let portal: shared::PortalMessage = serde_json::from_str(&message.content).ok()?;
-        match portal.content.as_slice() {
-            [shared::PortalContent::ConnectionCycle { duration }] => {
-                durations.push(duration.clone().unwrap_or_default())
-            }
-            _ => return None,
+/// Whether a portal message is a proxy reconnect notice. These are hidden from
+/// the transcript (see `group_messages`). The proxy no longer emits them, but
+/// older transcripts carry both the typed `ConnectionCycle` variant and the
+/// earlier `Proxy reconnected` markdown cards.
+pub(super) fn is_reconnect_notice(portal: &shared::PortalMessage) -> bool {
+    match portal.content.as_slice() {
+        [shared::PortalContent::ConnectionCycle { .. }] => true,
+        [shared::PortalContent::Text { text }] => {
+            let first_line = text.lines().next().unwrap_or_default().trim();
+            first_line.starts_with("**Proxy reconnected**")
+                || first_line.starts_with("Proxy reconnected")
         }
-    }
-    (!durations.is_empty()).then_some(durations)
-}
-
-/// One line for a whole run: `reconnected 4x (36-38s)`.
-pub(super) fn render_connection_cycle_run(durations: &[String]) -> Html {
-    let label = match durations {
-        [] => return html! {},
-        [only] if only.is_empty() => "reconnected".to_string(),
-        [only] => format!("reconnected after {only}"),
-        many => {
-            // Durations arrive newest-last and are near-identical; show the
-            // span rather than repeating one value N times.
-            let mut seen: Vec<&str> = many
-                .iter()
-                .map(String::as_str)
-                .filter(|d| !d.is_empty())
-                .collect();
-            seen.sort_unstable();
-            seen.dedup();
-            match (seen.first(), seen.last()) {
-                (Some(lo), Some(hi)) if lo == hi => {
-                    format!("reconnected {}x after {lo}", many.len())
-                }
-                (Some(lo), Some(hi)) => format!("reconnected {}x ({lo}-{hi})", many.len()),
-                _ => format!("reconnected {}x", many.len()),
-            }
-        }
-    };
-    html! {
-        <div class="connection-cycle">
-            <span class="connection-cycle-dot" />
-            { label }
-        </div>
+        _ => false,
     }
 }
 
@@ -175,17 +140,44 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
                 };
             }
 
-            // A run of reconnect notices collapses to one line.
-            if *category == GroupCategory::Portal {
-                if let Some(durations) = connection_cycle_run(messages) {
-                    return html! {
-                        <div class="claude-message portal-message" title={ts.unwrap_or_default()}>
-                            <div class="message-body">
-                                { render_connection_cycle_run(&durations) }
-                            </div>
-                        </div>
-                    };
+            if *category == GroupCategory::Antigravity {
+                let parts: Vec<Html> = messages
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, message)| {
+                        let content = dispatch::render_identity_group_part(
+                            message,
+                            props.agent_type,
+                            props.session_id,
+                            &props.continuation_statuses,
+                            props.on_schedule_continuation.clone(),
+                        )?;
+                        let key = message
+                            .raw_iso()
+                            .map(|iso| format!("a-{iso}"))
+                            .unwrap_or_else(|| format!("a{i}"));
+                        Some(html! { <div {key} class="grouped-message-part">{ content }</div> })
+                    })
+                    .collect();
+                if parts.is_empty() {
+                    return html! {};
                 }
+                let visible_count = parts.len();
+                return html! {
+                    <div class="claude-message antigravity-message" title={ts.unwrap_or_default()}>
+                        <div class="message-header">
+                            <span class={classes!("message-type-badge", badge_class.clone())}>{ label }</span>
+                            if visible_count > 1 {
+                                <span class="message-count" title={format!("{} consecutive events", visible_count)}>
+                                    { format!("× {}", visible_count) }
+                                </span>
+                            }
+                        </div>
+                        <div class="message-body grouped-message-body">
+                            { for parts.into_iter() }
+                        </div>
+                    </div>
+                };
             }
 
             let wrapper_class = match category {
@@ -193,7 +185,9 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
                 GroupCategory::Portal => "portal-message",
                 GroupCategory::Assistant | GroupCategory::Codex => "assistant-message",
                 // Handled above with an early return; arm kept for exhaustiveness.
-                GroupCategory::Thinking | GroupCategory::Muse => "assistant-message",
+                GroupCategory::Thinking | GroupCategory::Muse | GroupCategory::Antigravity => {
+                    "assistant-message"
+                }
             };
             let visible = visible_group_indices(*category, messages);
             // Render each member first, dropping the ones that produce nothing
@@ -231,10 +225,17 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
                 return html! {};
             }
             let visible_count = parts.len();
+            // Codex output reaches here under either the `Codex` or the
+            // `Assistant` category, both carrying the plain `Codex` identity label.
+            let header_label = if props.agent_type == shared::AgentType::Codex && label == "Codex" {
+                super::codex_label(props.model.as_deref())
+            } else {
+                label.clone()
+            };
             html! {
                 <div class={classes!("claude-message", wrapper_class)}>
                     <div class="message-header" title={ts.unwrap_or_default()}>
-                        <span class={classes!("message-type-badge", badge_class.clone())}>{ label }</span>
+                        <span class={classes!("message-type-badge", badge_class.clone())}>{ header_label }</span>
                         if visible_count > 1 {
                             <span class="message-count" title={format!("{} consecutive messages", visible_count)}>
                                 { format!("× {}", visible_count) }

@@ -112,7 +112,7 @@ fn combined_text(body: &FastTranscriptionBody) -> String {
     body.combined_phrases
         .iter()
         .map(|p| p.text.trim())
-        .filter(|t| !t.is_empty())
+        .filter(|t| shared::strings::is_non_empty(t))
         .collect::<Vec<_>>()
         .join(" ")
 }

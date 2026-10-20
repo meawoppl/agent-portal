@@ -188,7 +188,7 @@ fn job_error(job: &JobDetails) -> String {
         .errors
         .iter()
         .map(|e| e.message.trim())
-        .filter(|m| !m.is_empty())
+        .filter(|m| shared::strings::is_non_empty(m))
         .collect::<Vec<_>>()
         .join("; ");
     if joined.is_empty() {

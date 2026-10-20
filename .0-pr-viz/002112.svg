@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-labelledby="title desc">
+  <title id="title">Performance chart color overflow</title>
+  <desc id="desc">Performance charts keep the base portal palette, then generate more colors instead of wrapping repeated model colors.</desc>
+  <rect width="2000" height="1200" fill="#1a1b26"/>
+
+  <text x="80" y="105" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="50" font-weight="700">Performance Chart Colors Stop Wrapping</text>
+  <text x="80" y="158" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="28">series_color keeps the curated palette first, then generates overflow hues for extra model groups.</text>
+
+  <line x1="1000" y1="210" x2="1000" y2="1050" stroke="#3d4666" stroke-width="3" stroke-dasharray="10 12"/>
+
+  <text x="90" y="250" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700" letter-spacing="4">BEFORE</text>
+  <text x="90" y="298" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="27">metric_series used index % SERIES_COLORS.len()</text>
+  <text x="90" y="335" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">Eighth group reused the first color; model lines looked identical.</text>
+
+  <rect x="90" y="385" width="830" height="430" rx="16" fill="#16161e" stroke="#3d4666" stroke-width="2"/>
+  <line x1="145" y1="735" x2="860" y2="735" stroke="#565f89" stroke-width="2"/>
+  <line x1="145" y1="455" x2="145" y2="735" stroke="#565f89" stroke-width="2"/>
+  <path d="M145 700 C250 620 330 690 440 560 S650 535 860 460" fill="none" stroke="#7aa2f7" stroke-width="8" stroke-linecap="round"/>
+  <path d="M145 665 C265 585 335 640 445 540 S650 520 860 440" fill="none" stroke="#7aa2f7" stroke-width="4" stroke-linecap="round" stroke-dasharray="13 12"/>
+  <text x="180" y="795" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25">model 1 and model 8 both blue</text>
+
+  <rect x="160" y="860" width="52" height="32" rx="6" fill="#7aa2f7"/>
+  <text x="230" y="884" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">claude-opus-test</text>
+  <rect x="160" y="920" width="52" height="32" rx="6" fill="#7aa2f7"/>
+  <text x="230" y="944" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">claude-haiku-extra</text>
+  <text x="160" y="1008" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25">Duplicate legend swatches make per-model charts ambiguous.</text>
+
+  <text x="1080" y="250" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700" letter-spacing="4">AFTER</text>
+  <text x="1080" y="298" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="27">series_color(index) selects base or generated_series_color</text>
+  <text x="1080" y="335" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">The first seven colors are stable; overflow hues use a golden-angle step.</text>
+
+  <rect x="1080" y="385" width="830" height="430" rx="16" fill="#16161e" stroke="#3d4666" stroke-width="2"/>
+  <line x1="1135" y1="735" x2="1850" y2="735" stroke="#565f89" stroke-width="2"/>
+  <line x1="1135" y1="455" x2="1135" y2="735" stroke="#565f89" stroke-width="2"/>
+  <path d="M1135 700 C1240 620 1320 690 1430 560 S1640 535 1850 460" fill="none" stroke="#7aa2f7" stroke-width="8" stroke-linecap="round"/>
+  <path d="M1135 650 C1255 585 1345 625 1455 520 S1660 500 1850 430" fill="none" stroke="#bb9af7" stroke-width="8" stroke-linecap="round"/>
+  <text x="1170" y="795" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25">overflow groups get distinct colors</text>
+
+  <rect x="1150" y="860" width="52" height="32" rx="6" fill="#7aa2f7"/>
+  <text x="1220" y="884" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">claude-opus-test</text>
+  <rect x="1150" y="920" width="52" height="32" rx="6" fill="#bb9af7"/>
+  <text x="1220" y="944" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">claude-haiku-extra</text>
+  <text x="1150" y="1008" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25">Regression tests cover 48 unique series colors.</text>
+  <text x="1150" y="1044" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25">The base palette order stays stable.</text>
+
+  <rect x="190" y="1080" width="1620" height="70" rx="14" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+  <text x="230" y="1125" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">Scope: this changes chart palette assignment only; metric grouping, p95 toggles, and axis math stay unchanged.</text>
+</svg>

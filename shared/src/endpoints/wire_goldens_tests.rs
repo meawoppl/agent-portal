@@ -661,6 +661,7 @@ fn launcher_to_server_exit_reason_defaults() {
 #[test]
 fn launcher_server_to_launcher_launch_roundtrip_golden() {
     let msg = ServerToLauncher::LaunchSession {
+        history_restore: None,
         request_id: nil(),
         user_id: nil(),
         auth_token: "tok".into(),
@@ -812,4 +813,70 @@ fn continuation_reason_wire_strings_stable() {
         Some(ContinuationReason::Limit)
     );
     assert_eq!(ContinuationReason::from_wire("bogus"), None);
+}
+
+#[test]
+fn server_to_client_agent_progress_golden() {
+    let msg = ServerToClient::AgentProgress {
+        bars: vec![
+            crate::api::ProgressBar {
+                id: "build".into(),
+                label: Some("Building".into()),
+                fraction: Some(0.25),
+            },
+            crate::api::ProgressBar {
+                id: "wait".into(),
+                label: None,
+                fraction: None,
+            },
+        ],
+    };
+    let v = serde_json::to_value(&msg).unwrap();
+    assert_eq!(v["type"], "AgentProgress");
+    assert_eq!(v["bars"][0]["id"], "build");
+    assert_eq!(v["bars"][0]["fraction"], 0.25);
+    assert!(v["bars"][1].get("fraction").is_none());
+    assert!(v["bars"][1].get("label").is_none());
+    let back: ServerToClient = serde_json::from_value(v).unwrap();
+    match back {
+        ServerToClient::AgentProgress { bars } => assert_eq!(bars.len(), 2),
+        _ => panic!("wrong variant"),
+    }
+}
+
+#[test]
+fn server_to_client_session_progress_golden() {
+    let session_id = Uuid::nil();
+    let msg = ServerToClient::SessionProgress {
+        session_id,
+        fraction: Some(0.5),
+    };
+    let v = serde_json::to_value(&msg).unwrap();
+    assert_eq!(v["type"], "SessionProgress");
+    assert_eq!(v["fraction"], 0.5);
+    let back: ServerToClient = serde_json::from_value(v).unwrap();
+    assert!(matches!(
+        back,
+        ServerToClient::SessionProgress {
+            fraction: Some(_),
+            ..
+        }
+    ));
+
+    let cleared = serde_json::to_value(ServerToClient::SessionProgress {
+        session_id,
+        fraction: None,
+    })
+    .unwrap();
+    assert!(cleared.get("fraction").is_none());
+}
+
+#[test]
+fn server_to_client_session_progress_reset_golden() {
+    let v = serde_json::to_value(ServerToClient::SessionProgressReset).unwrap();
+    assert_eq!(v["type"], "SessionProgressReset");
+    assert!(matches!(
+        serde_json::from_value::<ServerToClient>(v).unwrap(),
+        ServerToClient::SessionProgressReset
+    ));
 }

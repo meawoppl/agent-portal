@@ -5,16 +5,25 @@
 mod config;
 mod connection;
 mod forward;
+mod history_restore;
+mod imports;
 mod login_registry;
+mod managed_forward;
 mod media;
 mod message;
 mod pastebin;
 mod path_policy;
 mod plugin;
+mod plugin_detect;
+mod plugin_preview;
+mod plugin_validate;
 mod process_manager;
+mod progress;
 mod scheduler;
 mod seppuku;
 mod service;
+mod session_plugins;
+mod work_queue;
 mod worktree;
 
 use clap::{Parser, Subcommand};
@@ -106,11 +115,41 @@ enum Command {
         #[command(subcommand)]
         action: MessageAction,
     },
+    /// View or add durable work queue items for your sessions.
+    #[command(name = "work-queue", alias = "queue")]
+    WorkQueue {
+        #[command(subcommand)]
+        action: WorkQueueAction,
+    },
     /// Display an image, video, or portable figure in this session's transcript.
     #[command(alias = "display")]
     Show {
         /// Path to the media file (png, jpg, gif, webp, svg, mp4, webm).
         file: String,
+    },
+    /// Show or update a live progress bar in this session's web view.
+    ///
+    /// VALUE is a number out of --max (default 100), a percentage like `37%`,
+    /// or a fraction like `3/12`. Omit it for an indeterminate bar. Bars are
+    /// live status only (not part of the transcript), expire after 10 minutes
+    /// without an update, and a session may show up to 8 at once, told apart
+    /// by --id. Call it in a loop to animate a long-running job.
+    Progress {
+        /// Current progress: `42`, `42%`, or `3/12`.
+        #[arg(conflicts_with = "done")]
+        value: Option<String>,
+        /// Text shown beside the bar.
+        #[arg(short, long, conflicts_with = "done")]
+        label: Option<String>,
+        /// What a bare VALUE is measured against.
+        #[arg(long, default_value_t = 100.0)]
+        max: f64,
+        /// Bar name, for running several at once.
+        #[arg(long)]
+        id: Option<String>,
+        /// Remove the bar.
+        #[arg(long)]
+        done: bool,
     },
     /// Expose a local HTTP port through the portal for the user's browser.
     ///
@@ -119,8 +158,16 @@ enum Command {
     /// replacing any current forward; `forward list` shows it; `forward close`
     /// revokes it.
     Forward {
-        /// A port number, `list`, or `close`.
+        /// A port number, `run`, `list`, or `close`.
         target: String,
+        /// Executable start script for `forward run`; receives PORTAL_PORT and PORT.
+        script: Option<std::path::PathBuf>,
+        /// HTTP readiness path for a managed service.
+        #[arg(long, default_value = "/")]
+        health_path: String,
+        /// Script arguments after --; {port} expands to the allocated service port.
+        #[arg(last = true)]
+        args: Vec<String>,
     },
     /// Install and run local Portal plugins.
     Plugin {
@@ -145,6 +192,36 @@ enum PluginAction {
         /// Git ref to fetch/checkout.
         #[arg(long = "ref")]
         reference: Option<String>,
+        /// Replace an existing install (or a non-plugin directory) of the same name.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Check a plugin directory's manifest without installing or running it
+    Validate {
+        /// Plugin directory containing agent-portal-plugin.toml
+        path: PathBuf,
+        /// Print a JSON report
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show what Portal will display for a plugin directory
+    Preview {
+        /// Plugin directory containing agent-portal-plugin.toml
+        path: PathBuf,
+        /// Report whether the plugin's detect rules match this directory
+        #[arg(long)]
+        cwd: Option<PathBuf>,
+        /// Print JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Re-fetch an installed plugin from its source and re-run setup
+    Update {
+        /// Plugin name
+        name: String,
+        /// Only report whether the source has a newer revision
+        #[arg(long)]
+        check: bool,
     },
     /// Show plugin metadata
     Info {
@@ -191,6 +268,11 @@ enum PluginAction {
     },
     /// Stop a running plugin surface
     Stop {
+        /// Plugin name
+        name: String,
+    },
+    /// Stop the plugin surface (if running) and start it again
+    Restart {
         /// Plugin name
         name: String,
     },
@@ -263,6 +345,37 @@ enum MessageAction {
 }
 
 #[derive(Subcommand, Debug)]
+enum WorkQueueAction {
+    /// List queued work. With no target, shows a summary across sessions.
+    List {
+        /// Target session id (a unique prefix works)
+        agent_id: Option<String>,
+        /// Include sent and dismissed items, not just pending work
+        #[arg(long)]
+        all: bool,
+        /// Print raw JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Add a text work item to another session's queue
+    Add {
+        /// Target session id (a unique prefix works)
+        agent_id: String,
+        /// Work item body
+        message: String,
+        /// Human-readable item title
+        #[arg(short, long)]
+        title: Option<String>,
+        /// Plugin/view context. JSON is preserved; non-JSON is stored as text.
+        #[arg(long)]
+        context: Option<String>,
+        /// Source metadata. JSON is preserved; non-JSON is stored as text.
+        #[arg(long)]
+        source: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 enum ServiceAction {
     /// Install and start the launcher as a persistent service
     Install,
@@ -315,13 +428,15 @@ fn resolve_backend_url(args_url: Option<String>, config_url: Option<String>) -> 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn path_has_executable(path: &str, name: &str) -> bool {
     use std::os::unix::fs::PermissionsExt;
-    path.split(':').filter(|dir| !dir.is_empty()).any(|dir| {
-        std::path::Path::new(dir)
-            .join(name)
-            .metadata()
-            .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-            .unwrap_or(false)
-    })
+    path.split(':')
+        .filter(|dir| shared::strings::is_non_empty(dir))
+        .any(|dir| {
+            std::path::Path::new(dir)
+                .join(name)
+                .metadata()
+                .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+                .unwrap_or(false)
+        })
 }
 
 /// Make sure `agent-portal` resolves on this process's PATH, prepending the
@@ -360,6 +475,26 @@ mod path_tests {
     use super::{path_has_executable, Args};
     use clap::Parser;
     use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn managed_forward_cli_accepts_script_health_path_and_literal_arguments() {
+        let parsed = Args::try_parse_from([
+            "agent-portal",
+            "forward",
+            "run",
+            "./serve.sh",
+            "--health-path",
+            "/healthz",
+            "--",
+            "--port",
+            "{port}",
+        ])
+        .unwrap();
+        assert!(
+            matches!(parsed.command, Some(super::Command::Forward {target, script:Some(_), health_path, args}) if target == "run" && health_path == "/healthz" && args == ["--port", "{port}"])
+        );
+        assert!(Args::try_parse_from(["agent-portal", "forward", "3000"]).is_ok());
+    }
 
     #[test]
     fn non_executable_file_is_not_resolvable() {
@@ -454,11 +589,55 @@ async fn main() -> anyhow::Result<()> {
                 } => message::history(&agent_id, output.as_deref(), stdout, force).await,
             };
         }
+        Some(Command::WorkQueue { action }) => {
+            return match action {
+                WorkQueueAction::List {
+                    agent_id,
+                    all,
+                    json,
+                } => work_queue::list(agent_id.as_deref(), all, json).await,
+                WorkQueueAction::Add {
+                    agent_id,
+                    message,
+                    title,
+                    context,
+                    source,
+                } => {
+                    work_queue::add(
+                        &agent_id,
+                        &message,
+                        title.as_deref(),
+                        context.as_deref(),
+                        source.as_deref(),
+                    )
+                    .await
+                }
+            };
+        }
         Some(Command::Show { file }) => {
             return media::show(&file).await;
         }
-        Some(Command::Forward { target }) => {
+        Some(Command::Progress {
+            value,
+            label,
+            max,
+            id,
+            done,
+        }) => {
+            return progress::run(value.as_deref(), label.as_deref(), max, id.as_deref(), done)
+                .await;
+        }
+        Some(Command::Forward {
+            target,
+            script,
+            health_path,
+            args,
+        }) => {
+            if target != "run" && (script.is_some() || !args.is_empty() || health_path != "/") {
+                anyhow::bail!("script, arguments and health-path require `forward run`");
+            }
             return match target.as_str() {
+                "run" => managed_forward::run_script(&script.ok_or_else(|| anyhow::anyhow!("usage: agent-portal forward run ./start.sh [--health-path /healthz] -- [args including {{port}}]"))?, args, health_path).await,
                 "list" => forward::list().await,
                 "connections" => forward::connections().await,
                 "close" => forward::close().await,
@@ -471,13 +650,19 @@ async fn main() -> anyhow::Result<()> {
             };
         }
         Some(Command::Plugin { action }) => {
-            return match action {
+            let result = match action {
                 PluginAction::List => plugin::list(),
                 PluginAction::Install {
                     source,
                     name,
                     reference,
-                } => plugin::install(&source, name.as_deref(), reference.as_deref()),
+                    force,
+                } => plugin::install(&source, name.as_deref(), reference.as_deref(), force),
+                PluginAction::Validate { path, json } => plugin_validate::validate(&path, json),
+                PluginAction::Preview { path, cwd, json } => {
+                    plugin_preview::preview(&path, cwd.as_deref(), json)
+                }
+                PluginAction::Update { name, check } => plugin::update(&name, check),
                 PluginAction::Info { name } => plugin::info(&name),
                 PluginAction::Runtime { name, json } => plugin::runtime(&name, json),
                 PluginAction::Skills { name } => plugin::skills(name.as_deref()),
@@ -488,12 +673,21 @@ async fn main() -> anyhow::Result<()> {
                 PluginAction::Doctor { name } => plugin::doctor(&name),
                 PluginAction::Start { name } => plugin::start(&name).await.map(|_| ()),
                 PluginAction::Stop { name } => plugin::stop(&name),
+                PluginAction::Restart { name } => plugin::restart(&name).await.map(|_| ()),
                 PluginAction::Status { name, json } => plugin::status(&name, json).await,
                 PluginAction::Open { name } => plugin::open(&name).await,
                 PluginAction::Remove { name } => plugin::remove(&name),
                 PluginAction::Enable { name } => plugin::set_enabled(&name, true),
                 PluginAction::Disable { name } => plugin::set_enabled(&name, false),
             };
+            // Plugin failures are user-facing (bad source, failed setup), so
+            // print the error chain without the backtrace that returning it
+            // from main would add under RUST_BACKTRACE=1.
+            if let Err(err) = result {
+                eprintln!("Error: {err:#}");
+                std::process::exit(1);
+            }
+            return Ok(());
         }
         Some(Command::Seppuku) => return seppuku::run().await,
         None => {}

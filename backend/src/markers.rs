@@ -145,6 +145,13 @@ pub const MEDIA_ARCHIVE_FAILED: &str = "MEDIA_ARCHIVE_FAILED";
 ///   is what stops the log/DB flood.
 pub const SESSION_LAUNCH_CRASHLOOP_PAUSED: &str = "SESSION_LAUNCH_CRASHLOOP_PAUSED";
 
+/// Reconciliation could not decode a restored session's durable launch recipe.
+/// The session is held rather than launched with empty context. Repeated lines
+/// indicate incompatible deployed code or damaged metadata; a single line may
+/// occur during a rolling rollback. Inspect `sessions.history_restore` and run
+/// a compatible backend. Preserve the recipe and source archive when repairing.
+pub const HISTORY_RESTORE_INVALID: &str = "HISTORY_RESTORE_INVALID";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,6 +168,7 @@ mod tests {
         RETENTION_TRIM_HELD,
         MEDIA_ARCHIVE_FAILED,
         SESSION_LAUNCH_CRASHLOOP_PAUSED,
+        HISTORY_RESTORE_INVALID,
     ];
 
     #[test]

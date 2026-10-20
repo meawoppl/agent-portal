@@ -92,9 +92,10 @@ pub(crate) fn render_frame(ctx: FrameRenderContext<'_>) -> Html {
             AgentFrame::Claude(ClaudeMessage::ConversationReset(msg)) => {
                 renderers::render_conversation_reset(&msg)
             }
-            AgentFrame::Codex(_) | AgentFrame::Muse(_) | AgentFrame::RawJson => {
-                render_raw_json(json)
-            }
+            AgentFrame::Codex(_)
+            | AgentFrame::Muse(_)
+            | AgentFrame::Antigravity(_)
+            | AgentFrame::RawJson => render_raw_json(json),
         },
         FrameRenderer::Codex => match frame {
             AgentFrame::Codex(event) => crate::components::codex_renderer::render_codex_frame(
@@ -122,6 +123,10 @@ pub(crate) fn render_frame(ctx: FrameRenderContext<'_>) -> Html {
                     </div>
                 }
             }
+            _ => html! {},
+        },
+        FrameRenderer::Antigravity => match frame {
+            AgentFrame::Antigravity(value) => renderers::render_antigravity_frame(&value),
             _ => html! {},
         },
         FrameRenderer::RawJson => render_raw_json(json),
@@ -168,6 +173,7 @@ pub(crate) fn render_identity_group_part(
         AgentFrame::Codex(event) => {
             crate::components::codex_renderer::render_codex_frame_content(&event, session_id)
         }
+        AgentFrame::Antigravity(value) => renderers::render_antigravity_frame_content(&value),
         _ => None,
     }
 }

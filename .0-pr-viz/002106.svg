@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2106 - Keep performance chart axes zero-based</text>
+<text x="55" y="108" font-family="sans-serif" font-size="34" fill="#e6e9f5">Non-negative performance metrics now draw from zero, so auto labels stop inventing negative ticks.</text>
+<path d="M55 178 H1945 M1000 195 V1130" stroke="#565f89" fill="none"/>
+<text x="55" y="235" font-family="sans-serif" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1055" y="235" font-family="sans-serif" font-size="22" fill="#9ece6a">AFTER</text>
+
+<g>
+<rect x="55" y="285" width="870" height="235" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="327" font-family="sans-serif" font-size="26" fill="#f7768e">value_bounds pads both ends</text>
+<text x="79" y="371" font-family="monospace" font-size="23" fill="#c0caf5">min=4, max=10, pad=(max-min)*0.08</text>
+<text x="79" y="407" font-family="sans-serif" font-size="23" fill="#c0caf5">Small positive ranges could start below zero.</text>
+<path d="M145 470 H850 M145 430 H850 M145 390 H850" stroke="#565f89" fill="none"/>
+<text x="86" y="475" font-family="monospace" font-size="22" fill="#f7768e">-0.50</text>
+<text x="94" y="435" font-family="monospace" font-size="22" fill="#a9b1d6">4.00</text>
+<text x="84" y="395" font-family="monospace" font-size="22" fill="#a9b1d6">10.48</text>
+<path d="M160 435 C330 416 515 396 815 389" stroke="#7aa2f7" fill="none" stroke-width="6" stroke-linecap="round"/>
+</g>
+
+<g>
+<rect x="1055" y="285" width="870" height="235" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="327" font-family="sans-serif" font-size="26" fill="#9ece6a">Non-negative ranges pin zero</text>
+<text x="1079" y="371" font-family="monospace" font-size="23" fill="#c0caf5">if min &gt;= 0.0 { (0.0, upper) }</text>
+<text x="1079" y="407" font-family="sans-serif" font-size="23" fill="#c0caf5">The bottom grid label is a real zero baseline.</text>
+<path d="M1145 470 H1850 M1145 430 H1850 M1145 390 H1850" stroke="#565f89" fill="none"/>
+<text x="1102" y="475" font-family="monospace" font-size="22" fill="#9ece6a">0.00</text>
+<text x="1094" y="435" font-family="monospace" font-size="22" fill="#a9b1d6">5.40</text>
+<text x="1084" y="395" font-family="monospace" font-size="22" fill="#a9b1d6">10.80</text>
+<path d="M1160 440 C1340 420 1515 400 1815 389" stroke="#7aa2f7" fill="none" stroke-width="6" stroke-linecap="round"/>
+</g>
+
+<g>
+<rect x="55" y="620" width="870" height="235" rx="12" fill="#1e202e" stroke="#e0af68"/>
+<text x="79" y="662" font-family="sans-serif" font-size="26" fill="#e0af68">Constant zero data had no useful span</text>
+<text x="79" y="706" font-family="monospace" font-size="23" fill="#c0caf5">[0.0, 0.0] needed explicit headroom</text>
+<text x="79" y="742" font-family="sans-serif" font-size="23" fill="#c0caf5">The chart still needs a visible y range.</text>
+<path d="M145 805 H850" stroke="#565f89" fill="none"/>
+<path d="M160 805 H815" stroke="#7aa2f7" fill="none" stroke-width="6" stroke-linecap="round"/>
+</g>
+
+<g>
+<rect x="1055" y="620" width="870" height="235" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="662" font-family="sans-serif" font-size="26" fill="#9ece6a">zero_based_axis_upper keeps headroom</text>
+<text x="1079" y="706" font-family="monospace" font-size="23" fill="#c0caf5">max &gt; 0.0 -> max * 1.08, else 1.0</text>
+<text x="1079" y="742" font-family="sans-serif" font-size="23" fill="#c0caf5">Zero-only series render with a 0..1 range.</text>
+<path d="M1145 805 H1850 M1145 765 H1850" stroke="#565f89" fill="none"/>
+<text x="1102" y="810" font-family="monospace" font-size="22" fill="#9ece6a">0.00</text>
+<text x="1102" y="770" font-family="monospace" font-size="22" fill="#a9b1d6">1.00</text>
+<path d="M1160 805 H1815" stroke="#7aa2f7" fill="none" stroke-width="6" stroke-linecap="round"/>
+</g>
+
+<g>
+<rect x="55" y="950" width="870" height="95" rx="12" fill="#1e202e" stroke="#a9b1d6"/>
+<text x="79" y="992" font-family="sans-serif" font-size="26" fill="#a9b1d6">Signed metrics still keep old padding</text>
+<text x="79" y="1028" font-family="sans-serif" font-size="23" fill="#c0caf5">Negative values are not clamped away.</text>
+</g>
+
+<g>
+<rect x="1055" y="950" width="870" height="95" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="992" font-family="sans-serif" font-size="26" fill="#9ece6a">Tests cover positive, zero, and negative inputs</text>
+<text x="1079" y="1028" font-family="sans-serif" font-size="23" fill="#c0caf5">cargo test -p frontend performance_panel</text>
+</g>
+
+<text x="55" y="1172" font-family="sans-serif" font-size="22" fill="#a9b1d6">Scope: performance_panel SVG bounds only; metric aggregation and formatting stay unchanged.</text>
+</svg>

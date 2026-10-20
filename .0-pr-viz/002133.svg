@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-labelledby="title desc">
+  <title id="title">PR 2133 - Dock work queue surface</title>
+  <desc id="desc">The work queue moved from an inline bottom panel to a SessionSurface side dock with pending and past task timing.</desc>
+  <rect width="2000" height="1200" fill="#16161e"/>
+
+  <text x="55" y="68" fill="#565f89" font-family="Inter, Arial, sans-serif" font-size="24" letter-spacing="1">PR #2133 - Dock work queue surface</text>
+  <text x="55" y="122" fill="#e6e9f5" font-family="Inter, Arial, sans-serif" font-size="34" font-weight="700">Queue work used to crowd the chat tail with no history.</text>
+  <text x="55" y="164" fill="#e6e9f5" font-family="Inter, Arial, sans-serif" font-size="34" font-weight="700">Now WorkQueue docks beside the session and records terminal durations.</text>
+  <line x1="55" y1="192" x2="1945" y2="192" stroke="#3d4666" stroke-width="2"/>
+
+  <text x="55" y="244" fill="#f7768e" font-family="Inter, Arial, sans-serif" font-size="22" font-weight="700" letter-spacing="4">BEFORE</text>
+  <text x="1055" y="244" fill="#9ece6a" font-family="Inter, Arial, sans-serif" font-size="22" font-weight="700" letter-spacing="4">AFTER</text>
+  <line x1="1000" y1="210" x2="1000" y2="1140" stroke="#3d4666" stroke-width="3" stroke-dasharray="14 16"/>
+
+  <rect x="70" y="285" width="850" height="760" rx="26" fill="#1a1b26" stroke="#3d4666" stroke-width="3"/>
+  <rect x="115" y="335" width="760" height="120" rx="16" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="145" y="382" fill="#c0caf5" font-family="Inter, Arial, sans-serif" font-size="28" font-weight="700">session-view-chat</text>
+  <text x="145" y="424" fill="#a9b1d6" font-family="Inter, Arial, sans-serif" font-size="24">messages, tasks, permissions, input bar</text>
+
+  <rect x="115" y="735" width="760" height="210" rx="16" fill="#1e202e" stroke="#f7768e" stroke-width="3"/>
+  <text x="145" y="786" fill="#f7768e" font-family="Inter, Arial, sans-serif" font-size="28" font-weight="700">render_edit_stack_panel(ctx)</text>
+  <text x="145" y="832" fill="#c0caf5" font-family="Inter, Arial, sans-serif" font-size="24">Inline bottom drawer consumes transcript height</text>
+  <text x="145" y="870" fill="#c0caf5" font-family="Inter, Arial, sans-serif" font-size="24">Shows only pending items</text>
+  <text x="145" y="908" fill="#c0caf5" font-family="Inter, Arial, sans-serif" font-size="24">No completed or failed duration in the UI</text>
+
+  <path d="M495 485 L495 700" fill="none" stroke="#f7768e" stroke-width="4" stroke-dasharray="10 12"/>
+  <polygon points="495,724 480,696 510,696" fill="#f7768e"/>
+  <text x="280" y="610" fill="#a9b1d6" font-family="Inter, Arial, sans-serif" font-size="22">queue competes with chat surface</text>
+
+  <rect x="1085" y="285" width="850" height="760" rx="26" fill="#1a1b26" stroke="#3d4666" stroke-width="3"/>
+  <rect x="1128" y="335" width="430" height="620" rx="18" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="1158" y="382" fill="#c0caf5" font-family="Inter, Arial, sans-serif" font-size="28" font-weight="700">session-view-chat</text>
+  <text x="1158" y="426" fill="#a9b1d6" font-family="Inter, Arial, sans-serif" font-size="23">keeps full vertical flow</text>
+  <text x="1158" y="468" fill="#a9b1d6" font-family="Inter, Arial, sans-serif" font-size="23">input and transcript stay stable</text>
+
+  <rect x="1600" y="335" width="285" height="620" rx="18" fill="#1e202e" stroke="#9ece6a" stroke-width="3"/>
+  <rect x="1620" y="360" width="245" height="54" rx="10" fill="#1e202e" stroke="#7aa2f7" stroke-width="2"/>
+  <text x="1638" y="396" fill="#e6e9f5" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="700">Work queue</text>
+  <text x="1628" y="456" fill="#7aa2f7" font-family="Inter, Arial, sans-serif" font-size="22" font-weight="700">Pending 2</text>
+  <text x="1760" y="456" fill="#a9b1d6" font-family="Inter, Arial, sans-serif" font-size="22">Past 5</text>
+
+  <rect x="1622" y="488" width="240" height="128" rx="12" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="1642" y="528" fill="#c0caf5" font-family="Inter, Arial, sans-serif" font-size="22" font-weight="700">EditStackItem</text>
+  <text x="1642" y="566" fill="#e0af68" font-family="Inter, Arial, sans-serif" font-size="20">pending</text>
+  <text x="1730" y="566" fill="#565f89" font-family="Inter, Arial, sans-serif" font-size="20">queued 4m</text>
+  <text x="1642" y="596" fill="#a9b1d6" font-family="Inter, Arial, sans-serif" font-size="20">Send / Dismiss</text>
+
+  <rect x="1622" y="642" width="240" height="148" rx="12" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="1642" y="682" fill="#c0caf5" font-family="Inter, Arial, sans-serif" font-size="22" font-weight="700">Past task</text>
+  <text x="1642" y="720" fill="#9ece6a" font-family="Inter, Arial, sans-serif" font-size="20">Done</text>
+  <text x="1715" y="720" fill="#565f89" font-family="Inter, Arial, sans-serif" font-size="20">took 2m 13s</text>
+  <text x="1642" y="752" fill="#a9b1d6" font-family="Inter, Arial, sans-serif" font-size="20">Remove when no longer useful</text>
+
+  <path d="M1568 638 L1595 638" fill="none" stroke="#9ece6a" stroke-width="4"/>
+  <polygon points="1609,638 1583,624 1583,652" fill="#9ece6a"/>
+  <text x="1240" y="642" fill="#a9b1d6" font-family="Inter, Arial, sans-serif" font-size="22">SessionSurfaceKind::WorkQueue</text>
+
+  <rect x="1128" y="980" width="757" height="95" rx="18" fill="#1e202e" stroke="#7aa2f7" stroke-width="2"/>
+  <text x="1160" y="1020" fill="#7aa2f7" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="700">update_edit_stack_item</text>
+  <text x="1160" y="1050" fill="#c0caf5" font-family="Inter, Arial, sans-serif" font-size="22">status accepts sent, completed, failed, dismissed</text>
+  <text x="1160" y="1078" fill="#c0caf5" font-family="Inter, Arial, sans-serif" font-size="22">late sent cannot overwrite terminal rows</text>
+
+  <rect x="110" y="1068" width="770" height="54" rx="12" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <text x="138" y="1103" fill="#a9b1d6" font-family="Inter, Arial, sans-serif" font-size="22">Only pending queue was visible; sent rows were effectively limbo.</text>
+
+  <text x="55" y="1172" fill="#565f89" font-family="Inter, Arial, sans-serif" font-size="22">Scope: no schema migration; elapsed time is derived from existing created_at, sent_at, and updated_at fields.</text>
+</svg>

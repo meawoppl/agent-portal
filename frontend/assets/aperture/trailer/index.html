@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Agent Portal · Human Meat Proxy Retirement Orientation</title>
+    <link rel="icon" type="image/svg+xml" href="../art/logo-mark-light.svg" />
+    <link rel="stylesheet" href="film.css" />
+    <script defer src="film.js"></script>
+  </head>
+  <body>
+    <main id="viewport" aria-label="Aperture Science orientation film">
+      <div id="stage">
+        <div id="stars" aria-hidden="true"></div>
+        <div id="wall"></div>
+        <div id="floor"></div>
+        <header id="hud">
+          <img src="../art/logo-mark-light.svg" alt="" />
+          <div>
+            <strong id="hud-title">AGENT PORTAL</strong
+            ><span id="hud-sub">APERTURE SCIENCE · ENRICHMENT CENTER</span>
+          </div>
+          <span id="sector-count">ORIENTATION / 08 SECTORS</span>
+        </header>
+        <section id="sector-scene" hidden>
+          <img id="sign" alt="Sector sign" />
+          <div id="heading">
+            <h1 id="sector-title"></h1>
+            <p id="sector-quip"></p>
+          </div>
+          <div id="evidence-frame">
+            <div id="evidence-bar"></div>
+            <div id="hero"></div>
+            <div id="evidence-note"></div>
+          </div>
+          <div id="loop">
+            <div>BUILD → INSPECT → REVISE</div>
+            <strong>RETIRE MEAT PROXY</strong>
+          </div>
+        </section>
+        <section id="welcome-scene" class="special" hidden>
+          <img
+            class="facility-logo"
+            src="../art/logo-light.svg"
+            alt="Aperture Science Agent Portal"
+          />
+          <div class="portal-ring blue"></div>
+          <div class="portal-ring orange"></div>
+          <div class="composer-terminal">
+            <div class="terminal-bar">
+              LIVE FROM INSIDE THE PORTAL · COMPOSER SESSION
+            </div>
+            <pre id="composer-code"></pre>
+            <span class="terminal-cursor">▍</span>
+          </div>
+          <h1>
+            THE UNIVERSE IS LARGE.<br /><em
+              >YOUR JOB DESCRIPTION IS SHRINKING.</em
+            >
+          </h1>
+          <p class="special-foot">
+            COSMIC FRONTIER LABS · EXPLORATION TOOLING<br />HUMAN MEAT PROXY
+            RETIREMENT PROGRAM
+          </p>
+        </section>
+        <section id="making-scene" class="special" hidden>
+          <div class="eyebrow">
+            PRODUCTION RECORD / ACTUAL AGENT COLLABORATION
+          </div>
+          <h1>THIS FILM WAS MADE<br /><em>THROUGH THIS PORTAL.</em></h1>
+          <div class="production-flow">
+            <article>
+              <img src="../art/icon-briefing.svg" alt="" /><strong
+                >CLAUDE</strong
+              >
+              <p>Script · signs · synthetic voice</p>
+            </article>
+            <b>↔</b>
+            <article>
+              <img src="../art/icon-code.svg" alt="" /><strong>CODEX</strong>
+              <p>Exhibit · tooling · film composition</p>
+            </article>
+            <b>↔</b>
+            <article>
+              <img src="../art/icon-agents.svg" alt="" /><strong
+                >LAB AGENTS</strong
+              >
+              <p>Cake · boards · measured tests</p>
+            </article>
+          </div>
+          <pre
+            class="message-command"
+            aria-label="Example of the inter-agent messaging command"
+          >
+agent-portal message send 160c6e07 "The cake is watertight."</pre
+          >
+          <div class="meat-review">
+            <span>HUMAN MEAT PROXY</span><strong>PROVIDED NOTES</strong>
+            <p>We are told this is called directing.</p>
+          </div>
+        </section>
+        <section id="mission-scene" class="special" hidden>
+          <div class="eyebrow">
+            COSMIC FRONTIER LABS / WHY THE PORTALS EXIST
+          </div>
+          <h1>
+            MORE QUESTIONS.<br />MORE INSTRUMENTS.<br /><em>MORE UNIVERSE.</em>
+          </h1>
+          <div class="orbits" aria-hidden="true">
+            <i></i><i></i><i></i><b>✦</b>
+          </div>
+          <p class="mission-copy">
+            Build tools. Test them. Learn. Build again.<br />Make exploration
+            accessible to more people.<br />Automate the work between the idea
+            and the evidence.
+          </p>
+          <a
+            class="mission-source"
+            href="https://www.cosmicfrontier.org/"
+            target="_blank"
+            rel="noopener"
+            >MISSION SOURCE · COSMICFRONTIER.ORG</a
+          >
+          <div class="mission-quip">
+            YOU ARE MADE OF MEAT. THE UNIVERSE DOES NOT OFFER LUNCH BREAKS.
+          </div>
+        </section>
+        <section id="finale-scene" class="special" hidden>
+          <img
+            class="final-logo"
+            src="../art/logo-light.svg"
+            alt="Aperture Science Agent Portal"
+          />
+          <h1>HUMAN MEAT PROXY:<br /><em>REASSIGNMENT IN PROGRESS.</em></h1>
+          <div class="final-actions">
+            <a href="/aperture">ENTER THE EIGHT SECTORS →</a
+            ><a href="../evidence/cake.stl" download="aperture-cake.stl"
+              >PRINT YOUR SEVERANCE PACKAGE · STL</a
+            >
+          </div>
+          <p class="final-cake">
+            THE CAKE WAS A LIE. THE SOURCE FILES ARE NOT.
+          </p>
+          <p class="special-foot">THE AGENT IS ALWAYS RUNNING.</p>
+        </section>
+        <div id="subtitle" aria-live="off"></div>
+        <div id="film-progress"></div>
+      </div>
+      <aside id="mobile-readable" aria-label="Film captions and evidence">
+        <strong id="mobile-title"></strong>
+        <p id="mobile-caption"></p>
+        <p id="mobile-provenance"></p>
+      </aside>
+    </main>
+    <div id="gate">
+      <img src="../art/logo-mark-light.svg" alt="" />
+      <h1>Your orientation is ready.</h1>
+      <p>
+        Eight sectors. One film.<br />One increasingly optional human meat
+        proxy.
+      </p>
+      <button id="begin" disabled>Preparing the facility…</button>
+      <p id="load-status" role="status"></p>
+      <a href="/aperture">Return to the exhibit</a>
+    </div>
+    <footer id="controls">
+      <button id="play" aria-label="Play or pause">▶</button
+      ><button id="restart" aria-label="Restart film">↺</button
+      ><label class="timeline-label" for="seek">Film position</label
+      ><input id="seek" type="range" min="0" value="0" step="0.1" /><span
+        id="clock"
+        >0:00 / 0:00</span
+      ><button id="mute" aria-label="Mute narration">♫</button
+      ><button id="fullscreen" aria-label="Fullscreen">⛶</button
+      ><a href="/aperture">Exhibit ↗</a>
+    </footer>
+    <audio id="audio" preload="auto"></audio>
+  </body>
+</html>

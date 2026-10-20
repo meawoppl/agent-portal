@@ -1,0 +1,500 @@
+Model {
+  Name "cdi_single_axis_si"
+  Version 8.0
+  Solver "ode4"
+  StartTime "0"
+  StopTime "2"
+  FixedStep "0.00001"
+  System {
+    Name "cdi_single_axis_si"
+    Block {
+      BlockType Step
+      Name "Base command"
+      SID "1"
+      Position [20, 20, 120, 65]
+      Time "0.1"
+      Before "0"
+      After "base_step"
+    }
+    Block {
+      BlockType Integrator
+      Name "Slave integrator"
+      SID "2"
+      Position [20, 100, 120, 145]
+      InitialCondition "0"
+    }
+    Block {
+      BlockType Sum
+      Name "Base error"
+      SID "3"
+      Position [180, 20, 280, 65]
+      Inputs "++-"
+    }
+    Block {
+      BlockType Gain
+      Name "Base position gain"
+      SID "4"
+      Position [330, 20, 430, 65]
+      Gain "kp_bus"
+    }
+    Block {
+      BlockType Sum
+      Name "Base velocity error"
+      SID "5"
+      Position [480, 20, 580, 65]
+      Inputs "+-"
+    }
+    Block {
+      BlockType Gain
+      Name "Base rate gain"
+      SID "6"
+      Position [630, 20, 730, 65]
+      Gain "kv_bus"
+    }
+    Block {
+      BlockType Integrator
+      Name "Base velocity"
+      SID "7"
+      Position [780, 20, 880, 65]
+      InitialCondition "0"
+    }
+    Block {
+      BlockType Integrator
+      Name "Base position"
+      SID "8"
+      Position [930, 20, 1030, 65]
+      InitialCondition "0"
+    }
+    Block {
+      BlockType Sum
+      Name "Relative position"
+      SID "9"
+      Position [930, 120, 1030, 165]
+      Inputs "+-"
+    }
+    Block {
+      BlockType Gain
+      Name "Slave gain"
+      SID "10"
+      Position [180, 120, 280, 165]
+      Gain "k_slave"
+    }
+    Block {
+      BlockType Gain
+      Name "Spring force"
+      SID "11"
+      Position [780, 120, 880, 165]
+      Gain "k_umb"
+    }
+    Block {
+      BlockType Sum
+      Name "Relative velocity"
+      SID "12"
+      Position [630, 120, 730, 165]
+      Inputs "+-"
+    }
+    Block {
+      BlockType Gain
+      Name "Damper force"
+      SID "13"
+      Position [480, 120, 580, 165]
+      Gain "c_umb"
+    }
+    Block {
+      BlockType Sum
+      Name "Payload force"
+      SID "14"
+      Position [630, 260, 730, 305]
+      Inputs "+--++"
+    }
+    Block {
+      BlockType Gain
+      Name "Inverse mass"
+      SID "15"
+      Position [780, 260, 880, 305]
+      Gain "1/mass"
+    }
+    Block {
+      BlockType Integrator
+      Name "Payload velocity"
+      SID "16"
+      Position [930, 260, 1030, 305]
+      InitialCondition "0"
+    }
+    Block {
+      BlockType Integrator
+      Name "Payload position"
+      SID "17"
+      Position [1080, 260, 1180, 305]
+      InitialCondition "0"
+    }
+    Block {
+      BlockType Step
+      Name "External force"
+      SID "18"
+      Position [480, 200, 580, 245]
+      Time "0.3"
+      Before "0"
+      After "force_step"
+    }
+    Block {
+      BlockType RandomNumber
+      Name "Acceleration noise"
+      SID "19"
+      Position [1080, 400, 1180, 445]
+      Mean "0"
+      Variance "1"
+      Seed "18273"
+      SampleTime "1/fs_noise"
+    }
+    Block {
+      BlockType Gain
+      Name "Acceleration ASD scaling"
+      SID "20"
+      Position [930, 400, 1030, 445]
+      Gain "accel_asd*sqrt(fs_noise/2)"
+    }
+    Block {
+      BlockType Sum
+      Name "Measured acceleration"
+      SID "21"
+      Position [780, 400, 880, 445]
+      Inputs "++"
+    }
+    Block {
+      BlockType TransferFcn
+      Name "Accelerometer bandwidth"
+      SID "22"
+      Position [630, 400, 730, 445]
+      Numerator "[1]"
+      Denominator "[1/(2*pi*f_accel) 1]"
+    }
+    Block {
+      BlockType Sum
+      Name "Acceleration error"
+      SID "23"
+      Position [20, 260, 120, 305]
+      Inputs "+-"
+    }
+    Block {
+      BlockType Gain
+      Name "Reference error"
+      SID "24"
+      Position [20, 400, 120, 445]
+      Gain "-k_track"
+    }
+    Block {
+      BlockType TransferFcn
+      Name "Tracking lead"
+      SID "25"
+      Position [180, 400, 280, 445]
+      Numerator "[1/(2*pi*0.1) 1]"
+      Denominator "[1/(2*pi*0.9) 1]"
+    }
+    Block {
+      BlockType Gain
+      Name "Acceleration proportional"
+      SID "26"
+      Position [180, 240, 280, 285]
+      Gain "ka"
+    }
+    Block {
+      BlockType Gain
+      Name "Acceleration integral gain"
+      SID "27"
+      Position [180, 310, 280, 355]
+      Gain "ki"
+    }
+    Block {
+      BlockType Integrator
+      Name "Acceleration integral"
+      SID "28"
+      Position [330, 310, 430, 355]
+      InitialCondition "0"
+    }
+    Block {
+      BlockType Sum
+      Name "Controller sum"
+      SID "29"
+      Position [330, 240, 430, 285]
+      Inputs "++"
+    }
+    Block {
+      BlockType Integrator
+      Name "Command force"
+      SID "30"
+      Position [480, 260, 580, 305]
+      InitialCondition "0"
+    }
+    Block {
+      BlockType RandomNumber
+      Name "Current noise"
+      SID "31"
+      Position [630, 520, 730, 565]
+      Mean "0"
+      Variance "1"
+      Seed "91283"
+      SampleTime "1/fs_noise"
+    }
+    Block {
+      BlockType Gain
+      Name "Current force scaling"
+      SID "32"
+      Position [780, 520, 880, 565]
+      Gain "current_asd*k_force*sqrt(fs_noise/2)"
+    }
+    Block {
+      BlockType Outport
+      Name "Position output"
+      SID "33"
+      Position [1230, 260, 1330, 305]
+      Port "1"
+    }
+    Line {
+      SrcBlock "Base command"
+      SrcPort 1
+      DstBlock "Base error"
+      DstPort 1
+    }
+    Line {
+      SrcBlock "Slave integrator"
+      SrcPort 1
+      DstBlock "Base error"
+      DstPort 2
+    }
+    Line {
+      SrcBlock "Base position"
+      SrcPort 1
+      DstBlock "Base error"
+      DstPort 3
+    }
+    Line {
+      SrcBlock "Base error"
+      SrcPort 1
+      DstBlock "Base position gain"
+      DstPort 1
+    }
+    Line {
+      SrcBlock "Base position gain"
+      SrcPort 1
+      DstBlock "Base velocity error"
+      DstPort 1
+    }
+    Line {
+      SrcBlock "Base velocity"
+      SrcPort 1
+      DstBlock "Base velocity error"
+      DstPort 2
+    }
+    Line {
+      SrcBlock "Base velocity error"
+      SrcPort 1
+      DstBlock "Base rate gain"
+      DstPort 1
+    }
+    Line {
+      SrcBlock "Base rate gain"
+      SrcPort 1
+      DstBlock "Base velocity"
+      DstPort 1
+    }
+    Line {
+      SrcBlock "Base velocity"
+      SrcPort 1
+      DstBlock "Base position"
+      DstPort 1
+    }
+    Line {
+      SrcBlock "Payload position"
+      SrcPort 1
+      DstBlock "Relative position"
+      DstPort 1
+    }
+    Line {
+      SrcBlock "Base position"
+      SrcPort 1
+      DstBlock "Relative position"
+      DstPort 2
+    }
+    Line {
+      SrcBlock "Relative position"
+      SrcPort 1
+      DstBlock "Slave gain"
+      DstPort 1
+    }
+    Line {
+      SrcBlock "Slave gain"
+      SrcPort 1
+      DstBlock "Slave integrator"
+      DstPort 1
+    }
+    Line {
+      SrcBlock "Relative position"
+      SrcPort 1
+      DstBlock "Spring force"
+      DstPort 1
+    }
+    Line {
+      SrcBlock "Payload velocity"
+      SrcPort 1
+      DstBlock "Relative velocity"
+      DstPort 1
+    }
+    Line {
+      SrcBlock "Base velocity"
+      SrcPort 1
+      DstBlock "Relative velocity"
+      DstPort 2
+    }
+    Line {
+      SrcBlock "Relative velocity"
+      SrcPort 1
+      DstBlock "Damper force"
+      DstPort 1
+    }
+    Line {
+      SrcBlock "Command force"
+      SrcPort 1
+      DstBlock "Payload force"
+      DstPort 1
+    }
+    Line {
+      SrcBlock "Spring force"
+      SrcPort 1
+      DstBlock "Payload force"
+      DstPort 2
+    }
+    Line {
+      SrcBlock "Damper force"
+      SrcPort 1
+      DstBlock "Payload force"
+      DstPort 3
+    }
+    Line {
+      SrcBlock "External force"
+      SrcPort 1
+      DstBlock "Payload force"
+      DstPort 4
+    }
+    Line {
+      SrcBlock "Payload force"
+      SrcPort 1
+      DstBlock "Inverse mass"
+      DstPort 1
+    }
+    Line {
+      SrcBlock "Inverse mass"
+      SrcPort 1
+      DstBlock "Payload velocity"
+      DstPort 1
+    }
+    Line {
+      SrcBlock "Payload velocity"
+      SrcPort 1
+      DstBlock "Payload position"
+      DstPort 1
+    }
+    Line {
+      SrcBlock "Acceleration noise"
+      SrcPort 1
+      DstBlock "Acceleration ASD scaling"
+      DstPort 1
+    }
+    Line {
+      SrcBlock "Acceleration ASD scaling"
+      SrcPort 1
+      DstBlock "Measured acceleration"
+      DstPort 2
+    }
+    Line {
+      SrcBlock "Inverse mass"
+      SrcPort 1
+      DstBlock "Measured acceleration"
+      DstPort 1
+    }
+    Line {
+      SrcBlock "Measured acceleration"
+      SrcPort 1
+      DstBlock "Accelerometer bandwidth"
+      DstPort 1
+    }
+    Line {
+      SrcBlock "Accelerometer bandwidth"
+      SrcPort 1
+      DstBlock "Acceleration error"
+      DstPort 2
+    }
+    Line {
+      SrcBlock "Payload position"
+      SrcPort 1
+      DstBlock "Reference error"
+      DstPort 1
+    }
+    Line {
+      SrcBlock "Reference error"
+      SrcPort 1
+      DstBlock "Tracking lead"
+      DstPort 1
+    }
+    Line {
+      SrcBlock "Tracking lead"
+      SrcPort 1
+      DstBlock "Acceleration error"
+      DstPort 1
+    }
+    Line {
+      SrcBlock "Acceleration error"
+      SrcPort 1
+      DstBlock "Acceleration proportional"
+      DstPort 1
+    }
+    Line {
+      SrcBlock "Acceleration error"
+      SrcPort 1
+      DstBlock "Acceleration integral gain"
+      DstPort 1
+    }
+    Line {
+      SrcBlock "Acceleration integral gain"
+      SrcPort 1
+      DstBlock "Acceleration integral"
+      DstPort 1
+    }
+    Line {
+      SrcBlock "Acceleration proportional"
+      SrcPort 1
+      DstBlock "Controller sum"
+      DstPort 1
+    }
+    Line {
+      SrcBlock "Acceleration integral"
+      SrcPort 1
+      DstBlock "Controller sum"
+      DstPort 2
+    }
+    Line {
+      SrcBlock "Controller sum"
+      SrcPort 1
+      DstBlock "Command force"
+      DstPort 1
+    }
+    Line {
+      SrcBlock "Current noise"
+      SrcPort 1
+      DstBlock "Current force scaling"
+      DstPort 1
+    }
+    Line {
+      SrcBlock "Payload position"
+      SrcPort 1
+      DstBlock "Position output"
+      DstPort 1
+    }
+    Line {
+      SrcBlock "Current force scaling"
+      SrcPort 1
+      DstBlock "Payload force"
+      DstPort 5
+    }
+  }
+}

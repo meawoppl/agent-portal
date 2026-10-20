@@ -6,6 +6,7 @@ use super::types::{
     FileUploadChunkFields, FileUploadResultFields, FileUploadStartFields, PermissionResponseFields,
     RegisterFields, SubagentRetryStatus,
 };
+use crate::api::ProgressBar;
 use crate::{
     AgentType, PermissionSuggestion, ReasoningEffort, SendMode, SessionCost, SessionStatus,
     TurnMetrics,
@@ -342,6 +343,14 @@ pub enum ServerToClient {
         open_preview: bool,
     },
 
+    /// The durable work queue changed outside this web client, usually because
+    /// a forwarded plugin surface submitted an annotation through
+    /// `POST /__portal/edit-stack`.
+    EditStackUpdated {
+        session_id: Uuid,
+        items: Vec<crate::api::EditStackItem>,
+    },
+
     /// Ephemeral live tool-progress heartbeat, fanned out from
     /// `ProxyToServer::ToolProgress`. Purely a live-status signal: never
     /// persisted, never part of `HistoryBatch`, so it carries no `created_at`
@@ -373,4 +382,36 @@ pub enum ServerToClient {
     /// render as transient live status and drop at turn end. A client offline
     /// during the frame loses nothing.
     Ephemeral { payload: serde_json::Value },
+
+    /// The session's complete set of agent-driven progress bars
+    /// (`agent-portal progress`). A full snapshot rather than a delta, so it is
+    /// also what a client receives on connect; an empty list clears every bar.
+    /// Live-only like [`ServerToClient::ToolProgress`]: never persisted, never
+    /// part of `HistoryBatch`.
+    AgentProgress { bars: Vec<ProgressBar> },
+
+    /// The completion fraction a session's rail pill shows for its agent
+    /// progress bars (see [`crate::api::pill_fraction`]), fanned out on every
+    /// member's user channel so the dashboard rail needs no per-session
+    /// socket. `None` clears the pill fill. Live-only like
+    /// [`ServerToClient::AgentProgress`]; sent when the whole-percent value
+    /// changes, and replayed when a user client connects.
+    SessionProgress {
+        session_id: Uuid,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fraction: Option<f32>,
+    },
+
+    /// Drop every rail-pill fill the client holds. Sent first when a user
+    /// client connects, followed by a [`ServerToClient::SessionProgress`] for
+    /// each session that still has one: the client's state survives its
+    /// reconnect loop, so without this boundary a fill learned before a drop
+    /// would outlive a bar that expired (or a backend that restarted) while it
+    /// was away.
+    SessionProgressReset,
+
+    /// Resource usage of the portal services serving this user: the backend
+    /// plus each connected launcher. Sent on connect, every few seconds, and
+    /// whenever a launcher reports; the list is the complete current table.
+    ServiceStatsUpdate { services: Vec<crate::ServiceStats> },
 }

@@ -3,7 +3,7 @@
 //! matching response frame arrives.
 
 use shared::api::ForwardError;
-use shared::{FileDownloadResponseFields, ForwardStatusFields, LauncherToServer};
+use shared::{FileDownloadResponseFields, ForwardStatusFields};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
@@ -42,42 +42,6 @@ impl SessionManager {
 }
 
 impl SessionManager {
-    pub fn register_dir_request(&self, request_id: Uuid) -> oneshot::Receiver<LauncherToServer> {
-        let (tx, rx) = oneshot::channel();
-        self.pending_dir_requests.insert(request_id, tx);
-        rx
-    }
-
-    pub fn complete_dir_request(&self, request_id: Uuid, msg: LauncherToServer) {
-        if let Some((_, tx)) = self.pending_dir_requests.remove(&request_id) {
-            let _ = tx.send(msg);
-        }
-    }
-
-    /// Drop a pending directory-listing request without resolving (send
-    /// failure or timeout).
-    pub fn cancel_dir_request(&self, request_id: Uuid) {
-        self.pending_dir_requests.remove(&request_id);
-    }
-
-    pub fn register_probe_request(&self, request_id: Uuid) -> oneshot::Receiver<LauncherToServer> {
-        let (tx, rx) = oneshot::channel();
-        self.pending_probe_requests.insert(request_id, tx);
-        rx
-    }
-
-    pub fn complete_probe_request(&self, request_id: Uuid, msg: LauncherToServer) {
-        if let Some((_, tx)) = self.pending_probe_requests.remove(&request_id) {
-            let _ = tx.send(msg);
-        }
-    }
-
-    /// Drop a pending agent-probe request without resolving (send failure or
-    /// timeout).
-    pub fn cancel_probe_request(&self, request_id: Uuid) {
-        self.pending_probe_requests.remove(&request_id);
-    }
-
     /// Register a pending file-download RPC; the returned receiver resolves when
     /// the owning proxy replies (or is cancelled on send-failure/timeout).
     pub fn register_file_download(

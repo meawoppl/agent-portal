@@ -92,7 +92,7 @@ fn path_leaf(path: &str) -> Option<String> {
 fn split_slug(slug: &str) -> Vec<String> {
     slug.split(['/', '-', '_', '.'])
         .map(str::trim)
-        .filter(|s| !s.is_empty())
+        .filter(|s| shared::strings::is_non_empty(s))
         .map(str::to_string)
         .collect()
 }

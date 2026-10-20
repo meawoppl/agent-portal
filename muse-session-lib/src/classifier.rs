@@ -226,6 +226,10 @@ fn classify_payload(record: &MuseRecord, payload: &MusePayload) -> AgentOutput {
             | MusePayload::SessionRunLinked(_)
             | MusePayload::ModelConfigured(_)
             | MusePayload::RunStarted(_)
+            // Telemetry is consumed by io_task before classification. Its
+            // exec.usage stream reuses the session id and sequence 1; keep
+            // it out of transcript identity and rendering entirely.
+            | MusePayload::RunUsage(_)
     ) {
         return AgentOutput::Noop;
     }

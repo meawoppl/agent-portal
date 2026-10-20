@@ -1,5 +1,6 @@
 //! Command history management for SessionView
 
+use crate::portal_client::PortalClient;
 use crate::utils::{storage_get, storage_set};
 use uuid::Uuid;
 
@@ -16,7 +17,7 @@ pub struct CommandHistory {
     /// Draft input preserved when navigating history
     draft: String,
     /// Session ID for localStorage key
-    session_id: Option<Uuid>,
+    storage_namespace: Option<String>,
 }
 
 impl CommandHistory {
@@ -27,9 +28,9 @@ impl CommandHistory {
     }
 
     /// Create a command history for a specific session with localStorage persistence
-    pub fn for_session(session_id: Uuid) -> Self {
+    pub fn for_session(session_id: Uuid, portal: &PortalClient) -> Self {
         let mut history = Self {
-            session_id: Some(session_id),
+            storage_namespace: portal.storage_key(&format!("command_history_{session_id}")),
             ..Default::default()
         };
         history.load_from_storage();
@@ -38,7 +39,7 @@ impl CommandHistory {
 
     /// Get the localStorage key for this session
     fn storage_key(&self) -> Option<String> {
-        self.session_id.map(|id| format!("command_history_{}", id))
+        self.storage_namespace.clone()
     }
 
     /// Load history from localStorage

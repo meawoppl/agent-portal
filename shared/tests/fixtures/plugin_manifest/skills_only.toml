@@ -1,0 +1,9 @@
+# These unrelated fields have never been validated by skill injection.
+name = 42
+install = false
+commands = "not a command list"
+surface = [1, 2, 3]
+
+[[skills]]
+name = "review"
+path = "skills/review/SKILL.md"

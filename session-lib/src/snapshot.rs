@@ -10,6 +10,10 @@ use crate::buffer::BufferedOutput;
 /// Configuration for creating a session
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SessionConfig {
+    /// Archived reference context. Folded into the first real input after a
+    /// process start, never sent as a turn of its own or rearmed by /clear.
+    #[serde(default)]
+    pub recovery_context: Option<String>,
     /// Unique session identifier
     pub session_id: Uuid,
     /// Working directory for the Claude session
@@ -43,6 +47,12 @@ pub struct SessionConfig {
     /// [`claude_conversation_id`](Self::claude_conversation_id).
     #[serde(default)]
     pub codex_thread_id: Option<String>,
+    /// Fail the launch instead of falling back to a fresh thread when
+    /// `thread/resume` fails or `codex_thread_id` is missing. Set for imported
+    /// conversations, whose only context lives in the native thread; ordinary
+    /// sessions fall back because the portal transcript survives regardless.
+    #[serde(default)]
+    pub codex_require_resume: bool,
     /// Claude's *current* conversation id, learned from its output stream and
     /// persisted by the launcher — the claude-side counterpart to
     /// [`codex_thread_id`](Self::codex_thread_id).
@@ -155,6 +165,7 @@ mod tests {
 
     fn sample_config() -> SessionConfig {
         SessionConfig {
+            recovery_context: None,
             session_id: Uuid::new_v4(),
             working_directory: PathBuf::from("/tmp/test"),
             session_name: "test-session".to_string(),
@@ -165,6 +176,7 @@ mod tests {
             muse_yolo: false,
             agent_type: Default::default(),
             codex_thread_id: None,
+            codex_require_resume: false,
             fork_from_session_id: None,
             codex_fork_from_thread_id: None,
             codex_fork_last_turn_id: None,

@@ -395,6 +395,68 @@ fn get_user_id_from_token(
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn reattach_preserves_a_name_changed_through_the_rename_api() {
+        use crate::handlers::proxy_tokens::{issue_proxy_token, TokenPersist};
+        use crate::test_support::{insert_session, insert_user, shared_pool, test_app_state};
+        let Some(pool) = shared_pool() else { return };
+        let state = std::sync::Arc::new(test_app_state(pool));
+        let mut conn = state.conn().unwrap();
+        let owner = insert_user(&mut conn, "rename-reconnect");
+        let session = insert_session(&mut conn, owner.id, "old launcher name");
+        let token = issue_proxy_token(
+            &mut conn,
+            state.jwt_secret.as_bytes(),
+            owner.id,
+            TokenPersist::Create {
+                name: "rename-reconnect",
+            },
+            Some(1),
+        )
+        .unwrap()
+        .token;
+        let renamed = crate::handlers::sessions::rename_session(
+            axum::extract::State(state.clone()),
+            crate::auth::CurrentUserId(owner.id),
+            axum::extract::Path(session.id),
+            axum::Json(shared::api::RenameSessionRequest {
+                session_name: "Renamed in Portal".into(),
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(renamed.0.session_name, "Renamed in Portal");
+        let registered = register_or_update_session(
+            &state,
+            &RegistrationParams {
+                claude_session_id: session.id,
+                session_name: &session.session_name,
+                auth_token: Some(&token),
+                working_directory: &session.working_directory,
+                resuming: true,
+                git_branch: &session.git_branch,
+                client_version: &session.client_version,
+                session_key: &session.session_key,
+                replaces_session_id: None,
+                hostname: &session.hostname,
+                launcher_id: session.launcher_id,
+                agent_type: shared::AgentType::Claude,
+                repo_url: &session.repo_url,
+                scheduled_task_id: None,
+                claude_args: &vec![],
+            },
+        );
+        assert!(registered.success);
+        assert_eq!(
+            crate::schema::sessions::table
+                .find(session.id)
+                .select(crate::schema::sessions::session_name)
+                .first::<String>(&mut conn)
+                .unwrap(),
+            "Renamed in Portal"
+        );
+    }
+
     /// Builds the `RegistrationResult` the existing-session branch returns
     /// when the resolved user isn't authorized for the row.
     fn unauthorized_reattach_result() -> RegistrationResult {

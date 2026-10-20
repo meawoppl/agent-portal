@@ -7,6 +7,8 @@
 //! - [`client_fanout`] — web/user client registries and broadcast fanout
 //! - [`correlation`] — request/response correlation for launcher RPCs
 //! - [`launcher_registry`] — launcher registration and `(user, host)` dedup
+//! - [`agent_progress`] — live agent-driven progress bars (in memory)
+//! - [`edit_stack_compaction`] — compact-before-dispatch phase for the work queue
 //!
 //! The `SessionManager` struct itself (and its small, cross-cutting helpers)
 //! lives here; each submodule contributes a focused `impl SessionManager`
@@ -14,33 +16,37 @@
 
 use dashmap::{DashMap, DashSet};
 use shared::api::ForwardError;
-use shared::{
-    FileDownloadResponseFields, ForwardStatusFields, LauncherToServer, ServerToClient,
-    ServerToProxy,
-};
+use shared::{FileDownloadResponseFields, ForwardStatusFields, ServerToClient, ServerToProxy};
 use std::collections::VecDeque;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
+mod agent_progress;
 mod client_fanout;
 mod correlation;
 mod data_plane;
+mod edit_stack_compaction;
 mod input_dedup;
 mod input_queue;
 mod launcher_registry;
+mod launcher_rpc;
 mod liveness;
 mod pending_queue;
 mod proxy_lifecycle;
 mod session_tracking;
 mod tunnel_client;
 
+pub use agent_progress::PROGRESS_BAR_TTL;
 use data_plane::DataPlaneMap;
 pub use data_plane::{DataPlaneConnection, DataPlaneSender, DATA_PLANE_CHANNEL_CAPACITY};
+pub(crate) use edit_stack_compaction::{CompactionGate, CompactionPhase};
 pub(crate) use input_dedup::{DedupVerdict, InputDeliveryState};
 pub(crate) use input_queue::EnqueueInput;
 pub use launcher_registry::LauncherConnection;
+use launcher_rpc::LauncherRequests;
+pub(crate) use launcher_rpc::{LauncherRpcError, LauncherRpcKind};
 pub use liveness::{
     LAUNCHER_LIVENESS_DEADLINE_SECS, LIVENESS_SWEEP_INTERVAL_SECS, PROXY_LIVENESS_DEADLINE_SECS,
 };
@@ -209,8 +215,7 @@ pub struct SessionManager {
     /// user. Entries here are kept in lockstep with `launchers`: inserted by
     /// `try_register_launcher`, removed by `unregister_launcher`.
     launcher_dedup: Arc<DashMap<(Uuid, String), Uuid>>,
-    pending_dir_requests: Arc<DashMap<Uuid, oneshot::Sender<LauncherToServer>>>,
-    pending_probe_requests: Arc<DashMap<Uuid, oneshot::Sender<LauncherToServer>>>,
+    pending_launcher_requests: Arc<LauncherRequests>,
     pending_file_downloads: Arc<DashMap<Uuid, oneshot::Sender<FileDownloadResponseFields>>>,
     /// Pending `ForwardOpen` → `ForwardStatus` round-trips, keyed by
     /// `(session_id, port)` — the reply frame carries no request id.
@@ -250,6 +255,17 @@ pub struct SessionManager {
     /// Recent web-client input ids per session and their delivery state —
     /// the server half of input idempotency (#1236, see `input_dedup.rs`).
     input_dedup: Arc<DashMap<Uuid, input_dedup::InputDedupQueue>>,
+    /// Live agent-driven progress bars per session (`agent-portal progress`),
+    /// in memory only (see `agent_progress.rs`).
+    agent_progress: Arc<DashMap<Uuid, agent_progress::SessionProgress>>,
+    /// Sessions with a delivered input whose terminal output has not arrived
+    /// yet. This closes the small input-ack-before-transcript window where the
+    /// durable latest-message classifier can still look idle.
+    active_turns: Arc<DashSet<Uuid>>,
+    /// Edit-stack compactions in flight, with when the phase last changed
+    /// (see `edit_stack_compaction.rs`).
+    edit_stack_compaction:
+        Arc<DashMap<Uuid, (edit_stack_compaction::CompactionPhase, std::time::Instant)>>,
     /// Monotonic counter for connection generations (prevents stale cleanup).
     /// Shared by proxy and launcher registrations — uniqueness is all that
     /// matters, not contiguity per registry.
@@ -267,8 +283,7 @@ impl Default for SessionManager {
             pending_truncations: Arc::new(DashSet::new()),
             launchers: Arc::new(DashMap::new()),
             launcher_dedup: Arc::new(DashMap::new()),
-            pending_dir_requests: Arc::new(DashMap::new()),
-            pending_probe_requests: Arc::new(DashMap::new()),
+            pending_launcher_requests: Arc::new(DashMap::new()),
             pending_file_downloads: Arc::new(DashMap::new()),
             pending_forward_status: Arc::new(DashMap::new()),
             forward_health: Arc::new(DashMap::new()),
@@ -279,6 +294,9 @@ impl Default for SessionManager {
             last_input_sender: Arc::new(DashMap::new()),
             subagent_tokens: Arc::new(DashMap::new()),
             input_dedup: Arc::new(DashMap::new()),
+            agent_progress: Arc::new(DashMap::new()),
+            active_turns: Arc::new(DashSet::new()),
+            edit_stack_compaction: Arc::new(DashMap::new()),
             gen_counter: Arc::new(AtomicU64::new(1)),
         }
     }
@@ -299,6 +317,18 @@ impl SessionManager {
             self.pending_truncations.remove(id);
         }
         ids
+    }
+
+    pub(crate) fn mark_turn_input_delivered(&self, session_id: Uuid) {
+        self.active_turns.insert(session_id);
+    }
+
+    pub(crate) fn mark_turn_finished(&self, session_id: Uuid) {
+        self.active_turns.remove(&session_id);
+    }
+
+    pub(crate) fn is_turn_active(&self, session_id: Uuid) -> bool {
+        self.active_turns.contains(&session_id)
     }
 }
 

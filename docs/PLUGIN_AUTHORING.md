@@ -172,11 +172,11 @@ path = "prompts/bringup.md"
 
 [[detect]]
 name = "esp-idf"
-any = ["sdkconfig", "CMakeLists.txt", "main/*.c", "main/*.cpp"]
+any = ["sdkconfig", "sdkconfig.defaults", "idf_component.yml"]
 
 [[detect]]
 name = "fpga"
-any = ["*.sv", "*.v", "*.xdc", "*.pcf", "*.json"]
+any = ["*.sv", "*.v", "*.xdc", "*.pcf"]
 
 [capabilities]
 domain = "embedded-development"
@@ -268,49 +268,55 @@ Surface requirements:
 
 ### Surface Edit Stacks
 
-Forwarded surfaces may hand a stack of visual/text annotations back to the active
-session with `window.parent.postMessage`. Portal accepts these messages only
-from the origin of the currently open session surface, stores each annotation in
-the durable session edit stack, and renders the pending stack in the chat view.
-The user can inspect, dismiss, send the next item, or send all items. `Send all`
-still prompts the agent one item at a time and waits for the current agent turn
-to finish before sending the next item.
+Forwarded surfaces may hand a stack of visual/text annotations back to the
+active session by posting JSON to the Portal-owned endpoint on the forward
+origin: `POST /__portal/edit-stack`. The forward proxy intercepts that path
+before the request reaches the plugin service, stores each annotation in the
+durable session edit stack, enqueues the submitted item(s) into the active agent
+session, and broadcasts an updated work-queue snapshot to the chat view. The
+manual session-scoped endpoints below can still be used to stage, inspect,
+dismiss, or send queue items from Portal UI and agent tooling.
 
 This is intentionally domain-neutral. Plugins should put their own coordinates,
 view names, slide numbers, waveform cursors, or other loose context in
 `source`/`context`; Portal stores and displays that JSON and injects it into the
 agent prompt when the user sends an item.
 
-Use this message shape:
+Use this request shape:
 
 ```js
-window.parent.postMessage({
-  type: "agent-portal:queue-prompts",
-  version: 1,
-  source: {
-    plugin: "my-plugin",
-    page: location.href,
-  },
-  items: [
-    {
-      title: "Short human-readable title",
-      body: "User note or speech transcript",
-      context: {
-        tab: "PCB",
-        rect: { x: 0.2, y: 0.1, w: 0.3, h: 0.4 },
-      },
-      image: {
-        dataUrl: "data:image/png;base64,...",
-      },
+await fetch("/__portal/edit-stack", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  credentials: "same-origin",
+  body: JSON.stringify({
+    source: {
+      plugin: "my-plugin",
+      page: location.href,
     },
-  ],
-}, new URL(document.referrer).origin);
+    items: [
+      {
+        title: "Short human-readable title",
+        body: "User note or speech transcript",
+        context: {
+          tab: "PCB",
+          rect: { x: 0.2, y: 0.1, w: 0.3, h: 0.4 },
+        },
+        image: {
+          dataUrl: "data:image/png;base64,...",
+        },
+      },
+    ],
+  }),
+});
 ```
 
 Keep payloads small and self-contained. Prefer a normalized region, current
 view/project identifiers, and an optional cropped image over full application
 state. Portal bounds the number of items, text size, JSON context size, and
-image data URL size before saving the stack.
+image data URL size before saving the stack. A `401` response means the
+forward's Portal session cookie is missing or stale; reopen the forward from
+the session before submitting annotations.
 
 Portal exposes the same state through session-scoped REST endpoints:
 
@@ -321,17 +327,33 @@ Portal exposes the same state through session-scoped REST endpoints:
 | `PATCH` | `/api/sessions/{id}/edit-stack/{item_id}` | Mark an item `pending`, `sent`, or `dismissed` |
 | `DELETE` | `/api/sessions/{id}/edit-stack/{item_id}` | Dismiss an item from the visible stack |
 
+Agent-side tooling can use the bearer-token equivalents:
+`GET /api/agent/sessions/{id}/edit-stack` and
+`POST /api/agent/sessions/{id}/edit-stack`. The bundled CLI exposes those as
+`agent-portal work-queue list [session-id]` and
+`agent-portal work-queue add <session-id> "task"`.
+
 The backend enforces normal session reader/mutator permissions. Items keep the
 creator id and display name; Portal only shows contributor names in the compact
 chat panel when there is more than one contributor in the pending stack.
 
+`plugin open` registers the manifest start command with the launcher daemon's
+managed-service supervisor. It persists the command, working directory and plugin
+environment, substitutes `{port}` when spawning each child, and keeps the public
+forward on a stable relay port. The start command must keep the server in the
+foreground; do not daemonize or start a second systemd/launchd service from it.
+The launcher restores the recipe after a daemon restart and restarts exited or
+repeatedly unhealthy children with bounded backoff. Agent session restarts do not
+own or kill these children. See [managed forwards](PORT_FORWARDING.md#cli-launchersrcforwardrs-mirroring-launchersrcmessagers)
+for the generic script interface, logs and recovery limits.
+
 The launcher owns the lifecycle:
 
-1. choose a free port;
+1. reserve a stable forwarding port and allocate a child port;
 2. expand placeholders in `[surface].start`;
 3. start the process;
-4. wait for `health_path` or TCP readiness;
-5. register the port with the existing forwarder;
+4. wait for a successful HTTP response at `health_path` (default `/`);
+5. register the relay port with the existing forwarder;
 6. open the session pane.
 
 Use `agent-portal plugin status <name> --json` to inspect the stored process,
@@ -340,6 +362,11 @@ port, health, and surface metadata. Runtime state lives in:
 ```text
 .portal/state/surfaces/surface.json
 ```
+
+Managed records have a `managed` generation ID and no child PID. `plugin stop`
+unregisters that generation, so a stale plugin record cannot stop a replacement
+service. `plugin start` alone retains direct local startup for use without a
+session; a surface opened through Portal remains launcher-managed.
 
 ## Commands
 
@@ -356,6 +383,19 @@ Good command behavior:
 
 The manifest should expose common, discoverable verbs. The plugin binary can
 still support richer pass-through subcommands.
+
+Set `accepts_args = true` on a command to let the user pass extra arguments
+when Portal runs it. Each argument is shell-quoted and appended to `run`, so a
+thin pass-through entry can expose the whole plugin CLI. It defaults to
+`false`, which runs `run` exactly as written.
+
+```toml
+[[commands]]
+name = "esp32-fpga"
+description = "Run any esp32-fpga subcommand."
+run = "bin/esp32-fpga"
+accepts_args = true
+```
 
 Useful inspection commands:
 
@@ -438,6 +478,36 @@ is "this repo works best with these Portal abilities."
 9. Test with the agents that should use it. Confirm Claude receives native
    skills and Codex/Muse receive the Plugin Skills reminder.
 
+### Validating and previewing
+
+Check a plugin directory before installing it. Neither command installs the
+plugin or runs any of its commands.
+
+```console
+agent-portal plugin validate ./agent-portal-plugins/esp32-fpga
+agent-portal plugin preview ./agent-portal-plugins/esp32-fpga --cwd ~/src/my-board
+```
+
+`validate` reports `error:` and `warning:` lines and exits non-zero only on
+errors: a missing or unparsable manifest, an invalid `name`, missing skill or
+prompt files, duplicate command or skill names, an empty command `run`, a
+`[surface]` without `start`, a `default_width_percent` outside 10-90, a
+`[[detect]]` with an empty `any`, or an unknown `{placeholder}`. Warnings cover
+unknown keys, missing `homepage`/`license`/`[compat]`/`install.doctor`, a
+surface without `health_path`, unknown skill `agents`, skills without
+frontmatter `name`/`description`, and detect patterns that are too broad
+(`*.json`, `README*`, ...) or can never match (detection compares file names
+only, so a pattern containing `/` never fires). Add `--json` for
+`{ ok, errors: [...], warnings: [...] }`, each item `{ field, message }`.
+
+`preview` renders what Portal will show: the plugin card, skills with their
+frontmatter descriptions and byte/estimated-token sizes, prompts, commands
+(and whether they accept arguments), surface dock metadata, and the total
+context estimate. With `--cwd` it reports whether the `[[detect]]` rules would
+suggest the plugin in that directory and why, using the same matching as the
+Portal backend. It ends with the `validate` findings. `--json` prints the same
+data as JSON.
+
 ## Runtime JSON Expectations
 
 `agent-portal plugin runtime <name> --json` is the stable machine-readable view
@@ -472,7 +542,7 @@ step deserves review.
 
 Before publishing a plugin:
 
-- `agent-portal-plugin.toml` validates.
+- `agent-portal plugin validate <path>` reports no errors.
 - `agent-portal plugin runtime <name> --json` is useful to an agent.
 - `agent-portal plugin doctor <name>` reports actionable diagnostics.
 - Skills are declared and have frontmatter descriptions.

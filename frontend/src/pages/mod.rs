@@ -1,5 +1,6 @@
 pub mod access_denied;
 pub mod admin;
+pub mod aperture;
 pub mod banned;
 pub mod dashboard;
 pub mod demo;

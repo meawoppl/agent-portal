@@ -1,6 +1,7 @@
+use crate::pages::dashboard::PortalSession;
+use crate::portal_client::SessionKey;
 use crate::utils::extract_folder;
 use shared::SessionInfo;
-use uuid::Uuid;
 use web_sys::MouseEvent;
 use yew::prelude::*;
 
@@ -38,6 +39,25 @@ fn render_context_bar(fraction: Option<f64>, compacting: bool) -> Html {
     }
 }
 
+/// Gentle green fill behind the pill's content, growing left→right with the
+/// agent's progress bars (`agent-portal progress`). It sits under the text and
+/// the activity ticks, and the pill's `overflow: hidden` clips it to the
+/// rounded shape.
+fn render_progress_fill(fraction: Option<f32>) -> Html {
+    let Some(fraction) = fraction else {
+        return html! {};
+    };
+    let pct = fraction.clamp(0.0, 1.0) * 100.0;
+    html! {
+        <span
+            class="pill-progress-fill"
+            style={format!("width: {pct:.0}%")}
+            title={format!("Agent progress {pct:.0}%")}
+            aria-hidden="true"
+        />
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum VcsView {
     PullRequests(Vec<(i64, String)>),
@@ -68,7 +88,7 @@ struct PillViewModel {
 pub(super) struct SessionPillProps {
     pub index: usize,
     pub display_number: Option<usize>,
-    pub session: SessionInfo,
+    pub session: PortalSession,
     pub is_focused: bool,
     pub is_awaiting: bool,
     pub is_hidden: bool,
@@ -81,16 +101,21 @@ pub(super) struct SessionPillProps {
     /// unknown window). Drives the top context-usage bar.
     #[prop_or_default]
     pub context_fraction: Option<f64>,
+    /// Completion fraction (0.0..=1.0) of the agent's progress bars, or `None`
+    /// when it has none running. Drives the green background fill.
+    #[prop_or_default]
+    pub progress_fraction: Option<f32>,
     pub is_broadcast_sender: bool,
     pub is_broadcast_receiver: bool,
     pub render_time: f64,
     pub on_select: Callback<usize>,
-    pub on_toggle_menu: Callback<(Uuid, MouseEvent)>,
+    pub on_toggle_menu: Callback<(SessionKey, MouseEvent)>,
 }
 
 #[function_component(SessionPill)]
 pub(super) fn session_pill(props: &SessionPillProps) -> Html {
-    let session = &props.session;
+    let session = &props.session.info;
+    let key = props.session.key;
     let view = PillViewModel::new(props);
 
     let on_click = {
@@ -101,32 +126,30 @@ pub(super) fn session_pill(props: &SessionPillProps) -> Html {
 
     let on_toggle_menu = {
         let on_toggle_menu = props.on_toggle_menu.clone();
-        let session_id = session.id;
-        Callback::from(move |e: MouseEvent| on_toggle_menu.emit((session_id, e)))
+        Callback::from(move |e: MouseEvent| on_toggle_menu.emit((key, e)))
     };
 
-    let sparkline =
-        render_activity_sparkline(&props.activity_timestamps, session.id, props.render_time);
+    let sparkline = render_activity_sparkline(&props.activity_timestamps, key, props.render_time);
 
     // Top context-usage bar: the counterpart to the bottom activity ticks, but
     // filling left→right with how full the model's context window is. Flashes
     // briefly when a compaction just landed (context drains) — reusing the same
     // compaction markers the bottom sparkline plots.
-    let compacting = props.activity_timestamps.recent_compaction(
-        session.id,
-        props.render_time,
-        COMPACTION_FLASH_MS,
-    );
+    let compacting =
+        props
+            .activity_timestamps
+            .recent_compaction(key, props.render_time, COMPACTION_FLASH_MS);
     let context_bar = render_context_bar(props.context_fraction, compacting);
 
     html! {
         <div
             class={classes!(view.pill_classes)}
             onclick={on_click}
-            key={session.id.to_string()}
+            key={key.to_string()}
             data-index={props.index.to_string()}
-            data-session-id={session.id.to_string()}
+            data-session-key={key.to_string()}
         >
+            { render_progress_fill(props.progress_fraction) }
             <span class={view.watermark_class} aria-hidden="true" />
             <span class="pill-broadcast-effect" aria-hidden="true">
                 <span class="pill-broadcast-strand strand-left-top" />
@@ -153,6 +176,9 @@ pub(super) fn session_pill(props: &SessionPillProps) -> Html {
                 { view.connection_symbol }
             </span>
             <span class="pill-name" title={view.repo_title.clone()}>
+                if props.session.portal.is_linked() {
+                    <span class="pill-portal" title={format!("{} · {}", props.session.portal.origin(), props.session.portal.account_label().unwrap_or(""))}>{props.session.portal.origin()}</span>
+                }
                 <span class="pill-session-name" title={session.session_name.clone()}>
                     { view.session_name }
                 </span>
@@ -195,7 +221,7 @@ pub(super) fn session_pill(props: &SessionPillProps) -> Html {
 
 impl PillViewModel {
     fn new(props: &SessionPillProps) -> Self {
-        let session = &props.session;
+        let session = &props.session.info;
         let is_status_disconnected = session.status.as_str() != "active";
 
         let mut pill_classes = vec!["session-pill"];
@@ -264,6 +290,7 @@ impl PillViewModel {
                 shared::AgentType::Claude => "pill-watermark claude",
                 shared::AgentType::Codex => "pill-watermark codex",
                 shared::AgentType::Muse => "pill-watermark muse",
+                shared::AgentType::Antigravity => "pill-watermark antigravity",
             },
             model_watermark: session
                 .last_model
@@ -337,7 +364,7 @@ fn repo_label_from_url(repo_url: &str) -> String {
 
     let parts = path
         .split('/')
-        .filter(|part| !part.is_empty())
+        .filter(|part| shared::strings::is_non_empty(part))
         .collect::<Vec<_>>();
     match parts.as_slice() {
         [.., owner, repo] => format!("{owner}/{repo}"),

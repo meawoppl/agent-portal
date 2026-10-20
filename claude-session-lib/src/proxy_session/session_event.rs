@@ -6,7 +6,7 @@
 //! [`SessionEvent`] from `claude_session.next_event()`:
 //!
 //! - Non-Claude `RawOutput`: the simple codex path (git refresh, buffer, send,
-//!   compaction reminder) — Claude `RawOutput` falls through to the
+//!   compaction re-arms the reminder) — Claude `RawOutput` falls through to the
 //!   wiggum/output-forwarder path that re-parses to `ClaudeOutput`.
 //! - `TurnMetricsReady`, `CodexThreadId`, `SessionLimitReached`: typed
 //!   side-channel forwards.
@@ -27,7 +27,7 @@ use super::git_metadata::{
 };
 use super::media_display::codex_output_image_read;
 use super::wiggum::handle_session_event_with_wiggum;
-use super::{inject_portal_reminder, is_codex_compaction_event, ConnectionResult, ConnectionState};
+use super::{is_codex_compaction_event, ConnectionResult, ConnectionState};
 
 pub(super) async fn handle_next_event<A: Agent>(
     state: &mut ConnectionState,
@@ -61,6 +61,7 @@ pub(super) async fn handle_next_event<A: Agent>(
             // every-100-messages fallback (#1653).
             let has_git_signal = match state.agent_type {
                 shared::AgentType::Muse => muse_output_has_git_signal(value),
+                shared::AgentType::Antigravity => false,
                 _ => codex_output_has_git_signal(value),
             };
             if has_git_signal {
@@ -88,11 +89,6 @@ pub(super) async fn handle_next_event<A: Agent>(
                 content: value.clone(),
                 agent_type: state.agent_type,
             };
-            // NB: the `ws` write guard is intentionally held across the
-            // `inject_portal_reminder` await below, matching the pre-extraction
-            // inline behavior (the guard's scope was the whole arm). The
-            // reminder injects input to the agent and never touches `ws_write`,
-            // so this is a plain serialization point, not a deadlock.
             let mut ws = state.ws_write.lock().await;
             if ws.send(msg).await.is_err() {
                 error!("Failed to send raw output");
@@ -100,8 +96,12 @@ pub(super) async fn handle_next_event<A: Agent>(
                     state.connection_start.elapsed(),
                 ));
             }
+            // Compaction drops the reminder from the agent's context. Re-arm
+            // it so the next real input carries it (see `input_delivery`).
             if is_codex_compaction {
-                inject_portal_reminder(claude_session).await;
+                state
+                    .reminder_pending
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
             }
             return None;
         }
@@ -133,6 +133,7 @@ pub(super) async fn handle_next_event<A: Agent>(
         &state.output_buffer,
         claude_session,
         state.agent_type,
+        &state.reminder_pending,
     )
     .await
 }

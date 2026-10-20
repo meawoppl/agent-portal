@@ -3,12 +3,13 @@
 #[path = "client_websocket_events.rs"]
 mod client_websocket_events;
 
-use crate::utils::{self, calculate_backoff, parse_version, On401};
+use crate::federation::{Federation, FederationAction};
+use crate::portal_client::{use_portal, ConnId, SessionKey};
+use crate::utils::{calculate_backoff, parse_version, On401};
 use client_websocket_events::handle_server_message;
 use shared::api::TurnMetricsResponse;
-use shared::{AppConfig, ClientEndpoint, TurnMetrics, WsEndpoint};
+use shared::{AppConfig, ClientEndpoint, ServiceStats, TurnMetrics};
 use std::collections::HashMap;
-use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
@@ -33,7 +34,10 @@ pub struct UseClientWebSocket {
     /// Newest context-capable row per session, independent of the bounded
     /// trend ring. Context status must not disappear when another session is
     /// busy or emits a newer row without context metadata.
-    pub latest_session_metrics: HashMap<Uuid, TurnMetrics>,
+    pub latest_session_metrics: HashMap<SessionKey, TurnMetrics>,
+    /// Per-session completion fraction of the agent's progress bars, pushed
+    /// live by `ServerToClient::SessionProgress`; drives the rail pill fill.
+    pub session_progress: HashMap<SessionKey, f32>,
     /// Monotonic counter that ticks every time the backend broadcasts a
     /// `ServerToClient::LaunchSessionResult` frame (proxy registered, or
     /// the launch failed). Consumers can hang a `use_effect_with` on this
@@ -45,6 +49,11 @@ pub struct UseClientWebSocket {
     /// launcher connected, disconnected, or was evicted. Consumers hang a
     /// `use_effect_with` on it to refetch `/api/launchers` (#710).
     pub launcher_event_counter: u32,
+    /// Services monitor table (backend plus the user's launchers), from the
+    /// newest `ServerToClient::ServiceStatsUpdate`.
+    pub service_stats: Vec<ServiceStats>,
+    /// Host CPU history per service id for the header sparkline.
+    pub service_cpu_history: HashMap<String, Vec<f64>>,
 }
 
 /// Decide whether `next` is strictly newer than `prev`. Falls back to string
@@ -78,113 +87,203 @@ pub fn use_client_websocket() -> UseClientWebSocket {
     // silently discards every update since mount. See `ClientWsState`.
     let live = use_reducer(client_websocket_events::ClientWsState::default);
 
-    // One-shot REST hydration on hook mount. Fires alongside (not gated on)
-    // the WS connect — the dashboard pill shows immediately if the user
-    // has any prior turns, and the WS path keeps it fresh once it lands.
+    let home = use_portal();
+    let registry = use_context::<Federation>();
+    let mut portals = vec![home];
+    if let Some(registry) = &registry {
+        portals.extend(registry.rows.iter().filter_map(|r| r.client.clone()));
+    }
+    let tasks = use_mut_ref(
+        HashMap::<
+            ConnId,
+            (
+                crate::portal_client::PortalClient,
+                futures_util::future::AbortHandle,
+            ),
+        >::new,
+    );
     {
-        let live = live.clone();
+        let tasks = tasks.clone();
         use_effect_with((), move |_| {
-            spawn_local(async move {
-                if let Ok(parsed) =
-                    utils::fetch_json::<TurnMetricsResponse>("/api/metrics/recent", On401::Ignore)
-                        .await
-                {
-                    live.dispatch(client_websocket_events::ClientWsAction::Hydrate {
-                        trend: parsed.metrics,
-                        latest: parsed.latest_by_session,
-                    });
+            move || {
+                for (_, (_, abort)) in tasks.borrow_mut().drain() {
+                    abort.abort();
                 }
-            });
-            || ()
+            }
         });
     }
-
     {
+        let tasks = tasks.clone();
+        let registry = registry.clone();
         let shutdown_reason = shutdown_reason.clone();
         let update_available = update_available.clone();
         let live = live.clone();
-
-        use_effect_with((), move |_| {
-            let shutdown_reason = shutdown_reason.clone();
-            let update_available = update_available.clone();
-            let live = live.clone();
-
-            spawn_local(async move {
-                let mut attempt: u32 = 0;
-                let mut known_version: Option<String> = None;
-                const MAX_ATTEMPTS: u32 = 10;
-
-                loop {
-                    let ws_endpoint = utils::ws_url(ClientEndpoint::PATH);
-                    match ws_bridge::yew_client::connect_to::<ClientEndpoint>(&ws_endpoint) {
-                        Ok(conn) => {
-                            attempt = 0; // Reset on successful connection
-                                         // We just (re)connected — any prior shutdown banner is now stale.
-                            shutdown_reason.set(None);
-
-                            // Compare the server's reported version against what we last saw.
-                            // If it advanced, surface a reload prompt; the user's JS/WASM
-                            // bundle was built against the earlier backend and may be drifted.
-                            if let Ok(cfg) =
-                                utils::fetch_json::<AppConfig>("/api/config", On401::Ignore).await
-                            {
-                                let next = cfg.server_version;
-                                match &known_version {
-                                    None => {
-                                        known_version = Some(next);
-                                    }
-                                    Some(prev) => {
-                                        if is_newer_version(prev, &next) {
-                                            update_available.set(Some(next.clone()));
-                                        }
-                                        known_version = Some(next);
-                                    }
-                                }
-                            }
-
-                            let (_sender, mut receiver) = conn.split();
-
-                            while let Some(result) = receiver.recv().await {
-                                match result {
-                                    Ok(msg) => handle_server_message(msg, &shutdown_reason, &live),
-                                    Err(e) => {
-                                        log::error!("Client WebSocket error: {:?}", e);
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            log::error!("Failed to connect client WebSocket: {:?}", e);
-                        }
-                    }
-
-                    // Reconnection with exponential backoff
-                    if attempt >= MAX_ATTEMPTS {
-                        log::error!("Client WebSocket: max reconnection attempts reached");
-                        break;
-                    }
-                    let delay_ms = calculate_backoff(attempt);
-                    attempt += 1;
-                    log::info!(
-                        "Client WebSocket reconnecting in {}ms (attempt {})",
-                        delay_ms,
-                        attempt
-                    );
-                    gloo::timers::future::TimeoutFuture::new(delay_ms).await;
+        use_effect_with(portals.clone(), move |portals| {
+            // A new linked account must not restart unrelated sockets or
+            // reset home server-version tracking.
+            tasks.borrow_mut().retain(|_, (client, abort)| {
+                if portals.contains(client) {
+                    true
+                } else {
+                    abort.abort();
+                    false
                 }
             });
-            || ()
+            for portal in portals.clone() {
+                if tasks.borrow().contains_key(&portal.conn()) {
+                    continue;
+                }
+                let registry = registry.clone();
+                let (shutdown_reason, update_available, live) = (
+                    shutdown_reason.clone(),
+                    update_available.clone(),
+                    live.clone(),
+                );
+                let (abort, registration) = futures_util::future::AbortHandle::new_pair();
+                tasks
+                    .borrow_mut()
+                    .insert(portal.conn(), (portal.clone(), abort));
+                spawn_local(async move {
+                    let _ = futures_util::future::Abortable::new(
+                        async move {
+                            if let Ok(parsed) = portal
+                                .fetch_json::<TurnMetricsResponse>(
+                                    "/api/metrics/recent",
+                                    On401::Ignore,
+                                )
+                                .await
+                            {
+                                live.dispatch(if portal.conn() == ConnId::HOME {
+                                    client_websocket_events::ClientWsAction::Hydrate {
+                                        trend: parsed.metrics,
+                                        latest: parsed.latest_by_session,
+                                    }
+                                } else {
+                                    client_websocket_events::ClientWsAction::LinkedHydrate(
+                                        portal.conn(),
+                                        parsed.latest_by_session,
+                                    )
+                                });
+                            }
+                            let mut attempt = 0;
+                            let mut known_version: Option<String> = None;
+                            loop {
+                                if portal.is_linked() {
+                                    live.dispatch(client_websocket_events::ClientWsAction::SessionProgressReset(portal.conn()));
+                                    if let Some(registry) = &registry {
+                                        registry.dispatch(FederationAction::LiveStatus(portal.conn(), Some("Connecting live updates".into())));
+                                    }
+                                }
+                                match portal.socket_url().await {
+                                    Ok(endpoint) => match ws_bridge::yew_client::connect_to::<
+                                        ClientEndpoint,
+                                    >(
+                                        &endpoint
+                                    ) {
+                                        Ok(conn) => {
+                                            if portal.conn() == ConnId::HOME {
+                                                shutdown_reason.set(None);
+                                                if let Ok(config) = portal
+                                                    .fetch_json::<AppConfig>(
+                                                        "/api/config",
+                                                        On401::Ignore,
+                                                    )
+                                                    .await
+                                                {
+                                                    if known_version.as_ref().is_some_and(|old| {
+                                                        is_newer_version(
+                                                            old,
+                                                            &config.server_version,
+                                                        )
+                                                    }) {
+                                                        update_available.set(Some(
+                                                            config.server_version.clone(),
+                                                        ));
+                                                    }
+                                                    known_version = Some(config.server_version);
+                                                }
+                                            }
+                                            let (_sender, mut receiver) = conn.split();
+                                            let mut announced = false;
+                                            while let Some(result) = receiver.recv().await {
+                                                match result {
+                                                    Ok(msg) => {
+                                                        if !announced {
+                                                            announced = true;
+                                                            attempt = 0;
+                                                            if let Some(registry) = &registry {
+                                                                registry.dispatch(FederationAction::LiveStatus(portal.conn(), None));
+                                                            }
+                                                        }
+                                                        handle_server_message(portal.conn(), msg, &shutdown_reason, &live);
+                                                    },
+                                                    Err(_) => break,
+                                                }
+                                            }
+                                        }
+                                        Err(_) => log::warn!(
+                                            "Portal user channel unavailable: {}",
+                                            portal.origin()
+                                        ),
+                                    },
+                                    Err(_) => log::warn!(
+                                        "Portal user channel authorization failed: {}",
+                                        portal.origin()
+                                    ),
+                                }
+                                if portal.is_linked() {
+                                    live.dispatch(client_websocket_events::ClientWsAction::SessionProgressReset(portal.conn()));
+                                    if let Some(registry) = &registry {
+                                        registry.dispatch(FederationAction::LiveStatus(portal.conn(), Some("Reconnecting live updates".into())));
+                                    }
+                                }
+                                if attempt >= 10 {
+                                    if let Some(registry) = &registry {
+                                        registry.dispatch(FederationAction::LiveStatus(portal.conn(), Some("Live updates unavailable; unlink and authorize again".into())));
+                                    }
+                                    live.dispatch(client_websocket_events::ClientWsAction::SessionProgressReset(portal.conn()));
+                                    break;
+                                }
+                                let delay = calculate_backoff(attempt);
+                                attempt += 1;
+                                gloo::timers::future::TimeoutFuture::new(delay).await;
+                            }
+                        },
+                        registration,
+                    )
+                    .await;
+                });
+            }
+            // Per-connection removal above and unmount cleanup own aborts.
+            || {}
         });
     }
+    let current: std::collections::HashSet<_> = portals.iter().map(|p| p.conn()).collect();
 
     UseClientWebSocket {
         shutdown_reason: (*shutdown_reason).clone(),
         update_available: (*update_available).clone(),
         recent_turn_metrics: live.recent_turn_metrics.clone(),
-        latest_session_metrics: live.latest_session_metrics.clone(),
+        latest_session_metrics: live
+            .latest_session_metrics
+            .iter()
+            .filter(|(key, _)| current.contains(&key.conn))
+            .map(|(key, value)| (*key, value.clone()))
+            .collect(),
+        session_progress: live
+            .session_progress
+            .iter()
+            .filter(|(key, _)| current.contains(&key.conn))
+            .map(|(key, value)| (*key, *value))
+            .collect(),
         launch_event_counter: live.launch_event_counter,
         launcher_event_counter: live.launcher_event_counter,
+        service_stats: live.service_stats.clone(),
+        service_cpu_history: live
+            .service_cpu_history
+            .iter()
+            .map(|(id, points)| (id.clone(), points.iter().map(|(_, v)| *v).collect()))
+            .collect(),
     }
 }
 

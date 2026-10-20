@@ -636,6 +636,10 @@ pub(crate) async fn claude_io_task(
                         // the CLI side when no turn is active.
                         client.send(&interrupt_input()).await.map(|_| ())
                     }
+                    IoCommand::Shutdown { completed } => {
+                        let _ = completed.send(());
+                        break;
+                    }
                 };
                 if let Err(e) = result {
                     let _ = event_tx.send(IoEvent::Error(SessionError::Agent(e.to_string())));
@@ -776,7 +780,7 @@ pub(crate) async fn claude_io_task(
                                 service_tier: current_service_tier.clone().or_else(|| {
                                     usage
                                         .map(|u| u.service_tier.clone())
-                                        .filter(|s| !s.is_empty())
+                                        .filter(|s| shared::strings::is_non_empty(s))
                                 }),
                                 input_tokens: usage
                                     .map(|u| u.input_tokens as i64)
@@ -986,6 +990,10 @@ pub(crate) async fn claude_io_task(
                                                 SessionError::Agent(e.to_string()),
                                             ));
                                         }
+                                    }
+                                    IoCommand::Shutdown { completed } => {
+                                        let _ = completed.send(());
+                                        break;
                                     }
                                 }
                             }

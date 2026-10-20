@@ -11,7 +11,9 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use claude_session_lib::{default_session_name, ClaudeAgent};
+use claude_session_lib::{
+    default_session_name, should_prime_portal_reminder_on_first_input, ClaudeAgent,
+};
 use session_lib::{Session, SessionConfig};
 use shared::api::{ResolveProxySessionRequest, ResolveProxySessionResponse};
 
@@ -346,6 +348,13 @@ async fn main() -> Result<()> {
     let session_id = resolved_session.session_id;
     let session_name = resolved_session.session_name;
     let resuming = resolved_session.resuming;
+    let codex_thread_id_for_resume = (agent_type == shared::AgentType::Codex && resuming)
+        .then(|| {
+            config
+                .get_directory_session(&cwd)
+                .and_then(|session| session.codex_thread_id.as_deref())
+        })
+        .flatten();
 
     // Print startup info (suppress in shim mode — stdout is reserved for claude I/O)
     if !args.shim {
@@ -408,6 +417,7 @@ async fn main() -> Result<()> {
 
     // Build session config
     let session_config = ProxySessionConfig {
+        history_restore: None,
         claude_conversation_id_sink: None,
         // Auto-display needs the launcher's upload credentials; a standalone
         // proxy simply doesn't display images the agent reads.
@@ -418,6 +428,11 @@ async fn main() -> Result<()> {
         auth_token,
         working_directory: cwd,
         resume: resuming,
+        prime_portal_reminder_on_first_input: should_prime_portal_reminder_on_first_input(
+            agent_type,
+            resuming,
+            codex_thread_id_for_resume,
+        ),
         git_branch,
         claude_args: args.claude_args.clone(),
         replaces_session_id: None,
@@ -819,6 +834,7 @@ async fn create_claude_session(config: &ProxySessionConfig) -> Result<ClaudeSess
     });
 
     let claude_config = SessionConfig {
+        recovery_context: None,
         session_id: config.session_id,
         working_directory: PathBuf::from(&config.working_directory),
         session_name: config.session_name.clone(),
@@ -839,6 +855,7 @@ async fn create_claude_session(config: &ProxySessionConfig) -> Result<ClaudeSess
             && config.claude_args.iter().any(|arg| arg == "--yolo"),
         agent_type: config.agent_type,
         codex_thread_id,
+        codex_require_resume: false,
         fork_from_session_id: None,
         codex_fork_from_thread_id: None,
         codex_fork_last_turn_id: None,

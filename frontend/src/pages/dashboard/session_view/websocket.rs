@@ -1,10 +1,9 @@
 //! WebSocket connection management for SessionView
 
-use crate::utils;
+use crate::portal_client::PortalClient;
 use futures_util::StreamExt;
-use shared::{
-    ClientEndpoint, ClientToServer, InputDeliveryStage, ServerToClient, TurnMetrics, WsEndpoint,
-};
+use shared::api::EditStackItem;
+use shared::{ClientEndpoint, ClientToServer, InputDeliveryStage, ServerToClient, TurnMetrics};
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 use yew::Callback;
@@ -53,6 +52,10 @@ pub enum WsEvent {
     ForwardsChanged {
         open_preview: bool,
     },
+    /// Durable work queue snapshot after a plugin surface submission.
+    EditStackUpdated {
+        items: Vec<EditStackItem>,
+    },
     /// Terminal outcome of a file upload (#939 phase 4). The view gates the
     /// prompt referencing the file on this.
     UploadResult(shared::FileUploadResultFields),
@@ -73,6 +76,9 @@ pub enum WsEvent {
     /// Drives a transient per-session live-status line (muse's streamed
     /// deltas / task status); never persisted, not part of `Output`.
     Ephemeral(serde_json::Value),
+    /// The session's full set of agent-driven progress bars
+    /// (`ServerToClient::AgentProgress`); replaces whatever the view held.
+    AgentProgress(Vec<shared::api::ProgressBar>),
 }
 
 /// Log a WebSocket failure and surface it to the UI as a [`WsEvent::Error`].
@@ -83,14 +89,50 @@ fn report_ws_error(on_event: &Callback<WsEvent>, context: &str, err: impl std::f
 
 /// Connect to WebSocket and start receiving messages.
 /// Returns immediately, spawns async task to handle connection.
+/// All async work for a view is cancelled when that view is destroyed. A
+/// removed/replaced linked account must not leave an authorized socket alive.
+#[derive(Clone, Default)]
+pub(super) struct SocketLifetime {
+    closed: std::rc::Rc<std::cell::Cell<bool>>,
+    aborts: std::rc::Rc<std::cell::RefCell<Vec<futures_util::future::AbortHandle>>>,
+}
+impl SocketLifetime {
+    pub fn spawn(&self, future: impl std::future::Future<Output = ()> + 'static) {
+        if self.closed.get() {
+            return;
+        }
+        let (abort, registration) = futures_util::future::AbortHandle::new_pair();
+        self.aborts.borrow_mut().push(abort);
+        spawn_local(async move {
+            let _ = futures_util::future::Abortable::new(future, registration).await;
+        });
+    }
+    pub fn close(&self) {
+        self.closed.set(true);
+        for abort in self.aborts.borrow_mut().drain(..) {
+            abort.abort();
+        }
+    }
+}
+
 pub fn connect_websocket(
+    lifetime: &SocketLifetime,
+    portal: &PortalClient,
     session_id: Uuid,
     replay_after: Option<String>,
     resuming: bool,
     on_event: Callback<WsEvent>,
 ) {
-    spawn_local(async move {
-        let ws_endpoint = utils::ws_url(ClientEndpoint::PATH);
+    let portal = portal.clone();
+    let send_lifetime = lifetime.clone();
+    lifetime.spawn(async move {
+        let ws_endpoint = match portal.socket_url().await {
+            Ok(url) => url,
+            Err(error) => {
+                on_event.emit(WsEvent::Error(format!("Portal connection failed: {error}")));
+                return;
+            }
+        };
         match ws_bridge::yew_client::connect_to::<ClientEndpoint>(&ws_endpoint) {
             Ok(conn) => {
                 let (mut sender, mut receiver) = conn.split();
@@ -132,7 +174,7 @@ pub fn connect_websocket(
                 on_event.emit(WsEvent::Connected(queue_tx));
 
                 let on_event_for_send = on_event.clone();
-                spawn_local(async move {
+                send_lifetime.spawn(async move {
                     while let Some(msg) = queue_rx.next().await {
                         if let Err(e) = sender.send(msg).await {
                             report_ws_error(&on_event_for_send, "WebSocket send error", e);
@@ -257,6 +299,12 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
         } => {
             on_event.emit(WsEvent::ForwardsChanged { open_preview });
         }
+        ServerToClient::EditStackUpdated {
+            session_id: _,
+            items,
+        } => {
+            on_event.emit(WsEvent::EditStackUpdated { items });
+        }
         ServerToClient::ToolProgress {
             tool_use_id,
             parent_tool_use_id,
@@ -277,9 +325,14 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
         ServerToClient::Ephemeral { payload } => {
             on_event.emit(WsEvent::Ephemeral(payload));
         }
+        ServerToClient::AgentProgress { bars } => {
+            on_event.emit(WsEvent::AgentProgress(bars));
+        }
         // Spend screens hydrate through REST. This user-wide broadcast reaches
         // every session socket too, but has no per-session UI consumer.
         ServerToClient::UserSpendUpdate { .. } => {}
+        // The rail pill fill is consumed by the dashboard's user-wide socket.
+        ServerToClient::SessionProgress { .. } | ServerToClient::SessionProgressReset => {}
         unhandled => {
             // Variants we haven't wired a UI route for yet (e.g. new
             // server-pushed frames added since this branch was written).
@@ -664,9 +717,11 @@ mod tests {
             WsEvent::TurnMetrics(_) => "TurnMetrics",
             WsEvent::InputProgress { .. } => "InputProgress",
             WsEvent::ForwardsChanged { .. } => "ForwardsChanged",
+            WsEvent::EditStackUpdated { .. } => "EditStackUpdated",
             WsEvent::UploadResult(_) => "UploadResult",
             WsEvent::ToolProgress { .. } => "ToolProgress",
             WsEvent::Ephemeral(_) => "Ephemeral",
+            WsEvent::AgentProgress(_) => "AgentProgress",
         }
     }
 }

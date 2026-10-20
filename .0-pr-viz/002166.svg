@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="monospace">
+<text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2166 · Typed plugin management contracts</text>
+<text x="55" y="105" font-size="34" fill="#e6e9f5">Inventory describes plugins; shared action types now define how to manage them.</text>
+<text x="55" y="148" font-size="34" fill="#e6e9f5">Launch snapshots carry provenance without inferring injection from detection.</text>
+<path d="M55 175 H1945 M1000 190 V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="55" y="230" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1055" y="230" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="55" y="280" width="890" height="250" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="325" font-size="26" fill="#7aa2f7">PortalPluginInfo</text>
+<text x="80" y="380" font-size="23" fill="#c0caf5">Skills, commands, detection, context estimates</text>
+<text x="80" y="435" font-size="23" fill="#f7768e">No shared management action contract</text>
+<rect x="1055" y="280" width="890" height="250" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="325" font-size="26" fill="#7aa2f7">PluginRequest / PluginResponse</text>
+<text x="1080" y="380" font-size="23" fill="#9ece6a">Typed lifecycle, policy, surface, named commands</text>
+<text x="1080" y="435" font-size="23" fill="#c0caf5">Explicit approval; output and exit status</text>
+<rect x="55" y="650" width="890" height="250" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="700" font-size="26" fill="#7aa2f7">PluginInventoryResponse</text>
+<text x="80" y="755" font-size="23" fill="#c0caf5">Current directory scan and suggested plugins</text>
+<text x="80" y="810" font-size="23" fill="#f7768e">No launch-time context snapshot</text>
+<rect x="1055" y="650" width="890" height="250" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="700" font-size="26" fill="#7aa2f7">PluginContextEntry</text>
+<text x="1080" y="755" font-size="23" fill="#9ece6a">Plugin, path, activation, reason, text, size</text>
+<text x="1080" y="810" font-size="23" fill="#c0caf5">Additive defaults preserve older inventory data</text>
+<text x="55" y="1172" font-size="22" fill="#a9b1d6">Scope: shared contracts only; launcher execution and Portal controls follow in integration PRs.</text>
+</g></svg>

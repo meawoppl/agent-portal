@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="sans-serif">
+<text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2176 · Centralize launcher RPC correlation</text>
+<text x="55" y="105" font-size="34" fill="#e6e9f5">Directory and agent requests repeated registration and timeout cleanup.</text>
+<text x="55" y="149" font-size="34" fill="#e6e9f5">One request lifecycle now releases pending state when a caller is cancelled.</text>
+<path d="M55 176 H1945 M1000 190 V1140" stroke="#565f89" stroke-width="2" stroke-dasharray="8 8"/>
+<text x="55" y="226" font-size="22" fill="#a9b1d6">BEFORE</text>
+<rect x="55" y="270" width="890" height="195" rx="14" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+<text x="79" y="312" font-size="26" fill="#7aa2f7">Endpoint-specific round trips</text>
+<text x="79" y="360" font-size="23" fill="#c0caf5">list_directories / probe_agents / launcher_rpc</text>
+<text x="79" y="396" font-size="23" fill="#c0caf5">Register, send and wait in separate paths.</text>
+<path d="M500 465 v55 m-9 -12 l9 12 9 -12" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="55" y="535" width="890" height="195" rx="14" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+<text x="79" y="577" font-size="26" fill="#7aa2f7">Separate correlation maps</text>
+<text x="79" y="625" font-size="23" fill="#c0caf5">Directory and agent reply families are isolated.</text>
+<text x="79" y="661" font-size="23" fill="#c0caf5">Each path repeats cancellation on timeout.</text>
+<path d="M500 730 v55 m-9 -12 l9 12 9 -12" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="55" y="800" width="890" height="195" rx="14" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+<text x="79" y="842" font-size="26" fill="#7aa2f7">HTTP handler cancellation</text>
+<text x="79" y="890" font-size="23" fill="#c0caf5">No drop guard owns pending correlation state.</text>
+<text x="79" y="926" font-size="23" fill="#c0caf5">A dropped caller can leave a waiter behind.</text>
+<text x="1055" y="226" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="1055" y="270" width="890" height="195" rx="14" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+<text x="1079" y="312" font-size="26" fill="#9ece6a">request_launcher</text>
+<text x="1079" y="360" font-size="23" fill="#c0caf5">One transport path registers before dispatch.</text>
+<text x="1079" y="396" font-size="23" fill="#c0caf5">Existing endpoint owner gate stays in place.</text>
+<path d="M1500 465 v55 m-9 -12 l9 12 9 -12" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="535" width="890" height="195" rx="14" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+<text x="1079" y="577" font-size="26" fill="#9ece6a">LauncherRpcKind + PendingRequest</text>
+<text x="1079" y="625" font-size="23" fill="#c0caf5">Directory and Agent still use separate keys.</text>
+<text x="1079" y="661" font-size="23" fill="#c0caf5">The guard removes state on every exit path.</text>
+<path d="M1500 730 v55 m-9 -12 l9 12 9 -12" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="800" width="890" height="195" rx="14" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+<text x="1079" y="842" font-size="26" fill="#9ece6a">Endpoint-owned HTTP mapping</text>
+<text x="1079" y="890" font-size="23" fill="#c0caf5">Same statuses, messages and timeout durations.</text>
+<text x="1079" y="926" font-size="23" fill="#c0caf5">Tests cover cancellation, late replies and family isolation.</text>
+<text x="55" y="1172" font-size="22" fill="#a9b1d6">No protocol or permission change; pending calls still use their existing deadlines after launcher disconnect.</text>
+</g></svg>

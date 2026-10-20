@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-labelledby="title desc">
+  <title id="title">Forward chip preview toggle</title>
+  <desc id="desc">The forwarded-port chip now toggles the in-portal preview when clicked again, while the arrow remains the new-tab action.</desc>
+  <rect width="2000" height="1200" fill="#1a1b26"/>
+
+  <text x="80" y="105" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="52" font-weight="700">Forward Port Chip Toggle</text>
+  <text x="80" y="158" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="28">Clicking the same :2342 chip now collapses or expands the in-frame preview.</text>
+
+  <rect x="80" y="230" width="1840" height="760" rx="18" fill="#16161e" stroke="#3d4666" stroke-width="3"/>
+  <rect x="110" y="260" width="1780" height="92" rx="12" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+  <text x="145" y="318" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="28" font-weight="650">session header</text>
+  <rect x="415" y="282" width="190" height="48" rx="24" fill="#1e202e" stroke="#7aa2f7" stroke-width="2"/>
+  <circle cx="445" cy="306" r="8" fill="#9ece6a"/>
+  <text x="468" y="316" fill="#c0caf5" font-family="JetBrains Mono, ui-monospace, monospace" font-size="25" font-weight="700">:2342</text>
+  <rect x="605" y="282" width="58" height="48" rx="0" fill="#3d4666" stroke="#7aa2f7" stroke-width="2"/>
+  <text x="620" y="317" fill="#7dcfff" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700">tab</text>
+  <text x="695" y="316" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">port marker; separate tab action</text>
+
+  <line x1="1000" y1="402" x2="1000" y2="930" stroke="#3d4666" stroke-width="3" stroke-dasharray="10 12"/>
+
+  <text x="150" y="435" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700">Before</text>
+  <text x="150" y="480" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25">Second click reopened the same preview.</text>
+  <rect x="150" y="535" width="760" height="310" rx="14" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <rect x="185" y="570" width="240" height="62" rx="31" fill="#3d4666" stroke="#7aa2f7" stroke-width="2"/>
+  <text x="228" y="612" fill="#c0caf5" font-family="JetBrains Mono, ui-monospace, monospace" font-size="30" font-weight="700">:2342</text>
+  <path d="M470 601 C550 601 575 665 660 665" fill="none" stroke="#e0af68" stroke-width="6" stroke-linecap="round"/>
+  <path d="M645 642 L670 666 L640 682" fill="none" stroke="#e0af68" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="665" y="610" width="190" height="110" rx="10" fill="#16161e" stroke="#565f89" stroke-width="2"/>
+  <text x="705" y="675" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">preview</text>
+  <text x="215" y="790" fill="#f7768e" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25">No quick way to fold it from the chip.</text>
+
+  <text x="1090" y="435" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="700">After</text>
+  <text x="1090" y="480" fill="#a9b1d6" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25">Same-port clicks toggle collapsed state.</text>
+  <rect x="1090" y="535" width="760" height="310" rx="14" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+  <rect x="1125" y="570" width="240" height="62" rx="31" fill="#3d4666" stroke="#7aa2f7" stroke-width="2"/>
+  <text x="1168" y="612" fill="#c0caf5" font-family="JetBrains Mono, ui-monospace, monospace" font-size="30" font-weight="700">:2342</text>
+  <path d="M1410 601 C1490 601 1518 655 1588 655" fill="none" stroke="#9ece6a" stroke-width="6" stroke-linecap="round"/>
+  <path d="M1574 633 L1598 656 L1570 674" fill="none" stroke="#9ece6a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="1605" y="592" width="55" height="140" rx="10" fill="#16161e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1625" y="676" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="28" font-weight="700">&gt;</text>
+  <text x="1160" y="790" fill="#9ece6a" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="25">Re-click expands it again, preserving mode.</text>
+
+  <rect x="200" y="1025" width="1600" height="80" rx="16" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+  <text x="250" y="1077" fill="#c0caf5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="27">The tab control stays separate; only the port marker toggles the in-portal iframe.</text>
+</svg>

@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="sans-serif">
+<text x="55" y="52" font-size="24" fill="#a9b1d6" letter-spacing="1">PR #2172 · Centralize plugin manifest types across consumers</text>
+<text x="55" y="108" font-size="34" fill="#e6e9f5">Manifest views now share one home and one skill definition.</text>
+<text x="55" y="151" font-size="34" fill="#e6e9f5">Each consumer keeps its existing validation boundary.</text>
+<path d="M55 175 H1945" stroke="#565f89"/>
+<text x="55" y="222" font-size="22" font-weight="bold" letter-spacing="4" fill="#f7768e">BEFORE</text>
+<text x="1055" y="222" font-size="22" font-weight="bold" letter-spacing="4" fill="#9ece6a">AFTER</text>
+<path d="M1000 190 V1140" stroke="#565f89" stroke-dasharray="8 10"/>
+<rect x="55" y="270" width="885" height="185" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="310" font-size="26" fill="#7aa2f7">launcher/src/plugin.rs</text>
+<text x="80" y="358" font-size="23" fill="#c0caf5">PluginManifest + SkillSection</text>
+<text x="80" y="405" font-size="23" fill="#c0caf5">Runtime validates run, install, and surface fields.</text>
+<rect x="55" y="500" width="885" height="185" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="540" font-size="26" fill="#7aa2f7">launcher/src/config.rs</text>
+<text x="80" y="588" font-size="23" fill="#c0caf5">PluginManifest + SkillSection</text>
+<text x="80" y="635" font-size="23" fill="#c0caf5">Skill injection validates only skills.</text>
+<rect x="55" y="730" width="885" height="185" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="770" font-size="26" fill="#7aa2f7">backend/src/handlers/plugins.rs</text>
+<text x="80" y="818" font-size="23" fill="#c0caf5">PluginManifest + ManifestSkill</text>
+<text x="80" y="865" font-size="23" fill="#c0caf5">Inventory ignores runtime-only fields.</text>
+<text x="80" y="1000" font-size="26" fill="#f7768e">Three separate skill field definitions can drift.</text>
+<rect x="1055" y="270" width="890" height="300" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="310" font-size="26" fill="#7aa2f7">shared::plugin_manifest</text>
+<text x="1080" y="358" font-size="23" fill="#c0caf5">RuntimeManifest&lt;Value&gt;</text>
+<text x="1080" y="405" font-size="23" fill="#c0caf5">SkillsManifest</text>
+<text x="1080" y="452" font-size="23" fill="#c0caf5">InventoryManifest</text>
+<text x="1080" y="525" font-size="26" fill="#9ece6a">All reuse SkillSection&lt;P&gt;.</text>
+<path d="M1500 570 V650" stroke="#9ece6a" stroke-width="3"/>
+<path d="M1490 637 L1500 650 L1510 637" fill="none" stroke="#9ece6a" stroke-width="3"/>
+<rect x="1055" y="675" width="890" height="270" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="715" font-size="26" fill="#7aa2f7">shared/tests/plugin_manifest.rs</text>
+<text x="1080" y="763" font-size="23" fill="#c0caf5">Fixtures run through TOML 0.8 and 0.9.</text>
+<text x="1080" y="810" font-size="23" fill="#c0caf5">Defaults, unknown fields, invalid skill rejection</text>
+<text x="1080" y="857" font-size="23" fill="#c0caf5">Skills-only and inventory-only permissiveness</text>
+<text x="1080" y="904" font-size="23" fill="#9ece6a">Existing parsing behavior remains explicit.</text>
+<text x="55" y="1172" font-size="22" fill="#a9b1d6">Scope: type ownership only; filesystem reads and TOML parsing remain with callers. No new manifest fields or policy.</text>
+</g>
+</svg>

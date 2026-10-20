@@ -15,6 +15,10 @@ const HEARTBEAT_INTERVAL: Duration =
 /// or a dropped ack without flapping (#1366).
 const HEARTBEAT_ACK_TIMEOUT: Duration =
     Duration::from_secs(shared::protocol::LAUNCHER_HEARTBEAT_INTERVAL_SECS * 3);
+/// Cadence of `LauncherToServer::SystemStats` against a backend that accepts
+/// it (`SERVER_CAPABILITY_SYSTEM_STATS`); the heartbeat carries a reading
+/// regardless.
+const SYSTEM_STATS_INTERVAL: Duration = Duration::from_secs(5);
 const MAX_BACKOFF: Duration = Duration::from_secs(shared::protocol::MAX_RECONNECT_BACKOFF_SECS);
 /// Retry cadence while parked on a fatal rejection: start here, double to the
 /// cap. Deliberately much slower than the network-error backoff — a fatal
@@ -30,10 +34,11 @@ fn classify_fatal(reason: Option<LauncherRejectReason>, error_msg: &str) -> Laun
     if let Some(reason) = reason {
         return reason;
     }
-    let msg = error_msg.to_ascii_lowercase();
-    if msg.contains("auth") || msg.contains("token") {
+    if shared::strings::contains_case_insensitive(error_msg, "auth")
+        || shared::strings::contains_case_insensitive(error_msg, "token")
+    {
         LauncherRejectReason::AuthFailed
-    } else if msg.contains("already have") {
+    } else if shared::strings::contains_case_insensitive(error_msg, "already have") {
         LauncherRejectReason::TooManyLaunchers
     } else {
         LauncherRejectReason::DuplicateLauncher
@@ -77,6 +82,14 @@ pub async fn run_launcher_loop(
     mut exit_rx: mpsc::UnboundedReceiver<SessionExited>,
 ) -> anyhow::Result<()> {
     process_manager.set_launcher_id(launcher_id);
+    // Service ownership outlives any session and backend reconnect. Aborting
+    // this task on launcher shutdown drops its children and relay listeners.
+    let services = tokio::spawn(async {
+        if let Err(err) = crate::managed_forward::supervise().await {
+            warn!(error = %err, "managed-service supervisor stopped");
+        }
+    });
+    let _services = crate::managed_forward::Task(services);
     let mut backoff = Duration::from_secs(1);
     let mut parked_backoff = PARKED_BACKOFF_START;
     // The reason whose instruction was last shown; re-emit when it changes so
@@ -114,9 +127,13 @@ pub async fn run_launcher_loop(
                         .ok()
                         .map(|p| p.to_string_lossy().to_string()),
                     capabilities: vec![
+                        shared::LAUNCHER_CAPABILITY_SESSION_PLUGINS.to_string(),
                         shared::LAUNCHER_CAPABILITY_CREATE_WORKTREE.to_string(),
                         shared::LAUNCHER_CAPABILITY_SCRATCH_WORKTREE.to_string(),
                         shared::LAUNCHER_CAPABILITY_FORK_SESSION.to_string(),
+                        shared::LAUNCHER_CAPABILITY_IMPORT_CODEX.to_string(),
+                        shared::LAUNCHER_CAPABILITY_RESTORE_SESSION.to_string(),
+                        shared::LAUNCHER_CAPABILITY_HISTORY_RESTORE.to_string(),
                         shared::LAUNCHER_CAPABILITY_RESTART.to_string(),
                         shared::LAUNCHER_CAPABILITY_HEARTBEAT_ACK.to_string(),
                     ],
@@ -129,6 +146,7 @@ pub async fn run_launcher_loop(
                 }
 
                 // Wait for RegisterAck. `Err(reason)` = fatal rejection.
+                let mut server_capabilities: Vec<String> = Vec::new();
                 let ack_ok = loop {
                     match ws_receiver.recv().await {
                         Some(Ok(ServerToLauncher::LauncherRegisterAck {
@@ -136,10 +154,12 @@ pub async fn run_launcher_loop(
                             error,
                             fatal,
                             reject_reason,
+                            capabilities,
                             ..
                         })) => {
                             if success {
                                 info!("Registration successful");
+                                server_capabilities = capabilities;
                                 break Ok(true);
                             }
                             let msg = error.unwrap_or_default();
@@ -195,8 +215,29 @@ pub async fn run_launcher_loop(
                     }
                 }
 
+                // Background native reads return through this connection-owned
+                // queue so history copying never blocks heartbeats or controls.
+                let (import_reply_tx, mut import_reply_rx) = mpsc::channel::<LauncherToServer>(4);
+
                 // Main loop
                 let mut heartbeat_timer = tokio::time::interval(HEARTBEAT_INTERVAL);
+                // Resource readings for the dashboard's services monitor: on
+                // every heartbeat, and every few seconds when the backend
+                // said it accepts the between-heartbeat frame.
+                let mut sysmon = portal_sysmon::SystemMonitor::new();
+                let fast_stats = server_capabilities
+                    .iter()
+                    .any(|c| c == shared::SERVER_CAPABILITY_SYSTEM_STATS);
+                if fast_stats {
+                    info!(
+                        "Backend accepts system stats; reporting every {}s",
+                        SYSTEM_STATS_INTERVAL.as_secs()
+                    );
+                } else {
+                    info!("Backend predates system stats; reporting on heartbeats only");
+                }
+                let mut stats_timer = tokio::time::interval(SYSTEM_STATS_INTERVAL);
+                stats_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                 let start = Instant::now();
                 // Half-open control-socket detection (#1366). `ack_seen` stays
                 // false against an older backend that doesn't echo heartbeats,
@@ -224,6 +265,9 @@ pub async fn run_launcher_loop(
                     tokio::pin!(continuation_sleep);
 
                     tokio::select! {
+                        Some(reply) = import_reply_rx.recv() => {
+                            if ws_sender.send(reply).await.is_err() { break; }
+                        }
                         result = ws_receiver.recv() => {
                             match result {
                                 Some(Ok(msg)) => {
@@ -242,6 +286,7 @@ pub async fn run_launcher_loop(
                                             &mut process_manager,
                                             &mut scheduler,
                                             &mut login_registry,
+                                            &import_reply_tx,
                                         ).await;
                                     }
                                 }
@@ -274,6 +319,7 @@ pub async fn run_launcher_loop(
                                 launcher_id,
                                 running_sessions: process_manager.running_session_ids(),
                                 uptime_secs: start.elapsed().as_secs(),
+                                system: Some(sysmon.sample()),
                             };
                             if ws_sender.send(hb).await.is_err() {
                                 warn!("Failed to send heartbeat");
@@ -283,6 +329,17 @@ pub async fn run_launcher_loop(
                             // Enforce max runtime on scheduled sessions
                             for session_id in scheduler.timed_out_sessions() {
                                 process_manager.stop(&session_id).await;
+                            }
+                        }
+
+                        _ = stats_timer.tick(), if fast_stats => {
+                            let frame = LauncherToServer::SystemStats {
+                                launcher_id,
+                                sample: sysmon.sample(),
+                            };
+                            if ws_sender.send(frame).await.is_err() {
+                                warn!("Failed to send system stats");
+                                break;
                             }
                         }
 
@@ -469,6 +526,7 @@ fn probe_agents_for_response() -> Vec<shared::AgentInstall> {
                     // Muse persists no account identity (no whoami at 0.1.0),
                     // so the cell is presence-only.
                     shared::AgentType::Muse => session_lib::probe::probe_muse_login(),
+                    shared::AgentType::Antigravity => session_lib::probe::probe_antigravity_login(),
                 }
             } else {
                 shared::AgentLoginStatus::Unknown
@@ -622,9 +680,11 @@ async fn handle_message(
     process_manager: &mut ProcessManager,
     scheduler: &mut Scheduler,
     login_registry: &mut crate::login_registry::LoginRegistry,
+    import_reply_tx: &mpsc::Sender<LauncherToServer>,
 ) {
     match msg {
         ServerToLauncher::LaunchSession {
+            history_restore,
             request_id,
             auth_token,
             working_directory,
@@ -660,6 +720,7 @@ async fn handle_message(
 
             let result = process_manager
                 .spawn(SpawnParams {
+                    history_restore,
                     auth_token,
                     working_directory: working_directory.clone(),
                     session_name: session_name.clone(),
@@ -744,6 +805,133 @@ async fn handle_message(
         }
         ServerToLauncher::ContinuationSync { continuations } => {
             scheduler.update_continuations(continuations);
+        }
+        ServerToLauncher::ListExternalSessions {
+            request_id,
+            agent_type,
+            query,
+        } => {
+            let sender = import_reply_tx.clone();
+            tokio::spawn(async move {
+                let result = tokio::select! {
+                    _ = sender.closed() => return,
+                    result = tokio::time::timeout(std::time::Duration::from_secs(45), crate::imports::list(agent_type, query)) => result,
+                }
+                .map_err(|_| "Session discovery timed out".to_string())
+                .and_then(|r| r.map_err(|e| format!("{e:#}")));
+                if sender
+                    .send(LauncherToServer::ExternalSessionsResult { request_id, result })
+                    .await
+                    .is_err()
+                {
+                    warn!("Failed to send external sessions result");
+                }
+            });
+        }
+        ServerToLauncher::CheckHistoryRestore {
+            request_id,
+            agent_type,
+            working_directory,
+            restore,
+        } => {
+            let sender = import_reply_tx.clone();
+            let running = process_manager
+                .running_session_ids()
+                .contains(&restore.source_session_id);
+            tokio::spawn(async move {
+                let result = if running && restore.mode == shared::api::HistoryRestoreMode::Native {
+                    Err("Original conversation is still running on this host. Stop it before restoring native state.".to_string())
+                } else {
+                    tokio::select! {
+                        _ = sender.closed() => return,
+                        result = tokio::time::timeout(
+                            std::time::Duration::from_secs(90),
+                            crate::history_restore::check(agent_type, &working_directory, &restore),
+                        ) => result,
+                    }
+                    .map_err(|_| {
+                        "Restore check timed out; reconnect the host and retry".to_string()
+                    })
+                    .and_then(|r| r.map_err(|e| format!("{e:#}")))
+                };
+                let _ = sender
+                    .send(LauncherToServer::CheckHistoryRestoreResult { request_id, result })
+                    .await;
+            });
+        }
+        ServerToLauncher::PrepareSessionImport {
+            request_id,
+            agent_type,
+            session_id,
+            request,
+        } => {
+            let sender = import_reply_tx.clone();
+            tokio::spawn(async move {
+                let result = tokio::select! {
+                    _ = sender.closed() => return,
+                    result = tokio::time::timeout(std::time::Duration::from_secs(90), crate::imports::prepare(agent_type, session_id, request)) => result,
+                }
+                    .map_err(|_| "Session import timed out. Close the original client and retry, or import without copying history.".to_string())
+                    .and_then(|r| r.map_err(|e| format!("{e:#}")));
+                if sender
+                    .send(LauncherToServer::PrepareSessionImportResult { request_id, result })
+                    .await
+                    .is_err()
+                {
+                    warn!("Failed to send session import result");
+                }
+            });
+        }
+        ServerToLauncher::PrepareSessionRestore {
+            request_id,
+            agent_type,
+            source_session_id,
+            session_id,
+            working_directory,
+        } => {
+            let result = crate::path_policy::ensure_existing_dir_under_home(&working_directory)
+                .and_then(|dir| {
+                    crate::process_manager::bind_restored_session(
+                        agent_type,
+                        source_session_id,
+                        session_id,
+                        &dir,
+                    )
+                })
+                .map_err(|e| format!("{e:#}"));
+            match &result {
+                Ok(()) => info!(
+                    "Restored session {} from archived {}",
+                    session_id, source_session_id
+                ),
+                Err(e) => warn!("Restore of {} failed: {}", source_session_id, e),
+            }
+            if ws_sender
+                .send(LauncherToServer::PrepareSessionRestoreResult { request_id, result })
+                .await
+                .is_err()
+            {
+                warn!("Failed to send session restore result");
+            }
+        }
+        ServerToLauncher::SessionPlugins {
+            request_id,
+            session_id,
+            working_directory,
+            selection,
+        } => {
+            let sender = import_reply_tx.clone();
+            tokio::spawn(async move {
+                let result = tokio::task::spawn_blocking(move || {
+                    crate::session_plugins::request(session_id, working_directory, selection)
+                })
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(|result| result.map_err(|error| format!("{error:#}")));
+                let _ = sender
+                    .send(LauncherToServer::SessionPluginsResult { request_id, result })
+                    .await;
+            });
         }
         ServerToLauncher::ListDirectories { request_id, path } => {
             let response = list_directory(&path, request_id);
@@ -938,6 +1126,11 @@ mod tests {
         );
         assert_eq!(
             classify_fatal(None, "You already have 10 launchers connected (max 10)."),
+            LauncherRejectReason::TooManyLaunchers
+        );
+        // Case-insensitive on every arm, not just the auth sniff.
+        assert_eq!(
+            classify_fatal(None, "YOU ALREADY HAVE 10 LAUNCHERS CONNECTED."),
             LauncherRejectReason::TooManyLaunchers
         );
         assert_eq!(

@@ -1,7 +1,9 @@
 //! Rendering functions for each message type, one module per message family.
 
+mod antigravity;
 mod assistant;
 mod errors;
+mod lightbox_gesture;
 mod media;
 mod portal;
 mod result;
@@ -9,6 +11,7 @@ mod system;
 mod tools;
 mod user;
 
+pub use antigravity::{render_antigravity_frame, render_antigravity_frame_content};
 pub(crate) use assistant::assistant_label;
 pub use assistant::{
     render_assistant_message, render_assistant_message_content, render_content_blocks,
