@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="Arial, sans-serif">
+<text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2252 · Update muse-codes and report run token usage</text>
+<text x="55" y="105" font-size="34" fill="#e6e9f5">Muse usage was unparseable and turn tokens stayed at zero.</text>
+<text x="55" y="148" font-size="34" fill="#e6e9f5">Decode run.usage, finalize token totals, and keep telemetry out of the transcript.</text>
+<path d="M55 177 H1945" stroke="#3d4666"/><path d="M1000 190 V1140" stroke="#565f89" stroke-dasharray="8 10"/>
+<text x="65" y="235" font-size="24" fill="#f7768e">BEFORE</text>
+<text x="1065" y="235" font-size="24" fill="#9ece6a">AFTER</text>
+<g><rect x="65" y="275" width="840" height="170" rx="14" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="90" y="317" font-size="28" fill="#7aa2f7">muse-codes 1.4.10</text>
+<text x="90" y="360" font-size="25" fill="#c0caf5">Muse 1.4.11 emits stream kind exec.usage.</text>
+<text x="90" y="394" font-size="25" fill="#c0caf5">The envelope fails to decode.</text>
+</g>
+<g><rect x="1065" y="275" width="840" height="170" rx="14" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1090" y="317" font-size="28" fill="#7aa2f7">muse-codes 1.4.11</text>
+<text x="1090" y="360" font-size="25" fill="#c0caf5">MusePayload::RunUsage decodes the snapshot.</text>
+<text x="1090" y="394" font-size="25" fill="#c0caf5">run_turn keeps the latest snapshot.</text>
+</g>
+<g><rect x="65" y="535" width="840" height="170" rx="14" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="90" y="577" font-size="28" fill="#7aa2f7">finalize_turn_metrics</text>
+<text x="90" y="620" font-size="25" fill="#c0caf5">input_tokens / output_tokens = 0</text>
+<text x="90" y="654" font-size="25" fill="#c0caf5">cache_read_tokens / thinking_tokens = 0</text>
+</g>
+<g><rect x="1065" y="535" width="840" height="170" rx="14" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1090" y="577" font-size="28" fill="#7aa2f7">finalize_turn_metrics</text>
+<text x="1090" y="620" font-size="25" fill="#c0caf5">Sum the per-model token counters once.</text>
+<text x="1090" y="654" font-size="25" fill="#c0caf5">Emit TurnMetricsReady with measured totals.</text>
+</g>
+<g><rect x="65" y="795" width="840" height="170" rx="14" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="90" y="837" font-size="28" fill="#7aa2f7">No run.usage handling</text>
+<text x="90" y="880" font-size="25" fill="#c0caf5">No token snapshot reaches turn metrics.</text>
+<text x="90" y="914" font-size="25" fill="#c0caf5">No typed telemetry suppression.</text>
+</g>
+<g><rect x="1065" y="795" width="840" height="170" rx="14" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1090" y="837" font-size="28" fill="#7aa2f7">classify_payload</text>
+<text x="1090" y="880" font-size="25" fill="#c0caf5">RunUsage becomes AgentOutput::Noop.</text>
+<text x="1090" y="914" font-size="25" fill="#c0caf5">No raw usage row reaches the transcript.</text>
+</g>
+<path d="M485 455 V515 m-9 -12 l9 12 9 -12" fill="none" stroke="#565f89" stroke-width="3"/>
+<path d="M485 715 V775 m-9 -12 l9 12 9 -12" fill="none" stroke="#565f89" stroke-width="3"/>
+<path d="M1485 455 V515 m-9 -12 l9 12 9 -12" fill="none" stroke="#565f89" stroke-width="3"/>
+<path d="M1485 715 V775 m-9 -12 l9 12 9 -12" fill="none" stroke="#565f89" stroke-width="3"/>
+<text x="55" y="1172" font-size="22" fill="#a9b1d6">Cost, context occupancy and separate child-token totals remain unavailable; older CLIs retain zero token counters.</text>
+</g></svg>
