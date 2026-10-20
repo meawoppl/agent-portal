@@ -537,6 +537,7 @@ pub fn launchers_panel() -> Html {
     // second panel) because both are facts about the same machine, and both
     // were separately fetching /api/launchers to list it.
     let probes = use_state(std::collections::HashMap::<Uuid, ProbeState>::new);
+    let probe_revision = use_state(|| 0u32);
     let login_target = use_state(|| None::<LoginTarget>);
     let install_target = use_state(|| None::<InstallTarget>);
     let loading = use_state(|| true);
@@ -549,7 +550,9 @@ pub fn launchers_panel() -> Html {
     {
         let probes = probes.clone();
         let launchers = launchers.clone();
-        use_effect_with((*launchers).clone(), move |list| {
+        // Authentication can change without any LauncherInfo field changing.
+        // Re-probe explicitly after login/install instead of relying on list equality.
+        use_effect_with(((*launchers).clone(), *probe_revision), move |(list, _)| {
             let list = list.clone();
             // Flipped by the cleanup below so a superseded run (launcher list
             // changed mid-probe) stops writing stale results over fresh ones.
@@ -871,8 +874,8 @@ pub fn launchers_panel() -> Html {
                         Callback::from(move |_| login_target.set(None))
                     }}
                     on_success={{
-                        let tick = tick.clone();
-                        Callback::from(move |_| tick.set(tick.wrapping_add(1)))
+                        let probe_revision = probe_revision.clone();
+                        Callback::from(move |_| probe_revision.set(probe_revision.wrapping_add(1)))
                     }}
                 />
             }
@@ -887,8 +890,8 @@ pub fn launchers_panel() -> Html {
                         Callback::from(move |_| install_target.set(None))
                     }}
                     on_success={{
-                        let tick = tick.clone();
-                        Callback::from(move |_| tick.set(tick.wrapping_add(1)))
+                        let probe_revision = probe_revision.clone();
+                        Callback::from(move |_| probe_revision.set(probe_revision.wrapping_add(1)))
                     }}
                 />
             }

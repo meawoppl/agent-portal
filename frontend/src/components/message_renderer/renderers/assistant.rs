@@ -163,6 +163,7 @@ pub fn render_assistant_message(
     msg: &AssistantMessage,
     timestamp: Option<&str>,
     session_id: Uuid,
+    on_claude_login: Option<Callback<()>>,
 ) -> Html {
     let blocks = msg.message.content.clone();
 
@@ -201,15 +202,25 @@ pub fn render_assistant_message(
                     }
                 }
             </div>
-            <div class="message-body">{ render_assistant_message_content(msg, session_id).unwrap_or_default() }</div>
+            <div class="message-body">{ render_assistant_message_content(msg, session_id, on_claude_login).unwrap_or_default() }</div>
         </div>
     }
 }
 
-pub fn render_assistant_message_content(msg: &AssistantMessage, session_id: Uuid) -> Option<Html> {
+pub fn render_assistant_message_content(
+    msg: &AssistantMessage,
+    session_id: Uuid,
+    on_claude_login: Option<Callback<()>>,
+) -> Option<Html> {
+    let login = super::errors::render_claude_login_action(
+        msg.error
+            .as_ref()
+            .is_some_and(|error| error.as_str() == "authentication_failed"),
+        on_claude_login,
+    );
     let completion_states = AssistantCompletionState::for_message(msg);
     let content = render_content_blocks(&msg.message.content, session_id);
-    if completion_states.is_empty() && content.is_none() {
+    if completion_states.is_empty() && content.is_none() && login.is_none() {
         return None;
     }
 
@@ -219,6 +230,7 @@ pub fn render_assistant_message_content(msg: &AssistantMessage, session_id: Uuid
                 { render_completion_states(msg) }
             }
             { content.unwrap_or_default() }
+            { login.unwrap_or_default() }
         </>
     })
 }
@@ -372,6 +384,22 @@ mod tests {
             }}"#
         );
         serde_json::from_str(&json).expect("valid typed assistant fixture")
+    }
+
+    #[test]
+    fn authentication_reply_offers_login_only_with_an_authorized_callback() {
+        let failed = assistant(r#", "error": "authentication_failed""#);
+        assert!(
+            render_assistant_message_content(&failed, Uuid::nil(), Some(Callback::noop()))
+                .is_some()
+        );
+        assert!(render_assistant_message_content(&failed, Uuid::nil(), None).is_none());
+        assert!(render_assistant_message_content(
+            &assistant(""),
+            Uuid::nil(),
+            Some(Callback::noop())
+        )
+        .is_none());
     }
 
     #[test]

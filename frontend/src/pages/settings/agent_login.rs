@@ -158,7 +158,7 @@ impl Component for AgentLoginModal {
             // removes completed flows, so the other request can report "gone";
             // preserve the confirmed approval regardless of response order.
             Msg::Polled(Ok(outcome)) if outcome.done && outcome.success => {
-                self.settle(ctx, outcome);
+                self.settle(outcome, &ctx.props().on_success, &ctx.props().on_close);
                 true
             }
             Msg::Polled(_)
@@ -168,7 +168,7 @@ impl Component for AgentLoginModal {
             }
             Msg::Polled(Ok(outcome)) => {
                 if outcome.done {
-                    self.settle(ctx, outcome);
+                    self.settle(outcome, &ctx.props().on_success, &ctx.props().on_close);
                     true
                 } else {
                     // Still waiting on the browser — poll again.
@@ -185,7 +185,7 @@ impl Component for AgentLoginModal {
             Msg::Settled(_) if matches!(self.stage, Stage::Settled(_)) => false,
             Msg::Settled(outcome) => {
                 self.submitting = false;
-                self.settle(ctx, outcome);
+                self.settle(outcome, &ctx.props().on_success, &ctx.props().on_close);
                 true
             }
             Msg::Close => {
@@ -228,13 +228,21 @@ impl AgentLoginModal {
         });
     }
 
-    /// Move to a settled outcome, firing `on_success` exactly once on success.
-    fn settle(&mut self, ctx: &Context<Self>, outcome: AgentLoginOutcome) {
-        if outcome.success && !self.notified_success {
-            self.notified_success = true;
-            ctx.props().on_success.emit(());
-        }
+    /// Settle before notifying the parent: success refreshes the matrix and
+    /// closes the modal, and must not be cancelled as an unfinished flow.
+    fn settle(
+        &mut self,
+        outcome: AgentLoginOutcome,
+        on_success: &Callback<()>,
+        on_close: &Callback<()>,
+    ) {
+        let notify = outcome.done && outcome.success && !self.notified_success;
         self.stage = Stage::Settled(outcome);
+        if notify {
+            self.notified_success = true;
+            on_success.emit(());
+            on_close.emit(());
+        }
     }
 
     /// Cancel the launcher-side flow if it's still parked (browser closed
@@ -435,6 +443,50 @@ fn cancel_login(portal: &PortalClient, launcher_id: Uuid, flow_id: Uuid) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn successful_login_refreshes_then_closes_once_and_failure_stays_open() {
+        use std::{cell::RefCell, rc::Rc};
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let success = {
+            let events = events.clone();
+            Callback::from(move |_| events.borrow_mut().push("refresh"))
+        };
+        let close = {
+            let events = events.clone();
+            Callback::from(move |_| events.borrow_mut().push("close"))
+        };
+        let mut modal = AgentLoginModal {
+            stage: Stage::Starting,
+            flow_id: None,
+            code_input: String::new(),
+            submitting: false,
+            notified_success: false,
+        };
+        modal.settle(
+            AgentLoginOutcome {
+                done: true,
+                success: false,
+                message: None,
+            },
+            &success,
+            &close,
+        );
+        assert!(events.borrow().is_empty());
+        for _ in 0..2 {
+            modal.settle(
+                AgentLoginOutcome {
+                    done: true,
+                    success: true,
+                    message: None,
+                },
+                &success,
+                &close,
+            );
+        }
+        assert_eq!(*events.borrow(), vec!["refresh", "close"]);
+        assert!(matches!(modal.stage, Stage::Settled(_)));
+    }
 
     #[test]
     fn success_reads_cleanly() {

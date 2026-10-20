@@ -151,6 +151,7 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
                             props.session_id,
                             &props.continuation_statuses,
                             props.on_schedule_continuation.clone(),
+                            props.on_claude_login.clone(),
                         )?;
                         let key = message
                             .raw_iso()
@@ -205,6 +206,7 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
                         props.session_id,
                         &props.continuation_statuses,
                         props.on_schedule_continuation.clone(),
+                        props.on_claude_login.clone(),
                     )?;
                     // Prefer the codex item id: it is stable across the
                     // item's whole lifecycle, whereas the surviving message's
