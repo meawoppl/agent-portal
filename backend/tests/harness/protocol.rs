@@ -501,3 +501,26 @@ async fn browser_hello_accepts_current_and_then_registration() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn browser_register_skew_uses_legacy_error_frame() {
+    if std::env::var("DATABASE_URL").is_err() {
+        return;
+    }
+    let url = format!("ws://{}", spawn_test_app().await);
+    let mut fields = test_register_fields();
+    fields.protocol_version = Some(u32::MAX);
+    let mut browser = connect::<ClientEndpoint>(&url).await.unwrap();
+    browser
+        .send(ClientToServer::Register(fields))
+        .await
+        .unwrap();
+    let frame = receive::<ClientEndpoint>(&mut browser, |f| {
+        matches!(
+            f,
+            ServerToClient::Error { .. } | ServerToClient::HelloAck { .. }
+        )
+    })
+    .await;
+    assert!(matches!(frame, ServerToClient::Error { message } if message.contains("Update")));
+}

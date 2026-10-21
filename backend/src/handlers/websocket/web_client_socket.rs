@@ -127,14 +127,20 @@ pub async fn handle_web_client_socket(
                         if let Some(version) = version {
                             let error = shared::protocol::check_protocol_version(version, "browser").err();
                             compatibility_checked = error.is_none();
-                            if matches!(client_msg, ClientToServer::Hello { .. }) || error.is_some() {
+                            if matches!(client_msg, ClientToServer::Hello { .. }) {
                                 let rejected = error.is_some();
                                 if ws_sender.send(ServerToClient::HelloAck {
                                     protocol_version: shared::protocol::PROTOCOL_VERSION,
                                     success: !rejected,
                                     error,
                                 }).await.is_err() || rejected { break; }
-                                if matches!(client_msg, ClientToServer::Hello { .. }) { continue; }
+                                continue;
+                            }
+                            if let Some(message) = error {
+                                // Legacy browsers know Error, not HelloAck. Keep the
+                                // rejection decodable even across a future major bump.
+                                let _ = ws_sender.send(ServerToClient::Error { message }).await;
+                                break;
                             }
                         }
                         if let ClientToServer::Dashboard { request_id, request } = client_msg {
