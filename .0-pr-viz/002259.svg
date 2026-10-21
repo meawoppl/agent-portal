@@ -46,8 +46,8 @@
   <!-- AFTER -->
   <rect x="1045" y="245" width="900" height="150" rx="10" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
   <text x="1069" y="285" font-size="26" fill="#c0caf5">WebPushBody (unchanged)</text>
-  <text x="1069" y="325" font-size="23" fill="#9ece6a">new test pins session_id, title, body, tag</text>
-  <text x="1069" y="360" font-size="23" fill="#a9b1d6">a rename now fails the build, not the browser</text>
+  <text x="1069" y="325" font-size="23" fill="#9ece6a">frontend/lint/sw.test.js runs the real handler</text>
+  <text x="1069" y="360" font-size="23" fill="#a9b1d6">in CI (npm run test:sw): fails 2/3 on old sw.js</text>
   <line x1="1495" y1="395" x2="1495" y2="440" stroke="#565f89" stroke-width="2" marker-end="url(#arr-dim)"/>
 
   <rect x="1045" y="445" width="900" height="150" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
