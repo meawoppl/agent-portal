@@ -61,6 +61,10 @@ mod linux {
     }
 
     fn enable_memory(root: &Path) -> Result<()> {
+        anyhow::ensure!(
+            root.join("cgroup.kill").exists(),
+            "kernel lacks cgroup.kill for session teardown"
+        );
         let controllers = std::fs::read_to_string(root.join("cgroup.controllers"))?;
         anyhow::ensure!(
             controllers.split_whitespace().any(|s| s == "memory"),
@@ -170,7 +174,11 @@ mod linux {
         fn drop(&mut self) {
             // Scope is this run's unique leaf only; never touch siblings or the
             // daemon. Group kill also reaps descendants that changed process group.
-            let _ = std::fs::write(self.path.join("cgroup.kill"), "1");
+            if let Err(error) = std::fs::write(self.path.join("cgroup.kill"), "1") {
+                if error.kind() != std::io::ErrorKind::NotFound {
+                    tracing::warn!(path = %self.path.display(), "Could not kill session cgroup descendants: {error}");
+                }
+            }
             let _ = std::fs::remove_file(&self.wrapper);
             let path = self.path.clone();
             if let Ok(runtime) = tokio::runtime::Handle::try_current() {
