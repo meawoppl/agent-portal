@@ -119,15 +119,70 @@ pub(crate) fn request(
         save_selection(&selection_path(session), &config, change)?;
     }
     apply_selection(&mut config, session, Path::new(&working_directory))?;
-    Ok(inventory(&config, working_directory))
+    Ok(inventory(&config, Some(working_directory), true))
 }
 
-fn inventory(config: &LauncherConfig, working_directory: String) -> PluginInventoryResponse {
-    let root = Path::new(&working_directory);
+/// Host inventory for the Plugins browser and launch suggestions. With a
+/// directory, `enabled` is what a new session there would load; without one it
+/// is the host-level install flag.
+pub(crate) fn host_inventory(working_directory: Option<String>) -> PluginInventoryResponse {
+    let mut config = config::load_config();
+    if let Some(directory) = &working_directory {
+        apply(&mut config, &Selection::new(), Path::new(directory));
+    }
+    inventory(&config, working_directory, false)
+}
+
+/// The text a skill or prompt describes itself with: the frontmatter
+/// `description:`, else its first non-empty line without heading marks.
+fn file_description(contents: &str) -> Option<String> {
+    let mut lines = contents.lines().map(str::trim);
+    let first = lines.find(|line| !line.is_empty())?;
+    let described = if first == "---" {
+        lines
+            .take_while(|line| *line != "---")
+            .find_map(|line| line.strip_prefix("description:"))
+            .map(|value| value.trim().trim_matches('"').to_string())
+    } else {
+        Some(first.trim_start_matches('#').trim().to_string())
+    };
+    described.filter(|text| !text.is_empty())
+}
+
+fn context_file(
+    plugin_root: &Path,
+    name: String,
+    path: String,
+    agents: Vec<String>,
+    warnings: &mut Vec<String>,
+) -> PortalPluginSkillInfo {
+    let (description, bytes) = match fs::read_to_string(plugin_root.join(&path)) {
+        Ok(contents) => (file_description(&contents), contents.len() as u64),
+        Err(error) => {
+            warnings.push(format!("Cannot read {path}: {error}"));
+            (None, 0)
+        }
+    };
+    PortalPluginSkillInfo {
+        name,
+        path,
+        agents,
+        description,
+        context_bytes: bytes,
+        estimated_tokens: bytes.div_ceil(4),
+    }
+}
+
+fn inventory(
+    config: &LauncherConfig,
+    working_directory: Option<String>,
+    session_selection_supported: bool,
+) -> PluginInventoryResponse {
+    let root = working_directory.as_deref().map(Path::new);
     let mut response = PluginInventoryResponse {
-        working_directory: Some(working_directory.clone()),
-        scanned: root.is_dir(),
-        session_selection_supported: true,
+        working_directory: working_directory.clone(),
+        scanned: root.is_some_and(Path::is_dir),
+        session_selection_supported,
         ..Default::default()
     };
     for (name, installed) in &config.plugins {
@@ -139,28 +194,62 @@ fn inventory(config: &LauncherConfig, working_directory: String) -> PluginInvent
             installed: true,
             enabled: installed.enabled,
             source: Some(installed.source.clone()),
+            path: Some(installed.path.clone()),
+            version: installed
+                .revision
+                .as_deref()
+                .map(|revision| revision.chars().take(12).collect())
+                .or_else(|| installed.reference.clone()),
             ..Default::default()
         };
         match manifest {
             Err(error) => plugin.warnings.push(format!("{error:#}")),
             Ok(manifest) => {
-                plugin.reason = crate::plugin_detect::detect_reason(root, &detect_rules(&manifest));
+                plugin.reason = root.and_then(|root| {
+                    crate::plugin_detect::detect_reason(root, &detect_rules(&manifest))
+                });
                 plugin.display_name = manifest.display_name.unwrap_or_else(|| name.clone());
                 plugin.description = manifest.description;
                 plugin.suggested = plugin.reason.is_some();
+                let mut warnings = Vec::new();
                 for skill in manifest.skills {
-                    let bytes = fs::metadata(plugin_root.join(&skill.path))
-                        .map(|m| m.len())
-                        .unwrap_or(0);
-                    plugin.skills.push(PortalPluginSkillInfo {
-                        name: skill.name,
-                        path: skill.path,
-                        agents: skill.agents,
-                        description: None,
-                        context_bytes: bytes,
-                        estimated_tokens: bytes.div_ceil(4),
-                    });
+                    plugin.skills.push(context_file(
+                        plugin_root,
+                        skill.name,
+                        skill.path,
+                        skill.agents,
+                        &mut warnings,
+                    ));
                 }
+                // The inventory view tolerates broken runtime fields so a bad
+                // one never hides the plugin; read them from the strict view
+                // and report a parse failure as a warning instead.
+                match crate::plugin::load_manifest(plugin_root) {
+                    Ok(runtime) => {
+                        plugin.homepage = runtime.homepage;
+                        plugin.has_doctor = runtime.install.doctor.is_some();
+                        for prompt in runtime.prompts {
+                            plugin.prompts.push(context_file(
+                                plugin_root,
+                                prompt.name,
+                                prompt.path.to_string_lossy().into_owned(),
+                                Vec::new(),
+                                &mut warnings,
+                            ));
+                        }
+                    }
+                    Err(error) => warnings.push(format!("{error:#}")),
+                }
+                plugin.warnings.extend(warnings);
+                // Agents the plugin's skills target; empty means every agent.
+                let mut agents: Vec<String> = plugin
+                    .skills
+                    .iter()
+                    .flat_map(|skill| skill.agents.iter().cloned())
+                    .collect();
+                agents.sort();
+                agents.dedup();
+                plugin.compatibility = agents;
                 plugin.context_bytes = plugin.skills.iter().map(|s| s.context_bytes).sum();
                 plugin.estimated_tokens = plugin.skills.iter().map(|s| s.estimated_tokens).sum();
                 plugin.commands = manifest
@@ -285,7 +374,7 @@ mod tests {
     fn inventory_uses_installed_config_including_disabled_or_broken_plugins() {
         let mut config = config();
         config.plugins.get_mut("slowbooks").unwrap().enabled = false;
-        let report = inventory(&config, "/missing".into());
+        let report = inventory(&config, Some("/missing".into()), true);
         assert!(report.session_selection_supported);
         assert_eq!(report.plugins.len(), 2);
         assert!(report.plugins[0].enabled);
@@ -374,5 +463,85 @@ mod tests {
         let mut session = host();
         apply(&mut session, &Selection::new(), &worktree);
         assert_eq!(enabled(&session), vec!["kicadmium"]);
+    }
+
+    #[test]
+    fn file_description_reads_frontmatter_or_first_line() {
+        let skill = "---\nname: layout\ndescription: \"Review a PCB layout\"\n---\n# Layout\n";
+        assert_eq!(
+            file_description(skill).as_deref(),
+            Some("Review a PCB layout")
+        );
+        assert_eq!(
+            file_description("\n# Export Gerbers\nbody").as_deref(),
+            Some("Export Gerbers")
+        );
+        assert_eq!(file_description("---\nname: bare\n---\nbody"), None);
+        assert_eq!(file_description(""), None);
+    }
+
+    /// The browser shows what a plugin contributes: prompts, docs, doctor,
+    /// targeted agents, and where it is installed.
+    #[test]
+    fn inventory_describes_prompts_docs_and_agents() {
+        let plugin = tempfile::tempdir().unwrap();
+        fs::create_dir_all(plugin.path().join("skills")).unwrap();
+        fs::write(
+            plugin.path().join("skills/layout.md"),
+            "---\ndescription: Layout review\n---\n",
+        )
+        .unwrap();
+        fs::write(plugin.path().join("intro.md"), "# Board context\n").unwrap();
+        fs::write(
+            plugin.path().join("agent-portal-plugin.toml"),
+            r#"
+name = "kicadmium"
+homepage = "https://example.com/kicadmium"
+[install]
+doctor = "true"
+[[skills]]
+name = "layout"
+path = "skills/layout.md"
+agents = ["codex", "claude"]
+[[prompts]]
+name = "intro"
+path = "intro.md"
+[[commands]]
+name = "export"
+run = "true"
+"#,
+        )
+        .unwrap();
+        let mut config = LauncherConfig::default();
+        config.plugins.insert(
+            "kicadmium".into(),
+            config::InstalledPlugin {
+                path: plugin.path().to_string_lossy().into_owned(),
+                source: "github:meawoppl/agent-portal-plugins//kicadmium".into(),
+                source_subdir: None,
+                reference: None,
+                enabled: true,
+                installed_at: chrono::Utc::now(),
+                revision: Some("0123456789abcdef".into()),
+            },
+        );
+
+        let report = inventory(&config, None, false);
+        assert!(!report.scanned && !report.session_selection_supported);
+        let info = &report.plugins[0];
+        assert_eq!(
+            info.homepage.as_deref(),
+            Some("https://example.com/kicadmium")
+        );
+        assert!(info.has_doctor);
+        assert_eq!(info.version.as_deref(), Some("0123456789ab"));
+        assert_eq!(info.compatibility, vec!["claude", "codex"]);
+        assert_eq!(info.skills[0].description.as_deref(), Some("Layout review"));
+        assert_eq!(info.prompts[0].name, "intro");
+        assert_eq!(
+            info.prompts[0].description.as_deref(),
+            Some("Board context")
+        );
+        assert!(info.reason.is_none() && info.warnings.is_empty());
     }
 }

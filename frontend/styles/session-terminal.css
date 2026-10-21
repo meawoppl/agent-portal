@@ -1055,6 +1055,45 @@
     font-weight: 500;
 }
 
+.plugin-card-badge.muted {
+    border-color: rgba(86, 95, 137, 0.5);
+    background: transparent;
+    color: var(--text-muted);
+}
+
+.plugin-card-version {
+    color: var(--text-muted);
+    font: 0.68rem var(--font-mono, monospace);
+    font-weight: 400;
+}
+
+.plugin-card-facts {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 0.2rem 0.6rem;
+    margin: 0;
+    font-size: 0.72rem;
+}
+
+.plugin-card-facts dt {
+    color: var(--text-muted);
+}
+
+.plugin-card-facts dd {
+    min-width: 0;
+    margin: 0;
+    overflow: hidden;
+    color: var(--text-secondary);
+    text-overflow: ellipsis;
+}
+
+.plugin-card-warnings {
+    margin: 0;
+    padding-left: 1.1rem;
+    color: var(--warning, #e0af68);
+    font-size: 0.72rem;
+}
+
 .plugin-card-context {
     flex: 0 0 auto;
     color: var(--text-teal, #7dcfff);

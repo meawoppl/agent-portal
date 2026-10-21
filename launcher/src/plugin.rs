@@ -1090,7 +1090,7 @@ fn ensure_enabled(name: &str, plugin: &InstalledPlugin) -> Result<()> {
     }
 }
 
-fn load_manifest(root: &Path) -> Result<PluginManifest> {
+pub(crate) fn load_manifest(root: &Path) -> Result<PluginManifest> {
     let path = root.join(MANIFEST);
     let body = std::fs::read_to_string(&path)
         .with_context(|| format!("failed to read {}", path.display()))?;

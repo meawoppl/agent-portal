@@ -456,6 +456,14 @@
     margin: 0.25rem 0;
 }
 
+.plugin-browse-link {
+    flex-shrink: 0;
+    margin-left: auto;
+    color: var(--accent);
+    font-size: 0.74rem;
+    white-space: nowrap;
+}
+
 .plugin-suggestion-strip {
     display: flex;
     align-items: center;

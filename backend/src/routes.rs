@@ -507,6 +507,10 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
         // Launcher API routes
         .route("/api/launchers", get(handlers::launchers::list_launchers))
         .route(
+            "/api/launchers/{launcher_id}/plugins",
+            post(handlers::plugins::run_plugin_action),
+        )
+        .route(
             "/api/launchers/{launcher_id}/directories",
             get(handlers::launchers::list_directories),
         )

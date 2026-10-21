@@ -1414,6 +1414,33 @@
     color: var(--warning, #e0af68);
 }
 
+/* Settings ▸ Plugins */
+.plugins-browser-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 0.75rem;
+}
+
+.plugins-browser-controls label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+}
+
+.plugins-browser-directory {
+    flex: 1 1 18rem;
+}
+
+.plugins-browser-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 0.9rem;
+    align-items: start;
+}
+
 /* Settings ▸ Schedule */
 .schedule-calendar {
     display: grid;

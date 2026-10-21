@@ -16,6 +16,7 @@ mod path_policy;
 mod plugin;
 mod plugin_detect;
 mod plugin_preview;
+mod plugin_rpc;
 mod plugin_validate;
 mod process_manager;
 mod progress;

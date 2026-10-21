@@ -8,6 +8,7 @@ mod launchers_panel;
 mod linked_portals;
 mod notifications_panel;
 mod performance_panel;
+mod plugins_panel;
 mod profile_panel;
 mod schedule_panel;
 mod session_forward;
@@ -20,6 +21,7 @@ use appearance_panel::AppearancePanel;
 use launchers_panel::LaunchersPanel;
 use notifications_panel::NotificationsPanel;
 use performance_panel::PerformancePanel;
+use plugins_panel::PluginsPanel;
 use schedule_panel::SchedulePanel;
 use sessions_panel::SessionsPanel;
 use shared::{ProxyTokenInfo, SessionInfo};
@@ -31,12 +33,30 @@ enum SettingsTab {
     Account,
     LinkedPortals,
     Computers,
+    Plugins,
     Sessions,
     Tokens,
     Notifications,
     Schedule,
     Performance,
     Appearance,
+}
+
+/// `/settings?tab=plugins` opens on the Plugins tab, so other surfaces can link
+/// straight to it.
+fn initial_tab() -> SettingsTab {
+    let search = web_sys::window()
+        .and_then(|w| w.location().search().ok())
+        .unwrap_or_default();
+    if search
+        .trim_start_matches('?')
+        .split('&')
+        .any(|p| p == "tab=plugins")
+    {
+        SettingsTab::Plugins
+    } else {
+        SettingsTab::Account
+    }
 }
 
 #[derive(Properties, PartialEq)]
@@ -46,7 +66,7 @@ pub struct SettingsPageProps {
 
 #[function_component(SettingsPage)]
 pub fn settings_page(props: &SettingsPageProps) -> Html {
-    let active_tab = use_state(|| SettingsTab::Account);
+    let active_tab = use_state(initial_tab);
 
     // Counts for tab badges (updated when panels load their data)
     let session_count = use_state(|| 0usize);
@@ -75,6 +95,7 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
     let on_account_tab = make_tab_handler(SettingsTab::Account);
     let on_linked_tab = make_tab_handler(SettingsTab::LinkedPortals);
     let on_computers_tab = make_tab_handler(SettingsTab::Computers);
+    let on_plugins_tab = make_tab_handler(SettingsTab::Plugins);
     let on_sessions_tab = make_tab_handler(SettingsTab::Sessions);
     let on_tokens_tab = make_tab_handler(SettingsTab::Tokens);
     let on_notifications_tab = make_tab_handler(SettingsTab::Notifications);
@@ -112,6 +133,12 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
                     onclick={on_computers_tab}
                 >
                     { "Computers" }
+                </button>
+                <button
+                    class={classes!("tab-button", (*active_tab == SettingsTab::Plugins).then_some("active"))}
+                    onclick={on_plugins_tab}
+                >
+                    { "Plugins" }
                 </button>
                 <button
                     class={classes!("tab-button", (*active_tab == SettingsTab::Sessions).then_some("active"))}
@@ -162,6 +189,9 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
                 }
                 if *active_tab == SettingsTab::Computers {
                     <LaunchersPanel />
+                }
+                if *active_tab == SettingsTab::Plugins {
+                    <PluginsPanel />
                 }
                 if *active_tab == SettingsTab::Tokens {
                     <TokensPanel on_tokens_loaded={on_tokens_loaded} />

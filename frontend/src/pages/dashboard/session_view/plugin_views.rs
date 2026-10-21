@@ -1,6 +1,8 @@
 //! Controlled plugin views. SessionView owns inventory fetching, surface state,
 //! and persisted notice expansion; these components only render and emit intent.
-use crate::components::plugin_discovery::{plugin_context_label, suggested_plugins};
+use crate::components::plugin_discovery::{
+    plugin_context_label, suggested_plugins, PluginCard, PLUGINS_BROWSER,
+};
 use shared::api::PortalPluginInfo;
 use yew::prelude::*;
 
@@ -20,11 +22,6 @@ pub(super) struct PluginDiscoverySurfaceProps {
     pub on_toggle_collapsed: Callback<MouseEvent>,
     pub on_toggle_mode: Callback<MouseEvent>,
     pub on_close: Callback<MouseEvent>,
-}
-
-#[derive(Properties, PartialEq)]
-struct PluginCardProps {
-    pub plugin: PortalPluginInfo,
 }
 
 #[function_component(PluginContextNotice)]
@@ -163,6 +160,7 @@ pub(super) fn plugin_discovery_surface(props: &PluginDiscoverySurfaceProps) -> H
                                 { format!("{suggested_count} suggested · {} installed", props.plugins.len()) }
                             </span>
                         </div>
+                        <a class="plugin-browse-link" href={PLUGINS_BROWSER} target="_blank" rel="noopener noreferrer">{ "Browse plugins" }</a>
                     </div>
                     if let Some(error) = props.error.as_deref() {
                         <div class="edit-stack-error">{ error }</div>
@@ -176,71 +174,5 @@ pub(super) fn plugin_discovery_surface(props: &PluginDiscoverySurfaceProps) -> H
                 </section>
             }
         </aside>
-    }
-}
-
-#[function_component(PluginCard)]
-fn plugin_card(props: &PluginCardProps) -> Html {
-    let plugin = &props.plugin;
-    let is_suggested = plugin.active || plugin.suggested;
-    html! {
-        <article class={classes!("plugin-card", is_suggested.then_some("suggested"))} key={plugin.name.clone()}>
-            <div class="plugin-card-topline">
-                <div class="plugin-card-title">
-                    <span>{ &plugin.display_name }</span>
-                    if is_suggested {
-                        <span class="plugin-card-badge">{ "suggested" }</span>
-                    }
-                </div>
-                <span class="plugin-card-context">
-                    { plugin_context_label(plugin.context_bytes, plugin.estimated_tokens) }
-                </span>
-            </div>
-            if let Some(description) = plugin.description.as_deref() {
-                <p class="plugin-card-description">{ description }</p>
-            }
-            if let Some(reason) = plugin.reason.as_deref() {
-                <div class="plugin-card-reason">{ reason }</div>
-            }
-            if let Some(source) = plugin.source.as_deref() {
-                <code class="plugin-card-source">{ source }</code>
-            }
-            if !plugin.skills.is_empty() {
-                <div class="plugin-card-section">
-                    <span class="plugin-card-section-title">{ "Skills" }</span>
-                    <div class="plugin-skill-list">
-                        { for plugin.skills.iter().map(|skill| {
-                            let title = skill
-                                .description
-                                .clone()
-                                .unwrap_or_else(|| skill.path.clone());
-                            html! {
-                                <span class="plugin-skill-pill" title={title} key={skill.name.clone()}>
-                                    { &skill.name }
-                                </span>
-                            }
-                        }) }
-                    </div>
-                </div>
-            }
-            if !plugin.commands.is_empty() {
-                <div class="plugin-card-section">
-                    <span class="plugin-card-section-title">{ "Commands" }</span>
-                    <div class="plugin-skill-list">
-                        { for plugin.commands.iter().map(|command| {
-                            let title = command
-                                .description
-                                .clone()
-                                .unwrap_or_else(|| "Plugin command".to_string());
-                            html! {
-                                <span class="plugin-command-pill" title={title} key={command.name.clone()}>
-                                    { &command.name }
-                                </span>
-                            }
-                        }) }
-                    </div>
-                </div>
-            }
-        </article>
     }
 }

@@ -47,6 +47,10 @@ pub enum LauncherToServer {
         request_id: Uuid,
         result: Result<crate::api::PluginInventoryResponse, String>,
     },
+    PluginResult {
+        request_id: Uuid,
+        result: Result<crate::api::PluginResponse, String>,
+    },
     /// Register a launcher daemon
     LauncherRegister {
         launcher_id: Uuid,
@@ -269,6 +273,11 @@ pub enum ServerToLauncher {
         session_id: Uuid,
         working_directory: String,
         selection: Option<crate::api::PluginOverride>,
+    },
+    /// Run one named plugin action on this host (`plugins.manage.v1`).
+    Plugin {
+        request_id: Uuid,
+        request: crate::api::PluginRequest,
     },
     /// Acknowledge launcher registration
     LauncherRegisterAck {

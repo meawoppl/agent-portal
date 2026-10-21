@@ -742,6 +742,7 @@ fn handle_launcher_message(
             );
         }
         LauncherToServer::SessionPluginsResult { request_id, .. }
+        | LauncherToServer::PluginResult { request_id, .. }
         | LauncherToServer::ProbeAgentsResult { request_id, .. }
         | LauncherToServer::ExternalSessionsResult { request_id, .. }
         | LauncherToServer::PrepareSessionImportResult { request_id, .. }
