@@ -53,6 +53,8 @@ pub enum LauncherToServer {
     },
     /// Register a launcher daemon
     LauncherRegister {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        protocol_version: Option<u32>,
         launcher_id: Uuid,
         launcher_name: String,
         auth_token: Option<String>,
@@ -281,6 +283,8 @@ pub enum ServerToLauncher {
     },
     /// Acknowledge launcher registration
     LauncherRegisterAck {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        protocol_version: Option<u32>,
         success: bool,
         launcher_id: Uuid,
         #[serde(skip_serializing_if = "Option::is_none")]

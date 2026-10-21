@@ -213,6 +213,7 @@ fn handle_proxy_message(
     } = ctx;
     match proxy_msg {
         ProxyToServer::Register(shared::RegisterFields {
+            protocol_version,
             session_id: claude_session_id,
             session_name,
             auth_token,
@@ -230,6 +231,20 @@ fn handle_proxy_message(
             claude_args,
             capabilities,
         }) => {
+            if let Err(error) = shared::protocol::check_protocol_version(protocol_version, "proxy")
+            {
+                let _ = tx.send(ServerToProxy::RegisterAck {
+                    protocol_version: Some(shared::protocol::PROTOCOL_VERSION),
+                    success: false,
+                    session_id: claude_session_id,
+                    error: Some(error),
+                    max_image_mb: app_state.max_image_mb,
+                    retryable: false,
+                    tunnel_data_ticket: None,
+                    tunnel_sizing: None,
+                });
+                return ControlFlow::Break(());
+            }
             let key = SessionId::new(claude_session_id.to_string());
 
             // SECURITY (#780): authenticate *before* registering the socket
@@ -299,6 +314,7 @@ fn handle_proxy_message(
             }
 
             let _ = tx.send(ServerToProxy::RegisterAck {
+                protocol_version: Some(shared::protocol::PROTOCOL_VERSION),
                 success: result.success,
                 session_id: claude_session_id,
                 error: result.error,

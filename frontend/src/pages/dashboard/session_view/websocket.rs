@@ -139,6 +139,7 @@ pub fn connect_websocket(
                 let (mut sender, mut receiver) = conn.split();
 
                 let register_msg = ClientToServer::Register(shared::RegisterFields {
+                    protocol_version: Some(shared::protocol::PROTOCOL_VERSION),
                     session_id,
                     session_name: session_id.to_string(),
                     auth_token: None,

@@ -175,6 +175,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
     ) = loop {
         match ws_receiver.recv().await {
             Some(Ok(LauncherToServer::LauncherRegister {
+                protocol_version,
                 launcher_id,
                 launcher_name,
                 auth_token,
@@ -183,6 +184,22 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                 version,
                 capabilities,
             })) => {
+                if let Err(error) =
+                    shared::protocol::check_protocol_version(protocol_version, "launcher")
+                {
+                    let _ = ws_sender
+                        .send(ServerToLauncher::LauncherRegisterAck {
+                            protocol_version: Some(shared::protocol::PROTOCOL_VERSION),
+                            success: false,
+                            launcher_id,
+                            error: Some(error),
+                            fatal: true,
+                            capabilities: Vec::new(),
+                            reject_reason: None,
+                        })
+                        .await;
+                    return;
+                }
                 // Authenticate and, for live launcher credentials, opportunistically
                 // rotate legacy non-expiring or half-lived tokens while the
                 // websocket is healthy (#1237 part 2).
@@ -209,6 +226,9 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                                     // backoff.
                                     let _ = ws_sender
                                         .send(ServerToLauncher::LauncherRegisterAck {
+                                            protocol_version: Some(
+                                                shared::protocol::PROTOCOL_VERSION,
+                                            ),
                                             capabilities: Vec::new(),
                                             success: false,
                                             fatal: false,
@@ -229,6 +249,9 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                                             None => {
                                                 let _ = ws_sender
                                                     .send(ServerToLauncher::LauncherRegisterAck {
+                                                        protocol_version: Some(
+                                                            shared::protocol::PROTOCOL_VERSION,
+                                                        ),
                                                         capabilities: Vec::new(),
                                                         success: false,
                                                         fatal: true,
@@ -245,6 +268,9 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                                     } else {
                                         let _ = ws_sender
                                             .send(ServerToLauncher::LauncherRegisterAck {
+                                                protocol_version: Some(
+                                                    shared::protocol::PROTOCOL_VERSION,
+                                                ),
                                                 capabilities: Vec::new(),
                                                 success: false,
                                                 fatal: true,
@@ -263,6 +289,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                         Err(_) => {
                             let _ = ws_sender
                                 .send(ServerToLauncher::LauncherRegisterAck {
+                                    protocol_version: Some(shared::protocol::PROTOCOL_VERSION),
                                     capabilities: Vec::new(),
                                     success: false,
                                     fatal: false,
@@ -280,6 +307,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                         None => {
                             let _ = ws_sender
                                 .send(ServerToLauncher::LauncherRegisterAck {
+                                    protocol_version: Some(shared::protocol::PROTOCOL_VERSION),
                                     capabilities: Vec::new(),
                                     success: false,
                                     fatal: true,
@@ -294,6 +322,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                 } else {
                     let _ = ws_sender
                         .send(ServerToLauncher::LauncherRegisterAck {
+                            protocol_version: Some(shared::protocol::PROTOCOL_VERSION),
                             capabilities: Vec::new(),
                             success: false,
                             fatal: true,
@@ -336,6 +365,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
         );
         let _ = ws_sender
             .send(ServerToLauncher::LauncherRegisterAck {
+                protocol_version: Some(shared::protocol::PROTOCOL_VERSION),
                 capabilities: Vec::new(),
                 success: false,
                 launcher_id,
@@ -393,6 +423,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
             );
             let _ = ws_sender
                 .send(ServerToLauncher::LauncherRegisterAck {
+                    protocol_version: Some(shared::protocol::PROTOCOL_VERSION),
                     capabilities: Vec::new(),
                     success: false,
                     launcher_id,
@@ -412,6 +443,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
     // Send RegisterAck
     let _ = ws_sender
         .send(ServerToLauncher::LauncherRegisterAck {
+            protocol_version: Some(shared::protocol::PROTOCOL_VERSION),
             capabilities: vec![shared::SERVER_CAPABILITY_SYSTEM_STATS.to_string()],
             success: true,
             launcher_id,

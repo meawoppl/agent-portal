@@ -125,6 +125,7 @@ pub async fn run_launcher_loop(
 
                 // Send registration
                 let register = LauncherToServer::LauncherRegister {
+                    protocol_version: Some(shared::protocol::PROTOCOL_VERSION),
                     launcher_id,
                     launcher_name: launcher_name.to_string(),
                     auth_token: auth_token.clone(),
@@ -158,6 +159,7 @@ pub async fn run_launcher_loop(
                 let ack_ok = loop {
                     match ws_receiver.recv().await {
                         Some(Ok(ServerToLauncher::LauncherRegisterAck {
+                            protocol_version,
                             success,
                             error,
                             fatal,
@@ -165,6 +167,12 @@ pub async fn run_launcher_loop(
                             capabilities,
                             ..
                         })) => {
+                            if let Err(error) =
+                                shared::protocol::check_protocol_version(protocol_version, "server")
+                            {
+                                error!("{error}");
+                                break Err(classify_fatal(None, &error));
+                            }
                             if success {
                                 info!("Registration successful");
                                 server_capabilities = capabilities;

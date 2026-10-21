@@ -67,6 +67,9 @@ pub const CONTINUATION_REASON_OVERLOADED: &str = ContinuationReason::Overloaded.
 /// Fields for session registration (shared by proxy and web client).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisterFields {
+    /// Transport major, not the application release. Missing means legacy v1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol_version: Option<u32>,
     pub session_id: Uuid,
     pub session_name: String,
     pub auth_token: Option<String>,

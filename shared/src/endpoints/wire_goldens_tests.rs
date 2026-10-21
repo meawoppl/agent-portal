@@ -66,6 +66,7 @@ where
 
 fn reg_fields(session_name: &str) -> RegisterFields {
     RegisterFields {
+        protocol_version: None,
         session_id: nil(),
         session_name: session_name.into(),
         auth_token: None,
@@ -550,6 +551,7 @@ fn proxy_to_server_ephemeral_golden() {
 #[test]
 fn server_to_proxy_register_ack_golden_omits_absent_ticket() {
     let ack = ServerToProxy::RegisterAck {
+        protocol_version: None,
         success: true,
         session_id: nil(),
         error: None,

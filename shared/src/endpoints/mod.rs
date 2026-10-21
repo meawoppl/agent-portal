@@ -68,6 +68,7 @@ mod tests {
         // absent, so an older proxy sees a byte-identical ack to what it got
         // before.
         let ack = ServerToProxy::RegisterAck {
+            protocol_version: None,
             success: true,
             session_id: Uuid::nil(),
             error: None,
@@ -119,6 +120,7 @@ mod tests {
     #[test]
     fn register_ack_carries_tunnel_sizing() {
         let ack = ServerToProxy::RegisterAck {
+            protocol_version: None,
             success: true,
             session_id: Uuid::nil(),
             error: None,
@@ -233,6 +235,7 @@ mod tests {
     #[test]
     fn launcher_to_server_register_roundtrip() {
         let msg = LauncherToServer::LauncherRegister {
+            protocol_version: None,
             launcher_id: Uuid::nil(),
             launcher_name: "test-launcher".into(),
             auth_token: Some("tok".into()),

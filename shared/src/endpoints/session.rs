@@ -215,6 +215,8 @@ pub enum ProxyToServer {
 pub enum ServerToProxy {
     /// Acknowledge session registration
     RegisterAck {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        protocol_version: Option<u32>,
         success: bool,
         session_id: Uuid,
         #[serde(skip_serializing_if = "Option::is_none")]
