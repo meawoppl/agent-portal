@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2266 · Reload macOS service definitions with a recovery worker</text>
+<text x="55" y="108" font-family="sans-serif" font-size="34" fill="#e6e9f5">Restart must outlive the launcher it stops.</text>
+<text x="55" y="150" font-family="sans-serif" font-size="34" fill="#e6e9f5">A separate launchd job reloads the plist and records recovery failures.</text>
+<path d="M55 180H1945 M1000 200V1120" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="65" y="235" font-family="sans-serif" font-size="24" fill="#f7768e">BEFORE</text>
+<text x="1045" y="235" font-family="sans-serif" font-size="24" fill="#9ece6a">AFTER</text>
+<rect x="65" y="285" width="870" height="170" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="89" y="327" font-family="sans-serif" font-size="26" fill="#f7768e">sync() rewrites the plist</text>
+<text x="89" y="367" font-family="sans-serif" font-size="23" fill="#c0caf5">Ambient PATH can change the rendered definition.</text>
+<text x="89" y="400" font-family="sans-serif" font-size="23" fill="#c0caf5">SuccessfulExit=false excludes clean-exit recovery.</text>
+<rect x="65" y="525" width="870" height="170" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="89" y="567" font-family="sans-serif" font-size="26" fill="#f7768e">kickstart uses the loaded job</text>
+<text x="89" y="607" font-family="sans-serif" font-size="23" fill="#c0caf5">Disk changes are not reloaded.</text>
+<text x="89" y="640" font-family="sans-serif" font-size="23" fill="#c0caf5">In-process unload/load can kill its own recovery.</text>
+<rect x="65" y="765" width="870" height="170" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="89" y="807" font-family="sans-serif" font-size="26" fill="#f7768e">Launcher can remain offline</text>
+<text x="89" y="847" font-family="sans-serif" font-size="23" fill="#c0caf5">No persistent restart outcome.</text>
+<text x="89" y="880" font-family="sans-serif" font-size="23" fill="#c0caf5">Manual recovery is required.</text>
+<rect x="1045" y="285" width="870" height="170" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1069" y="327" font-family="sans-serif" font-size="26" fill="#9ece6a">Validate and preserve configuration</text>
+<text x="1069" y="367" font-family="sans-serif" font-size="23" fill="#c0caf5">Stable installed PATH; escaped XML values.</text>
+<text x="1069" y="400" font-family="sans-serif" font-size="23" fill="#c0caf5">KeepAlive=true also covers clean exits.</text>
+<rect x="1045" y="525" width="870" height="170" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1069" y="567" font-family="sans-serif" font-size="26" fill="#9ece6a">launchctl submit owns the worker</text>
+<text x="1069" y="607" font-family="sans-serif" font-size="23" fill="#c0caf5">bootout then bootstrap; bounded retries.</text>
+<text x="1069" y="640" font-family="sans-serif" font-size="23" fill="#c0caf5">Worker is independent of the unloaded job.</text>
+<rect x="1045" y="765" width="870" height="170" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1069" y="807" font-family="sans-serif" font-size="26" fill="#9ece6a">Record success or failure</text>
+<text x="1069" y="847" font-family="sans-serif" font-size="23" fill="#c0caf5">restart-status.txt and restart.log survive.</text>
+<text x="1069" y="880" font-family="sans-serif" font-size="23" fill="#c0caf5">service status exposes the last outcome.</text>
+<text x="55" y="1170" font-family="sans-serif" font-size="22" fill="#e0af68">Scope: Linux-tested recovery script; real macOS launchd smoke test pending. Offline failures are reported locally.</text>
+</svg>
