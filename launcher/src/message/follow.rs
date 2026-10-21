@@ -1,7 +1,7 @@
 //! Long polling waits on backend activity, not a client peek timer. Output
 //! checkpoints advance only after a whole batch has been written and flushed.
 use anyhow::{Context, Result};
-use shared::api::{FollowEvent, FollowPage, SessionActivityState};
+use shared::api::{FollowEvent, FollowPage, FollowRecord, FollowRecordKind, SessionActivityState};
 use std::{
     io::{self, Write},
     time::{Duration, Instant},
@@ -38,6 +38,21 @@ fn duration(s: &str) -> Result<Duration, String> {
         return Err("duration must be between 100ms and 1h".into());
     }
     Ok(d)
+}
+
+#[derive(Default)]
+struct IdleCompletion {
+    pending: bool,
+}
+impl IdleCompletion {
+    fn observe(&mut self, previous: Option<SessionActivityState>, page: &FollowPage) -> bool {
+        if !page.connected || page.state.is_active() {
+            self.pending = false;
+        } else if previous.is_some_and(SessionActivityState::is_active) {
+            self.pending = true;
+        }
+        self.pending && !page.more
+    }
 }
 
 struct Batch {
@@ -78,7 +93,7 @@ impl Batch {
 }
 
 fn emit(
-    kind: &str,
+    kind: FollowRecordKind,
     cursor: &str,
     state: SessionActivityState,
     connected: bool,
@@ -86,16 +101,25 @@ fn emit(
     json: bool,
 ) -> Result<()> {
     // One record is capped at 100 summaries of at most 240 characters each.
-    let record = serde_json::json!({"kind":kind, "cursor":cursor, "start_cursor":events.first().map(|e| &e.cursor), "state":state, "connected":connected, "events":events});
+    let record = FollowRecord {
+        kind,
+        cursor: cursor.to_owned(),
+        start_cursor: events.first().map(|e| e.cursor.clone()),
+        state,
+        connected,
+        events: events.to_vec(),
+    };
     let mut out = io::stdout().lock();
     if json {
-        writeln!(out, "{record}")?;
+        serde_json::to_writer(&mut out, &record)?;
+        writeln!(out)?;
     } else {
         let digest = events
             .iter()
             .map(|e| format!("{}: {}", e.kind, e.text))
             .collect::<Vec<_>>()
             .join(" | ");
+        let kind = kind.as_str();
         writeln!(
             out,
             "[{kind} {state:?} connected={connected} cursor={cursor}] {digest}"
@@ -150,6 +174,7 @@ pub async fn run(agent_id: &str, options: Options) -> Result<()> {
     let mut heartbeat = Instant::now() + options.heartbeat;
     let mut failures = 0u32;
     let mut more = false;
+    let mut idle_completion = IdleCompletion::default();
     loop {
         let deadline = batch.deadline(&options, heartbeat);
         let wait = if more {
@@ -209,9 +234,7 @@ pub async fn run(agent_id: &str, options: Options) -> Result<()> {
         };
         failures = 0;
         let changed = state != Some(page.state) || connected != Some(page.connected);
-        let became_idle = state.is_some_and(|s: SessionActivityState| s.is_active())
-            && page.state == SessionActivityState::Idle
-            && page.connected;
+        let completed_idle = idle_completion.observe(state, &page);
         for event in page.events {
             cursor = Some(event.cursor.clone());
             if kinds.contains(&event.kind.as_str())
@@ -221,7 +244,7 @@ pub async fn run(agent_id: &str, options: Options) -> Result<()> {
             }
             if batch.full(&options) {
                 emit(
-                    "batch",
+                    FollowRecordKind::Batch,
                     cursor.as_deref().unwrap(),
                     page.state,
                     page.connected,
@@ -237,10 +260,10 @@ pub async fn run(agent_id: &str, options: Options) -> Result<()> {
         more = page.more;
         let now = Instant::now();
         let due = now >= batch.deadline(&options, heartbeat);
-        if (!batch.events.is_empty() && (due || changed)) || changed || now >= heartbeat {
+        if changed || now >= heartbeat || (!batch.events.is_empty() && due) {
             if !batch.events.is_empty() {
                 emit(
-                    "batch",
+                    FollowRecordKind::Batch,
                     &page.cursor,
                     page.state,
                     page.connected,
@@ -251,7 +274,7 @@ pub async fn run(agent_id: &str, options: Options) -> Result<()> {
             }
             if changed && kinds.contains(&"status") {
                 emit(
-                    "status",
+                    FollowRecordKind::Status,
                     &page.cursor,
                     page.state,
                     page.connected,
@@ -261,7 +284,7 @@ pub async fn run(agent_id: &str, options: Options) -> Result<()> {
             }
             if now >= heartbeat {
                 emit(
-                    "heartbeat",
+                    FollowRecordKind::Heartbeat,
                     &page.cursor,
                     page.state,
                     page.connected,
@@ -271,7 +294,17 @@ pub async fn run(agent_id: &str, options: Options) -> Result<()> {
                 heartbeat = now + options.heartbeat;
             }
         }
-        if options.until_idle && became_idle {
+        if options.until_idle && completed_idle {
+            if !batch.events.is_empty() {
+                emit(
+                    FollowRecordKind::Batch,
+                    &page.cursor,
+                    page.state,
+                    page.connected,
+                    &batch.events,
+                    options.json,
+                )?;
+            }
             return Ok(());
         }
     }
@@ -329,5 +362,24 @@ mod tests {
         options.batch_count = 100;
         options.batch_chars = 10;
         assert!(batch.full(&options));
+    }
+    #[test]
+    fn idle_completion_drains_more_than_one_page_and_does_not_exit_on_initial_idle() {
+        let mut completion = IdleCompletion::default();
+        let mut page = FollowPage {
+            cursor: "100".into(),
+            events: (0..100).map(|_| event("line")).collect(),
+            state: SessionActivityState::Idle,
+            connected: true,
+            more: true,
+        };
+        assert!(!completion.observe(Some(SessionActivityState::Busy), &page));
+        page.cursor = "125".into();
+        page.events.truncate(25);
+        page.more = false;
+        assert!(completion.observe(Some(SessionActivityState::Idle), &page));
+        assert!(!IdleCompletion::default().observe(None, &page));
+        page.connected = false;
+        assert!(!completion.observe(Some(SessionActivityState::Busy), &page));
     }
 }

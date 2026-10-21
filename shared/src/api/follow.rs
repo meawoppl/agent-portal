@@ -48,3 +48,31 @@ mod tests {
         assert_eq!(parse_follow_cursor("nonsense", id), None);
     }
 }
+
+/// Stable line-oriented CLI output; checkpoint only after consuming the record.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FollowRecordKind {
+    Batch,
+    Status,
+    Heartbeat,
+}
+impl FollowRecordKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Batch => "batch",
+            Self::Status => "status",
+            Self::Heartbeat => "heartbeat",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FollowRecord {
+    pub kind: FollowRecordKind,
+    pub cursor: String,
+    pub start_cursor: Option<String>,
+    pub state: SessionActivityState,
+    pub connected: bool,
+    pub events: Vec<FollowEvent>,
+}

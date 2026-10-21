@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" fill="#a9b1d6" font-family="sans-serif" font-size="24">PR #2267 · Follow peer activity with resumable cursors</text>
+<text x="55" y="108" fill="#e6e9f5" font-family="sans-serif" font-size="34">Peek windows could miss a busy peer. Follow now checkpoints durable sequences,</text>
+<text x="55" y="150" fill="#e6e9f5" font-family="sans-serif" font-size="34">so reconnects catch up and missing retained bodies fail explicitly.</text>
+<path d="M 55 177 H 1945 M 1000 190 V 1130" stroke="#565f89" stroke-width="1" stroke-dasharray="6 6"/>
+<text x="55" y="225" fill="#f7768e" font-family="sans-serif" font-size="26">BEFORE</text>
+<text x="1055" y="225" fill="#9ece6a" font-family="sans-serif" font-size="26">AFTER</text>
+<rect x="55" y="265" width="850" height="180" rx="12" fill="#1e202e" stroke="#7aa2f7" stroke-width="2"/>
+<text x="79" y="307" fill="#7aa2f7" font-family="sans-serif" font-size="28">message peek</text>
+<text x="79" y="350" fill="#c0caf5" font-family="sans-serif" font-size="24">Read a recent, bounded snapshot.</text>
+<text x="79" y="385" fill="#c0caf5" font-family="sans-serif" font-size="24">A supervisor must decide when to ask again.</text>
+<path d="M 480 450 v 45 m -10 -10 l 10 10 10 -10" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="55" y="510" width="850" height="180" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="79" y="552" fill="#f7768e" font-family="sans-serif" font-size="28">Clock-driven watcher</text>
+<text x="79" y="595" fill="#c0caf5" font-family="sans-serif" font-size="24">Busy peers can outrun the recent window.</text>
+<text x="79" y="630" fill="#c0caf5" font-family="sans-serif" font-size="24">Quiet peers still cost another poll.</text>
+<path d="M 480 695 v 45 m -10 -10 l 10 10 10 -10" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="55" y="755" width="850" height="180" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="79" y="797" fill="#f7768e" font-family="sans-serif" font-size="28">message history</text>
+<text x="79" y="840" fill="#c0caf5" font-family="sans-serif" font-size="24">Download the whole known transcript.</text>
+<text x="79" y="875" fill="#c0caf5" font-family="sans-serif" font-size="24">No saved follow cursor for the missing interval.</text>
+<rect x="1055" y="265" width="850" height="180" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1079" y="307" fill="#9ece6a" font-family="sans-serif" font-size="28">session_follow_messages</text>
+<text x="1079" y="350" fill="#c0caf5" font-family="sans-serif" font-size="24">Transactionally serialized per-session sequence.</text>
+<text x="1079" y="385" fill="#c0caf5" font-family="sans-serif" font-size="24">The UUID index survives transcript retention.</text>
+<path d="M 1480 450 v 45 m -10 -10 l 10 10 10 -10" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="510" width="850" height="180" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1079" y="552" fill="#9ece6a" font-family="sans-serif" font-size="28">Activity wake + read_page</text>
+<text x="1079" y="595" fill="#c0caf5" font-family="sans-serif" font-size="24">Subscribe before read; catch up in 100-row pages.</text>
+<text x="1079" y="630" fill="#c0caf5" font-family="sans-serif" font-size="24">Recheck membership; reject retention gaps.</text>
+<path d="M 1480 695 v 45 m -10 -10 l 10 10 10 -10" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="755" width="850" height="180" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1079" y="797" fill="#9ece6a" font-family="sans-serif" font-size="28">message follow / history --since</text>
+<text x="1079" y="840" fill="#c0caf5" font-family="sans-serif" font-size="24">Bounded digests + checkpoints + heartbeats.</text>
+<text x="1079" y="875" fill="#c0caf5" font-family="sans-serif" font-size="24">Quiet/count/character/time batching; reconnect.</text>
+<text x="55" y="1020" fill="#e0af68" font-family="sans-serif" font-size="26">No cursor means a lapse becomes reconstruction.</text>
+<text x="1055" y="1020" fill="#9ece6a" font-family="sans-serif" font-size="26">Idle completion drains catch-up before exiting.</text>
+<text x="55" y="1170" fill="#a9b1d6" font-family="sans-serif" font-size="22">Scope: status is a live snapshot; no automatic harness subscription. Backfill covers retained messages only.</text>
+</svg>

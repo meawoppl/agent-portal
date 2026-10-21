@@ -51,7 +51,9 @@ connectivity. These are **live snapshots**, not durable historical status events
 a brief busy/idle transition entirely within a disconnect may be missed.
 `--until-idle` exits only after observing an active → idle transition on a
 connected peer; starting on an idle or disconnected peer does not immediately
-exit. It cannot guarantee observing every past completed turn.
+exit. After that transition, it drains all catch-up pages and flushes buffered
+text before exiting. A newly active turn cancels the pending completion.
+It cannot guarantee observing every past completed turn.
 
 Transport failures and server errors retry with capped backoff, reporting to
 stderr. Healthy heartbeats stop while the server is unreachable; monitors should
@@ -65,7 +67,8 @@ silently skipping it. `message history --since` uses the same retained sequence
 index and unions archived and hot transcript bodies. It errors if either source
 cannot supply every selected message. Incremental history requires the session's
 index still to exist; after session deletion, download the full archive instead.
-Raw history is intentionally not summary-safe. `--tail` applies after `--since`.
+Raw history is intentionally not summary-safe. `--tail` applies after `--since`;
+the returned resume cursor advances past deliberately omitted earlier rows too.
 The small sequence/UUID index remains until session deletion; transcript bodies
 still obey existing retention. No new full-transcript copy is kept.
 
