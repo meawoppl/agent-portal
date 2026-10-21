@@ -5,8 +5,8 @@ use crate::plugin_policy::DirectoryPolicy;
 use anyhow::{Context, Result};
 use shared::{
     api::{
-        PluginActivation, PluginInventoryResponse, PluginOverride, PluginPolicy,
-        PortalPluginCommandInfo, PortalPluginInfo, PortalPluginSkillInfo,
+        PluginActivation, PluginContextEntry, PluginInventoryResponse, PluginOverride,
+        PluginPolicy, PortalPluginCommandInfo, PortalPluginInfo, PortalPluginSkillInfo,
     },
     plugin_manifest::InventoryManifest,
 };
@@ -209,12 +209,35 @@ pub(crate) fn request(
         save_selection(&selection_path(session), &config, change)?;
     }
     let resolutions = apply_selection(&mut config, session, Path::new(&working_directory))?;
-    Ok(inventory(
-        &config,
-        Some(working_directory),
-        true,
-        &resolutions,
-    ))
+    let mut response = inventory(&config, Some(working_directory), true, &resolutions);
+    response.injected_context = read_injected(&context_path(session));
+    Ok(response)
+}
+
+/// What the session's current process was launched with, written at spawn.
+fn context_path(session: Uuid) -> PathBuf {
+    session_lib::paths::config_dir()
+        .join("session-plugins")
+        .join(format!("{session}.context.json"))
+}
+
+/// Record what a launch injected, replacing the previous launch's record.
+pub(crate) fn record_injected(session: Uuid, entries: &[PluginContextEntry]) {
+    let written = serde_json::to_string(entries)
+        .map_err(anyhow::Error::from)
+        .and_then(|json| config::write_config_atomic(&context_path(session), &json));
+    if let Err(error) = written {
+        tracing::warn!("Could not record plugin context for {session}: {error:#}");
+    }
+}
+
+/// A session launched before recording existed, or whose record is damaged,
+/// shows no record rather than a guess from the current inventory.
+fn read_injected(path: &Path) -> Vec<PluginContextEntry> {
+    fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
 }
 
 /// Host inventory for the Plugins browser and launch suggestions. With a
@@ -631,6 +654,29 @@ mod tests {
         assert!(enabled && r.activation == Some(Detected));
         let (enabled, r) = on(false, None, Ask, true);
         assert!(!enabled && r.activation.is_none());
+    }
+
+    /// A damaged or missing record reads as nothing recorded, never as a guess.
+    #[test]
+    fn injected_record_round_trips_and_damage_reads_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.context.json");
+        assert!(read_injected(&path).is_empty());
+        let entry = PluginContextEntry {
+            plugin: "kicadmium".into(),
+            name: "layout".into(),
+            path: "/p/skills/layout/SKILL.md".into(),
+            kind: shared::api::PluginContextKind::Skill,
+            activation: PluginActivation::Policy,
+            reason: "Always loaded in this project".into(),
+            context_bytes: 12,
+            estimated_tokens: 3,
+            text: "# Layout".into(),
+        };
+        fs::write(&path, serde_json::to_string(std::slice::from_ref(&entry)).unwrap()).unwrap();
+        assert_eq!(read_injected(&path), vec![entry]);
+        fs::write(&path, "broken").unwrap();
+        assert!(read_injected(&path).is_empty());
     }
 
     #[test]

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use shared::api::{PluginActivation, PluginContextEntry, PluginContextKind};
 use shared::plugin_manifest::{SkillSection as ManifestSkill, SkillsManifest as PluginManifest};
 use shared::AgentType;
 use std::path::{Path, PathBuf};
@@ -49,6 +50,37 @@ pub struct PluginSkillContext {
     pub claude_plugin_dirs: Vec<PathBuf>,
     pub reminder: Option<String>,
     pub cleanup_dir: Option<PathBuf>,
+    /// What this launch handed the agent, recorded so the session can show it.
+    pub injected: Vec<PluginContextEntry>,
+}
+
+/// Text kept per injected file for inspection; the agent reads the file.
+const INJECTED_TEXT_LIMIT: usize = 64 * 1024;
+
+fn injected_skill(plugin: &str, name: &str, path: &Path) -> PluginContextEntry {
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let bytes = text.len() as u64;
+    let mut kept = text;
+    if kept.len() > INJECTED_TEXT_LIMIT {
+        let mut cut = INJECTED_TEXT_LIMIT;
+        while !kept.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        kept.truncate(cut);
+        kept.push_str("\n…");
+    }
+    PluginContextEntry {
+        plugin: plugin.to_string(),
+        name: name.to_string(),
+        path: path.display().to_string(),
+        kind: PluginContextKind::Skill,
+        // Filled from the plugin's resolution by the caller.
+        activation: PluginActivation::Detected,
+        reason: String::new(),
+        context_bytes: bytes,
+        estimated_tokens: bytes.div_ceil(4),
+        text: kept,
+    }
 }
 
 fn default_true() -> bool {
@@ -200,21 +232,38 @@ pub fn plugin_skill_context(
     working_directory: &Path,
 ) -> PluginSkillContext {
     let mut config = load_config();
-    match crate::session_plugins::apply_selection(&mut config, session_id, working_directory) {
-        Ok(_) => {}
-        Err(error) => {
-            // Never silently re-enable excluded skills if the selection cannot be read.
-            tracing::error!("Could not read session plugin selection: {error:#}");
-            return PluginSkillContext::default();
-        }
-    }
-    plugin_skill_context_from_config(
+    let resolutions =
+        match crate::session_plugins::apply_selection(&mut config, session_id, working_directory) {
+            Ok(resolutions) => resolutions,
+            Err(error) => {
+                // Never silently re-enable excluded skills if the selection cannot be read.
+                tracing::error!("Could not read session plugin selection: {error:#}");
+                crate::session_plugins::record_injected(session_id, &[]);
+                return PluginSkillContext::default();
+            }
+        };
+    let mut context = plugin_skill_context_from_config(
         &config,
         &config_dir()
             .join("plugin-skill-roots")
             .join(session_id.to_string()),
         agent_type,
-    )
+    );
+    for entry in &mut context.injected {
+        let activation = resolutions
+            .get(&entry.plugin)
+            .and_then(|resolution| resolution.activation)
+            .unwrap_or(PluginActivation::Detected);
+        entry.activation = activation;
+        entry.reason = match activation {
+            PluginActivation::Explicit => "Chosen for this session",
+            PluginActivation::Policy => "Always loaded in this project",
+            PluginActivation::Detected => "Detected in this directory",
+        }
+        .to_string();
+    }
+    crate::session_plugins::record_injected(session_id, &context.injected);
+    context
 }
 
 fn plugin_skill_context_from_config(
@@ -251,6 +300,9 @@ fn plugin_skill_context_from_config(
                 && materialize_claude_skill(&claude_root, &skill_name, &path).is_ok()
             {
                 has_claude_skill = true;
+                context
+                    .injected
+                    .push(injected_skill(plugin_name, &skill_name, &path));
             }
             let reminder_agent = match agent_type {
                 AgentType::Codex => Some("codex"),
@@ -267,6 +319,9 @@ fn plugin_skill_context_from_config(
                     "- `{plugin_name}:{skill_name}`{description}: {}",
                     path.display()
                 ));
+                context
+                    .injected
+                    .push(injected_skill(plugin_name, &skill_name, &path));
             }
         }
         if has_claude_skill {
@@ -779,6 +834,12 @@ description: Route KiCad PCB layouts.
             .join("SKILL.md")
             .is_file());
         assert!(context.reminder.is_none());
+        // The record lists what was handed over, with its text for inspection.
+        assert_eq!(context.injected.len(), 1);
+        assert_eq!(context.injected[0].plugin, "kicad-pcb");
+        assert_eq!(context.injected[0].name, "kicad-layout");
+        assert!(context.injected[0].context_bytes > 0);
+        assert!(!context.injected[0].text.is_empty());
 
         let context = plugin_skill_context_from_config(&config, &generated_root, AgentType::Codex);
         assert!(context.claude_plugin_dirs.is_empty());
@@ -790,6 +851,10 @@ description: Route KiCad PCB layouts.
 
         let context = plugin_skill_context_from_config(&config, &generated_root, AgentType::Muse);
         assert!(context.reminder.is_none());
+        assert!(
+            context.injected.is_empty(),
+            "nothing handed over, nothing recorded"
+        );
 
         let context =
             plugin_skill_context_from_config(&config, &generated_root, AgentType::Antigravity);
@@ -811,6 +876,7 @@ description: Route KiCad PCB layouts.
             let context = plugin_skill_context_from_config(&config, &generated_root, agent);
             assert!(context.claude_plugin_dirs.is_empty());
             assert!(context.reminder.is_none());
+            assert!(context.injected.is_empty());
         }
         assert!(!generated_root.join("kicad-pcb").exists());
     }

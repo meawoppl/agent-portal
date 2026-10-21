@@ -18,8 +18,8 @@ use crate::utils::{self, On401};
 use gloo::events::EventListener;
 use gloo::timers::callback::Timeout;
 use shared::api::{
-    EditStackItem, EditStackResponse, ForwardInfo, PluginInventoryResponse, PortalPluginInfo,
-    TurnMetricsResponse, UpdateEditStackItemRequest,
+    EditStackItem, EditStackResponse, ForwardInfo, PluginContextEntry, PluginInventoryResponse,
+    PortalPluginInfo, TurnMetricsResponse, UpdateEditStackItemRequest,
 };
 use shared::strings::truncate_with_ellipsis;
 use shared::{
@@ -533,6 +533,8 @@ pub struct SessionView {
     pending_surface_restore: Option<ForwardSurfaceMemory>,
     active_surface: Option<SessionSurface>,
     plugins: Vec<PortalPluginInfo>,
+    /// What the running process was launched with, recorded by the launcher.
+    injected_context: Vec<PluginContextEntry>,
     plugin_error: Option<String>,
     plugin_notice_expanded: bool,
     edit_stack_items: Vec<EditStackItem>,
@@ -678,6 +680,7 @@ impl Component for SessionView {
             pending_surface_restore: load_open_surface(session_id, &ctx.props().portal),
             active_surface: None,
             plugins: Vec::new(),
+            injected_context: Vec::new(),
             plugin_error: None,
             plugin_notice_expanded: load_plugin_notice_expanded(session_id, &ctx.props().portal),
             edit_stack_items: Vec::new(),
@@ -1027,6 +1030,7 @@ impl Component for SessionView {
                     return false;
                 }
                 self.plugins = data.plugins;
+                self.injected_context = data.injected_context;
                 self.plugin_error = None;
                 true
             }
@@ -1580,9 +1584,17 @@ impl Component for SessionView {
                                     </div>
                                 }
                                 <PluginContextNotice
+                                    entries={self.injected_context.clone()}
                                     plugins={self.plugins.clone()}
                                     expanded={self.plugin_notice_expanded}
                                     on_toggle={ctx.link().callback(|_| SessionViewMsg::TogglePluginNotice)}
+                                    launcher_id={
+                                        (!ctx.props().portal.is_linked()
+                                            && ctx.props().session.my_role == shared::SessionRole::Owner)
+                                            .then_some(ctx.props().session.launcher_id)
+                                            .flatten()
+                                    }
+                                    working_directory={ctx.props().session.working_directory.clone()}
                                 />
                                 {
                                     groups.into_iter().enumerate().map(|(i, group)| {

@@ -1,16 +1,28 @@
 //! Controlled plugin views. SessionView owns inventory fetching, surface state,
 //! and persisted notice expansion; these components only render and emit intent.
 use crate::components::plugin_discovery::{
-    plugin_context_label, suggested_plugins, PluginCard, PLUGINS_BROWSER,
+    plugin_context_label, run_plugin_action, suggested_plugins, PluginCard, PLUGINS_BROWSER,
 };
-use shared::api::PortalPluginInfo;
+use shared::api::{
+    PluginAction, PluginActivation, PluginContextEntry, PluginContextKind, PluginPolicy,
+    PluginRequest, PortalPluginInfo,
+};
+use std::collections::{BTreeMap, BTreeSet};
+use uuid::Uuid;
+use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
 #[derive(Properties, PartialEq)]
 pub(super) struct PluginContextNoticeProps {
+    /// The launcher's record of what this session's process was given.
+    pub entries: Vec<PluginContextEntry>,
+    /// Current inventory, for display names and project policy.
     pub plugins: Vec<PortalPluginInfo>,
     pub expanded: bool,
     pub on_toggle: Callback<MouseEvent>,
+    /// Set when the viewer may change this computer's project policy.
+    pub launcher_id: Option<Uuid>,
+    pub working_directory: String,
 }
 
 #[derive(Properties, PartialEq)]
@@ -24,42 +36,96 @@ pub(super) struct PluginDiscoverySurfaceProps {
     pub on_close: Callback<MouseEvent>,
 }
 
+fn activation_label(activation: PluginActivation) -> &'static str {
+    match activation {
+        PluginActivation::Explicit => "chosen for this session",
+        PluginActivation::Policy => "project policy",
+        PluginActivation::Detected => "detected",
+    }
+}
+
+/// What this session's process was launched with, from the launcher's record,
+/// with each file's text one click away rather than in the transcript.
 #[function_component(PluginContextNotice)]
 pub(super) fn plugin_context_notice(props: &PluginContextNoticeProps) -> Html {
-    let suggested = props
-        .plugins
-        .iter()
-        .filter(|plugin| plugin.enabled)
-        .collect::<Vec<_>>();
-    if suggested.is_empty() {
+    let disabled = use_state(BTreeSet::<String>::new);
+    let error = use_state(|| None::<String>);
+    if props.entries.is_empty() {
         return html! {};
     }
-    let context_bytes = suggested
+    let mut by_plugin: BTreeMap<&str, Vec<&PluginContextEntry>> = BTreeMap::new();
+    for entry in &props.entries {
+        by_plugin
+            .entry(entry.plugin.as_str())
+            .or_default()
+            .push(entry);
+    }
+    let display_name = |name: &str| {
+        props
+            .plugins
+            .iter()
+            .find(|plugin| plugin.name == name)
+            .map_or_else(|| name.to_string(), |plugin| plugin.display_name.clone())
+    };
+    let context_bytes = props.entries.iter().map(|e| e.context_bytes).sum::<u64>();
+    let estimated_tokens = props
+        .entries
         .iter()
-        .map(|plugin| plugin.context_bytes)
+        .map(|e| e.estimated_tokens)
         .sum::<u64>();
-    let estimated_tokens = suggested
-        .iter()
-        .map(|plugin| plugin.estimated_tokens)
-        .sum::<u64>();
-    let label = suggested
-        .iter()
-        .map(|plugin| plugin.display_name.as_str())
+    let label = by_plugin
+        .keys()
+        .map(|name| display_name(name))
         .collect::<Vec<_>>()
         .join(", ");
     let expanded = props.expanded;
-    let toggle = props.on_toggle.clone();
+
+    let disable = |name: &str| -> Option<Callback<MouseEvent>> {
+        let launcher_id = props.launcher_id?;
+        let never = props
+            .plugins
+            .iter()
+            .any(|plugin| plugin.name == name && plugin.policy == PluginPolicy::Never);
+        if never || disabled.contains(name) {
+            return None;
+        }
+        let name = name.to_string();
+        let directory = props.working_directory.clone();
+        let (disabled, error) = (disabled.clone(), error.clone());
+        Some(Callback::from(move |_: MouseEvent| {
+            let request = PluginRequest {
+                working_directory: Some(directory.clone()),
+                session_id: None,
+                action: PluginAction::SetPolicy {
+                    name: name.clone(),
+                    policy: PluginPolicy::Never,
+                },
+            };
+            let (name, disabled, error) = (name.clone(), disabled.clone(), error.clone());
+            spawn_local(async move {
+                match run_plugin_action(launcher_id, &request).await {
+                    Ok(_) => {
+                        let mut names = (*disabled).clone();
+                        names.insert(name);
+                        disabled.set(names);
+                        error.set(None);
+                    }
+                    Err(e) => error.set(Some(format!("Could not change the project policy: {e}"))),
+                }
+            });
+        }))
+    };
 
     html! {
         <section class={classes!("plugin-context-card", expanded.then_some("expanded"))}>
             <button
                 type="button"
                 class="plugin-context-summary"
-                onclick={toggle}
+                onclick={props.on_toggle.clone()}
                 aria-expanded={expanded.to_string()}
             >
                 <span class="plugin-context-caret">{ if expanded { "▾" } else { "▸" } }</span>
-                <span class="plugin-context-title">{ "Selected plugin skills" }</span>
+                <span class="plugin-context-title">{ "Plugin context at launch" }</span>
                 <span class="plugin-context-names">{ label }</span>
                 <span class="plugin-context-size">
                     { plugin_context_label(context_bytes, estimated_tokens) }
@@ -67,18 +133,43 @@ pub(super) fn plugin_context_notice(props: &PluginContextNoticeProps) -> Html {
             </button>
             if expanded {
                 <div class="plugin-context-body">
-                    { for suggested.into_iter().map(|plugin| {
+                    if let Some(error) = &*error {
+                        <div class="edit-stack-error">{ error }</div>
+                    }
+                    { for by_plugin.iter().map(|(name, entries)| {
+                        let bytes = entries.iter().map(|e| e.context_bytes).sum::<u64>();
+                        let tokens = entries.iter().map(|e| e.estimated_tokens).sum::<u64>();
+                        let first = entries[0];
                         html! {
-                            <article class="plugin-context-plugin" key={plugin.name.clone()}>
+                            <article class="plugin-context-plugin" key={name.to_string()}>
                                 <div class="plugin-context-plugin-title">
-                                    <span>{ &plugin.display_name }</span>
-                                    <span>{ plugin_context_label(plugin.context_bytes, plugin.estimated_tokens) }</span>
+                                    <span>{ display_name(name) }</span>
+                                    <span>{ plugin_context_label(bytes, tokens) }</span>
                                 </div>
-                                if let Some(reason) = plugin.reason.as_deref() {
-                                    <div class="plugin-context-detail">{ reason }</div>
-                                }
-                                if let Some(source) = plugin.source.as_deref() {
-                                    <code class="plugin-context-source">{ source }</code>
+                                <div class="plugin-context-detail">
+                                    { format!("{} · {}", first.reason, activation_label(first.activation)) }
+                                </div>
+                                { for entries.iter().map(|entry| html! {
+                                    <details class="plugin-context-entry" key={entry.path.clone()}>
+                                        <summary>
+                                            <span class="plugin-context-kind">
+                                                { match entry.kind { PluginContextKind::Skill => "skill", PluginContextKind::Prompt => "prompt" } }
+                                            </span>
+                                            <span>{ &entry.name }</span>
+                                            <span class="plugin-context-size">
+                                                { plugin_context_label(entry.context_bytes, entry.estimated_tokens) }
+                                            </span>
+                                        </summary>
+                                        <code class="plugin-context-source">{ &entry.path }</code>
+                                        <pre class="plugin-context-text">{ &entry.text }</pre>
+                                    </details>
+                                }) }
+                                if disabled.contains(*name) {
+                                    <div class="plugin-context-detail">{ "Won't load in new sessions in this project." }</div>
+                                } else if let Some(onclick) = disable(name) {
+                                    <button type="button" class="plugin-context-disable" {onclick}>
+                                        { "Disable for this project" }
+                                    </button>
                                 }
                             </article>
                         }

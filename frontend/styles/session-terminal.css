@@ -985,6 +985,48 @@
     white-space: nowrap;
 }
 
+.plugin-context-entry summary {
+    display: flex;
+    gap: 0.5rem;
+    align-items: baseline;
+    color: var(--text-primary);
+    font-size: 0.76rem;
+    cursor: pointer;
+}
+
+.plugin-context-entry .plugin-context-size {
+    margin-left: auto;
+}
+
+.plugin-context-kind {
+    color: var(--text-muted);
+    font-size: 0.66rem;
+    text-transform: uppercase;
+}
+
+.plugin-context-text {
+    max-height: 18rem;
+    overflow: auto;
+    margin: 0.35rem 0 0;
+    padding: 0.5rem;
+    border-radius: 6px;
+    background: var(--bg-darker);
+    color: var(--text-secondary);
+    font: 0.7rem var(--font-mono, monospace);
+    white-space: pre-wrap;
+}
+
+.plugin-context-disable {
+    justify-self: start;
+    padding: 0.2rem 0.55rem;
+    border: 1px solid rgba(247, 118, 142, 0.45);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--error, #f7768e);
+    font-size: 0.72rem;
+    cursor: pointer;
+}
+
 .plugin-panel {
     flex: 1 1 auto;
     display: flex;
