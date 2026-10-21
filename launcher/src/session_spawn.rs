@@ -192,7 +192,18 @@ async fn run_inner(action: Action) -> Result<()> {
             .await?
             .error_for_status()?;
             if json {
-                println!("{}", serde_json::json!({"session_id":child,"stopped":true}));
+                #[derive(serde::Serialize)]
+                struct Stopped {
+                    session_id: Uuid,
+                    stopped: bool,
+                }
+                println!(
+                    "{}",
+                    serde_json::to_string(&Stopped {
+                        session_id: child,
+                        stopped: true
+                    })?
+                );
             } else {
                 println!("Stopped {child}");
             }
