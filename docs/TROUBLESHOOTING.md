@@ -448,3 +448,20 @@ If you're still stuck:
    - Rust version (`rustc --version`)
    - Full error message
    - Output of `./scripts/install-deps.sh`
+
+### macOS service restart recovery
+
+`agent-portal service restart` reloads the installed plist using a separate
+launchd recovery job. The worker survives unloading the launcher, retries
+bootstrap while the old job drains, and records the outcome in
+`~/Library/Logs/agent-portal/restart-status.txt`. `agent-portal service status`
+prints that status even when the launcher is offline. Command diagnostics are
+in `restart.log` beside it. If recovery fails, inspect that log and run
+`agent-portal service start` after correcting the reported error.
+
+The service restarts after clean as well as unsuccessful exits. Stop it with
+`agent-portal service stop`, which unloads it. Service sync preserves the PATH
+in the installed plist; shell PATH changes do not silently rewrite it. First
+install includes the launcher directory, `~/.local/bin`, `~/.cargo/bin`,
+Homebrew and the standard system directories. Add any custom tool directory
+to the plist's `EnvironmentVariables.PATH` and restart to load it.

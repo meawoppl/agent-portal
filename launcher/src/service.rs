@@ -30,7 +30,7 @@ fn path_with_local_bin(existing: &str, home: Option<&str>) -> String {
 /// launcher binary's own directory — agents spawned by the service shell out
 /// to `agent-portal` (messaging, port forwarding), and the binary often lives
 /// somewhere systemd/launchd's minimal PATH doesn't cover.
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(target_os = "linux")]
 fn service_path(binary_path: &str) -> String {
     let home = std::env::var("HOME").ok();
     let mut base = path_with_local_bin(&std::env::var("PATH").unwrap_or_default(), home.as_deref());
@@ -332,9 +332,48 @@ fn log_dir() -> String {
 }
 
 #[cfg(target_os = "macos")]
-fn generate_plist(binary_path: &str) -> String {
-    let log_dir = log_dir();
-    let path = service_path(binary_path);
+fn generate_plist(binary_path: &str) -> Result<String> {
+    // Preserve the installed PATH rather than importing whichever shell happened
+    // to request an update. First install gets a deterministic set of tool paths.
+    let plist = plist_path()?;
+    let base = if plist.exists() {
+        let output = std::process::Command::new("/usr/bin/plutil")
+            .args(["-extract", "EnvironmentVariables.PATH", "raw", "-o", "-"])
+            .arg(&plist)
+            .output()?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "Cannot read installed service PATH: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        String::from_utf8(output.stdout)?.trim_end().to_owned()
+    } else {
+        "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin".to_owned()
+    };
+    let home = std::env::var("HOME").ok();
+    let mut path = path_with_local_bin(&base, home.as_deref());
+    if let Some(home) = home {
+        path = path_with_dir(&path, &format!("{home}/.cargo/bin"));
+    }
+    if let Some(dir) = std::path::Path::new(binary_path).parent() {
+        path = path_with_dir(&path, &dir.to_string_lossy());
+    }
+    Ok(render_plist(binary_path, &path, &log_dir()))
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn render_plist(binary_path: &str, path: &str, log_dir: &str) -> String {
+    let escape = |s: &str| {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('\"', "&quot;")
+            .replace('\'', "&apos;")
+    };
+    let binary_path = escape(binary_path);
+    let path = escape(path);
+    let log_dir = escape(log_dir);
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -355,10 +394,7 @@ fn generate_plist(binary_path: &str) -> String {
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
-    <dict>
-        <key>SuccessfulExit</key>
-        <false/>
-    </dict>
+    <true/>
     <key>StandardOutPath</key>
     <string>{log_dir}/stdout.log</string>
     <key>StandardErrorPath</key>
@@ -377,7 +413,7 @@ fn generate_plist(binary_path: &str) -> String {
 </dict>
 </plist>
 "#,
-        label = PLIST_LABEL,
+        label = "com.agent-portal.launcher",
     )
 }
 
@@ -401,7 +437,7 @@ pub fn install() -> Result<()> {
     // Ensure log directory exists
     std::fs::create_dir_all(log_dir()).context("Failed to create log directory")?;
 
-    let content = generate_plist(&binary_path);
+    let content = generate_plist(&binary_path)?;
     std::fs::write(&plist, content)
         .with_context(|| format!("Failed to write {}", plist.display()))?;
 
@@ -437,7 +473,7 @@ pub fn sync() -> Result<()> {
     }
 
     let binary_path = current_exe_path()?;
-    let content = generate_plist(&binary_path);
+    let content = generate_plist(&binary_path)?;
 
     if std::fs::read_to_string(&plist).unwrap_or_default() == content {
         return Ok(());
@@ -485,13 +521,19 @@ pub fn status() -> Result<()> {
         return Ok(());
     }
 
+    if let Ok(status) = std::fs::read_to_string(format!("{}/restart-status.txt", log_dir())) {
+        println!("Last restart: {}", status.trim());
+    }
     let output = std::process::Command::new("launchctl")
         .args(["list"])
         .output()
         .context("Failed to run launchctl list")?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let matching: Vec<&str> = stdout.lines().filter(|l| l.contains(PLIST_LABEL)).collect();
+    let matching: Vec<&str> = stdout
+        .lines()
+        .filter(|line| line.split_whitespace().last() == Some(PLIST_LABEL))
+        .collect();
 
     if matching.is_empty() {
         println!("Service is installed but not running.");
@@ -515,10 +557,16 @@ pub fn start() -> Result<()> {
         anyhow::bail!("Service is not installed. Run 'agent-portal service install' first.");
     }
     let plist = plist_path()?;
-    std::process::Command::new("launchctl")
+    let output = std::process::Command::new("/bin/launchctl")
         .args(["load", &plist.to_string_lossy()])
         .output()
         .context("Failed to run launchctl load")?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "launchctl load failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
     println!("Started {}", PLIST_LABEL);
     Ok(())
 }
@@ -530,47 +578,85 @@ pub fn stop() -> Result<()> {
         anyhow::bail!("Service is not installed.");
     }
     let plist = plist_path()?;
-    std::process::Command::new("launchctl")
+    let output = std::process::Command::new("/bin/launchctl")
         .args(["unload", &plist.to_string_lossy()])
         .output()
         .context("Failed to run launchctl unload")?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "launchctl unload failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
     println!("Stopped {}", PLIST_LABEL);
     Ok(())
 }
 
+/// Reload from disk in an independent launchd job. A shell forked by the
+/// launcher can be killed by bootout with its parent, stranding the service.
+/// `submit` makes launchd own the recovery worker instead.
 #[cfg(target_os = "macos")]
 pub fn restart() -> Result<()> {
     use anyhow::{bail, Context};
-
-    // Do not unload the job from inside the process that job owns: launchd may
-    // terminate us before we can load it again. kickstart performs the
-    // kill-and-respawn transaction inside launchd instead.
-    let uid = std::process::Command::new("id")
-        .arg("-u")
-        .output()
-        .context("Failed to determine user id for launchctl")?;
-    if !uid.status.success() {
+    if !is_installed() {
+        bail!("Service is not installed.");
+    }
+    sync()?;
+    let plist = plist_path()?;
+    let validation = std::process::Command::new("/usr/bin/plutil")
+        .arg("-lint")
+        .arg(&plist)
+        .output()?;
+    if !validation.status.success() {
         bail!(
-            "id -u failed: {}",
-            String::from_utf8_lossy(&uid.stderr).trim()
+            "Service plist failed validation; launcher left running: {}",
+            String::from_utf8_lossy(&validation.stdout)
         );
     }
-    let domain = format!(
-        "gui/{}/{}",
-        String::from_utf8_lossy(&uid.stdout).trim(),
-        PLIST_LABEL
-    );
-    let output = std::process::Command::new("launchctl")
-        .args(["kickstart", "-k", &domain])
+    // POSIX getuid needs no subprocess or parsing of ambient command output.
+    let domain = format!("gui/{}", unsafe { libc::getuid() });
+    let target = format!("{domain}/{PLIST_LABEL}");
+    let helper = format!("{PLIST_LABEL}.restart.{}", uuid::Uuid::new_v4());
+    let logs = log_dir();
+    std::fs::create_dir_all(&logs)?;
+    let status = format!("{logs}/restart-status.txt");
+    let log = format!("{logs}/restart.log");
+    std::fs::write(
+        &status,
+        "Restart requested; waiting for launchd recovery worker.\n",
+    )?;
+    let output = std::process::Command::new("/bin/launchctl")
+        .args([
+            "submit",
+            "-l",
+            &helper,
+            "-o",
+            &log,
+            "-e",
+            &log,
+            "--",
+            "/bin/sh",
+            "-c",
+            include_str!("service_restart_macos.sh"),
+            "agent-portal-restart",
+            "/bin/launchctl",
+            &domain,
+            &target,
+        ])
+        .arg(&plist)
+        .arg(&status)
+        .arg(&helper)
         .output()
-        .context("Failed to run launchctl kickstart")?;
+        .context("Failed to submit launchd recovery worker")?;
     if !output.status.success() {
-        bail!(
-            "launchctl kickstart failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
+        let error = format!(
+            "Restart not scheduled; launcher left running: {}",
+            String::from_utf8_lossy(&output.stderr)
         );
+        std::fs::write(&status, &error)?;
+        bail!(error);
     }
-    println!("Restarted {}", PLIST_LABEL);
+    println!("Restart scheduled; progress: {status}; log: {log}");
     Ok(())
 }
 
@@ -645,6 +731,92 @@ pub fn logs(_lines: u32, _follow: bool) -> Result<()> {
 #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
 mod tests {
     use super::{path_with_dir, path_with_local_bin};
+
+    #[test]
+    fn plist_survives_clean_exit_and_escapes_paths() {
+        let plist = super::render_plist("/Users/O'Brien & Co/bin/portal", "/bin:<tools>", "/logs");
+        assert!(plist.contains("<key>KeepAlive</key>\n    <true/>"));
+        assert!(!plist.contains("SuccessfulExit"));
+        assert!(plist.contains("O&apos;Brien &amp; Co"));
+        assert!(plist.contains("/bin:&lt;tools&gt;"));
+    }
+
+    /// Execute the real recovery worker with a controlled launchctl substitute.
+    /// Covers delayed bootout completion, command failures and shell-safe paths
+    /// without unloading a service or requiring a macOS host.
+    #[cfg(unix)]
+    #[test]
+    fn restart_worker_retries_and_reports_failures() {
+        use std::os::unix::fs::PermissionsExt;
+        for (mode, success, attempts) in [
+            ("retry", true, 3),
+            ("fail", false, 30),
+            ("kickfail", false, 1),
+        ] {
+            let temp = tempfile::tempdir().unwrap();
+            let ctl = temp.path().join("launchctl");
+            std::fs::write(
+                &ctl,
+                r#"#!/bin/sh
+printf '%s\n' "$1" >> "$TEST_ROOT/calls"
+case "$1" in
+ bootout) exit 1 ;;
+ bootstrap)
+  count=0
+  [ ! -e "$TEST_ROOT/count" ] || count=$(cat "$TEST_ROOT/count")
+  count=$((count + 1))
+  printf '%s' "$count" > "$TEST_ROOT/count"
+  printf '%s' "$3" > "$TEST_ROOT/plist-arg"
+  [ "$MODE" != fail ] && { [ "$MODE" != retry ] || [ "$count" -ge 3 ]; }
+  ;;
+ kickstart) [ "$MODE" != kickfail ] ;;
+ remove) exit 0 ;;
+esac
+"#,
+            )
+            .unwrap();
+            let sleep = temp.path().join("sleep");
+            std::fs::write(&sleep, "#!/bin/sh\nexit 0\n").unwrap();
+            for executable in [&ctl, &sleep] {
+                std::fs::set_permissions(executable, std::fs::Permissions::from_mode(0o700))
+                    .unwrap();
+            }
+            let status = temp.path().join("status");
+            let plist = temp.path().join("a 'quoted' $(touch INJECTED) plist");
+            let output = std::process::Command::new("/bin/sh")
+                .args([
+                    "-c",
+                    include_str!("service_restart_macos.sh"),
+                    "restart-test",
+                ])
+                .arg(&ctl)
+                .args(["gui/501", "gui/501/com.agent-portal.launcher"])
+                .arg(&plist)
+                .arg(&status)
+                .arg("recovery-worker")
+                .env("TEST_ROOT", temp.path())
+                .env("MODE", mode)
+                .env("PATH", format!("{}:/usr/bin:/bin", temp.path().display()))
+                .current_dir(temp.path())
+                .output()
+                .unwrap();
+            assert_eq!(output.status.success(), success, "{mode}: {output:?}");
+            assert_eq!(
+                std::fs::read_to_string(temp.path().join("count")).unwrap(),
+                attempts.to_string()
+            );
+            assert_eq!(
+                std::fs::read_to_string(temp.path().join("plist-arg")).unwrap(),
+                plist.to_str().unwrap()
+            );
+            assert!(!temp.path().join("INJECTED").exists());
+            let message = std::fs::read_to_string(&status).unwrap();
+            assert_eq!(message.contains("RESTART FAILED"), !success);
+            let calls = std::fs::read_to_string(temp.path().join("calls")).unwrap();
+            assert!(calls.starts_with("bootout\nbootstrap\n"));
+            assert_eq!(calls.contains("remove"), success);
+        }
+    }
 
     #[test]
     fn prepends_local_bin_when_absent() {

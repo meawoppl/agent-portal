@@ -554,7 +554,8 @@ fn probe_agents_for_response() -> Vec<shared::AgentInstall> {
 fn restart_service() {
     if crate::service::is_installed() {
         if let Err(e) = crate::service::sync() {
-            error!("Service unit sync failed: {}", e);
+            error!("Service unit sync failed; leaving launcher running: {}", e);
+            return;
         }
         if let Err(e) = crate::service::restart() {
             error!("Service restart failed: {}", e);
