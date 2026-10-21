@@ -113,6 +113,25 @@ pub async fn handle_web_client_socket(
                 match result {
                     Ok(client_msg) => {
                         if linked.as_ref().is_some_and(|auth| auth.authorize(&app_state, crate::handlers::federation::message_scope(&client_msg)).is_err()) { break; }
+                        // Negotiate inline: a rejection must reach the socket before
+                        // closing, and no later pipelined mutation may dispatch.
+                        let version = match &client_msg {
+                            ClientToServer::Hello { protocol_version } => Some(Some(*protocol_version)),
+                            ClientToServer::Register(fields) => Some(fields.protocol_version),
+                            _ => None,
+                        };
+                        if let Some(version) = version {
+                            let error = shared::protocol::check_protocol_version(version, "browser").err();
+                            if matches!(client_msg, ClientToServer::Hello { .. }) || error.is_some() {
+                                let rejected = error.is_some();
+                                if ws_sender.send(ServerToClient::HelloAck {
+                                    protocol_version: shared::protocol::PROTOCOL_VERSION,
+                                    success: !rejected,
+                                    error,
+                                }).await.is_err() || rejected { break; }
+                                if matches!(client_msg, ClientToServer::Hello { .. }) { continue; }
+                            }
+                        }
                         if let ClientToServer::Dashboard { request_id, request } = client_msg {
                             // Linked grants currently exclude host administration on REST;
                             // a socket must not bypass that narrower allow-list.
@@ -188,6 +207,8 @@ fn handle_web_client_message(
     } = ctx;
     match client_msg {
         ClientToServer::Dashboard { .. } => false, // handled asynchronously by the socket
+        // Consumed by the socket handshake before command dispatch.
+        ClientToServer::Hello { .. } => false,
         ClientToServer::Register(shared::RegisterFields {
             session_id,
             session_name,

@@ -1,3 +1,4 @@
+mod browser_protocol;
 mod components;
 mod dashboard_rpc;
 mod federation;

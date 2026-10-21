@@ -143,6 +143,9 @@ pub enum ClientToServer {
         request_id: Uuid,
         request: crate::api::DashboardRequest,
     },
+    /// Negotiate before exposing any browser mutation sender.
+    Hello { protocol_version: u32 },
+
     /// Register to receive updates for a session
     Register(RegisterFields),
 
@@ -190,6 +193,14 @@ pub enum ServerToClient {
         request_id: Uuid,
         result: Result<crate::api::DashboardResponse, crate::api::DashboardError>,
     },
+    /// Explicit result of browser protocol negotiation. Failure closes the socket.
+    HelloAck {
+        protocol_version: u32,
+        success: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+
     /// Output from Claude Code.
     #[serde(rename = "ClaudeOutput")]
     AgentOutput {

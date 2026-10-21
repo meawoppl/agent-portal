@@ -1281,6 +1281,10 @@ pub enum DevicePollResponse {
 /// Application configuration returned by /api/config endpoint
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
+    /// Transport major and support for the browser Hello/HelloAck handshake.
+    /// Missing means a legacy v1 server; a failed config fetch is not legacy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol_version: Option<u32>,
     /// Custom title for the app (displayed in top bar)
     /// Defaults to "Agent Portal" if not configured; override with APP_TITLE env var
     pub app_title: String,
