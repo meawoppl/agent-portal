@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" font-family="Arial, sans-serif">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-size="24" fill="#565f89">PR #2262 · Simpler settings, forwards beside sessions</text>
+<text x="55" y="110" font-size="34" fill="#e6e9f5">Remove unused sound controls and put each setting beside the feature it controls.</text>
+<path d="M55 170 H1945 M1000 210 V1120" stroke="#3d4666" stroke-width="2"/>
+<text x="55" y="235" font-size="22" fill="#f7768e" letter-spacing="4">BEFORE</text>
+<rect x="55" y="300" width="900" height="150" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="350" font-size="26" fill="#c0caf5">Sounds tab</text>
+<text x="79" y="390" font-size="26" fill="#c0caf5">Synthesizer, API and saved sound preferences</text>
+<rect x="55" y="510" width="900" height="150" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="560" font-size="26" fill="#c0caf5">Forwarding tab</text>
+<text x="79" y="600" font-size="26" fill="#c0caf5">Separate from the sessions table</text>
+<rect x="55" y="720" width="900" height="150" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="770" font-size="26" fill="#c0caf5">Health Timer tab</text>
+<text x="79" y="810" font-size="26" fill="#c0caf5">Separate settings destination</text>
+<text x="1045" y="235" font-size="22" fill="#9ece6a" letter-spacing="4">AFTER</text>
+<rect x="1045" y="300" width="900" height="150" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1069" y="350" font-size="26" fill="#c0caf5">Sounds removed</text>
+<text x="1069" y="390" font-size="26" fill="#c0caf5">Migration drops users.sound_config</text>
+<rect x="1045" y="510" width="900" height="150" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1069" y="560" font-size="26" fill="#c0caf5">Sessions: Forwards column</text>
+<text x="1069" y="600" font-size="26" fill="#c0caf5">Links, streams and public/private control</text>
+<rect x="1045" y="720" width="900" height="150" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1069" y="770" font-size="26" fill="#c0caf5">Appearance: Health timer</text>
+<text x="1069" y="810" font-size="26" fill="#c0caf5">Existing browser preferences preserved</text>
+<text x="55" y="1172" font-size="22" fill="#565f89">Dropping sound preferences is permanent; migration rollback restores an empty column.</text></svg>
