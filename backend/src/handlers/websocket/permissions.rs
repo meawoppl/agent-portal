@@ -285,7 +285,7 @@ mod db_tests {
         }
         let manager = SessionManager::new();
         let key = SessionId::new(session.id.to_string());
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, mut rx) = super::super::session_manager::conn_channel(16);
         manager.add_web_client(key.clone(), tx.clone());
         handle_permission_cancelled(
             &manager,
