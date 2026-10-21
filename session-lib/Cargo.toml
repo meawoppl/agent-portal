@@ -40,6 +40,8 @@ libc = "0.2"
 test-fixtures = ["dep:tempfile"]
 
 [dev-dependencies]
+futures-util = "0.3"
+tokio-tungstenite = "0.28"
 tempfile = "3.27.0"
 
 [lints]

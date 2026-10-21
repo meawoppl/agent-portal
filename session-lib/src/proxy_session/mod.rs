@@ -7,6 +7,7 @@
 //! out, slice by slice; `claude-session-lib::proxy_session` re-exports each
 //! moved item so its internal call sites are unchanged.
 
+pub mod file_transfer;
 pub mod heartbeat_watchdog;
 pub mod input_delivery;
 pub mod permission_bridge;

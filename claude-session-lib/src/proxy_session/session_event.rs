@@ -187,6 +187,7 @@ mod tests {
         .await
         .unwrap();
         let (write, _read) = connection.split();
+        let ws_write = Arc::new(Mutex::new(write));
         let id = uuid::Uuid::new_v4();
         let (output_tx, mut output_rx) = mpsc::unbounded_channel();
         let mut state = ConnectionState {
@@ -195,7 +196,7 @@ mod tests {
             interrupt_rx: mpsc::unbounded_channel().1,
             ack_rx: mpsc::unbounded_channel().1,
             output_tx,
-            ws_write: Arc::new(Mutex::new(write)),
+            ws_write: ws_write.clone(),
             disconnect_rx: oneshot::channel().1,
             graceful_shutdown_rx: mpsc::unbounded_channel().1,
             session_terminated_rx: oneshot::channel().1,
@@ -209,7 +210,7 @@ mod tests {
             file_upload_rx: mpsc::unbounded_channel().1,
             file_download_rx: mpsc::unbounded_channel().1,
             working_directory: ".".into(),
-            active_uploads: Default::default(),
+            file_transfer: super::super::FileTransferBridge::new(".".into(), ws_write),
             reminder_pending: Arc::new(AtomicBool::new(false)),
             agent_type: shared::AgentType::Claude,
             git_metadata: session_lib::git_metadata::GitMetadataState::new(None),
