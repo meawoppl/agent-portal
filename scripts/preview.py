@@ -49,7 +49,7 @@ def runtime_env(port, database, title='Agent Portal PR preview'):
             'HOST': '127.0.0.1', 'PORT': str(port), 'DATABASE_URL': database,
             'SESSION_SECRET': secrets.token_hex(64),
             'BASE_URL': f'http://127.0.0.1:{port}',
-            'APP_TITLE': title, 'RUST_LOG': 'info'}
+            'SPLASH_TEXT': title, 'RUST_LOG': 'info'}
 
 
 def await_ready(check, process=None, timeout=90):
@@ -145,7 +145,7 @@ def main():
                                        cwd=scratch, env=runtime_env(port, database, title), stdout=log, stderr=log)
             def healthy():
                 with urllib.request.urlopen(f'http://127.0.0.1:{port}/api/config', timeout=2) as response:
-                    return response.status == 200 and json.load(response).get('app_title') == title
+                    return response.status == 200 and json.load(response).get('splash_text') == title
             await_ready(healthy, backend)
             if args.forward:
                 opened = run('agent-portal', 'forward', str(port), stdout=subprocess.PIPE)
