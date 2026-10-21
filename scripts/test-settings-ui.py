@@ -91,11 +91,11 @@ async def main():
                 await expect(row.locator(".forwarding-url")).to_have_attribute("href", forward["url"])
                 await expect(page.locator(".session-row").filter(has_text="/home/test/other").locator(".session-forwards")).to_have_text("—")
                 toggle = row.get_by_role("checkbox", name="Public forward for Build site")
-                await toggle.check()
+                await toggle.click()
                 await expect(toggle).to_be_checked()
                 await expect(row.locator(".forwarding-badge")).to_have_text("Public")
                 state["fail_patch"] = True
-                await toggle.uncheck()
+                await toggle.click()
                 await expect(row.get_by_role("alert")).to_contain_text("Could not change")
                 await expect(toggle).to_be_checked()
                 await row.locator("summary").click()

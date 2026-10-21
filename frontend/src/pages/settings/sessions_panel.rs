@@ -242,7 +242,7 @@ pub fn sessions_panel(props: &SessionsPanelProps) -> Html {
                     <p class="section-description">
                         { "View sessions and their forwarded websites across all machines. Public forwards are accessible to anyone with the URL." }
                     </p>
-                    <button type="button" class="btn-secondary" onclick={on_refresh} disabled={*sessions_loading || *forwards_loading}>{"Refresh sessions and forwards"}</button>
+                    <button type="button" class="header-button" onclick={on_refresh} disabled={*sessions_loading || *forwards_loading}>{"Refresh sessions and forwards"}</button>
                 </div>
                 if let Some(error) = &*forwards_error { <p class="error-message" role="alert">{error}</p> }
 
