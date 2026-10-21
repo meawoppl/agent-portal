@@ -164,6 +164,9 @@ pub fn plugins_panel() -> Html {
     let outcome = use_state(|| None::<Outcome>);
     let pending = use_state(|| None::<Pending>);
     let install_draft = use_state(String::new);
+    // Bumped on every computer or directory change; an action answer only
+    // lands if the selection it started under is still current.
+    let generation = use_mut_ref(|| 0_u64);
 
     {
         let launchers = launchers.clone();
@@ -195,12 +198,13 @@ pub fn plugins_panel() -> Html {
 
     {
         let (inventory, outcome, pending) = (inventory.clone(), outcome.clone(), pending.clone());
+        let generation = generation.clone();
         use_effect_with(
             (*selected, (*directory).clone(), can_manage),
             move |(launcher, directory, can_manage)| {
+                *generation.borrow_mut() += 1;
                 inventory.set(None);
                 // Results and confirmations belong to the previous selection.
-                // Actions lock the picker, so none is in flight here.
                 outcome.set(None);
                 pending.set(None);
                 // A slow answer for the previous computer or directory must not
@@ -239,8 +243,13 @@ pub fn plugins_panel() -> Html {
     let on_match = {
         let directory_draft = directory_draft.clone();
         let directory = directory.clone();
+        let busy = busy.is_some();
         Callback::from(move |e: SubmitEvent| {
             e.prevent_default();
+            // Enter in the field still submits while the button is disabled.
+            if busy {
+                return;
+            }
             let draft = directory_draft.trim().to_string();
             directory.set((!draft.is_empty()).then_some(draft));
         })
@@ -251,23 +260,34 @@ pub fn plugins_panel() -> Html {
     let run = {
         let selected = *selected;
         let directory = (*directory).clone();
+        let already_busy = busy.is_some();
+        let generation = generation.clone();
         let (inventory, busy, outcome) = (inventory.clone(), busy.clone(), outcome.clone());
         Callback::from(move |(label, action): (String, PluginAction)| {
             let Some(launcher) = selected else { return };
+            if already_busy {
+                return;
+            }
             let request = PluginRequest {
                 working_directory: directory.clone(),
                 session_id: None,
                 action,
             };
+            let started = *generation.borrow();
+            let generation = generation.clone();
             let (inventory, busy, outcome) = (inventory.clone(), busy.clone(), outcome.clone());
             busy.set(Some(label.clone()));
             outcome.set(None);
             spawn_local(async move {
                 let result = run_plugin_action(launcher, &request).await;
+                busy.set(None);
+                // The answer describes the selection the action started under.
+                if *generation.borrow() != started {
+                    return;
+                }
                 if let Some(updated) = result.as_ref().ok().and_then(|r| r.inventory.clone()) {
                     inventory.set(Some(Ok(updated)));
                 }
-                busy.set(None);
                 outcome.set(Some(Outcome { label, result }));
             });
         })
