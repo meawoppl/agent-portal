@@ -336,10 +336,12 @@ struct Absence {
 }
 
 impl Absence {
-    /// Record one poll's answer; true once the forward has been missing on
-    /// enough consecutive polls for long enough. Seeing it again resets.
-    fn observe(&mut self, missing: bool, now: std::time::Instant) -> bool {
-        if !missing {
+    /// Record one poll's answer (`None` when it was unknown); true once the
+    /// forward has been missing on enough consecutive polls for long enough.
+    /// Seeing it again, or not knowing, starts the count over: only
+    /// consecutive confirmed misses add up to a close.
+    fn observe(&mut self, missing: Option<bool>, now: std::time::Instant) -> bool {
+        if missing != Some(true) {
             *self = Self::default();
             return false;
         }
@@ -460,14 +462,10 @@ async fn serve(root: PathBuf, recipe: Recipe, credentials: Credentials) -> Resul
                         // reconnect can briefly report no forward or a 404.
                         let (current_base, token) = credentials()?;
                         if current_base != base { bail!("configured backend changed; register the service again"); }
-                        let Some(missing) = forward_missing(&client, &base, &token, recipe.session, port).await else {
-                            // An unknown answer breaks the run: only consecutive,
-                            // confirmed misses may add up to a close.
-                            absence = Absence::default();
-                            continue;
-                        };
-                        if absence.observe(missing.is_some(), tokio::time::Instant::now().into_std()) {
-                            let reason = missing.unwrap_or_default();
+                        let answer = forward_missing(&client, &base, &token, recipe.session, port).await;
+                        let missing = answer.as_ref().map(Option::is_some);
+                        if absence.observe(missing, tokio::time::Instant::now().into_std()) {
+                            let reason = answer.flatten().unwrap_or_default();
                             tracing::warn!(
                                 session = %recipe.session,
                                 generation = %recipe.generation,
@@ -759,16 +757,16 @@ mod tests {
         let at = |s: u64| start + Duration::from_millis(s);
         let mut absence = Absence::default();
         // Three misses inside the grace window: not yet.
-        assert!(!absence.observe(true, at(0)));
-        assert!(!absence.observe(true, at(10)));
-        assert!(!absence.observe(true, at(20)));
+        assert!(!absence.observe(Some(true), at(0)));
+        assert!(!absence.observe(Some(true), at(10)));
+        assert!(!absence.observe(Some(true), at(20)));
         // Seen again: the count starts over.
-        assert!(!absence.observe(false, at(30)));
+        assert!(!absence.observe(Some(false), at(30)));
         let grace = ABSENCE_GRACE.as_millis() as u64;
-        assert!(!absence.observe(true, at(40)));
-        assert!(!absence.observe(true, at(40 + grace)));
+        assert!(!absence.observe(Some(true), at(40)));
+        assert!(!absence.observe(Some(true), at(40 + grace)));
         // Third consecutive miss, past the grace window.
-        assert!(absence.observe(true, at(50 + grace)));
+        assert!(absence.observe(Some(true), at(50 + grace)));
     }
 
     /// The supervisor resets on an unknown answer, so misses separated by an
@@ -779,13 +777,13 @@ mod tests {
         let grace = ABSENCE_GRACE.as_millis() as u64;
         let at = |s: u64| start + Duration::from_millis(s);
         let mut absence = Absence::default();
-        assert!(!absence.observe(true, at(0)));
-        assert!(!absence.observe(true, at(10)));
-        // A long stretch of unknown answers: the supervisor starts over.
-        absence = Absence::default();
-        assert!(!absence.observe(true, at(10 * grace)));
-        assert!(!absence.observe(true, at(10 * grace + 10)));
-        assert!(!absence.observe(true, at(10 * grace + 20)));
+        assert!(!absence.observe(Some(true), at(0)));
+        assert!(!absence.observe(Some(true), at(10)));
+        // A long stretch of unknown answers starts the count over.
+        assert!(!absence.observe(None, at(5 * grace)));
+        assert!(!absence.observe(Some(true), at(10 * grace)));
+        assert!(!absence.observe(Some(true), at(10 * grace + 10)));
+        assert!(!absence.observe(Some(true), at(10 * grace + 20)));
     }
 
     #[test]
