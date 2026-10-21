@@ -61,7 +61,9 @@ The immutable depth survives parent deletion. Failed initial launches are marked
 failed and paused; a caller can submit a new request after correcting the cause.
 Initial launches recovered after a backend restart retain their worktree,
 plugins and first prompt, rather than trying to resume a nonexistent agent
-conversation. Request records retain the approving owner and outcome, even if
+conversation. If the backend stops after reserving an ID but before preparing
+the child, the sweep marks that incomplete request failed after two minutes;
+it never silently retries under changed approval. Request records retain the approving owner and outcome, even if
 the parent is deleted; operational logs record requests and lifecycle actions.
 
 ## Credential boundary
@@ -73,7 +75,9 @@ is bound to the parent session, not just that it belongs to the same user.
 Runtime credentials are excluded from session snapshots and Debug output.
 
 Session tokens cannot use the manual launch/fork APIs, create/update schedules, import/restore sessions, mint or renew owner
-credentials, register a launcher socket, or register a different Portal session UUID to bypass spawn policy. Legacy stop/pause/delete calls accept only self or direct children for session credentials; manually resuming requires an owner credential. Missing native Claude history starts a new native conversation under the same Portal UUID with an explicit transcript notice. Browser
+credentials, open the owner dashboard WebSocket, register a launcher socket,
+or register a different Portal session UUID to bypass spawn policy. A paused
+session cannot unpause itself by reconnecting its proxy. Legacy stop/pause/delete calls accept only self or direct children for session credentials; manually resuming requires an owner credential. Missing native Claude history starts a new native conversation under the same Portal UUID with an explicit transcript notice. Browser
 consent endpoints reject Authorization headers and require the owner's signed
 cookie, including in development mode. Owner personal API tokens retain their
 broader manual-launch capability. This is an API credential boundary, **not an

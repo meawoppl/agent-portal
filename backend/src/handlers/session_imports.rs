@@ -386,7 +386,6 @@ mod tests {
         let result = list_external_sessions(
             State(state),
             CurrentUserId(owner),
-            axum::http::HeaderMap::new(),
             Path((launcher, "codex".into())),
             Query(ExternalSessionQuery::default()),
         )

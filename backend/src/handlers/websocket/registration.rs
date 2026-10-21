@@ -79,14 +79,14 @@ pub fn register_or_update_session(
     // Resolve auth_token → user_id up front. Required for *both* new and
     // existing sessions so an attacker can't reactivate someone else's
     // session by knowing its UUID.
-    let requesting_user_id = match get_user_id_from_token(
+    let (requesting_user_id, bound_session) = match get_user_id_from_token(
         app_state,
         &mut conn,
         params.auth_token,
         params.claude_session_id,
         params.replaces_session_id,
     ) {
-        TokenAuth::User(id) => id,
+        TokenAuth::User(id, bound) => (id, bound),
         TokenAuth::Unavailable => {
             warn!(
                 "Deferring session registration, token verification unavailable: session_id={}",
@@ -151,6 +151,14 @@ pub fn register_or_update_session(
         .unwrap_or(None);
 
     let result = if let Some(existing_session) = existing {
+        if existing_session.paused && bound_session.is_some() {
+            return RegistrationResult {
+                success: false,
+                session_id: None,
+                error: Some("Session is paused; resume it through the owner dashboard".into()),
+                retryable: false,
+            };
+        }
         // Authorization gate for reattach: the resolved user_id must be the
         // session's owner or a `session_members` row. Same error shape as
         // "session not found" so a probe can't distinguish the two cases.
@@ -167,34 +175,47 @@ pub fn register_or_update_session(
             };
         }
 
-        match diesel::update(sessions::table.find(existing_session.id))
-            .set((
-                sessions::status.eq(SessionStatus::Active.as_str()),
-                sessions::paused.eq(false),
-                // Note: launch_failure_count is intentionally NOT reset here. A
-                // crash-looping session registers successfully on every attempt
-                // (then exits ~1s later), so resetting on registration kept the
-                // backoff pinned at zero. The counter is now reset only on a
-                // healthy completed run (see `record_exit_for_backoff`), so it
-                // reflects runtime health and the crash-loop backoff can escalate.
-                //
-                // Release the launch lease: registration means this launch is no
-                // longer in flight, so reconcile may claim it again once the
-                // session stops running.
-                sessions::launch_lease_until.eq(None::<chrono::NaiveDateTime>),
-                sessions::last_activity.eq(diesel::dsl::now),
-                sessions::working_directory.eq(params.working_directory),
-                sessions::git_branch.eq(params.git_branch),
-                sessions::client_version.eq(params.client_version),
-                sessions::hostname.eq(params.hostname),
-                sessions::repo_url.eq(params.repo_url),
-                sessions::launcher_id.eq(params.launcher_id),
-                sessions::fork_launch_pending.eq(false),
-                sessions::claude_args.eq(serde_json::to_value(params.claude_args)
-                    .unwrap_or_else(|_| serde_json::Value::Array(Vec::new()))),
-            ))
-            .execute(&mut conn)
+        // A concurrent stop must win over a late bound proxy reconnect.
+        match diesel::update(
+            sessions::table.find(existing_session.id).filter(
+                sessions::paused.eq(false).or(bound_session
+                    .is_none()
+                    .into_sql::<diesel::sql_types::Bool>()),
+            ),
+        )
+        .set((
+            sessions::status.eq(SessionStatus::Active.as_str()),
+            sessions::paused.eq(false),
+            // Note: launch_failure_count is intentionally NOT reset here. A
+            // crash-looping session registers successfully on every attempt
+            // (then exits ~1s later), so resetting on registration kept the
+            // backoff pinned at zero. The counter is now reset only on a
+            // healthy completed run (see `record_exit_for_backoff`), so it
+            // reflects runtime health and the crash-loop backoff can escalate.
+            //
+            // Release the launch lease: registration means this launch is no
+            // longer in flight, so reconcile may claim it again once the
+            // session stops running.
+            sessions::launch_lease_until.eq(None::<chrono::NaiveDateTime>),
+            sessions::last_activity.eq(diesel::dsl::now),
+            sessions::working_directory.eq(params.working_directory),
+            sessions::git_branch.eq(params.git_branch),
+            sessions::client_version.eq(params.client_version),
+            sessions::hostname.eq(params.hostname),
+            sessions::repo_url.eq(params.repo_url),
+            sessions::launcher_id.eq(params.launcher_id),
+            sessions::fork_launch_pending.eq(false),
+            sessions::claude_args.eq(serde_json::to_value(params.claude_args)
+                .unwrap_or_else(|_| serde_json::Value::Array(Vec::new()))),
+        ))
+        .execute(&mut conn)
         {
+            Ok(0) => RegistrationResult {
+                success: false,
+                session_id: None,
+                error: Some("Session is paused or no longer exists".into()),
+                retryable: false,
+            },
             Ok(_) => {
                 if let Err(e) =
                     crate::handlers::session_spawn::registered(&mut conn, existing_session.id)
@@ -367,7 +388,7 @@ fn create_new_session(
 /// clients must retry with backoff. Collapsing the two is what turned deploy
 /// blips into parked launchers (#1264).
 enum TokenAuth {
-    User(Uuid),
+    User(Uuid, Option<Uuid>),
     Rejected,
     Unavailable,
 }
@@ -389,7 +410,7 @@ fn get_user_id_from_token(
                     }
                 }
                 info!("JWT token verified for user: {}", verified.email);
-                return TokenAuth::User(verified.user_id);
+                return TokenAuth::User(verified.user_id, verified.token.session_id);
             }
             Err(crate::errors::AppError::ServiceUnavailable(_)) => {
                 // The token was never evaluated — don't let a DB blip
@@ -405,7 +426,7 @@ fn get_user_id_from_token(
 
     if app_state.dev_mode {
         match crate::auth::dev_user(conn).map(|user| user.id) {
-            Ok(id) => TokenAuth::User(id),
+            Ok(id) => TokenAuth::User(id, None),
             Err(_) => TokenAuth::Rejected,
         }
     } else {
@@ -449,7 +470,7 @@ mod tests {
             .execute(&mut conn)
             .unwrap();
         assert!(
-            matches!(get_user_id_from_token(&state,&mut conn,Some(&issued.token),child.id,None),TokenAuth::User(id) if id==user.id)
+            matches!(get_user_id_from_token(&state,&mut conn,Some(&issued.token),child.id,None),TokenAuth::User(id, Some(bound)) if id==user.id && bound==child.id)
         );
         assert!(matches!(
             get_user_id_from_token(
@@ -478,6 +499,33 @@ mod tests {
             .unwrap();
         assert_eq!(actual.spawned_by, Some(parent.id));
         assert_eq!(actual.spawn_depth, 2);
+        crate::db::session_lifecycle::pause(&mut conn, child.id).unwrap();
+        let result = register_or_update_session(
+            &state,
+            &RegistrationParams {
+                claude_session_id: child.id,
+                session_name: &child.session_name,
+                auth_token: Some(&issued.token),
+                working_directory: &child.working_directory,
+                resuming: true,
+                git_branch: &child.git_branch,
+                client_version: &child.client_version,
+                session_key: &child.session_key,
+                replaces_session_id: None,
+                hostname: &child.hostname,
+                launcher_id: child.launcher_id,
+                agent_type: shared::AgentType::Claude,
+                repo_url: &child.repo_url,
+                scheduled_task_id: None,
+                claude_args: &vec![],
+            },
+        );
+        assert!(!result.success);
+        assert!(crate::schema::sessions::table
+            .find(child.id)
+            .select(crate::schema::sessions::paused)
+            .first::<bool>(&mut conn)
+            .unwrap());
     }
 
     #[tokio::test]

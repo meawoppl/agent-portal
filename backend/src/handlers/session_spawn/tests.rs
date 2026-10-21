@@ -379,3 +379,90 @@ async fn idle_children_pause_without_stopping_unrelated_sessions() {
             .paused
     );
 }
+
+#[tokio::test]
+async fn session_token_cannot_upgrade_to_owner_dashboard_socket() {
+    use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Error};
+    let Some(f) = fixture() else { return };
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let router = axum::Router::new()
+        .route(
+            "/ws/client",
+            axum::routing::get(crate::handlers::websocket::handle_web_client_websocket),
+        )
+        .with_state(f.state.clone())
+        .layer(tower_cookies::CookieManagerLayer::new());
+    let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let mut request = format!("ws://{addr}/ws/client")
+        .into_client_request()
+        .unwrap();
+    request.headers_mut().insert(
+        axum::http::header::AUTHORIZATION,
+        f.headers[axum::http::header::AUTHORIZATION].clone(),
+    );
+    let result = tokio_tungstenite::connect_async(request).await;
+    server.abort();
+    assert!(
+        matches!(result,Err(Error::Http(response)) if response.status()==StatusCode::FORBIDDEN)
+    );
+}
+
+#[tokio::test]
+async fn expired_dispatch_claim_cannot_commit_a_late_child() {
+    let Some(f) = fixture() else { return };
+    let req = request();
+    let child_id = Uuid::new_v4();
+    let mut conn = f.state.conn().unwrap();
+    diesel::insert_into(requests::table)
+        .values((
+            requests::id.eq(req.request_id),
+            requests::user_id.eq(f.parent.user_id),
+            requests::parent_session_id.eq(f.parent.id),
+            requests::launcher_id.eq(f.parent.launcher_id.unwrap()),
+            requests::request.eq(serde_json::to_value(&req).unwrap()),
+            requests::state.eq("launching"),
+            requests::child_session_id.eq(child_id),
+            requests::updated_at.eq(chrono::Utc::now().naive_utc() - chrono::Duration::minutes(3)),
+        ))
+        .execute(&mut conn)
+        .unwrap();
+    drop(conn);
+    sweep(f.state.clone()).await.unwrap();
+    let mut conn = f.state.conn().unwrap();
+    assert_eq!(
+        requests::table
+            .find(req.request_id)
+            .select(requests::state)
+            .first::<String>(&mut conn)
+            .unwrap(),
+        "failed"
+    );
+    drop(conn);
+    let result = super::super::launchers::launch_owned_session(
+        &f.state,
+        f.parent.user_id,
+        LaunchRequest {
+            launch: req.launch,
+            launcher_id: f.parent.launcher_id,
+            name: None,
+            create_worktree: false,
+        },
+        Some(ChildLaunch {
+            request_id: req.request_id,
+            session_id: child_id,
+            parent: f.parent,
+            policy: SpawnPolicy::default(),
+            prompt: req.prompt,
+            plugins: req.plugins,
+        }),
+    );
+    assert!(result.is_err());
+    assert!(sessions::table
+        .find(child_id)
+        .select(sessions::id)
+        .first::<Uuid>(&mut f.state.conn().unwrap())
+        .optional()
+        .unwrap()
+        .is_none());
+}

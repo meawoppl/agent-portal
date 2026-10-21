@@ -135,7 +135,7 @@ pub(crate) fn launch_owned_session(
     let request_id = child.as_ref().map_or_else(Uuid::new_v4, |c| c.request_id);
     let session_id = child.as_ref().map_or_else(Uuid::new_v4, |c| c.session_id);
     let mut conn = app_state.conn()?;
-    conn.transaction::<_, AppError, _>(|conn| {
+    let child_notice = conn.transaction::<_, AppError, _>(|conn| {
         create_desired_session(
             conn,
             DesiredSessionDraft {
@@ -156,12 +156,21 @@ pub(crate) fn launch_owned_session(
                 fork_create_worktree: false,
             },
         )?;
-        if let Some(child) = &child {
-            super::session_spawn::persist_child(conn, child)?;
-        }
-        Ok(())
+        child
+            .as_ref()
+            .map(|child| super::session_spawn::persist_child(conn, child))
+            .transpose()
     })?;
     drop(conn);
+    if let (Some(child), Some(note)) = (&child, child_notice) {
+        if let Err(e) = super::session_spawn::broadcast_notice(app_state, &child.parent, note) {
+            tracing::warn!(
+                "{}: child notice: {:?}",
+                crate::markers::SPAWN_LIFECYCLE_FAILED,
+                e
+            );
+        }
+    }
     app_state
         .session_manager
         .register_launch_session(request_id, session_id);

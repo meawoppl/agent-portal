@@ -130,6 +130,11 @@ pub async fn handle_web_client_websocket(
             Err(error) => error.into_response(),
         };
     }
+    // Dashboard frames act with owner authority (including launch RPCs).
+    // A session token must stay on /ws/session and its scoped agent APIs.
+    if let Err(error) = crate::auth::require_manual_launch_credential(&app_state, &headers) {
+        return error.into_response();
+    }
     let user_id = match crate::auth::extract_user_id(&app_state, Some(&headers), &cookies).ok() {
         Some(id) => id,
         None => {

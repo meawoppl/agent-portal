@@ -521,6 +521,12 @@ fn dispatch(state: Arc<AppState>, row: RequestRow) -> Result<SpawnRequestInfo, S
             .find(row.id)
             .select(RequestRow::as_select())
             .first::<RequestRow>(conn)?;
+        if current.state != "launching" {
+            return Err(SpawnFailure::new(
+                "request_not_launching",
+                "Request is no longer approved for dispatch",
+            ));
+        }
         if current.child_session_id.is_some() {
             return Err(SpawnFailure::new(
                 "launch_in_progress",
@@ -546,14 +552,6 @@ fn dispatch(state: Arc<AppState>, row: RequestRow) -> Result<SpawnRequestInfo, S
         name: None,
         create_worktree: false,
     };
-    notice(
-        &state,
-        &parent,
-        format!(
-            "Launching child session [{}](/dashboard?session={})",
-            child_id, child_id
-        ),
-    )?;
     let child = ChildLaunch {
         request_id: row.id,
         session_id: child_id,
@@ -584,8 +582,24 @@ fn dispatch(state: Arc<AppState>, row: RequestRow) -> Result<SpawnRequestInfo, S
         .info()
 }
 
-pub(crate) fn persist_child(conn: &mut PgConnection, child: &ChildLaunch) -> Result<(), AppError> {
+pub(crate) fn persist_child(
+    conn: &mut PgConnection,
+    child: &ChildLaunch,
+) -> Result<crate::models::Message, AppError> {
     use crate::schema::pending_inputs;
+    // The expiry sweep takes this same request lock. Either preparation wins
+    // and commits a recoverable child, or the expired claim rejects preparation
+    // and the outer transaction rolls the child row back.
+    let (state, id) = requests::table
+        .find(child.request_id)
+        .select((requests::state, requests::child_session_id))
+        .for_update()
+        .first::<(String, Option<Uuid>)>(conn)?;
+    if state != "launching" || id != Some(child.session_id) {
+        return Err(AppError::BadRequest(
+            "Spawn claim expired before child preparation",
+        ));
+    }
     diesel::update(sessions::table.find(child.session_id))
         .set((
             sessions::spawned_by.eq(child.parent.id),
@@ -623,7 +637,14 @@ pub(crate) fn persist_child(conn: &mut PgConnection, child: &ChildLaunch) -> Res
             requests::updated_at.eq(diesel::dsl::now),
         ))
         .execute(conn)?;
-    Ok(())
+    persist_notice(
+        conn,
+        &child.parent,
+        format!(
+            "Launching child session [{}](/dashboard?session={})",
+            child.session_id, child.session_id
+        ),
+    )
 }
 
 #[derive(serde::Serialize)]
@@ -734,7 +755,7 @@ fn persist_notice(
     conn: &mut PgConnection,
     parent: &Session,
     text: String,
-) -> Result<crate::models::Message, SpawnFailure> {
+) -> Result<crate::models::Message, AppError> {
     let content = shared::PortalMessage::text(text).to_json();
     Ok(diesel::insert_into(crate::schema::messages::table)
         .values(crate::models::NewMessage {
@@ -749,7 +770,7 @@ fn persist_notice(
         })
         .get_result(conn)?)
 }
-fn broadcast_notice(
+pub(crate) fn broadcast_notice(
     state: &AppState,
     parent: &Session,
     inserted: crate::models::Message,
@@ -765,11 +786,6 @@ fn broadcast_notice(
     );
     Ok(())
 }
-fn notice(state: &AppState, parent: &Session, text: String) -> Result<(), SpawnFailure> {
-    let inserted = persist_notice(&mut *state.conn()?, parent, text)?;
-    broadcast_notice(state, parent, inserted)
-}
-
 pub(crate) async fn sweep(state: Arc<AppState>) -> Result<(), AppError> {
     let mut conn = state.conn()?;
     // An interrupted dispatch before the session transaction committed has no
@@ -782,27 +798,44 @@ pub(crate) async fn sweep(state: Arc<AppState>) -> Result<(), AppError> {
         )
         .select((requests::id, requests::child_session_id))
         .load::<(Uuid, Option<Uuid>)>(&mut conn)?;
-    for (id, child) in abandoned {
-        let exists = child
-            .map(|id| {
-                sessions::table
-                    .find(id)
-                    .select(sessions::id)
-                    .first::<Uuid>(&mut conn)
-                    .optional()
-            })
-            .transpose()?
-            .flatten()
-            .is_some();
-        if !exists {
-            diesel::update(requests::table.find(id))
-                .set((
-                    requests::state.eq("failed"),
-                    requests::error_code.eq("dispatch_interrupted"),
-                    requests::updated_at.eq(diesel::dsl::now),
-                ))
-                .execute(&mut conn)?;
-        }
+    for (id, _) in abandoned {
+        conn.transaction::<_, AppError, _>(|conn| {
+            let current = requests::table
+                .find(id)
+                .filter(requests::state.eq("launching"))
+                .filter(
+                    requests::updated_at
+                        .lt(chrono::Utc::now().naive_utc() - chrono::Duration::minutes(2)),
+                )
+                .select(requests::child_session_id)
+                .for_update()
+                .first::<Option<Uuid>>(conn)
+                .optional()?;
+            let Some(child) = current else {
+                return Ok(());
+            };
+            let exists = child
+                .map(|id| {
+                    sessions::table
+                        .find(id)
+                        .select(sessions::id)
+                        .first::<Uuid>(conn)
+                        .optional()
+                })
+                .transpose()?
+                .flatten()
+                .is_some();
+            if !exists {
+                diesel::update(requests::table.find(id))
+                    .set((
+                        requests::state.eq("failed"),
+                        requests::error_code.eq("dispatch_interrupted"),
+                        requests::updated_at.eq(diesel::dsl::now),
+                    ))
+                    .execute(conn)?;
+            }
+            Ok(())
+        })?;
     }
     let children = sessions::table
         .filter(sessions::spawn_depth.gt(1))
