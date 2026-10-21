@@ -16,6 +16,7 @@ use super::types::{PendingPermission, WsSender};
 pub enum WsEvent {
     Connected(WsSender),
     Error(String),
+    Incompatible(String),
     /// Live `ClaudeOutput`. Second field is the server-assigned `created_at`
     /// for the persisted DB row (`None` if the backend didn't send one — the
     /// pre-#784 wire shape and the rare error-envelope paths that don't go
@@ -193,7 +194,11 @@ pub fn connect_websocket(
                 }
             }
             Err(e) => {
-                report_ws_error(&on_event, "Failed to connect WebSocket", e);
+                if e.retryable {
+                    on_event.emit(WsEvent::Error(e.message));
+                } else {
+                    on_event.emit(WsEvent::Incompatible(e.message));
+                }
             }
         }
     });
@@ -727,6 +732,7 @@ mod tests {
         match ev {
             WsEvent::Connected(_) => "Connected",
             WsEvent::Error(_) => "Error",
+            WsEvent::Incompatible(_) => "Incompatible",
             WsEvent::Output(_) => "Output",
             WsEvent::HistoryBatch(_, _) => "HistoryBatch",
             WsEvent::Permission(_) => "Permission",

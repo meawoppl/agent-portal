@@ -22,8 +22,9 @@ for a successful `HelloAck` before exposing any dashboard or session mutation
 sender. Read-only seed snapshots arriving first are delivered normally, not
 lost. A failed config fetch, negative acknowledgement, closed connection or
 10-second acknowledgement timeout fails closed; none triggers a legacy fallback
-or automatic mutation replay. The user sees the connection error and can
-reconnect/update.
+or automatic mutation replay. Transient transport/config/timeout failures retry
+with the existing bounded backoff; explicit major mismatches and negative acks
+stop and show update guidance. The user sees the connection error.
 
 The server handles Hello before dashboard dispatch and rejects incompatible
 session Register frames too. It closes the socket after sending a rejection,

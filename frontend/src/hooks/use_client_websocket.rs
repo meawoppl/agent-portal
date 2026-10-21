@@ -259,14 +259,14 @@ fn use_live_client_websocket() -> UseClientWebSocket {
                                         }
                                         Err(error) => {
                                             if portal.conn() == ConnId::HOME {
-                                                shutdown_reason.set(Some(error.clone()));
+                                                shutdown_reason.set(Some(error.message.clone()));
                                             }
                                             if let Some(registry) = &registry {
-                                                registry.dispatch(FederationAction::LiveStatus(portal.conn(), Some(error)));
+                                                registry.dispatch(FederationAction::LiveStatus(portal.conn(), Some(error.message)));
                                             }
                                             // No sender was exposed; do not replay mutations or
                                             // turn a failed handshake into a legacy connection.
-                                            break;
+                                            if !error.retryable { break; }
                                         }
                                 }
                                 if portal.is_linked() {

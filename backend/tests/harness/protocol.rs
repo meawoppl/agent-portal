@@ -497,7 +497,7 @@ async fn browser_hello_accepts_current_and_then_registration() {
         .await
         .unwrap();
     receive::<ClientEndpoint>(&mut browser, |f| {
-        matches!(f, ServerToClient::HistoryBatch { .. })
+        matches!(f, ServerToClient::AgentProgress { .. })
     })
     .await;
 }
