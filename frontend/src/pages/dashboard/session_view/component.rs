@@ -2374,7 +2374,6 @@ impl SessionView {
                 self.dispatch_tasks(TasksInbound::Live(ev));
             }
         }
-        crate::audio::play_sound(crate::audio::SoundEvent::Activity);
         let activity_ts = output
             .raw_iso()
             .map(parse_iso_ms_utc)
@@ -2531,7 +2530,6 @@ impl SessionView {
     }
 
     fn handle_ws_error(&mut self, ctx: &Context<Self>, err: String) -> bool {
-        crate::audio::play_sound(crate::audio::SoundEvent::Error);
         self.ws_connected = false;
         self.ws_sender = None;
         ctx.props()

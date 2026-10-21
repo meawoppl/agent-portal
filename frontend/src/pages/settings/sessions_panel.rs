@@ -1,7 +1,8 @@
+use super::session_forward::SessionForward;
 use crate::components::{ConfirmModal, ConfirmModalStyle, ShareDialog};
 use crate::utils::{self, On401};
 use gloo_net::http::Request;
-use shared::api::SessionsResponse;
+use shared::api::{SessionsResponse, UserForwardInfo, UserForwardsResponse};
 use shared::SessionInfo;
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
@@ -10,6 +11,9 @@ use yew::prelude::*;
 #[derive(Properties, PartialEq)]
 struct SessionRowProps {
     session: SessionInfo,
+    forward: Option<UserForwardInfo>,
+    forwards_loading: bool,
+    on_forward_changed: Callback<()>,
     on_delete: Callback<Uuid>,
     on_share: Callback<Uuid>,
 }
@@ -58,6 +62,15 @@ fn session_row(props: &SessionRowProps) -> Html {
             <td class="session-activity">{ utils::format_timestamp(&session.last_activity) }</td>
             <td class="session-created">{ utils::format_timestamp(&session.created_at) }</td>
             <td class={status_class}>{ session.status.as_str() }</td>
+            <td class="session-forwards">
+                if props.forwards_loading {
+                    <span>{"Loading…"}</span>
+                } else if let Some(forward) = &props.forward {
+                    <SessionForward forward={forward.clone()} can_edit={is_owner} on_changed={props.on_forward_changed.clone()} />
+                } else {
+                    <span class="empty-forward">{"—"}</span>
+                }
+            </td>
             <td class="session-actions">
                 if is_owner {
                     <button class="share-button" onclick={on_share_click} title="Share session">
@@ -81,6 +94,40 @@ pub struct SessionsPanelProps {
 pub fn sessions_panel(props: &SessionsPanelProps) -> Html {
     let sessions = use_state(Vec::<SessionInfo>::new);
     let sessions_loading = use_state(|| true);
+    let forwards = use_state(Vec::<UserForwardInfo>::new);
+    let forwards_loading = use_state(|| true);
+    let forwards_error = use_state(|| None::<String>);
+    let fetch_forwards = {
+        let forwards = forwards.clone();
+        let loading = forwards_loading.clone();
+        let error = forwards_error.clone();
+        Callback::from(move |()| {
+            let forwards = forwards.clone();
+            let loading = loading.clone();
+            let error = error.clone();
+            loading.set(true);
+            spawn_local(async move {
+                match utils::fetch_json::<UserForwardsResponse>("/api/forwards", On401::Ignore)
+                    .await
+                {
+                    Ok(data) => {
+                        forwards.set(data.forwards);
+                        error.set(None);
+                    }
+                    Err(_) => error.set(Some("Could not refresh forwards. Try again.".into())),
+                }
+                loading.set(false);
+            });
+        })
+    };
+    {
+        let fetch = fetch_forwards.clone();
+        use_effect_with((), move |_| {
+            fetch.emit(());
+            || ()
+        });
+    }
+
     let share_session_id = use_state(|| None::<Uuid>);
     let confirm_action = use_state(|| None::<(String, Callback<MouseEvent>)>);
 
@@ -179,15 +226,25 @@ pub fn sessions_panel(props: &SessionsPanelProps) -> Html {
         })
     };
 
+    let on_refresh = {
+        let fetch_sessions = fetch_sessions.clone();
+        let fetch_forwards = fetch_forwards.clone();
+        Callback::from(move |_: MouseEvent| {
+            fetch_sessions.emit(());
+            fetch_forwards.emit(());
+        })
+    };
     html! {
         <>
             <section class="section-stack sessions-section">
                 <div class="section-header">
                     <h2>{ "Session History" }</h2>
                     <p class="section-description">
-                        { "View and manage your Claude Code sessions across all machines." }
+                        { "View sessions and their forwarded websites across all machines. Public forwards are accessible to anyone with the URL." }
                     </p>
+                    <button type="button" class="btn-secondary" onclick={on_refresh} disabled={*sessions_loading || *forwards_loading}>{"Refresh sessions and forwards"}</button>
                 </div>
+                if let Some(error) = &*forwards_error { <p class="error-message" role="alert">{error}</p> }
 
                 if *sessions_loading {
                     <div class="loading">
@@ -211,6 +268,7 @@ pub fn sessions_panel(props: &SessionsPanelProps) -> Html {
                                     <th>{ "Last Activity" }</th>
                                     <th>{ "Created" }</th>
                                     <th>{ "Status" }</th>
+                                    <th>{ "Forwards" }</th>
                                     <th>{ "Actions" }</th>
                                 </tr>
                             </thead>
@@ -220,6 +278,9 @@ pub fn sessions_panel(props: &SessionsPanelProps) -> Html {
                                         <SessionRow
                                             key={session.id.to_string()}
                                             session={session.clone()}
+                                            forward={forwards.iter().find(|forward| forward.session_id == session.id).cloned()}
+                                            forwards_loading={*forwards_loading}
+                                            on_forward_changed={fetch_forwards.clone()}
                                             on_delete={on_delete_session.clone()}
                                             on_share={on_share_session.clone()}
                                         />

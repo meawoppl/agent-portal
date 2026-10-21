@@ -3,7 +3,6 @@ mod agent_install;
 pub(crate) mod agent_login;
 mod agents_panel;
 mod appearance_panel;
-mod forwarding_panel;
 mod health_timer_panel;
 mod launchers_panel;
 mod linked_portals;
@@ -11,22 +10,19 @@ mod notifications_panel;
 mod performance_panel;
 mod profile_panel;
 mod schedule_panel;
+mod session_forward;
 mod sessions_panel;
-mod sounds_panel;
 mod tokens_panel;
 
 use crate::utils;
 use account_panel::AccountPanel;
 use appearance_panel::AppearancePanel;
-use forwarding_panel::ForwardingPanel;
-use health_timer_panel::HealthTimerPanel;
 use launchers_panel::LaunchersPanel;
 use notifications_panel::NotificationsPanel;
 use performance_panel::PerformancePanel;
 use schedule_panel::SchedulePanel;
 use sessions_panel::SessionsPanel;
 use shared::{ProxyTokenInfo, SessionInfo};
-use sounds_panel::SoundsPanel;
 use tokens_panel::{count_expiring_tokens, TokensPanel};
 use yew::prelude::*;
 
@@ -37,10 +33,7 @@ enum SettingsTab {
     Computers,
     Sessions,
     Tokens,
-    Forwarding,
-    Sounds,
     Notifications,
-    HealthTimer,
     Schedule,
     Performance,
     Appearance,
@@ -84,10 +77,7 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
     let on_computers_tab = make_tab_handler(SettingsTab::Computers);
     let on_sessions_tab = make_tab_handler(SettingsTab::Sessions);
     let on_tokens_tab = make_tab_handler(SettingsTab::Tokens);
-    let on_forwarding_tab = make_tab_handler(SettingsTab::Forwarding);
-    let on_sounds_tab = make_tab_handler(SettingsTab::Sounds);
     let on_notifications_tab = make_tab_handler(SettingsTab::Notifications);
-    let on_health_timer_tab = make_tab_handler(SettingsTab::HealthTimer);
     let on_schedule_tab = make_tab_handler(SettingsTab::Schedule);
     let on_performance_tab = make_tab_handler(SettingsTab::Performance);
     let on_appearance_tab = make_tab_handler(SettingsTab::Appearance);
@@ -140,28 +130,10 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
                     }
                 </button>
                 <button
-                    class={classes!("tab-button", (*active_tab == SettingsTab::Forwarding).then_some("active"))}
-                    onclick={on_forwarding_tab}
-                >
-                    { "Forwarding" }
-                </button>
-                <button
-                    class={classes!("tab-button", (*active_tab == SettingsTab::Sounds).then_some("active"))}
-                    onclick={on_sounds_tab}
-                >
-                    { "Sounds" }
-                </button>
-                <button
                     class={classes!("tab-button", (*active_tab == SettingsTab::Notifications).then_some("active"))}
                     onclick={on_notifications_tab}
                 >
                     { "Notifications" }
-                </button>
-                <button
-                    class={classes!("tab-button", (*active_tab == SettingsTab::HealthTimer).then_some("active"))}
-                    onclick={on_health_timer_tab}
-                >
-                    { "Health Timer" }
                 </button>
                 <button
                     class={classes!("tab-button", (*active_tab == SettingsTab::Schedule).then_some("active"))}
@@ -194,17 +166,8 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
                 if *active_tab == SettingsTab::Tokens {
                     <TokensPanel on_tokens_loaded={on_tokens_loaded} />
                 }
-                if *active_tab == SettingsTab::Forwarding {
-                    <ForwardingPanel />
-                }
-                if *active_tab == SettingsTab::Sounds {
-                    <SoundsPanel />
-                }
                 if *active_tab == SettingsTab::Notifications {
                     <NotificationsPanel />
-                }
-                if *active_tab == SettingsTab::HealthTimer {
-                    <HealthTimerPanel />
                 }
                 if *active_tab == SettingsTab::Schedule {
                     <SchedulePanel />

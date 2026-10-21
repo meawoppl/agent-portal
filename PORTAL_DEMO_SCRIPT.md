@@ -53,8 +53,7 @@ That's not a feature request I got. It's a feature everyone deserves."
 - Web input goes through a client-side outbox with idempotency — closing the
   tab mid-send doesn't drop or double a message.
 - Voice input is browser-native (Web Speech API), no server credentials.
-- Sound settings tab: fully synthesized notification sounds with an ADSR
-  editor, because why not.
+- Appearance settings include an optional health-break timer.
 
 ---
 
@@ -133,7 +132,7 @@ WebSockets and server-sent events work through it — Jupyter kernels, Vite
 hot-reload, all of it. And it's private by default: that URL bounced through
 a token handoff only my login can complete. If I *want* it public —"
 
-**DO:** Settings ▸ **Forwarding** → flip the toggle to **Public**.
+**DO:** Settings ▸ **Sessions** → in **Forwards**, flip the toggle to **Public**.
 Open the URL in an incognito window: it loads with no login.
 
 **SAY:** "— one switch, ngrok-style sharing. And it's paranoid in the right

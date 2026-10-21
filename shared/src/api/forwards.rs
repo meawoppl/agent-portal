@@ -63,7 +63,7 @@ pub struct ForwardInfo {
     pub process: Option<String>,
 }
 
-/// One of the caller's active forwards, for the Settings ▸ Forwarding tab.
+/// One of the caller's active forwards, for the Settings ▸ Sessions view.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UserForwardInfo {
     pub session_id: Uuid,

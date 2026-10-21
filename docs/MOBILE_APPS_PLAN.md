@@ -578,7 +578,7 @@ surface end to end, refresh included, with no cookie in play.
 | C3 | Web Push transport: `web-push` crate, `PORTAL_VAPID_{PUBLIC,PRIVATE}_KEY` env, dead-endpoint pruning on 404/410 → `disabled_at` | `backend/src/push/webpush.rs`, workspace `Cargo.toml` | M | C2 |
 | C4 | Event hooks: emit `NotificationEvent` from the three verified points — `permissions.rs:73`, `message_handlers.rs:309`, and the `Disconnected` transitions (`proxy_socket.rs:116`, `background.rs:83`, `launcher_socket.rs:577`) | those files | S | C2 |
 | C5 | **Presence liveness** (§8.2 caveat): eagerly remove `user_clients` senders on socket close in `web_client_socket.rs` instead of lazy prune-on-failed-send | `backend/src/handlers/websocket/` | S | — |
-| C6 | `notification_prefs` storage (jsonb on `users`, same pattern as the existing `sound_config` column) + GET/PUT API | migration, `handlers/push.rs` | S | W0 |
+| C6 | `notification_prefs` storage (jsonb on `users`) + GET/PUT API | migration, `handlers/push.rs` | S | W0 |
 | C7 | Native transports: APNs via `a2` (HTTP/2, p8 key) + FCM v1 (HTTP, service account) behind the same `PushTransport` trait | `backend/src/push/{apns,fcm}.rs`, `Cargo.toml` | M | C2 |
 
 *Exit test* (C1–C6): locked Android phone with the installed PWA receives a
@@ -591,7 +591,7 @@ tab suppresses the same push.
 |---|---|---|---|---|
 | D1 | SW `push` event handler + `notificationclick` deep link to `/app/session/{id}`; collapse via Web Push `tag` | `frontend/sw.js` | S | A2 |
 | D2 | Subscribe flow: `pushManager.subscribe` with VAPID public key, POST to `/api/push/subscriptions`, notification-permission prompt UX, unsubscribe | `frontend/src/` | M | A2, W0 (e2e needs C1/C3) |
-| D3 | Settings → Notifications panel: new `SettingsTab` variant + panel alongside `sounds_panel.rs` (`frontend/src/pages/settings/mod.rs:20`); per-event-kind toggles | `frontend/src/pages/settings/` | S | W0 (e2e needs C6) |
+| D3 | Settings → Notifications panel: `SettingsTab` variant + panel in `frontend/src/pages/settings/mod.rs`; per-event-kind toggles | `frontend/src/pages/settings/` | S | W0 (e2e needs C6) |
 
 ### Track E — Tauri shell (M3)
 

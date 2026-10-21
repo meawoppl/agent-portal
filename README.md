@@ -189,9 +189,8 @@ branch names come back spelled correctly.
 
 ### Notifications
 
-Web Push, APNs, and FCM for turn-complete and permission-needed events; a
-notification sound designer with synthesized tones and an ADSR editor; and an
-optional health-break timer that nudges you away from the screen.
+Web Push, APNs, and FCM for turn-complete and permission-needed events, plus an
+optional health-break timer in Settings → Appearance.
 
 ### Sharing and access control
 

@@ -20,7 +20,6 @@ Stores authenticated users. Created on first OAuth login.
 | `is_admin` | BOOL | No | Admin privileges flag |
 | `disabled` | BOOL | No | Account disabled flag |
 | `ban_reason` | TEXT | Yes | Reason for ban (if disabled) |
-| `sound_config` | JSONB | Yes | Per-user sound notification settings |
 
 ### `sessions`
 
@@ -196,7 +195,7 @@ Migrations are in `backend/migrations/` and follow the naming convention `YYYY-M
 | `2026-01-20-231629_add_pending_inputs_table` | Adds pending_inputs table |
 | `2026-02-16-171025_add_hostname_and_launcher_id` | Adds hostname and launcher_id to sessions |
 | `2026-02-18-222738_add_pr_url` | Adds pr_url to sessions |
-| `2026-02-19-180649_add_sound_config_to_users` | Adds sound_config to users |
+| `2026-02-19-180649_add_sound_config_to_users` | Historical sound-settings column (removed by `2026-10-21-170000_remove_sound_settings`) |
 | `2026-02-21-204646_add_agent_type_to_sessions` | Adds agent_type to sessions |
 
 ## Working with the Schema

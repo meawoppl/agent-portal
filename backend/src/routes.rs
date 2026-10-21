@@ -293,7 +293,7 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
             "/api/sessions/{id}/forwards/public",
             axum::routing::patch(handlers::forwards::set_forward_public),
         )
-        // The caller's forwards across sessions, for Settings ▸ Forwarding.
+        // The caller's forwards across sessions, for Settings ▸ Sessions.
         .route("/api/forwards", get(handlers::forwards::list_user_forwards))
         .route(
             "/api/agent/sessions/{id}/forwards",
@@ -458,12 +458,6 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
         .route(
             "/api/push/prefs",
             get(handlers::push::get_prefs).put(handlers::push::put_prefs),
-        )
-        // Sound settings
-        .route(
-            "/api/settings/sound",
-            get(handlers::sound_settings::get_sound_settings)
-                .put(handlers::sound_settings::save_sound_settings),
         )
         .route(
             "/api/settings/profile",

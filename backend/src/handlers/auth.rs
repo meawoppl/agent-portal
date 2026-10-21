@@ -1098,7 +1098,6 @@ mod tests {
             is_admin: false,
             disabled: false,
             ban_reason: None,
-            sound_config: None,
             notification_prefs: None,
             nickname: None,
         }

@@ -929,7 +929,6 @@ impl InputBar {
         agent_input: String,
         mode: SendMode,
     ) {
-        crate::audio::ensure_audio_context();
         self.command_history.push(visible_input);
         self.set_input_text("");
         self.input_text.clear();

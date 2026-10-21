@@ -238,7 +238,6 @@ Handler modules under `backend/src/handlers/`:
 | `voice.rs`                      | `/ws/voice/{id}` Google STT bridge |
 | `images.rs`                     | `GET /images/:hash`, dedup store |
 | `retention.rs`                  | Background sweeper for session_max_age + message retention |
-| `sound_settings.rs`             | Per-user notification-sound prefs |
 | `session_access.rs`             | "Who can see this session" authorisation helpers |
 | `admin.rs`                      | Admin-only routes (user management, bans) |
 | `downloads.rs`                  | Binary download links (proxy / launcher artifacts) |
@@ -289,7 +288,7 @@ A Yew (Rust → WASM) SPA. Pages under `frontend/src/pages/`:
 
 - `splash.rs` — landing page / sign-in entry.
 - `dashboard/` — main view: live session list + the per-session terminal with scrollback, prompt input, permission dialog, image upload, voice.
-- `settings/` — user preferences (sound, default agent, etc.).
+- `settings/` — user preferences (appearance, notifications, default agent, etc.).
 - `admin/` — user management, ban list, deployment-wide config.
 - `access_denied.rs`, `banned.rs` — error pages for the auth/allowlist outcomes.
 

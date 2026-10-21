@@ -568,9 +568,6 @@ pub fn dashboard_page() -> Html {
             if currently_awaiting == is_awaiting {
                 return;
             }
-            if is_awaiting {
-                crate::audio::play_sound(crate::audio::SoundEvent::AwaitingInput);
-            }
             session_state.dispatch(DashboardSessionAction::SetAwaiting {
                 session_id,
                 awaiting: is_awaiting,

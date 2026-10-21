@@ -20,12 +20,6 @@ pub struct LinkedIdentitiesResponse {
     pub identities: Vec<LinkedIdentity>,
 }
 
-/// Response for GET /api/settings/sound
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SoundSettingsResponse {
-    pub sound_config: Option<serde_json::Value>,
-}
-
 /// Body for `PUT /api/settings/profile` (#1485). A `nickname` of `None` or an
 /// empty/whitespace string clears the nickname (falls back to name/email).
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -285,8 +285,6 @@ pub(super) fn use_dashboard_focus(
         // that produced the current render; translate it to the session id so
         // focus stays attached to that session across later reorders.
         Callback::from(move |index: usize| {
-            crate::audio::ensure_audio_context();
-            crate::audio::play_sound(crate::audio::SoundEvent::SessionSwap);
             if let Some(session) = active_sessions.get(index) {
                 save_last_active_session(session.key, home_user);
                 session_state.dispatch(if mobile_session_selector {

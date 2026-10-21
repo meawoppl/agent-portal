@@ -285,7 +285,7 @@ Semantics:
 **Live diagnostics.** `agent-portal forward connections` prints every tunnel
 stream the backend currently attributes to the session: UUID, forwarded port,
 control/binary transport, and open time, plus the total against the 512-stream
-ceiling. Settings ▸ Forwarding exposes the same inventory per session. This is
+ceiling. Settings ▸ Sessions exposes the same inventory per session. This is
 the backend's authoritative live registry; if it is well below 512 while the
 proxy reports `at-capacity`, the two sides have diverged and proxy-side stream
 cleanup is the fault rather than legitimate browser concurrency.
@@ -571,7 +571,7 @@ through the WebSocket splice path.
   by default forwards are only reachable by users who already have read access
   to that session's transcript, which is the same trust boundary.
 - **Public forwards** are an owner opt-in (`session_forwards.public`, toggled
-  from Settings ▸ Forwarding). A public forward skips the token handoff and
+  from Settings ▸ Sessions). A public forward skips the token handoff and
   serves the subdomain to anyone with the URL. The dispatch checks `public`
   *before* the cookie gate, but for a private-or-absent forward it still runs
   the cookie gate before distinguishing present-from-absent, so an
@@ -617,7 +617,7 @@ through the WebSocket splice path.
   authenticate there — public forwards still preview, private ones need "Visit
   site". The reverse proxy re-scopes upstream framing policy so the portal may
   embed (see Response rewriting).
-- **Settings ▸ Forwarding** lists the caller's active forwards across their
+- **Settings ▸ Sessions** lists the caller's active forwards in the Forwards column beside their
   sessions (`GET /api/forwards`, owner-scoped) with a per-forward public/private
   toggle (`PATCH …/forwards/public`), so the owner can opt a forward into
   unauthenticated public access.

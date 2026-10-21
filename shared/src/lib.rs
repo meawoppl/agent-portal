@@ -183,8 +183,8 @@ pub mod plugin_manifest;
 pub use api::{
     format_bytes_short, AgentSessionInfo, AgentSessionsResponse, CodexPermissionInput,
     ErrorMessage, LaunchSpec, ModelUsage, ModelUsageEntry, SendAgentMessageRequest,
-    SendAgentMessageResponse, ServiceKind, ServiceStats, SoundSettingsResponse, SystemSample,
-    TurnMetrics, TurnMetricsResponse, WorktreeMode,
+    SendAgentMessageResponse, ServiceKind, ServiceStats, SystemSample, TurnMetrics,
+    TurnMetricsResponse, WorktreeMode,
 };
 pub use local_frame::{LocalFrame, UserFrame, ERROR_MESSAGE_TYPE};
 

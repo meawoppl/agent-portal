@@ -234,9 +234,8 @@
    spacing, which the shell owns. Anything nested deeper keeps its margins.
  *
  * `> [class]` rather than `> *`: `> *` scores 0-1-0, which merely *ties* the
- * single-class rules it must override (`.notification-prefs`, `.sound-toggle`,
- * `.subdomain-create`), leaving stylesheet source order to decide — and all
- * three are declared after this rule, so the reset would lose and do nothing.
+ * single-class rules it must override (`.notification-prefs`, `.subdomain-create`), leaving stylesheet source order to decide — and all
+ * both are declared after this rule, so the reset would lose and do nothing.
  * The attribute selector makes it 0-2-0, which wins regardless of order,
  * including across files. Every child here carries a class.
  *
@@ -772,41 +771,11 @@
     padding: 3rem;
 }
 
-/* =============================================================================
-   Sounds Tab
-   ============================================================================= */
-
-.sounds-section {
-    max-width: 900px;
-}
-
-.sound-save-area {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-}
 
 .save-feedback {
     color: var(--text-secondary);
     font-size: 0.85rem;
     font-weight: 500;
-}
-
-.save-feedback.saved {
-    color: var(--success);
-}
-
-.save-feedback.unsaved {
-    color: var(--error);
-}
-
-.create-button.disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.sound-toggle {
-    margin-bottom: 1.5rem;
 }
 
 .toggle-label {
@@ -951,98 +920,6 @@
 
 .health-minutes-input span {
     color: var(--text-secondary);
-}
-
-.sound-event-cards {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-}
-
-.sound-event-card {
-    background: var(--bg-darker);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 1.25rem;
-}
-
-.sound-card-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    margin-bottom: 1rem;
-}
-
-.sound-card-header h3 {
-    margin: 0;
-    font-size: 1rem;
-    color: var(--text-primary);
-}
-
-.sound-card-header p {
-    margin: 0.25rem 0 0;
-    font-size: 0.8rem;
-    color: var(--text-secondary);
-}
-
-.preview-button {
-    background: transparent;
-    border: 1px solid var(--accent);
-    color: var(--accent);
-    padding: 0.3rem 0.75rem;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 0.8rem;
-    transition: all 0.2s;
-    flex-shrink: 0;
-}
-
-.preview-button:hover {
-    background: var(--accent);
-    color: #fff;
-}
-
-.sound-controls {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: 0.75rem;
-}
-
-.sound-control {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-}
-
-.sound-control label {
-    font-size: 0.8rem;
-    color: var(--text-secondary);
-}
-
-.sound-control select {
-    background: var(--bg-dark);
-    border: 1px solid var(--border);
-    color: var(--text-primary);
-    padding: 0.35rem 0.5rem;
-    border-radius: 4px;
-    font-size: 0.85rem;
-}
-
-.sound-control select:focus {
-    outline: none;
-    border-color: var(--accent);
-}
-
-.sound-control input[type="range"] {
-    width: 100%;
-    accent-color: var(--accent);
-    cursor: pointer;
-}
-
-.sound-value {
-    font-size: 0.75rem;
-    color: var(--text-secondary);
-    font-family: var(--font-mono);
 }
 
 /* Responsive */
@@ -1472,34 +1349,13 @@
     );
 }
 
-/* Settings ▸ Forwarding */
-.forwarding-list {
+/* Settings ▸ Sessions: forwarded websites */
+.session-forward {
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
-}
-
-.forwarding-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-    padding: 0.75rem 1rem;
-    background: var(--bg-darker);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-}
-
-.forwarding-meta {
-    display: flex;
-    flex-direction: column;
-    gap: 0.2rem;
-    min-width: 0;
-}
-
-.forwarding-name {
-    color: var(--text-primary);
-    font-weight: 600;
+    gap: 0.5rem;
+    min-width: 15rem;
+    max-width: 22rem;
 }
 
 .forwarding-url {

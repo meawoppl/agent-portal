@@ -483,7 +483,7 @@ pub async fn delete_forward(
 }
 
 /// GET /api/forwards — the caller's active forwards across the sessions they
-/// own, for the Settings ▸ Forwarding tab. Owner-scoped, since only the owner
+/// own, for the Settings ▸ Sessions tab. Owner-scoped, since only the owner
 /// can toggle a forward public. Empty (not an error) when forwarding is
 /// disabled.
 pub async fn list_user_forwards(

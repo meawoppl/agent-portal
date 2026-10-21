@@ -52,6 +52,7 @@ pub fn appearance_panel() -> Html {
     };
 
     html! {
+        <div class="section-stack">
         <section class="section-stack">
             <div class="section-header">
                 <h2>{ "Appearance" }</h2>
@@ -171,6 +172,8 @@ pub fn appearance_panel() -> Html {
                 </label>
             </div>
         </section>
+        <super::health_timer_panel::HealthTimerPanel />
+        </div>
     }
 }
 
