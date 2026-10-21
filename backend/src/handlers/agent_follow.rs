@@ -1,5 +1,7 @@
 //! Read-only activity-driven long poll. Wake hints may coalesce or be lost;
 //! only the transactionally assigned PostgreSQL sequence advances the cursor.
+mod lifecycle;
+
 use crate::schema::{messages, session_follow_heads, session_follow_messages, session_members};
 use crate::{errors::AppError, AppState};
 use axum::{
@@ -144,6 +146,7 @@ fn read_page(
         }
         let summary =
             super::peek_summary::summarize_message(message_id, &agent, &role, &content, time);
+        let lifecycle = lifecycle::classify(&agent, &content);
         let kind = match summary.kind.as_str() {
             "text"
                 if role == "portal"
@@ -164,7 +167,8 @@ fn read_page(
         events.push(FollowEvent {
             cursor: follow_cursor(id, sequence),
             message_id,
-            kind,
+            activity: lifecycle.activity,
+            kind: lifecycle.kind.map(str::to_owned).unwrap_or(kind),
             text: summary.summary,
         });
         cursor = sequence;
@@ -193,6 +197,47 @@ mod tests {
             .bind::<diesel::sql_types::Uuid,_>(user).bind::<diesel::sql_types::Text,_>(text).execute(conn).unwrap();
         id
     }
+    #[test]
+    fn replay_preserves_turn_activity_independently_of_current_connectivity() {
+        let Some(pool) = shared_pool() else { return };
+        let app = test_app_state(pool.clone());
+        let mut conn = pool.get().unwrap();
+        let user = insert_user(&mut conn, "follow-lifecycle");
+        let session = insert_session(&mut conn, user.id, "follow-lifecycle");
+        diesel::insert_into(session_members::table)
+            .values((
+                session_members::session_id.eq(session.id),
+                session_members::user_id.eq(user.id),
+                session_members::role.eq("owner"),
+            ))
+            .execute(&mut conn)
+            .unwrap();
+        let first = insert(&mut conn, session.id, user.id, r#"{"type":"turn.started"}"#);
+        let last = insert(
+            &mut conn,
+            session.id,
+            user.id,
+            r#"{"type":"turn.failed","error":{"message":"failure"}}"#,
+        );
+        diesel::update(messages::table.filter(messages::session_id.eq(session.id)))
+            .set(messages::agent_type.eq("codex"))
+            .execute(&mut conn)
+            .unwrap();
+        let page = read_page(&app, user.id, session.id, Some(0)).unwrap();
+        assert_eq!(page.events.len(), 2);
+        assert_eq!(page.events[0].message_id, first);
+        assert_eq!(page.events[0].activity, Some(SessionActivityState::Busy));
+        assert_eq!(page.events[1].message_id, last);
+        assert_eq!(page.events[1].activity, Some(SessionActivityState::Idle));
+        assert_eq!(page.events[1].kind, "error");
+        assert!(!page.connected);
+        assert_eq!(page.state, SessionActivityState::Idle);
+        let replay = read_page(&app, user.id, session.id, Some(1)).unwrap();
+        assert_eq!(replay.events.len(), 1);
+        assert_eq!(replay.events[0].message_id, last);
+        assert_eq!(replay.cursor, page.cursor);
+    }
+
     #[test]
     fn pages_replay_equal_timestamps_and_detect_retention_and_revocation() {
         let Some(pool) = shared_pool() else { return };

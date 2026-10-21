@@ -7,6 +7,9 @@ use uuid::Uuid;
 pub struct FollowEvent {
     pub cursor: String,
     pub message_id: Uuid,
+    /// Activity observed in this durable row; never historical connectivity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity: Option<SessionActivityState>,
     pub kind: String,
     pub text: String,
 }
@@ -67,8 +70,18 @@ impl FollowRecordKind {
     }
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum FollowRecordSource {
+    Durable,
+    Snapshot,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FollowRecord {
+    /// Events are journal rows; state/connected always describe the current peer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<FollowRecordSource>,
     pub kind: FollowRecordKind,
     pub cursor: String,
     pub start_cursor: Option<String>,

@@ -1,7 +1,10 @@
 //! Long polling waits on backend activity, not a client peek timer. Output
 //! checkpoints advance only after a whole batch has been written and flushed.
 use anyhow::{Context, Result};
-use shared::api::{FollowEvent, FollowPage, FollowRecord, FollowRecordKind, SessionActivityState};
+use shared::api::{
+    FollowEvent, FollowPage, FollowRecord, FollowRecordKind, FollowRecordSource,
+    SessionActivityState,
+};
 use std::{
     io::{self, Write},
     time::{Duration, Instant},
@@ -45,6 +48,17 @@ struct IdleCompletion {
     pending: bool,
 }
 impl IdleCompletion {
+    fn observe_activity(
+        &mut self,
+        previous: Option<SessionActivityState>,
+        activity: SessionActivityState,
+    ) {
+        if activity.is_active() {
+            self.pending = false;
+        } else if previous.is_some_and(SessionActivityState::is_active) {
+            self.pending = true;
+        }
+    }
     fn observe(&mut self, previous: Option<SessionActivityState>, page: &FollowPage) -> bool {
         if !page.connected || page.state.is_active() {
             self.pending = false;
@@ -102,6 +116,11 @@ fn emit(
 ) -> Result<()> {
     // One record is capped at 100 summaries of at most 240 characters each.
     let record = FollowRecord {
+        source: Some(if events.is_empty() {
+            FollowRecordSource::Snapshot
+        } else {
+            FollowRecordSource::Durable
+        }),
         kind,
         cursor: cursor.to_owned(),
         start_cursor: events.first().map(|e| e.cursor.clone()),
@@ -116,17 +135,55 @@ fn emit(
     } else {
         let digest = events
             .iter()
-            .map(|e| format!("{}: {}", e.kind, e.text))
+            .map(|e| {
+                format!(
+                    "{}{}: {}",
+                    e.kind,
+                    e.activity
+                        .map(|a| format!(" turn={a:?}"))
+                        .unwrap_or_default(),
+                    e.text
+                )
+            })
             .collect::<Vec<_>>()
             .join(" | ");
         let kind = kind.as_str();
         writeln!(
             out,
-            "[{kind} {state:?} connected={connected} cursor={cursor}] {digest}"
+            "[{kind} peer_now={state:?} connected={connected} cursor={cursor}] {digest}"
         )?;
     }
     out.flush()?;
     Ok(())
+}
+
+/// A lifecycle is visible through the status filter even when its primary
+/// kind (e.g. error or a tool) is excluded. Never expose that excluded body.
+fn select_event(
+    event: &FollowEvent,
+    kinds: &[&str],
+    regex: Option<&regex::Regex>,
+    boundary: bool,
+) -> Option<FollowEvent> {
+    let primary = kinds.contains(&event.kind.as_str())
+        && (event.kind == "status" || regex.is_none_or(|r| r.is_match(&event.text)));
+    let status = boundary && event.activity.is_some() && kinds.contains(&"status");
+    if !primary && !status {
+        return None;
+    }
+    let mut selected = event.clone();
+    if !primary {
+        selected.kind = "status".into();
+        selected.text = format!(
+            "turn {}",
+            match event.activity.expect("status requires activity") {
+                SessionActivityState::Busy => "busy",
+                SessionActivityState::Idle => "idle",
+                SessionActivityState::Throttled => "throttled",
+            }
+        );
+    }
+    Some(selected)
 }
 
 pub async fn run(agent_id: &str, options: Options) -> Result<()> {
@@ -175,6 +232,7 @@ pub async fn run(agent_id: &str, options: Options) -> Result<()> {
     let mut failures = 0u32;
     let mut more = false;
     let mut idle_completion = IdleCompletion::default();
+    let mut last_activity = None;
     loop {
         let deadline = batch.deadline(&options, heartbeat);
         let wait = if more {
@@ -234,13 +292,41 @@ pub async fn run(agent_id: &str, options: Options) -> Result<()> {
         };
         failures = 0;
         let changed = state != Some(page.state) || connected != Some(page.connected);
-        let completed_idle = idle_completion.observe(state, &page);
-        for event in page.events {
+        for event in &page.events {
+            let changed_activity = event.activity.is_some() && event.activity != last_activity;
+            let boundary = changed_activity
+                || event.activity.is_some() && matches!(event.kind.as_str(), "status" | "error");
+            if boundary && !batch.events.is_empty() {
+                // Flush only through the previous row. Checkpointing this new
+                // lifecycle cursor before its event was emitted would lose it.
+                emit(
+                    FollowRecordKind::Batch,
+                    cursor.as_deref().expect("buffered event cursor"),
+                    page.state,
+                    page.connected,
+                    &batch.events,
+                    options.json,
+                )?;
+                batch = Batch::new();
+            }
+            if let Some(activity) = event.activity {
+                idle_completion.observe_activity(last_activity, activity);
+                last_activity = Some(activity);
+            }
             cursor = Some(event.cursor.clone());
-            if kinds.contains(&event.kind.as_str())
-                && regex.as_ref().is_none_or(|r| r.is_match(&event.text))
-            {
-                batch.push(event);
+            if let Some(selected) = select_event(event, &kinds, regex.as_ref(), boundary) {
+                if boundary {
+                    emit(
+                        FollowRecordKind::Status,
+                        &event.cursor,
+                        page.state,
+                        page.connected,
+                        &[selected],
+                        options.json,
+                    )?;
+                } else {
+                    batch.push(selected);
+                }
             }
             if batch.full(&options) {
                 emit(
@@ -254,6 +340,7 @@ pub async fn run(agent_id: &str, options: Options) -> Result<()> {
                 batch = Batch::new();
             }
         }
+        let completed_idle = idle_completion.observe(state, &page);
         cursor = Some(page.cursor.clone());
         state = Some(page.state);
         connected = Some(page.connected);
@@ -326,6 +413,7 @@ mod tests {
         FollowEvent {
             cursor: "cursor".into(),
             message_id: uuid::Uuid::new_v4(),
+            activity: None,
             kind: "text".into(),
             text: text.into(),
         }
@@ -381,5 +469,49 @@ mod tests {
         assert!(!IdleCompletion::default().observe(None, &page));
         page.connected = false;
         assert!(!completion.observe(Some(SessionActivityState::Busy), &page));
+    }
+    #[test]
+    fn status_filter_preserves_failed_terminal_without_leaking_excluded_bodies() {
+        let mut e = event("sensitive tool output");
+        e.kind = "error".into();
+        e.activity = Some(SessionActivityState::Idle);
+        let no_match = regex::Regex::new("NEVER").unwrap();
+        let selected = select_event(&e, &["status"], Some(&no_match), true).unwrap();
+        assert_eq!(selected.kind, "status");
+        assert_eq!(selected.text, "turn idle");
+        assert_eq!(selected.cursor, e.cursor);
+        assert!(select_event(&e, &["text"], None, true).is_none());
+        let selected = select_event(&e, &["error"], None, true).unwrap();
+        assert_eq!(selected.kind, "error");
+        assert_eq!(selected.text, e.text);
+        e.kind = "tool_result".into();
+        e.activity = Some(SessionActivityState::Busy);
+        assert_eq!(
+            select_event(&e, &["status"], None, true).unwrap().text,
+            "turn busy"
+        );
+    }
+    #[test]
+    fn replayed_turn_completes_only_after_draining_and_current_idle() {
+        let mut completion = IdleCompletion::default();
+        completion.observe_activity(None, SessionActivityState::Busy);
+        completion.observe_activity(Some(SessionActivityState::Busy), SessionActivityState::Idle);
+        let mut page = FollowPage {
+            cursor: "end".into(),
+            events: vec![],
+            state: SessionActivityState::Idle,
+            connected: true,
+            more: true,
+        };
+        assert!(!completion.observe(Some(SessionActivityState::Idle), &page));
+        page.more = false;
+        assert!(completion.observe(Some(SessionActivityState::Idle), &page));
+        completion.observe_activity(Some(SessionActivityState::Idle), SessionActivityState::Busy);
+        page.state = SessionActivityState::Busy;
+        assert!(!completion.observe(Some(SessionActivityState::Idle), &page));
+        completion.observe_activity(Some(SessionActivityState::Busy), SessionActivityState::Idle);
+        page.state = SessionActivityState::Idle;
+        page.connected = false;
+        assert!(!completion.observe(Some(SessionActivityState::Idle), &page));
     }
 }

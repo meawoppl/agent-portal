@@ -46,14 +46,27 @@ Status changes flush pending text immediately. A single event can exceed the
 character target; its 240-character cap still applies. Filtered events advance
 the checkpoint too.
 
-Heartbeats (default 60s) include the cursor, observed activity state and
-connectivity. These are **live snapshots**, not durable historical status events:
-a brief busy/idle transition entirely within a disconnect may be missed.
+Typed turn starts, completions, failures and rejected rate limits carry durable
+`events[].activity` metadata. Failed terminals are `error` events, including
+Claude result errors, Codex failed turns and Muse unsuccessful terminals.
+A lifecycle row still has exactly one event and one cursor. Activity boundaries
+flush the preceding batch before emitting that row; `--only status` includes its
+activity even if its primary kind is excluded, with a safe status summary rather
+than the excluded body. Unknown frames never claim a completed turn.
+
+Records identify their trigger with `source: durable` (journal events) or
+`source: snapshot` (current status/heartbeat). Record-level `state` and
+`connected` always describe the current peer, even when replayed event activity
+is older. Heartbeats (default 60s) carry those current snapshots. Connectivity is
+not journaled: a connect/disconnect entirely between observations may be missed.
 `--until-idle` exits only after observing an active → idle transition on a
 connected peer; starting on an idle or disconnected peer does not immediately
 exit. After that transition, it drains all catch-up pages and flushes buffered
 text before exiting. A newly active turn cancels the pending completion.
-It cannot guarantee observing every past completed turn.
+Replayed active → idle lifecycle events can also complete the wait, after all
+catch-up pages drain and the current peer is connected and idle. A later durable
+active event or a currently active peer cancels that pending completion. Older
+servers without activity metadata retain snapshot-only behavior.
 
 Transport failures and server errors retry with capped backoff, reporting to
 stderr. Healthy heartbeats stop while the server is unreachable; monitors should
