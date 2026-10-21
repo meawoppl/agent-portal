@@ -1,0 +1,9 @@
+[advisories]
+# RUSTSEC-2023-0071: rsa is transitive through web-push -> jwt-simple ->
+# superboring. Portal's VAPID path uses only ES256KeyPair; it never constructs
+# an RSA key or calls this crate's RSA private-key operations. FCM's RSA uses
+# jsonwebtoken/ring, not rsa. This is an exposure exception, NOT a patched crate.
+# Owner: repository maintainer (@meawoppl). Reviewed 2026-10-21; re-review by
+# 2026-11-21 and on any change to web-push, jwt-simple or signing call sites.
+# Evidence and removal conditions: docs/DEPENDENCY_SECURITY.md.
+ignore = ["RUSTSEC-2023-0071"]

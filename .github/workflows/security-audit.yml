@@ -1,0 +1,39 @@
+name: Dependency Security
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    # New advisories must be found even when Cargo.lock has not changed.
+    - cron: '41 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-security-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: RustSec Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check exposure review ownership and expiry
+        run: |
+          python3 scripts/test_audit_exceptions.py
+          python3 scripts/check-audit-exceptions.py
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          cache-key: "cargo-audit"
+      - name: Install pinned cargo-audit
+        run: cargo install cargo-audit --version 0.22.2 --locked
+      - name: Audit every locked platform against fresh advisories
+        # No target filtering, stale DB fallback, continue-on-error or warning suppression.
+        run: cargo audit --file Cargo.lock
