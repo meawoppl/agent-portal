@@ -162,6 +162,9 @@ fn render_pill_section(
                 key={key.to_string()}
                 index={index}
                 display_number={Some(number_offset + display_idx)}
+                parent_name={session.info.spawned_by.map(|id| props.sessions.iter()
+                    .find(|parent| parent.key.conn == session.key.conn && parent.info.id == id)
+                    .map(|parent| parent.info.session_name.clone()).unwrap_or_else(|| id.to_string()))}
                 session={session.clone()}
                 is_focused={index == props.focused_index}
                 is_awaiting={props.awaiting_sessions.contains(&key)}

@@ -217,6 +217,7 @@ pub fn dashboard_page() -> Html {
                     .then_with(|| session_order::session_display_cmp(a, b))
             });
         }
+        session_order::group_children(&mut sorted, ui_state.group_by_host);
         sorted
     };
 

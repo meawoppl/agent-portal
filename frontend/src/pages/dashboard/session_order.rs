@@ -35,6 +35,55 @@ pub(super) fn session_display_cmp(a: &PortalSession, b: &PortalSession) -> Order
     display_sort_key(a).cmp(&display_sort_key(b))
 }
 
+/// Keep child sessions beside their parent without changing the stable sibling
+/// order. Host grouping takes precedence for children on another machine.
+/// Missing parents and malformed cycles remain visible; portal identities never
+/// cross connection boundaries. Keyboard navigation consumes this same vector.
+pub(super) fn group_children(sessions: &mut Vec<PortalSession>, by_host: bool) {
+    let parents: Vec<Option<usize>> = sessions
+        .iter()
+        .map(|child| {
+            child.info.spawned_by.and_then(|id| {
+                sessions.iter().position(|parent| {
+                    parent.key.conn == child.key.conn
+                        && parent.info.id == id
+                        && (!by_host || host_group_key(parent) == host_group_key(child))
+                })
+            })
+        })
+        .collect();
+    fn append(
+        index: usize,
+        parents: &[Option<usize>],
+        seen: &mut HashSet<usize>,
+        order: &mut Vec<usize>,
+    ) {
+        if !seen.insert(index) {
+            return;
+        }
+        order.push(index);
+        for (child, parent) in parents.iter().enumerate() {
+            if *parent == Some(index) {
+                append(child, parents, seen, order);
+            }
+        }
+    }
+    let mut seen = HashSet::new();
+    let mut order = Vec::with_capacity(sessions.len());
+    for (index, parent) in parents.iter().enumerate() {
+        if parent.is_none() {
+            append(index, &parents, &mut seen, &mut order);
+        }
+    }
+    for index in 0..sessions.len() {
+        append(index, &parents, &mut seen, &mut order);
+    }
+    *sessions = order
+        .into_iter()
+        .map(|index| sessions[index].clone())
+        .collect();
+}
+
 /// Background history hydration order, newest user input first.
 ///
 /// This is intentionally separate from [`session_display_cmp`]: messaging a
@@ -238,6 +287,43 @@ mod tests {
             forked_from_session_id: None,
             fork_point_turn_id: None,
         }
+    }
+
+    #[test]
+    fn child_grouping_keeps_siblings_stable_and_handles_missing_parents_and_cycles() {
+        let parent = session(Uuid::from_u128(1), "/z", "one", None);
+        let mut child = session(Uuid::from_u128(2), "/a", "two", None);
+        child.info.spawned_by = Some(parent.info.id);
+        let other = session(Uuid::from_u128(3), "/b", "one", None);
+        let mut list = vec![child.clone(), other.clone(), parent.clone()];
+        group_children(&mut list, false);
+        assert_eq!(
+            list.iter().map(|s| s.info.id).collect::<Vec<_>>(),
+            vec![other.info.id, parent.info.id, child.info.id]
+        );
+        let mut grouped = vec![other.clone(), parent.clone(), child.clone()];
+        group_children(&mut grouped, true);
+        assert_eq!(grouped[2].info.id, child.info.id);
+        let mut cycle = parent.clone();
+        cycle.info.spawned_by = Some(child.info.id);
+        let mut list = vec![child.clone(), cycle, other];
+        group_children(&mut list, false);
+        assert_eq!(list.len(), 3);
+        assert_eq!(list.iter().map(|s| s.key).collect::<HashSet<_>>().len(), 3);
+        let mut orphan = vec![child];
+        group_children(&mut orphan, false);
+        assert_eq!(orphan.len(), 1);
+    }
+
+    #[test]
+    fn parent_ids_do_not_join_families_across_portals() {
+        let parent = session(Uuid::from_u128(1), "/z", "host", None);
+        let mut child = session(Uuid::from_u128(2), "/a", "host", None);
+        child.info.spawned_by = Some(parent.info.id);
+        child.key.conn = ConnId::linked(99);
+        let mut sessions = vec![child.clone(), parent];
+        group_children(&mut sessions, false);
+        assert_eq!(sessions[0].key, child.key);
     }
 
     #[test]

@@ -1495,6 +1495,9 @@ impl Component for SessionView {
                             { format!("launcher v{}", version) }
                         </span>
                     }
+                    if !ctx.props().portal.is_linked() && is_forward_owner {
+                        <super::spawn_controls::SpawnControls key={ctx.props().session.id.to_string()} session_id={ctx.props().session.id} />
+                    }
                     if !ctx.props().portal.is_linked() {
                         <PluginSelector
                             key={ctx.props().session.id.to_string()}
