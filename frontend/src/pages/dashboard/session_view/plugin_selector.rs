@@ -135,7 +135,7 @@ pub(super) fn plugin_selector(props: &PluginSelectorProps) -> Html {
             <summary class="session-header-action plugin-action" title="Choose plugins for this session">{format!("Plugins {count} ▾")}</summary>
             <div class="plugin-selector-menu" aria-label="Session plugins" aria-busy={busy.to_string()}>
                 <strong>{"Plugins for this session"}</strong>
-                <p>{"Choose installed plugin skills. Changes apply after restarting this session."}</p>
+                <p>{"Choose installed plugin skills. These are the skills the next launch loads; unchosen plugins are on where their files are detected. Changes apply after restarting this session."}</p>
                 if !props.is_owner { <p>{"Only the session owner can change this selection."}</p> }
                 if let Some(message) = &*error { <p role="alert" class="plugin-selector-error">{message}</p> }
                 if *busy { <p role="status">{"Loading / saving…"}</p> }

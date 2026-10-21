@@ -63,6 +63,12 @@ fn detected_in(plugin_root: &Path, working_directory: &Path) -> bool {
 /// Without one, a host-enabled plugin is on only where its detect rules match
 /// the session's working directory, so every installed plugin doesn't load its
 /// skills into every session.
+///
+/// This selects which plugin *skills* a session is launched with, and is what
+/// the inventory shows. It is not an authorization boundary: plugin commands
+/// and runtimes (`plugin open`/`start`/commands) still go by the host-level
+/// `enabled` flag. Detection runs at launch and on each inventory request, so
+/// a file added afterwards changes the next launch, not the running session.
 fn apply(config: &mut LauncherConfig, selection: &Selection, working_directory: &Path) {
     for (name, plugin) in &mut config.plugins {
         plugin.enabled = match selection.get(name) {
@@ -299,6 +305,7 @@ mod tests {
             ("unlinked", r#"any = ["*.slx"]"#, true),
             ("presentations", "", true),
             ("kicad-off", r#"any = ["*.kicad_pcb"]"#, false),
+            ("broken", "", true),
         ];
         for (name, detect, _) in installs {
             let root = plugins.path().join(name);
@@ -308,11 +315,12 @@ mod tests {
             } else {
                 format!("[[detect]]\nname = \"{name}\"\n{detect}\n")
             };
-            fs::write(
-                root.join("agent-portal-plugin.toml"),
-                format!("name = \"{name}\"\n{rules}"),
-            )
-            .unwrap();
+            let manifest = if name == "broken" {
+                "this is = not [valid toml".to_string()
+            } else {
+                format!("name = \"{name}\"\n{rules}")
+            };
+            fs::write(root.join("agent-portal-plugin.toml"), manifest).unwrap();
         }
         let host = || {
             let mut config = LauncherConfig::default();
@@ -341,13 +349,30 @@ mod tests {
                 .collect()
         }
 
+        // No choice: only the host-enabled, detected plugin. An unreadable
+        // manifest is never detected, so `broken` stays off.
         let mut session = host();
         apply(&mut session, &Selection::new(), project.path());
         assert_eq!(enabled(&session), vec!["kicadmium"]);
 
+        // Explicit choices win in both directions, including turning on a
+        // plugin the host has disabled.
         let mut session = host();
-        let choices = Selection::from([("unlinked".into(), true), ("kicadmium".into(), false)]);
+        let choices = Selection::from([
+            ("unlinked".into(), true),
+            ("kicadmium".into(), false),
+            ("kicad-off".into(), true),
+        ]);
         apply(&mut session, &choices, project.path());
-        assert_eq!(enabled(&session), vec!["unlinked"]);
+        assert_eq!(enabled(&session), vec!["kicad-off", "unlinked"]);
+
+        // A session in a worktree under a hidden directory detects from that
+        // root: only hidden *descendants* are skipped by the scan.
+        let worktree = project.path().join(".worktrees").join("feature");
+        fs::create_dir_all(&worktree).unwrap();
+        fs::write(worktree.join("other.kicad_pcb"), "").unwrap();
+        let mut session = host();
+        apply(&mut session, &Selection::new(), &worktree);
+        assert_eq!(enabled(&session), vec!["kicadmium"]);
     }
 }
