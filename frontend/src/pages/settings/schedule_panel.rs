@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use futures_util::future::join_all;
 use shared::api::{
     ScheduledTaskInfo, ScheduledTaskListResponse, ScheduledTaskOccurrence, ScheduledTaskRun,
     ScheduledTaskRunsResponse, UpcomingScheduledTasksResponse,
@@ -100,6 +101,8 @@ fn run_link(run: &ScheduledTaskRun) -> Html {
     }
 }
 
+type TaskRuns = (ScheduledTaskInfo, Result<Vec<ScheduledTaskRun>, String>);
+
 #[derive(Properties, PartialEq)]
 struct RecentRunsProps {
     refresh: u32,
@@ -108,33 +111,33 @@ struct RecentRunsProps {
 /// Past runs of each scheduled task, linking to their logs.
 #[function_component(RecentRuns)]
 fn recent_runs(props: &RecentRunsProps) -> Html {
-    let runs =
-        use_state(|| None::<Result<Vec<(ScheduledTaskInfo, Vec<ScheduledTaskRun>)>, String>>);
+    let runs = use_state(|| None::<Result<Vec<TaskRuns>, String>>);
     {
         let runs = runs.clone();
         use_effect_with(props.refresh, move |_| {
             spawn_local(async move {
-                let result = async {
-                    let tasks = utils::fetch_json::<ScheduledTaskListResponse>(
-                        "/api/scheduled-tasks",
+                let tasks = match utils::fetch_json::<ScheduledTaskListResponse>(
+                    "/api/scheduled-tasks",
+                    On401::Logout,
+                )
+                .await
+                {
+                    Ok(list) => list.tasks,
+                    Err(e) => return runs.set(Some(Err(e.to_string()))),
+                };
+                // One task failing (say, deleted mid-load) costs only its own row.
+                let loaded = join_all(tasks.into_iter().map(|task| async move {
+                    let task_runs = utils::fetch_json::<ScheduledTaskRunsResponse>(
+                        &format!("/api/scheduled-tasks/{}/runs", task.id),
                         On401::Logout,
                     )
-                    .await?
-                    .tasks;
-                    let mut out = Vec::with_capacity(tasks.len());
-                    for task in tasks {
-                        let task_runs = utils::fetch_json::<ScheduledTaskRunsResponse>(
-                            &format!("/api/scheduled-tasks/{}/runs", task.id),
-                            On401::Logout,
-                        )
-                        .await?
-                        .runs;
-                        out.push((task, task_runs));
-                    }
-                    Ok::<_, utils::FetchError>(out)
-                }
+                    .await
+                    .map(|r| r.runs)
+                    .map_err(|e| e.to_string());
+                    (task, task_runs)
+                }))
                 .await;
-                runs.set(Some(result.map_err(|e| e.to_string())));
+                runs.set(Some(Ok(loaded)));
             });
             || ()
         });
@@ -155,13 +158,19 @@ fn recent_runs(props: &RecentRunsProps) -> Html {
                         <h3 title={task.fields.name.clone()}>{ &task.fields.name }</h3>
                         <span>{ format!("{} · {}", task.fields.launch.agent_type.as_str(), task.hostname) }</span>
                     </header>
-                    if task_runs.is_empty() {
-                        <p class="schedule-day-empty">{ "Has not run yet" }</p>
-                    } else {
-                        <ul class="schedule-run-list">
-                            { for task_runs.iter().take(RUNS_PER_TASK).map(run_link) }
-                        </ul>
-                    }
+                    { match task_runs {
+                        Err(error) => html! {
+                            <p class="settings-error">{ format!("Could not load runs: {error}") }</p>
+                        },
+                        Ok(task_runs) if task_runs.is_empty() => html! {
+                            <p class="schedule-day-empty">{ "Has not run yet" }</p>
+                        },
+                        Ok(task_runs) => html! {
+                            <ul class="schedule-run-list">
+                                { for task_runs.iter().take(RUNS_PER_TASK).map(run_link) }
+                            </ul>
+                        },
+                    } }
                 </section>
             }) }
         },

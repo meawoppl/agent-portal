@@ -172,6 +172,25 @@ pub(super) fn resolve_focus_index(
         .unwrap_or(0)
 }
 
+/// Sessions kept out of focus, activation, waiting counts, and keyboard
+/// rotation: the manually hidden ones, paused ones, and scheduled-task runs.
+/// Paused and manually hidden sessions still get a pill in the rail's hidden
+/// section; scheduled runs get none (Settings ▸ Schedule links to them). Any of
+/// them can still be focused explicitly, e.g. through a `?session=` deep link.
+pub(super) fn effective_hidden_sessions(
+    sessions: &[PortalSession],
+    manually_hidden: &HashSet<SessionKey>,
+) -> HashSet<SessionKey> {
+    let mut hidden = manually_hidden.clone();
+    hidden.extend(
+        sessions
+            .iter()
+            .filter(|s| s.info.paused || s.info.scheduled_task_id.is_some())
+            .map(|s| s.key),
+    );
+    hidden
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -420,6 +439,27 @@ mod tests {
         let sessions = vec![session(a, "/a", "h", None), session(b, "/b", "h", None)];
         // a is hidden → first non-hidden is b at index 1.
         assert_eq!(resolve_focus_index(&sessions, None, &hidden, 0), 1);
+    }
+
+    /// A scheduled run is skipped by automatic focus but can still be focused
+    /// explicitly, which is how Schedule's "Open session" link reaches it.
+    #[test]
+    fn scheduled_runs_skip_automatic_focus_but_open_explicitly() {
+        let cron = Uuid::from_u128(1);
+        let manual = Uuid::from_u128(2);
+        let mut cron_run = session(cron, "/a", "h", None);
+        cron_run.info.scheduled_task_id = Some(Uuid::from_u128(9));
+        let sessions = vec![cron_run, session(manual, "/b", "h", None)];
+
+        let hidden = effective_hidden_sessions(&sessions, &HashSet::new());
+        assert!(hidden.contains(&key(cron)));
+        assert!(!hidden.contains(&key(manual)));
+
+        assert_eq!(resolve_focus_index(&sessions, None, &hidden, 0), 1);
+        assert_eq!(
+            resolve_focus_index(&sessions, Some(key(cron)), &hidden, 1),
+            0
+        );
     }
 
     /// A focused id that is only *transiently* absent (e.g. a just-launched
