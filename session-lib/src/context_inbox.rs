@@ -59,6 +59,14 @@ impl ContextInbox {
         self.0.lock().ok()?.pending.clone()
     }
 
+    /// `current` and `pending` read together, so they belong to one revision.
+    pub fn snapshot(&self) -> (Option<String>, Option<ContextUpdate>) {
+        match self.0.lock() {
+            Ok(state) => (state.current.clone(), state.pending.clone()),
+            Err(_) => (None, None),
+        }
+    }
+
     pub fn is_pending(&self) -> bool {
         self.pending().is_some()
     }

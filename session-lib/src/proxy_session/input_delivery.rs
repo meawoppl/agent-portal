@@ -63,10 +63,13 @@ where
     // acknowledged only once the agent accepts this input, so a failed
     // delivery leaves it for the next one.
     let inbox = claude_session.context_inbox().clone();
-    let context_update = if slash_command { None } else { inbox.pending() };
+    // One read, so the fresh-context text and the change it covers belong to
+    // the same revision.
+    let (current, pending) = inbox.snapshot();
+    let context_update = if slash_command { None } else { pending };
     let (text, display_event) = if inject_reminder || recovery.is_some() {
         let mut context = fresh_plugin_context(
-            &inbox,
+            current,
             claude_session.config().plugin_skill_reminder.as_deref(),
         );
         if let Some(recovery) = recovery {
@@ -118,15 +121,13 @@ where
             return Some(ConnectionResult::AgentExited);
         }
     };
-    if let Some(update) = context_update {
-        inbox.acknowledge(update.revision);
-    }
     spawn_delivery_completion(
         ws_write.clone(),
         session_id,
         input.client_msg_id,
         input.ack,
         delivered,
+        context_update.map(|update| (inbox, update)),
     );
     None
 }
@@ -134,11 +135,22 @@ where
 /// The plugin context a fresh conversation (first input, `/clear`, a restart
 /// with recovery) starts with: the latest posted one, else the launch-time
 /// one. Covers any pending change, which a fresh start makes moot.
-fn fresh_plugin_context(inbox: &crate::ContextInbox, launch: Option<&str>) -> String {
-    inbox
-        .current()
+fn fresh_plugin_context(current: Option<String>, launch: Option<&str>) -> String {
+    current
         .or_else(|| launch.map(str::to_string))
         .unwrap_or_default()
+}
+
+/// A change carried by an input is done only once the agent accepted that
+/// input; a rejected or dropped delivery leaves it pending for the next one.
+fn settle_context_update(
+    outcome: &Result<Result<(), String>, oneshot::error::RecvError>,
+    inbox: &crate::ContextInbox,
+    update: &crate::ContextUpdate,
+) {
+    if matches!(outcome, Ok(Ok(()))) {
+        inbox.acknowledge(update.revision);
+    }
 }
 
 fn spawn_delivery_completion(
@@ -147,9 +159,14 @@ fn spawn_delivery_completion(
     client_msg_id: Option<Uuid>,
     ack: Option<PortalInputAck>,
     delivered: oneshot::Receiver<Result<(), String>>,
+    context: Option<(crate::ContextInbox, crate::ContextUpdate)>,
 ) {
     tokio::spawn(async move {
-        match delivered.await {
+        let outcome = delivered.await;
+        if let Some((inbox, update)) = &context {
+            settle_context_update(&outcome, inbox, update);
+        }
+        match outcome {
             Ok(Ok(())) => {
                 // Delivery stage: the input is now in the agent's stream — the
                 // optimistic row clears here (#939).
@@ -196,23 +213,49 @@ mod tests {
     fn a_fresh_conversation_uses_the_latest_plugin_context() {
         let inbox = crate::ContextInbox::default();
         let old = "## Plugin Skills\n- `old:skill`";
-        let launch = Some(old);
-        assert_eq!(fresh_plugin_context(&inbox, launch), old);
+        assert_eq!(fresh_plugin_context(inbox.current(), Some(old)), old);
 
         inbox.post(1, String::new(), "## Plugin context changed".into());
         let delivered = inbox.pending().unwrap();
-        inbox.acknowledge(delivered.revision);
+        settle_context_update(&Ok(Ok(())), &inbox, &delivered);
         assert!(!inbox.is_pending());
-        assert_eq!(fresh_plugin_context(&inbox, launch), "", "no plugins now");
+        assert_eq!(
+            fresh_plugin_context(inbox.current(), Some(old)),
+            "",
+            "no plugins now"
+        );
 
         inbox.post(
             2,
             "## Plugin Skills\n- `new:skill`".into(),
             "changed".into(),
         );
+        let (current, pending) = inbox.snapshot();
+        assert_eq!(pending.unwrap().revision, 2);
         assert_eq!(
-            fresh_plugin_context(&inbox, launch),
+            fresh_plugin_context(current, Some(old)),
             "## Plugin Skills\n- `new:skill`"
         );
+    }
+
+    /// Only an input the agent accepted completes the change it carried.
+    #[tokio::test]
+    async fn rejected_or_dropped_delivery_keeps_the_change_pending() {
+        let inbox = crate::ContextInbox::default();
+        inbox.post(1, "c".into(), "u".into());
+        let update = inbox.pending().unwrap();
+
+        settle_context_update(&Ok(Err("busy".into())), &inbox, &update);
+        assert!(inbox.is_pending(), "a rejected input leaves it pending");
+
+        let (sender, receiver) = oneshot::channel::<Result<(), String>>();
+        drop(sender);
+        settle_context_update(&receiver.await, &inbox, &update);
+        assert!(inbox.is_pending(), "a dropped delivery leaves it pending");
+
+        // A newer change lands before the old one is finally accepted.
+        inbox.post(2, "c2".into(), "u2".into());
+        settle_context_update(&Ok(Ok(())), &inbox, &update);
+        assert_eq!(inbox.pending().unwrap().revision, 2);
     }
 }
