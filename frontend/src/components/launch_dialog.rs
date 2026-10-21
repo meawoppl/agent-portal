@@ -331,6 +331,10 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     let plugin_suggestion_error = use_state(|| None::<String>);
     // Plugins switched on or off here, keyed by name; cleared with the target.
     let plugin_choices = use_state(BTreeMap::<String, bool>::new);
+    // The launcher and directory the suggestions (and so the choices) were
+    // loaded for. A launch only sends choices made for its own target, even
+    // in the render before the effect above clears them.
+    let plugin_target = use_state(|| None::<(Option<Uuid>, String)>);
 
     // Fetch launchers on mount and on every LaunchersChanged tick (#710);
     // auto-select install mode when none are connected.
@@ -380,6 +384,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         let plugin_suggestions = plugin_suggestions.clone();
         let plugin_suggestion_error = plugin_suggestion_error.clone();
         let plugin_choices = plugin_choices.clone();
+        let plugin_target = plugin_target.clone();
         use_effect_with(target, move |(launcher, path)| {
             let (launcher, path) = (*launcher, path.clone());
             // Suggestions for a directory the user has already moved past must
@@ -388,15 +393,19 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
             plugin_suggestions.set(Vec::new());
             plugin_suggestion_error.set(None);
             plugin_choices.set(BTreeMap::new());
+            plugin_target.set(None);
             if let Some(launcher) = launcher {
                 let current = current.clone();
                 spawn_local(async move {
-                    let result = fetch_launcher_plugins(launcher, Some(path)).await;
+                    let result = fetch_launcher_plugins(launcher, Some(path.clone())).await;
                     if !current.get() {
                         return;
                     }
                     match result {
-                        Ok(data) => plugin_suggestions.set(data.plugins),
+                        Ok(data) => {
+                            plugin_suggestions.set(data.plugins);
+                            plugin_target.set(Some((Some(launcher), path)));
+                        }
                         Err(err) => plugin_suggestion_error
                             .set(Some(format!("Could not load plugin suggestions: {err}"))),
                     }
@@ -556,7 +565,10 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     // Primary action, invoked by the Launch button and by Enter from any
     // non-button field (#1384). `Callback<()>` so both call sites can fire it.
     let launch: Callback<()> = {
-        let plugin_selection = plugin_overrides(&plugin_suggestions, &plugin_choices);
+        let launch_target = (*selected_launcher, (*dir.path).clone());
+        let plugin_selection = (plugin_target.as_ref() == Some(&launch_target))
+            .then(|| plugin_overrides(&plugin_suggestions, &plugin_choices))
+            .flatten();
         let dir_path = dir.path.clone();
         let home_root = dir.home_root.clone();
         let extra_args = extra_args.clone();

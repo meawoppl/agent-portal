@@ -316,3 +316,46 @@ pub fn plugin_card(props: &PluginCardProps) -> Html {
         </article>
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn plugin(name: &str, enabled: bool) -> PortalPluginInfo {
+        PortalPluginInfo {
+            name: name.into(),
+            display_name: name.into(),
+            enabled,
+            ..Default::default()
+        }
+    }
+
+    fn choices(pairs: &[(&str, bool)]) -> BTreeMap<String, bool> {
+        pairs.iter().map(|(n, e)| (n.to_string(), *e)).collect()
+    }
+
+    /// Only real changes are sent; with none, the launcher leaves every plugin
+    /// to policy and detection.
+    #[test]
+    fn overrides_carry_only_real_changes() {
+        let plugins = [plugin("kicadmium", true), plugin("visilog", false)];
+        assert_eq!(plugin_overrides(&plugins, &BTreeMap::new()), None);
+        // Toggled away and back: the choice equals the effective state.
+        assert_eq!(
+            plugin_overrides(&plugins, &choices(&[("kicadmium", true)])),
+            None
+        );
+        assert_eq!(
+            plugin_overrides(
+                &plugins,
+                &choices(&[("kicadmium", false), ("visilog", true)])
+            ),
+            Some(choices(&[("kicadmium", false), ("visilog", true)]))
+        );
+        // A name no longer in the inventory is dropped, not sent.
+        assert_eq!(
+            plugin_overrides(&plugins, &choices(&[("removed", true)])),
+            None
+        );
+    }
+}

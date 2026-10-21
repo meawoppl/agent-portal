@@ -524,6 +524,13 @@
     border-style: dashed;
 }
 
+@media (pointer: coarse) {
+    .plugin-suggestion-pill {
+        min-height: 44px;
+        padding-inline: 0.7rem;
+    }
+}
+
 .plugin-policy-mark {
     color: var(--text-muted);
     font-size: 0.66rem;
