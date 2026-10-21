@@ -865,7 +865,48 @@ async fn run_session_task(
         let extra_args = plugin_skill.extra_args;
         let plugin_skill_reminder = plugin_skill.reminder;
 
+        // A wrapper joins the cgroup before exec, so no agent tool can race a
+        // post-spawn PID move. Antigravity connects to an existing IDE process.
+        let limits = config::load_config().session_memory.unwrap_or_default();
+        let executable = match config.agent_type {
+            shared::AgentType::Claude => Some("claude"),
+            shared::AgentType::Codex => Some("codex"),
+            shared::AgentType::Muse => Some("muse"),
+            shared::AgentType::Antigravity => {
+                info!(session_id = %config.session_id, "Antigravity uses an external IDE; no per-session cgroup containment");
+                None
+            }
+        };
+        let session_group = if let Some(binary) = executable {
+            match crate::session_cgroups::SessionGroup::prepare(
+                config.session_id,
+                Path::new(binary),
+                limits.high_bytes,
+                limits.max_bytes,
+            ) {
+                Ok(group) => group,
+                Err(error) if limits.high_bytes.is_some() || limits.max_bytes.is_some() => {
+                    error!(session_id = %config.session_id, "Cannot apply configured session memory limits: {error:#}");
+                    cleanup_plugin_skill_root(plugin_skill_cleanup_dir.as_deref());
+                    return TaskOutcome {
+                        exit_code: Some(1),
+                        reason: SessionExitReason::Error,
+                    };
+                }
+                Err(error) => {
+                    warn!(session_id = %config.session_id, "Session memory containment unavailable; using ordinary process groups: {error:#}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        if session_group.is_none() && (limits.high_bytes.is_some() || limits.max_bytes.is_some()) {
+            warn!(session_id = %config.session_id, "Memory delegation unsupported for this run; configured session limits are not enforced");
+        }
         let session_config = SessionConfig {
+            runtime_command: session_group.as_ref().map(|group| group.command()),
+            memory_events_path: session_group.as_ref().map(|group| group.events()),
             recovery_context: config
                 .history_restore
                 .as_ref()

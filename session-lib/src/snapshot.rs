@@ -10,6 +10,12 @@ use crate::buffer::BufferedOutput;
 /// Configuration for creating a session
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SessionConfig {
+    /// Ephemeral containment wrapper; never resume a deleted wrapper from disk.
+    #[serde(skip)]
+    pub runtime_command: Option<PathBuf>,
+    /// Kernel memory.events for this run, excluded from durable snapshots.
+    #[serde(skip)]
+    pub memory_events_path: Option<PathBuf>,
     /// Archived reference context. Folded into the first real input after a
     /// process start, never sent as a turn of its own or rearmed by /clear.
     #[serde(default)]
@@ -165,6 +171,8 @@ mod tests {
 
     fn sample_config() -> SessionConfig {
         SessionConfig {
+            runtime_command: None,
+            memory_events_path: None,
             recovery_context: None,
             session_id: Uuid::new_v4(),
             working_directory: PathBuf::from("/tmp/test"),

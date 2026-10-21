@@ -122,6 +122,7 @@ dependencies = [
  "tracing-journald",
  "tracing-subscriber",
  "uuid",
+ "which",
  "ws-bridge",
 ]
 
@@ -4552,6 +4553,7 @@ dependencies = [
  "serde_json",
  "session-lib",
  "shared",
+ "tempfile",
  "tokio",
  "tracing",
  "uuid",

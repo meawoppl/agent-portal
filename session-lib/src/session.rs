@@ -53,6 +53,9 @@ pub struct Session<A: Agent> {
     /// `kill_on_drop` doesn't fire when the SDK keeps the child alive in
     /// detached tasks (#927).
     agent_pid: Option<u32>,
+    memory_events: Option<crate::memory_events::MemoryEvents>,
+    // Preserve terminal events while delivering a final kernel OOM notice first.
+    pending_event: Option<Option<IoEvent>>,
     _agent: PhantomData<A>,
 }
 
@@ -121,6 +124,10 @@ impl<A: Agent> Session<A> {
     /// Create a new session, spawning the per-agent I/O task.
     pub async fn new(config: SessionConfig) -> Result<Self, SessionError> {
         let buffer = OutputBuffer::new(config.session_id);
+        let memory_events = config
+            .memory_events_path
+            .clone()
+            .map(crate::memory_events::MemoryEvents::new);
 
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let (command_tx, command_rx) = mpsc::unbounded_channel();
@@ -140,6 +147,8 @@ impl<A: Agent> Session<A> {
             event_rx: Some(event_rx),
             io_task: Some(handle),
             agent_pid: None,
+            memory_events,
+            pending_event: None,
             _agent: PhantomData,
         })
     }
@@ -156,6 +165,10 @@ impl<A: Agent> Session<A> {
         let mut config = snapshot.config;
         config.resume = true;
 
+        let memory_events = config
+            .memory_events_path
+            .clone()
+            .map(crate::memory_events::MemoryEvents::new);
         let (command_tx, event_rx, io_task) = if snapshot.was_running {
             let (event_tx, event_rx) = mpsc::unbounded_channel();
             let (command_tx, command_rx) = mpsc::unbounded_channel();
@@ -181,6 +194,8 @@ impl<A: Agent> Session<A> {
             event_rx,
             io_task,
             agent_pid: None,
+            memory_events,
+            pending_event: None,
             _agent: PhantomData,
         })
     }
@@ -226,9 +241,31 @@ impl<A: Agent> Session<A> {
     pub async fn next_event(&mut self) -> Option<SessionEvent> {
         // Loop to skip internal messages (ControlResponse, etc).
         loop {
-            let event_rx = self.event_rx.as_mut()?;
-
-            match event_rx.recv().await {
+            if let Some(value) = self.memory_events.as_mut().and_then(|m| m.poll(false)) {
+                self.buffer.push(value.clone());
+                return Some(SessionEvent::RawOutput(value));
+            }
+            let event = if let Some(pending) = self.pending_event.take() {
+                pending
+            } else {
+                let event_rx = self.event_rx.as_mut()?;
+                tokio::select! {
+                    event = event_rx.recv() => event,
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(1)), if self.memory_events.is_some() => continue,
+                }
+            };
+            if matches!(
+                &event,
+                None | Some(IoEvent::Exited { .. } | IoEvent::Error(_))
+                    | Some(IoEvent::Classified(AgentOutput::NotFound))
+            ) {
+                if let Some(value) = self.memory_events.as_mut().and_then(|m| m.poll(true)) {
+                    self.pending_event = Some(event);
+                    self.buffer.push(value.clone());
+                    return Some(SessionEvent::RawOutput(value));
+                }
+            }
+            match event {
                 Some(IoEvent::AgentStarted { pid }) => {
                     // Record the agent pid for `stop()`'s group-kill (#927);
                     // not a consumer-facing event, so keep looping.
@@ -811,5 +848,87 @@ mod tests {
         );
 
         session.stop().await.unwrap();
+    }
+}
+
+#[cfg(test)]
+mod memory_notice_tests {
+    use super::*;
+
+    struct QuietAgent;
+    impl Agent for QuietAgent {
+        fn spawn_io_task(
+            config: SessionConfig,
+            mut commands: mpsc::UnboundedReceiver<IoCommand>,
+            events: mpsc::UnboundedSender<IoEvent>,
+        ) -> Result<tokio::task::JoinHandle<()>, SessionError> {
+            Ok(tokio::spawn(async move {
+                // One command drives a terminal OOM; silence otherwise tests
+                // that the session's own timer delivers nonterminal notices.
+                if commands.recv().await.is_some() {
+                    std::fs::write(config.memory_events_path.unwrap(), "oom_kill 1\n").unwrap();
+                    let _ = events.send(IoEvent::Exited { code: 137 });
+                }
+            }))
+        }
+    }
+
+    #[tokio::test]
+    async fn oom_notice_arrives_while_idle_and_is_buffered() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("memory.events");
+        std::fs::write(&path, "oom_kill 0\n").unwrap();
+        let mut session = Session::<QuietAgent>::new(SessionConfig {
+            memory_events_path: Some(path.clone()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+        let writer = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            std::fs::write(path, "oom_kill 1\n").unwrap();
+        });
+        let event = tokio::time::timeout(std::time::Duration::from_secs(3), session.next_event())
+            .await
+            .unwrap();
+        assert!(
+            matches!(event, Some(SessionEvent::RawOutput(ref v)) if v.to_string().contains("Out of memory"))
+        );
+        assert_eq!(session.snapshot().pending_outputs.len(), 1);
+        writer.await.unwrap();
+        session.stop().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn final_notice_precedes_exit_and_runtime_paths_do_not_persist() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("memory.events");
+        std::fs::write(&path, "oom_kill 0\n").unwrap();
+        let mut session = Session::<QuietAgent>::new(SessionConfig {
+            memory_events_path: Some(path),
+            runtime_command: Some("ephemeral-wrapper".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+        let bytes = session.snapshot().to_bytes().unwrap();
+        let restored = SessionSnapshot::from_bytes(&bytes).unwrap();
+        assert!(restored.config.memory_events_path.is_none());
+        assert!(restored.config.runtime_command.is_none());
+        session
+            .command_tx
+            .as_ref()
+            .unwrap()
+            .send(IoCommand::Interrupt)
+            .unwrap();
+        let event = session.next_event().await;
+        assert!(
+            matches!(event, Some(SessionEvent::RawOutput(ref v)) if v.to_string().contains("Out of memory"))
+        );
+        assert!(matches!(
+            session.next_event().await,
+            Some(SessionEvent::Exited { code: 137 })
+        ));
+        assert!(session.next_event().await.is_none());
     }
 }

@@ -465,3 +465,42 @@ in the installed plist; shell PATH changes do not silently rewrite it. First
 install includes the launcher directory, `~/.local/bin`, `~/.cargo/bin`,
 Homebrew and the standard system directories. Add any custom tool directory
 to the plist's `EnvironmentVariables.PATH` and restart to load it.
+
+### Per-session memory containment (Linux)
+
+The systemd user service delegates the cgroup v2 memory controller. At daemon
+startup the launcher moves into its own leaf, and each Claude, Codex or Muse
+run receives a sibling cgroup. The agent executable joins before starting, so
+its build tools inherit that group. Stopping the session kills its remaining
+cgroup descendants without touching other sessions.
+
+Optional `launcher.json` settings apply to new session launches (bytes):
+
+```json
+"session_memory": {
+  "high_bytes": 8589934592,
+  "max_bytes": 12884901888
+}
+```
+
+`high_bytes` applies memory reclaim pressure; `max_bytes` is a RAM ceiling.
+There is no default cap. Without a cap, host-wide kernel memory exhaustion can
+still kill processes in other groups. Swap is not capped. See the
+[kernel memory controller documentation](https://docs.kernel.org/admin-guide/cgroup-v2.html#memory).
+
+A rising kernel `memory.events` `oom_kill` counter produces a durable Portal
+message in the affected session, even if the agent is idle or about to exit.
+Exit 137 alone is never called OOM. Userspace kills (including systemd-oomd
+SIGKILLs) need not increment that kernel counter and cannot be reliably
+attributed by this notice.
+
+Upgrades may require one service restart for delegation to take effect. If
+memory control is missing or inaccessible, the daemon logs that it is using
+ordinary process groups; limits and OOM notices are unavailable in that mode.
+On supported hosts, an invalid or unwritable configured limit fails the session
+launch rather than silently ignoring the cap. A prepared wrapper that cannot
+join its cgroup also refuses to start the agent.
+macOS, Windows, standalone proxies and Antigravity's external IDE retain their
+existing process management. This is resource containment, not a security
+sandbox: a process with permission to start its own systemd unit can leave the
+session's cgroup.

@@ -229,6 +229,14 @@ fn acknowledge_delivery_if_accepted(
 /// previously the lone agent that dropped it.
 fn build_exec_builder(config: &SessionConfig, text: &str) -> MuseExecBuilder {
     MuseExecBuilder::new(text)
+        .binary(
+            config
+                .runtime_command
+                .as_ref()
+                .or(config.claude_path.as_ref())
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "muse".into()),
+        )
         .provider(Provider::Meta)
         .working_directory(&config.working_directory)
         .session_id(config.session_id.to_string())
@@ -481,5 +489,31 @@ mod tests {
                 .any(|(k, v)| k == "PORTAL_SESSION_ID" && *v == config.session_id.to_string()),
             "PORTAL_SESSION_ID must be exported to the muse child; envs: {envs:?}"
         );
+    }
+}
+
+#[cfg(all(test, unix))]
+mod runtime_command_tests {
+    use super::*;
+    #[test]
+    fn runtime_wrapper_overrides_binary_without_changing_arguments() {
+        let directory = tempfile::tempdir().unwrap();
+        let wrapper = directory.path().join("agent wrapper with spaces");
+        std::os::unix::fs::symlink("/bin/echo", &wrapper).unwrap();
+        let config = SessionConfig {
+            runtime_command: Some(wrapper.clone()),
+            claude_path: Some("/must-not-launch-this-original".into()),
+            extra_args: vec!["--model".into(), "example".into()],
+            ..Default::default()
+        };
+        let command = build_exec_builder(&config, "prompt with spaces")
+            .build_command()
+            .unwrap();
+        assert_eq!(command.as_std().get_program(), wrapper.as_os_str());
+        assert!(command
+            .as_std()
+            .get_args()
+            .any(|arg| arg == "prompt with spaces"));
+        assert!(command.as_std().get_args().any(|arg| arg == "example"));
     }
 }

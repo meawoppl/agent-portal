@@ -285,7 +285,7 @@ pub(crate) async fn codex_io_task(
     let overrides = with_portal_config_defaults(overrides);
 
     let mut builder = AppServerBuilder::new()
-        .command(codex_path)
+        .command(config.runtime_command.as_deref().unwrap_or(codex_path))
         .working_directory(&config.working_directory)
         // Exported so shell tools codex spawns inherit it — `agent-portal
         // message send` reads this as its first sender-attribution arm.

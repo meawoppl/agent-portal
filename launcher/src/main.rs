@@ -22,6 +22,7 @@ mod progress;
 mod scheduler;
 mod seppuku;
 mod service;
+mod session_cgroups;
 mod session_plugins;
 mod work_queue;
 mod worktree;
@@ -707,6 +708,7 @@ async fn main() -> anyhow::Result<()> {
     // via `service::sync` after updates); this covers the running process and
     // units that predate that.
     ensure_self_on_path();
+    session_cgroups::initialize();
 
     // Check if running as a system service; suggest installing if not
     if !args.no_update && !service::is_installed() {

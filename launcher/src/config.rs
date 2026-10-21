@@ -6,6 +6,10 @@ use uuid::Uuid;
 
 #[derive(Debug, Deserialize, Serialize, Default)]
 pub struct LauncherConfig {
+    /// Optional per-session cgroup v2 memory limits in bytes. Only applied on
+    /// Linux hosts with delegated memory control; new session launches read the current values.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_memory: Option<SessionMemoryLimits>,
     pub backend_url: Option<String>,
     pub auth_token: Option<String>,
     pub name: Option<String>,
@@ -13,6 +17,12 @@ pub struct LauncherConfig {
     pub sessions: Vec<ExpectedSession>,
     #[serde(default)]
     pub plugins: std::collections::BTreeMap<String, InstalledPlugin>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct SessionMemoryLimits {
+    pub high_bytes: Option<u64>,
+    pub max_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -541,6 +551,7 @@ mod tests {
     #[test]
     fn roundtrip_config_serialization() {
         let config = LauncherConfig {
+            session_memory: None,
             backend_url: Some("wss://test.com".to_string()),
             auth_token: Some("tok_test".to_string()),
             name: Some("test-launcher".to_string()),
@@ -719,6 +730,7 @@ description: Route KiCad PCB layouts.
     fn roundtrip_config_with_session_id() {
         let sid = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
         let config = LauncherConfig {
+            session_memory: None,
             backend_url: None,
             auth_token: None,
             name: None,

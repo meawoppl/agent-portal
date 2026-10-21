@@ -834,6 +834,8 @@ async fn create_claude_session(config: &ProxySessionConfig) -> Result<ClaudeSess
     });
 
     let claude_config = SessionConfig {
+        runtime_command: None,
+        memory_events_path: None,
         recovery_context: None,
         session_id: config.session_id,
         working_directory: PathBuf::from(&config.working_directory),

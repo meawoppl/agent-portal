@@ -130,7 +130,7 @@ pub(crate) async fn spawn_claude(
 /// Factored out of [`spawn_claude`] so the environment and stdio wiring are
 /// assertable in tests without launching a process.
 fn build_claude_command(claude_path: &Path, args: &[String], config: &SessionConfig) -> Command {
-    let mut cmd = Command::new(claude_path);
+    let mut cmd = Command::new(config.runtime_command.as_deref().unwrap_or(claude_path));
     cmd.args(args);
     cmd.current_dir(&config.working_directory);
     // Claude exports `CLAUDE_CODE_SESSION_ID` to the tools it spawns, but that
@@ -256,6 +256,21 @@ fn log_claude_info(claude_path: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtime_command_preserves_original_argv_and_environment() {
+        let config = SessionConfig {
+            runtime_command: Some("/tmp/wrapper with spaces".into()),
+            ..Default::default()
+        };
+        let args = vec!["--resume".to_owned(), "a b".to_owned()];
+        let command = build_claude_command(Path::new("/original/claude"), &args, &config);
+        assert_eq!(command.as_std().get_program(), "/tmp/wrapper with spaces");
+        assert_eq!(
+            command.as_std().get_args().collect::<Vec<_>>(),
+            vec!["--resume", "a b"]
+        );
+    }
 
     #[test]
     fn fork_args_keep_source_and_new_identity_distinct() {

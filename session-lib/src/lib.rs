@@ -33,6 +33,7 @@ pub mod git_metadata;
 pub mod heartbeat;
 pub mod install;
 pub mod io;
+mod memory_events;
 pub mod output_buffer;
 pub mod paths;
 pub mod probe;

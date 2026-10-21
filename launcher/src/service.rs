@@ -78,9 +78,8 @@ fn service_file_path() -> Result<std::path::PathBuf> {
         .join(format!("{}.service", SERVICE_NAME)))
 }
 
-/// The launcher's user unit. Every session, and every build or test a session
-/// runs, shares this unit's cgroup, so the OOM settings decide whether one
-/// runaway `ld` costs one command or every session on the machine:
+/// The launcher's user unit delegates memory control to per-session leaves.
+/// OOM settings also protect the fallback on hosts without cgroup v2 delegation:
 /// `OOMPolicy=continue` keeps the service up when the kernel kills a process
 /// inside it (systemd's default, `stop`, tears the whole unit down), and
 /// `ManagedOOMPreference=avoid` asks `systemd-oomd` to pick other cgroups first.
@@ -101,6 +100,7 @@ Restart=on-failure
 RestartSec=5
 OOMPolicy=continue
 ManagedOOMPreference=avoid
+Delegate=memory
 
 [Install]
 WantedBy=default.target
@@ -893,6 +893,7 @@ esac
             .collect();
         assert!(service.contains(&"OOMPolicy=continue"), "{unit}");
         assert!(service.contains(&"ManagedOOMPreference=avoid"), "{unit}");
+        assert!(service.contains(&"Delegate=memory"), "{unit}");
     }
 
     /// Startup sync only rewrites a unit that runs this exact executable.
