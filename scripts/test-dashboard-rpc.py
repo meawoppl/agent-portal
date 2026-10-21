@@ -46,8 +46,12 @@ async def main():
             data = dict(sessions=[])
         await route.fulfill(content_type='application/json', body=json.dumps(data))
 
+    reconnected = asyncio.Event()
+
     async def ws(route):
         sockets.append(route)
+        if len(sockets) > 1:
+            reconnected.set()
         def message(raw):
             msg = json.loads(raw)
             assert msg['type'] == 'Dashboard', msg
@@ -82,6 +86,10 @@ async def main():
             await page.get_by_role('button', name='Confirm Restart', exact=True).click()
             await expect(page.get_by_text('Fixture denied restart', exact=False)).to_be_visible()
             assert operations.count('restart_launcher') == 1
+            await sockets[0].close(code=1001, reason='fixture disconnect')
+            await asyncio.wait_for(reconnected.wait(), timeout=15)
+            await expect(page.get_by_text('rpc-host', exact=True)).to_be_visible()
+            assert operations.count('restart_launcher') == 1, 'reconnect must not replay restart'
             assert not forbidden, forbidden
             assert not errors, errors
             (ROOT / 'builds').mkdir(exist_ok=True)

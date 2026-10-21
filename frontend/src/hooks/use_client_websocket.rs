@@ -257,6 +257,10 @@ fn use_live_client_websocket() -> UseClientWebSocket {
                                                         if !announced {
                                                             announced = true;
                                                             attempt = 0;
+                                                            if portal.conn() == ConnId::HOME {
+                                                                // Refresh read models after reconnect; never replay mutations.
+                                                                live.dispatch(client_websocket_events::ClientWsAction::LauncherEvent);
+                                                            }
                                                             if let Some(registry) = &registry {
                                                                 registry.dispatch(FederationAction::LiveStatus(portal.conn(), None));
                                                             }
