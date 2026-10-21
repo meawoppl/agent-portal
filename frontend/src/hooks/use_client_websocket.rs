@@ -204,12 +204,12 @@ fn use_live_client_websocket() -> UseClientWebSocket {
                                         registry.dispatch(FederationAction::LiveStatus(portal.conn(), Some("Connecting live updates".into())));
                                     }
                                 }
+                                if portal.conn() == ConnId::HOME { shutdown_reason.set(None); }
                                 match crate::browser_protocol::connect(&portal, |msg| {
                                     handle_server_message(portal.conn(), msg, &shutdown_reason, &live);
                                 }).await {
                                         Ok((conn, config)) => {
                                             if portal.conn() == ConnId::HOME {
-                                                shutdown_reason.set(None);
                                                 if known_version.as_ref().is_some_and(|old| is_newer_version(old, &config.server_version)) {
                                                     update_available.set(Some(config.server_version.clone()));
                                                 }

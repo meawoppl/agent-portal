@@ -62,6 +62,7 @@ pub async fn handle_web_client_socket(
 
     let mut dashboard_jobs = tokio::task::JoinSet::new();
     let mut dashboard_ids = std::collections::HashSet::new();
+    let mut compatibility_checked = false;
     let mut session_key: Option<SessionId> = None;
     let mut verified_session_id: Option<Uuid> = None;
     let mut pending_uploads: HashMap<String, PendingUpload> = HashMap::new();
@@ -118,10 +119,14 @@ pub async fn handle_web_client_socket(
                         let version = match &client_msg {
                             ClientToServer::Hello { protocol_version } => Some(Some(*protocol_version)),
                             ClientToServer::Register(fields) => Some(fields.protocol_version),
+                            // An old dashboard can start without Register or Hello.
+                            // Treat that as v1, never as whichever major is current.
+                            _ if !compatibility_checked => Some(None),
                             _ => None,
                         };
                         if let Some(version) = version {
                             let error = shared::protocol::check_protocol_version(version, "browser").err();
+                            compatibility_checked = error.is_none();
                             if matches!(client_msg, ClientToServer::Hello { .. }) || error.is_some() {
                                 let rejected = error.is_some();
                                 if ws_sender.send(ServerToClient::HelloAck {

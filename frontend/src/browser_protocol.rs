@@ -54,9 +54,16 @@ pub(crate) async fn connect(
         let timeout = gloo::timers::future::TimeoutFuture::new(10_000);
         futures_util::pin_mut!(negotiation, timeout);
         match futures_util::future::select(negotiation, timeout).await {
-        futures_util::future::Either::Left((result, _)) => result?,
-        futures_util::future::Either::Right(_) => return Err("Portal compatibility confirmation timed out. Reconnect after checking the server; no commands were sent.".into()),
+            futures_util::future::Either::Left((result, _)) => result?,
+            futures_util::future::Either::Right(_) => {
+                return Err(concat!(
+                    "Portal compatibility confirmation timed out. ",
+                    "Reconnect after checking the server; no commands were sent."
+                )
+                .into());
+            }
+        }
     }
-    }
+
     Ok((socket, config))
 }
