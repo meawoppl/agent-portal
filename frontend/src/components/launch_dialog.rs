@@ -380,25 +380,37 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         let plugin_suggestion_error = plugin_suggestion_error.clone();
         use_effect_with(target, move |(launcher, path)| {
             let (launcher, path) = (*launcher, path.clone());
-            spawn_local(async move {
-                let Some(launcher) = launcher else {
-                    plugin_suggestions.set(Vec::new());
-                    plugin_suggestion_error.set(None);
-                    return;
-                };
-                match fetch_launcher_plugins(launcher, Some(path)).await {
-                    Ok(data) => {
-                        plugin_suggestions.set(data.plugins);
-                        plugin_suggestion_error.set(None);
+            // Suggestions for a directory the user has already moved past must
+            // not overwrite the current ones.
+            let current = std::rc::Rc::new(std::cell::Cell::new(true));
+            {
+                let current = current.clone();
+                spawn_local(async move {
+                    let result = match launcher {
+                        Some(launcher) => Some(fetch_launcher_plugins(launcher, Some(path)).await),
+                        None => None,
+                    };
+                    if !current.get() {
+                        return;
                     }
-                    Err(err) => {
-                        plugin_suggestions.set(Vec::new());
-                        plugin_suggestion_error
-                            .set(Some(format!("Could not load plugin suggestions: {err}")));
+                    match result {
+                        None => {
+                            plugin_suggestions.set(Vec::new());
+                            plugin_suggestion_error.set(None);
+                        }
+                        Some(Ok(data)) => {
+                            plugin_suggestions.set(data.plugins);
+                            plugin_suggestion_error.set(None);
+                        }
+                        Some(Err(err)) => {
+                            plugin_suggestions.set(Vec::new());
+                            plugin_suggestion_error
+                                .set(Some(format!("Could not load plugin suggestions: {err}")));
+                        }
                     }
-                }
-            });
-            || ()
+                });
+            }
+            move || current.set(false)
         });
     }
 

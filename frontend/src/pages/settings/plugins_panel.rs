@@ -1,6 +1,9 @@
 //! Settings ▸ Plugins: the plugins installed on each computer, optionally
 //! matched against a project directory.
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use shared::api::PluginInventoryResponse;
 use shared::LauncherInfo;
 use uuid::Uuid;
@@ -63,13 +66,20 @@ pub fn plugins_panel() -> Html {
             (*selected, (*directory).clone(), can_manage),
             move |(launcher, directory, can_manage)| {
                 inventory.set(None);
+                // A slow answer for the previous computer or directory must not
+                // land under the one now selected.
+                let current = Rc::new(Cell::new(true));
                 if let (Some(launcher), true) = (*launcher, *can_manage) {
                     let (launcher, directory) = (launcher, directory.clone());
+                    let current = current.clone();
                     spawn_local(async move {
-                        inventory.set(Some(fetch_launcher_plugins(launcher, directory).await));
+                        let result = fetch_launcher_plugins(launcher, directory).await;
+                        if current.get() {
+                            inventory.set(Some(result));
+                        }
                     });
                 }
-                || ()
+                move || current.set(false)
             },
         );
     }
