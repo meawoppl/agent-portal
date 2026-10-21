@@ -247,7 +247,8 @@ current branch, working changes, development database and existing servers are
 untouched. The printed SHA identifies exactly what is being reviewed; restart
 the command to fetch subsequent PR changes. Cold builds can take several minutes.
 
-Prerequisites: Python 3, Git, Docker, Rust with the WASM target, Trunk, and an
+Prerequisites: a Unix-like host (Linux/macOS or WSL), Python 3, Git, Docker,
+Rust with the WASM target, Trunk, and an
 authenticated `origin` remote. `--forward` additionally needs `agent-portal` in
 an active session with no existing forward. Only run **trusted PR code**: build
 scripts run with your account's permissions, just as with `cargo build`.

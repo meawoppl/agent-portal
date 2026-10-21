@@ -24,7 +24,10 @@ def run(*args, **kwargs):
     try:
         stdout, stderr = process.communicate()
     except BaseException:
-        os.killpg(process.pid, signal.SIGTERM)
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
         try:
             process.communicate(timeout=10)
         except subprocess.TimeoutExpired:
@@ -148,6 +151,9 @@ def main():
                     return response.status == 200 and json.load(response).get('splash_text') == title
             await_ready(healthy, backend)
             if args.forward:
+                # A request may commit even if the CLI is interrupted before
+                # returning its URL. Retain the unique port for cleanup then.
+                forward_identity = f':{port}  '
                 opened = run('agent-portal', 'forward', str(port), stdout=subprocess.PIPE)
                 url = opened.stdout.strip()
                 forward_identity = f':{port}  {url}  '
