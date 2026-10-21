@@ -253,8 +253,9 @@ reapplies them. It compares both generated Rust schema and a full schema-only
 PostgreSQL dump before/after, including indexes, constraints and functions.
 The script never rewrites `schema.rs` or edits the migration registry itself.
 
-To reproduce, install that Diesel CLI with PostgreSQL support and PostgreSQL
-client tools, then run:
+To reproduce, install that Diesel CLI with PostgreSQL support, PostgreSQL
+client tools, and the pinned toolchain's `rustfmt` component (Diesel uses it to
+format generated schema), then run:
 
 ```sh
 DATABASE_URL=postgresql://localhost/postgres python3 scripts/check-migration-roundtrip.py
