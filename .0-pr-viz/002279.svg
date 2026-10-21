@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" fill="#a9b1d6" font-family="sans-serif" font-size="24">PR #2279 · APNs on the maintained HTTP stack</text>
+<text x="55" y="104" fill="#e6e9f5" font-family="sans-serif" font-size="34">APNs pulled in an obsolete TLS stack. Reusing reqwest and ES256 signing</text>
+<text x="55" y="148" fill="#e6e9f5" font-family="sans-serif" font-size="34">removes seven advisories while keeping notification behavior explicit.</text>
+<path d="M55 177H1945 M1000 190V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="65" y="225" fill="#f7768e" font-family="sans-serif" font-size="24">BEFORE</text>
+<text x="1055" y="225" fill="#9ece6a" font-family="sans-serif" font-size="24">AFTER</text>
+<rect x="65" y="260" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="90" y="304" fill="#a9b1d6" font-family="sans-serif" font-size="28">Separate APNs client</text>
+<text x="90" y="351" fill="#c0caf5" font-family="sans-serif" font-size="24">a2 0.10.0 sends the notification.</text>
+<text x="90" y="392" fill="#c0caf5" font-family="sans-serif" font-size="24">A separate hyper-rustls dependency handles TLS.</text>
+<rect x="65" y="470" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="90" y="514" fill="#a9b1d6" font-family="sans-serif" font-size="28">Obsolete TLS dependency chain</text>
+<text x="90" y="561" fill="#c0caf5" font-family="sans-serif" font-size="24">rustls 0.22.4 and webpki 0.102.8.</text>
+<text x="90" y="602" fill="#c0caf5" font-family="sans-serif" font-size="24">Seven current RustSec entries remain in the lock.</text>
+<rect x="65" y="680" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="90" y="724" fill="#a9b1d6" font-family="sans-serif" font-size="28">Provider-token authentication</text>
+<text x="90" y="771" fill="#c0caf5" font-family="sans-serif" font-size="24">Token signing and reuse live inside a2.</text>
+<text x="90" y="812" fill="#c0caf5" font-family="sans-serif" font-size="24">Application tests mostly inspect payload structs.</text>
+<rect x="65" y="890" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="90" y="934" fill="#a9b1d6" font-family="sans-serif" font-size="28">User-visible contract</text>
+<text x="90" y="981" fill="#c0caf5" font-family="sans-serif" font-size="24">Alert, sound, session ID and event kind.</text>
+<text x="90" y="1022" fill="#c0caf5" font-family="sans-serif" font-size="24">Bad device tokens disable the subscription.</text>
+<rect x="1055" y="260" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="1080" y="304" fill="#9ece6a" font-family="sans-serif" font-size="28">Existing reqwest client</text>
+<text x="1080" y="351" fill="#c0caf5" font-family="sans-serif" font-size="24">HTTP/2 with explicit native TLS ALPN h2.</text>
+<text x="1080" y="392" fill="#c0caf5" font-family="sans-serif" font-size="24">No redirects; bounded request timeout.</text>
+<rect x="1055" y="470" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="1080" y="514" fill="#9ece6a" font-family="sans-serif" font-size="28">Remove old TLS chain</text>
+<text x="1080" y="561" fill="#c0caf5" font-family="sans-serif" font-size="24">a2 and its obsolete TLS packages leave the lock.</text>
+<text x="1080" y="602" fill="#c0caf5" font-family="sans-serif" font-size="24">No advisory ignore is added.</text>
+<rect x="1055" y="680" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="1080" y="724" fill="#9ece6a" font-family="sans-serif" font-size="28">Explicit ES256 provider token</text>
+<text x="1080" y="771" fill="#c0caf5" font-family="sans-serif" font-size="24">kid, iss and iat; reuse for 50 minutes.</text>
+<text x="1080" y="812" fill="#c0caf5" font-family="sans-serif" font-size="24">Verify signatures and cache boundary in tests.</text>
+<rect x="1055" y="890" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="1080" y="934" fill="#9ece6a" font-family="sans-serif" font-size="28">Real HTTP/2 regression tests</text>
+<text x="1080" y="981" fill="#c0caf5" font-family="sans-serif" font-size="24">Preserve alert/body, topic and collapse headers.</text>
+<text x="1080" y="1022" fill="#c0caf5" font-family="sans-serif" font-size="24">Credential errors stay distinct from dead devices.</text>
+<text x="55" y="1172" fill="#a9b1d6" font-family="sans-serif" font-size="22">Scope: local HTTP/2 and signing tests, no live APNs/device delivery. Other dependency findings are separate follow-ups.</text>
+</svg>
