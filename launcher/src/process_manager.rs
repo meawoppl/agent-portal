@@ -867,7 +867,17 @@ async fn run_session_task(
 
         // A wrapper joins the cgroup before exec, so no agent tool can race a
         // post-spawn PID move. Antigravity connects to an existing IDE process.
-        let limits = config::load_config().session_memory.unwrap_or_default();
+        let limits = match config::load_session_memory() {
+            Ok(limits) => limits,
+            Err(error) => {
+                error!(session_id = %config.session_id, "Invalid launcher session memory configuration: {error:#}");
+                cleanup_plugin_skill_root(plugin_skill_cleanup_dir.as_deref());
+                return TaskOutcome {
+                    exit_code: Some(1),
+                    reason: SessionExitReason::Error,
+                };
+            }
+        };
         let executable = match config.agent_type {
             shared::AgentType::Claude => Some("claude"),
             shared::AgentType::Codex => Some("codex"),

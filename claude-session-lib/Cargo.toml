@@ -29,6 +29,8 @@ rand = "0.8"
 dirs = "6.0.0"
 
 [dev-dependencies]
+futures-util = "0.3"
+tokio-tungstenite = "0.28"
 tempfile = "3.27.0"
 
 [lints]

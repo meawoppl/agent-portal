@@ -86,6 +86,24 @@ pub fn load_config() -> LauncherConfig {
     load_config_at(&config_path())
 }
 
+/// Session limits must never disappear because a running daemon's config was
+/// edited incorrectly. Missing files retain the first-install defaults.
+pub fn load_session_memory() -> anyhow::Result<SessionMemoryLimits> {
+    load_session_memory_at(&config_path())
+}
+
+fn load_session_memory_at(path: &Path) -> anyhow::Result<SessionMemoryLimits> {
+    let contents = match std::fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(SessionMemoryLimits::default())
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let config: LauncherConfig = serde_json::from_str(&contents)?;
+    Ok(config.session_memory.unwrap_or_default())
+}
+
 /// Load a [`LauncherConfig`] from an explicit path. Split out from
 /// [`load_config`] so the read-modify-write helpers can be tested against a
 /// temp path (mirrors the [`read_or_create_id`] seam).
@@ -746,5 +764,27 @@ description: Route KiCad PCB layouts.
         let serialized = serde_json::to_string_pretty(&config).unwrap();
         let deserialized: LauncherConfig = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized.sessions[0].session_id, Some(sid));
+    }
+}
+
+#[cfg(test)]
+mod session_memory_tests {
+    use super::*;
+
+    #[test]
+    fn malformed_limits_never_fall_back_to_uncapped() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("launcher.json");
+        assert!(load_session_memory_at(&path).is_ok());
+        for value in ["-1", "\"1024\"", "18446744073709551616"] {
+            std::fs::write(
+                &path,
+                format!("{{\"session_memory\":{{\"max_bytes\":{value}}}}}"),
+            )
+            .unwrap();
+            assert!(load_session_memory_at(&path).is_err(), "{value}");
+        }
+        std::fs::write(&path, r#"{"session_memory":{"max_bytes":1024}}"#).unwrap();
+        assert_eq!(load_session_memory_at(&path).unwrap().max_bytes, Some(1024));
     }
 }

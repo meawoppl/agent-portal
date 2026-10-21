@@ -39,7 +39,13 @@ pub(super) async fn handle_next_event<A: Agent>(
     // uses this simple inline path; Claude falls through to the
     // wiggum/output-forwarder path, which re-parses the value to `ClaudeOutput`
     // for its image/git/wiggum side-effects.
-    if state.agent_type != shared::AgentType::Claude {
+    // Portal notices (including terminal OOM attribution) must reach the
+    // sequenced replay buffer inline. The Claude output worker is aborted on
+    // Exited; queuing a notice there can erase it before it is even sequenced.
+    let portal_notice = matches!(&event, Some(SessionEvent::RawOutput(value))
+        if serde_json::from_value::<shared::PortalMessage>(value.clone())
+            .is_ok_and(|message| message.message_type == shared::PortalMessage::MESSAGE_TYPE));
+    if state.agent_type != shared::AgentType::Claude || portal_notice {
         if let Some(SessionEvent::RawOutput(ref value)) = event {
             // Fire-and-forget: this arm runs inline in the connection's
             // `select!`, so awaiting a refresh here stalls output forwarding,
@@ -136,4 +142,124 @@ pub(super) async fn handle_next_event<A: Agent>(
         &state.reminder_pending,
     )
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use session_lib::{
+        agent::Agent,
+        error::SessionError,
+        io::{IoCommand, IoEvent},
+        snapshot::SessionConfig,
+    };
+    use std::sync::{atomic::AtomicBool, Arc};
+    use std::time::Instant;
+    use tokio::sync::{mpsc, oneshot, Mutex};
+
+    struct NoProcess;
+    impl Agent for NoProcess {
+        fn spawn_io_task(
+            _: SessionConfig,
+            _: mpsc::UnboundedReceiver<IoCommand>,
+            _: mpsc::UnboundedSender<IoEvent>,
+        ) -> Result<tokio::task::JoinHandle<()>, SessionError> {
+            Ok(tokio::spawn(async {}))
+        }
+    }
+
+    /// The output worker is deliberately never polled. A notice immediately
+    /// followed by Exited must still be on the wire and in the replay buffer.
+    #[tokio::test]
+    async fn claude_terminal_notice_bypasses_abortable_output_queue() {
+        use futures_util::StreamExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(socket).await.unwrap();
+            let frame = socket.next().await.unwrap().unwrap();
+            frame.into_text().unwrap().to_string()
+        });
+        let connection = ws_bridge::native_client::connect::<shared::SessionEndpoint>(&format!(
+            "ws://{address}"
+        ))
+        .await
+        .unwrap();
+        let (write, _read) = connection.split();
+        let id = uuid::Uuid::new_v4();
+        let (output_tx, mut output_rx) = mpsc::unbounded_channel();
+        let mut state = ConnectionState {
+            session_id: id,
+            perm_rx: mpsc::unbounded_channel().1,
+            interrupt_rx: mpsc::unbounded_channel().1,
+            ack_rx: mpsc::unbounded_channel().1,
+            output_tx,
+            ws_write: Arc::new(Mutex::new(write)),
+            disconnect_rx: oneshot::channel().1,
+            graceful_shutdown_rx: mpsc::unbounded_channel().1,
+            session_terminated_rx: oneshot::channel().1,
+            connection_start: Instant::now(),
+            output_buffer: Arc::new(Mutex::new(
+                session_lib::output_buffer::PendingOutputBuffer::new(id).unwrap(),
+            )),
+            wiggum_rx: mpsc::unbounded_channel().1,
+            wiggum_state: None,
+            heartbeat: session_lib::heartbeat::HeartbeatTracker::new(),
+            file_upload_rx: mpsc::unbounded_channel().1,
+            file_download_rx: mpsc::unbounded_channel().1,
+            working_directory: ".".into(),
+            active_uploads: Default::default(),
+            reminder_pending: Arc::new(AtomicBool::new(false)),
+            agent_type: shared::AgentType::Claude,
+            git_metadata: session_lib::git_metadata::GitMetadataState::new(None),
+            git_refresh: Default::default(),
+            codex_thread_id_sink: None,
+            media_display_sink: None,
+        };
+        let mut session = Session::<NoProcess>::new(SessionConfig::default())
+            .await
+            .unwrap();
+        let notice = shared::PortalMessage::text(
+            "Out of memory: the kernel killed 1 process in this session's cgroup.".into(),
+        )
+        .to_json();
+        assert!(handle_next_event(
+            &mut state,
+            &mut session,
+            Some(SessionEvent::RawOutput(notice.clone()))
+        )
+        .await
+        .is_none());
+        assert!(
+            output_rx.try_recv().is_err(),
+            "notice must not wait for the worker"
+        );
+        assert_eq!(
+            state
+                .output_buffer
+                .lock()
+                .await
+                .get_pending()
+                .next()
+                .unwrap()
+                .content,
+            notice
+        );
+        assert!(handle_next_event(
+            &mut state,
+            &mut session,
+            Some(SessionEvent::Exited { code: 137 })
+        )
+        .await
+        .is_some());
+        let wire = tokio::time::timeout(std::time::Duration::from_secs(2), server)
+            .await
+            .unwrap()
+            .unwrap();
+        let message: ProxyToServer = serde_json::from_str(&wire).unwrap();
+        assert!(
+            matches!(message, ProxyToServer::SequencedOutput { content, .. } if content == notice)
+        );
+    }
 }
