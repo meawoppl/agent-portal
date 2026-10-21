@@ -297,6 +297,9 @@ pub(crate) async fn codex_io_task(
         // can't go stale the way the thread mapping does. Mirrors the muse
         // fix (#1635).
         .env("PORTAL_SESSION_ID", config.session_id.to_string());
+    for (key, value) in config.portal_environment() {
+        builder = builder.env(key, value);
+    }
     for (k, v) in &overrides {
         builder = builder.config_override(k, v);
     }

@@ -178,8 +178,10 @@ fn token_response(
 pub async fn create_token_handler(
     State(app_state): State<Arc<AppState>>,
     CurrentUserId(user_id): CurrentUserId,
+    headers: axum::http::HeaderMap,
     Json(req): Json<CreateProxyTokenRequest>,
 ) -> Result<Json<CreateProxyTokenResponse>, AppError> {
+    crate::auth::require_manual_launch_credential(&app_state, &headers)?;
     let mut conn = app_state.conn()?;
 
     let issued = issue_proxy_token(
@@ -256,9 +258,11 @@ pub async fn revoke_token_handler(
 pub async fn renew_token_handler(
     State(app_state): State<Arc<AppState>>,
     CurrentUserId(user_id): CurrentUserId,
+    headers: axum::http::HeaderMap,
     Path(token_id): Path<Uuid>,
     Json(req): Json<RenewProxyTokenRequest>,
 ) -> Result<Json<CreateProxyTokenResponse>, AppError> {
+    crate::auth::require_manual_launch_credential(&app_state, &headers)?;
     let mut conn = app_state.conn()?;
 
     let existing: ProxyAuthToken = proxy_auth_tokens::table

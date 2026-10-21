@@ -165,6 +165,7 @@ mod tests {
     /// the tests below can enforce uniqueness, naming, and that each is wired to
     /// a real emit site.
     const ALL_MARKERS: &[&str] = &[
+        SPAWN_LIFECYCLE_FAILED,
         PENDING_INPUT_PERSIST_FAILED,
         INPUT_SEQ_BUMP_FAILED,
         PUSH_DISPATCH_FAILED,
@@ -230,3 +231,8 @@ mod tests {
         }
     }
 }
+
+/// Child lifecycle persistence/sweep failure. Repeated events mean database
+/// failure or schema drift; inspect migration state and database health. The
+/// periodic sweep retries automatically; do not manually delete request rows.
+pub const SPAWN_LIFECYCLE_FAILED: &str = "SPAWN_LIFECYCLE_FAILED";

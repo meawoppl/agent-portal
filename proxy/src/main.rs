@@ -417,6 +417,7 @@ async fn main() -> Result<()> {
 
     // Build session config
     let session_config = ProxySessionConfig {
+        startup_notice: None,
         history_restore: None,
         claude_conversation_id_sink: None,
         // Auto-display needs the launcher's upload credentials; a standalone
@@ -836,6 +837,12 @@ async fn create_claude_session(config: &ProxySessionConfig) -> Result<ClaudeSess
     let claude_config = SessionConfig {
         runtime_command: None,
         memory_events_path: None,
+        portal_credentials: config.auth_token.as_ref().map(|token| {
+            session_lib::PortalCredentials {
+                backend_url: config.backend_url.clone(),
+                token: token.clone(),
+            }
+        }),
         recovery_context: None,
         session_id: config.session_id,
         working_directory: PathBuf::from(&config.working_directory),

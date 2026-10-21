@@ -25,6 +25,7 @@ mod seppuku;
 mod service;
 mod session_cgroups;
 mod session_plugins;
+mod session_spawn;
 mod work_queue;
 mod worktree;
 
@@ -103,6 +104,11 @@ struct Args {
 
 #[derive(Subcommand, Debug)]
 enum Command {
+    /// Create and manage policy-gated child sessions.
+    Session {
+        #[command(subcommand)]
+        action: session_spawn::Action,
+    },
     /// Authenticate with the backend server via browser
     Login,
     /// Update agent-portal to the latest version (restarts service if running)
@@ -586,6 +592,7 @@ async fn main() -> anyhow::Result<()> {
                 ServiceAction::Pastebin => pastebin::upload_diagnostics().await,
             };
         }
+        Some(Command::Session { action }) => return session_spawn::run(action).await,
         Some(Command::Message { action }) => {
             return match action {
                 MessageAction::List => message::list().await,

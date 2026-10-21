@@ -750,6 +750,9 @@ pub(crate) fn ensure_session_archived(
 /// eviction cancels each stale connection's socket task, so the client's
 /// reconnect logic recovers automatically.
 pub async fn run_liveness_sweep(app_state: Arc<AppState>) {
+    if let Err(e) = crate::handlers::session_spawn::sweep(app_state.clone()).await {
+        tracing::error!("{}: {:?}", crate::markers::SPAWN_LIFECYCLE_FAILED, e);
+    }
     use crate::handlers::websocket::{
         LAUNCHER_LIVENESS_DEADLINE_SECS, PROXY_LIVENESS_DEADLINE_SECS,
     };

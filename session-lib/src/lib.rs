@@ -50,7 +50,7 @@ pub use buffer::{BufferedOutput, OutputBuffer};
 pub use error::SessionError;
 pub use io::{IoCommand, IoEvent, PermissionResponse, SessionEvent};
 pub use session::Session;
-pub use snapshot::{PendingPermission, SessionConfig, SessionSnapshot};
+pub use snapshot::{PendingPermission, PortalCredentials, SessionConfig, SessionSnapshot};
 pub use turn_tracker::{TurnOutcome, TurnTracker};
 
 // Re-export claude_codes types that appear in our public API. Per-agent

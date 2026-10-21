@@ -314,6 +314,34 @@ diesel::table! {
 }
 
 diesel::table! {
+    session_spawn_policies (session_id) {
+        session_id -> Uuid,
+        approval_mode -> Text,
+        max_children -> Int4,
+        max_depth -> Int4,
+        idle_timeout_seconds -> Int4,
+        stop_on_parent_end -> Bool,
+        first_approved_at -> Nullable<Timestamp>,
+    }
+}
+
+diesel::table! {
+    session_spawn_requests (id) {
+        id -> Uuid,
+        user_id -> Uuid,
+        parent_session_id -> Uuid,
+        launcher_id -> Uuid,
+        request -> Jsonb,
+        state -> Text,
+        child_session_id -> Nullable<Uuid>,
+        approved_by -> Nullable<Uuid>,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+        error_code -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
     sessions (id) {
         id -> Uuid,
         user_id -> Uuid,
@@ -364,6 +392,10 @@ diesel::table! {
         fork_create_worktree -> Bool,
         last_messaged_at -> Timestamp,
         history_restore -> Nullable<Jsonb>,
+        spawned_by -> Nullable<Uuid>,
+        spawn_depth -> Int4,
+        spawn_idle_timeout_seconds -> Nullable<Int4>,
+        spawn_stop_on_parent_end -> Bool,
     }
 }
 
@@ -460,6 +492,7 @@ diesel::joinable!(session_follow_messages -> sessions (session_id));
 diesel::joinable!(session_forwards -> sessions (session_id));
 diesel::joinable!(session_members -> sessions (session_id));
 diesel::joinable!(session_members -> users (user_id));
+diesel::joinable!(session_spawn_policies -> sessions (session_id));
 diesel::joinable!(sessions -> users (user_id));
 diesel::joinable!(turn_metrics -> messages (user_message_id));
 diesel::joinable!(turn_metrics -> sessions (session_id));
@@ -488,6 +521,8 @@ diesel::allow_tables_to_appear_in_same_query!(
     session_follow_messages,
     session_forwards,
     session_members,
+    session_spawn_policies,
+    session_spawn_requests,
     sessions,
     turn_metrics,
     user_identities,

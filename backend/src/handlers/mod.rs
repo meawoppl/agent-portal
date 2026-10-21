@@ -37,6 +37,7 @@ pub mod scheduled_tasks;
 pub mod session_access;
 pub mod session_imports;
 pub mod session_restore;
+pub mod session_spawn;
 pub mod sessions;
 pub mod stt;
 pub mod turn_metrics;

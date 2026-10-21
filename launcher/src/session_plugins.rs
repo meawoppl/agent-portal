@@ -109,6 +109,33 @@ fn save_selection(path: &Path, config: &LauncherConfig, change: PluginOverride) 
     config::write_config_atomic(path, &serde_json::to_string_pretty(&selection)?)
 }
 
+/// Persist requested child plugins before constructing its first agent process.
+/// A later restart must preserve changes the owner made in the plugin panel.
+pub(crate) fn install_initial_selection(
+    session: Uuid,
+    selection: &BTreeMap<String, bool>,
+) -> Result<()> {
+    let config = config::load_config();
+    install_selection_at(&selection_path(session), &config, selection)
+}
+fn install_selection_at(path: &Path, config: &LauncherConfig, selection: &Selection) -> Result<()> {
+    // A subsequent resume must keep owner edits even if the original plugin
+    // was uninstalled since first launch.
+    let _guard = SELECTION_WRITE
+        .lock()
+        .map_err(|_| anyhow::anyhow!("Plugin selection lock poisoned"))?;
+    if path.exists() {
+        return Ok(());
+    }
+    for name in selection.keys() {
+        anyhow::ensure!(
+            config.plugins.contains_key(name),
+            "Plugin is not installed: {name}"
+        );
+    }
+    config::write_config_atomic(path, &serde_json::to_string_pretty(selection)?)
+}
+
 pub(crate) fn request(
     session: Uuid,
     working_directory: String,
@@ -279,6 +306,23 @@ fn inventory(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn initial_selection_is_validated_and_never_overwrites_owner_changes() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("selection.json");
+        let config = LauncherConfig::default();
+        let missing = [("not-installed".into(), true)].into();
+        assert!(install_selection_at(&path, &config, &missing).is_err());
+        assert!(!path.exists());
+        install_selection_at(&path, &config, &Selection::new()).unwrap();
+        std::fs::write(&path, r#"{"owner-change":false}"#).unwrap();
+        install_selection_at(&path, &config, &missing).unwrap();
+        assert_eq!(
+            read_selection(&path).unwrap().get("owner-change"),
+            Some(&false)
+        );
+    }
+
     fn config() -> LauncherConfig {
         let mut config = LauncherConfig::default();
         for name in ["kicadmium", "slowbooks"] {

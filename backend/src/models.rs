@@ -161,6 +161,12 @@ pub struct Session {
     pub last_messaged_at: NaiveDateTime,
     #[serde(skip)]
     pub history_restore: Option<serde_json::Value>,
+    pub spawned_by: Option<Uuid>,
+    pub spawn_depth: i32,
+    #[serde(skip)]
+    pub spawn_idle_timeout_seconds: Option<i32>,
+    #[serde(skip)]
+    pub spawn_stop_on_parent_end: bool,
 }
 
 /// Insertable session that specifies the ID (so we can use Claude's session ID)

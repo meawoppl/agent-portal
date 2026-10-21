@@ -169,6 +169,99 @@ impl FromRequestParts<Arc<AppState>> for CurrentUserId {
     }
 }
 
+/// Browser consent must not be forgeable with an agent's bearer credential.
+/// Unlike CurrentUserId this always requires the signed browser cookie, even
+/// in dev mode; the normal dev login issues that cookie.
+pub struct BrowserUserId(pub Uuid);
+
+impl FromRequestParts<Arc<AppState>> for BrowserUserId {
+    type Rejection = Response;
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &Arc<AppState>,
+    ) -> Result<Self, Self::Rejection> {
+        if parts.headers.contains_key(header::AUTHORIZATION) {
+            return Err(AppError::Forbidden.into_response());
+        }
+        let cookies = Cookies::from_request_parts(parts, state)
+            .await
+            .map_err(|e| e.into_response())?;
+        let result = (|| {
+            let mut conn = state.conn()?;
+            let user = reject_disabled_user(load_cookie_user(state, &mut conn, &cookies)?)?;
+            if let Some(expected) = parts.headers.get("X-Portal-Account") {
+                if expected.to_str().ok().and_then(|s| Uuid::parse_str(s).ok()) != Some(user.id) {
+                    return Err(AppError::Forbidden);
+                }
+            }
+            Ok::<_, AppError>(BrowserUserId(user.id))
+        })();
+        result.map_err(|e| e.into_response())
+    }
+}
+
+/// Session credentials must use the policy-gated child-spawn API. Personal
+/// owner API tokens keep their existing manual launch capability. This checks
+/// the launch-token name too, so an as-yet-unbound launch token cannot bypass it.
+pub(crate) fn require_manual_launch_credential(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<(), AppError> {
+    if let Some(token) = bearer_token(headers) {
+        if !token.starts_with(crate::handlers::federation::LINKED_TOKEN_PREFIX) {
+            let verified = crate::handlers::proxy_tokens::verify_and_get_user_with_token(
+                state,
+                &mut *state.conn()?,
+                token,
+            )?;
+            if verified.token.session_id.is_some()
+                || verified.token.name == crate::handlers::proxy_tokens::LAUNCH_TOKEN_NAME
+            {
+                return Err(AppError::Forbidden);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Session credentials may stop/delete themselves or direct children, never a
+/// sibling. Personal owner tokens and browser requests retain their old scope.
+pub(crate) fn require_session_lifecycle_scope(
+    state: &AppState,
+    headers: &HeaderMap,
+    target: Uuid,
+) -> Result<(), AppError> {
+    let Some(token) = bearer_token(headers) else {
+        return Ok(());
+    };
+    if token.starts_with(crate::handlers::federation::LINKED_TOKEN_PREFIX) {
+        return Ok(());
+    }
+    let mut conn = state.conn()?;
+    let verified =
+        crate::handlers::proxy_tokens::verify_and_get_user_with_token(state, &mut conn, token)?;
+    if verified.token.name == crate::handlers::proxy_tokens::LAUNCH_TOKEN_NAME
+        || verified.token.session_id.is_some()
+    {
+        let parent = verified.token.session_id.ok_or(AppError::Forbidden)?;
+        if parent != target {
+            use crate::schema::sessions;
+            let owned_child = sessions::table
+                .find(target)
+                .filter(sessions::user_id.eq(verified.user_id))
+                .filter(sessions::spawned_by.eq(parent))
+                .select(sessions::id)
+                .first::<Uuid>(&mut conn)
+                .optional()?
+                .is_some();
+            if !owned_child {
+                return Err(AppError::Forbidden);
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -177,6 +270,74 @@ mod tests {
     use crate::schema::{proxy_auth_tokens, users};
     use axum::http::{header::AUTHORIZATION, HeaderValue};
     use tower_cookies::Cookie;
+
+    #[tokio::test]
+    async fn spawn_consent_requires_cookie_even_in_dev_and_rejects_bearer_and_stale_account() {
+        let Some(pool) = crate::test_support::shared_pool() else {
+            return;
+        };
+        let mut state = crate::test_support::test_app_state(pool);
+        state.dev_mode = true;
+        let user = insert_user(&mut state.conn().unwrap(), false);
+        let state = Arc::new(state);
+        async fn extract(state: &Arc<AppState>, cookies: Cookies, headers: HeaderMap) -> bool {
+            let (mut parts, _) = axum::http::Request::new(()).into_parts();
+            parts.headers = headers;
+            parts.extensions.insert(cookies);
+            BrowserUserId::from_request_parts(&mut parts, state)
+                .await
+                .is_ok()
+        }
+        assert!(!extract(&state, Cookies::default(), HeaderMap::new()).await);
+        assert!(extract(&state, signed_cookie(&state, user.id), HeaderMap::new()).await);
+        assert!(
+            !extract(
+                &state,
+                signed_cookie(&state, user.id),
+                bearer_headers("anything")
+            )
+            .await
+        );
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "X-Portal-Account",
+            Uuid::new_v4().to_string().parse().unwrap(),
+        );
+        assert!(!extract(&state, signed_cookie(&state, user.id), headers).await);
+    }
+
+    #[test]
+    fn session_credentials_cannot_use_manual_launch_or_mint_credentials() {
+        let Some(pool) = crate::test_support::shared_pool() else {
+            return;
+        };
+        let state = crate::test_support::test_app_state(pool);
+        let mut conn = state.conn().unwrap();
+        let user = insert_user(&mut conn, false);
+        let issued = crate::handlers::proxy_tokens::issue_proxy_token(
+            &mut conn,
+            state.jwt_secret.as_bytes(),
+            user.id,
+            TokenPersist::Create {
+                name: crate::handlers::proxy_tokens::LAUNCH_TOKEN_NAME,
+            },
+            None,
+        )
+        .unwrap();
+        let headers = bearer_headers(&issued.token);
+        // Rejected before first registration too, closing the unbound-token window.
+        assert!(require_manual_launch_credential(&state, &headers).is_err());
+        let personal = crate::handlers::proxy_tokens::issue_proxy_token(
+            &mut conn,
+            state.jwt_secret.as_bytes(),
+            user.id,
+            TokenPersist::Create { name: "owner-cli" },
+            None,
+        )
+        .unwrap();
+        assert!(require_manual_launch_credential(&state, &bearer_headers(&personal.token)).is_ok());
+        assert!(require_manual_launch_credential(&state, &HeaderMap::new()).is_ok());
+    }
 
     fn user(disabled: bool) -> User {
         User {

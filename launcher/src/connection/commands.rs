@@ -183,6 +183,7 @@ pub(super) async fn handle_message(
 ) {
     match msg {
         ServerToLauncher::LaunchSession {
+            plugin_selection,
             history_restore,
             request_id,
             auth_token,
@@ -219,7 +220,8 @@ pub(super) async fn handle_message(
 
             let result = process_manager
                 .spawn(SpawnParams {
-                    history_restore,
+                    plugin_selection,
+                    history_restore: history_restore.map(|r| *r),
                     auth_token,
                     working_directory: working_directory.clone(),
                     session_name: session_name.clone(),

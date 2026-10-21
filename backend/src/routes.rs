@@ -508,6 +508,30 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
             shared::LauncherEndpoint::PATH,
             get(handlers::websocket::handle_launcher_websocket),
         )
+        .route(
+            "/api/agent/sessions/{parent}/children",
+            get(handlers::session_spawn::children).post(handlers::session_spawn::start),
+        )
+        .route(
+            "/api/agent/sessions/{parent}/children/{child}/stop",
+            post(handlers::session_spawn::stop_child),
+        )
+        .route(
+            "/api/sessions/{parent}/spawn-policy",
+            get(handlers::session_spawn::get_policy).patch(handlers::session_spawn::set_policy),
+        )
+        .route(
+            "/api/sessions/{parent}/spawn-requests",
+            get(handlers::session_spawn::list_requests),
+        )
+        .route(
+            "/api/sessions/{parent}/spawn-requests/{request}/approve",
+            post(handlers::session_spawn::approve),
+        )
+        .route(
+            "/api/sessions/{parent}/spawn-requests/{request}/deny",
+            post(handlers::session_spawn::deny),
+        )
         // Launcher API routes
         .route("/api/launchers", get(handlers::launchers::list_launchers))
         .route(

@@ -79,7 +79,13 @@ pub fn register_or_update_session(
     // Resolve auth_token → user_id up front. Required for *both* new and
     // existing sessions so an attacker can't reactivate someone else's
     // session by knowing its UUID.
-    let requesting_user_id = match get_user_id_from_token(app_state, &mut conn, params.auth_token) {
+    let requesting_user_id = match get_user_id_from_token(
+        app_state,
+        &mut conn,
+        params.auth_token,
+        params.claude_session_id,
+        params.replaces_session_id,
+    ) {
         TokenAuth::User(id) => id,
         TokenAuth::Unavailable => {
             warn!(
@@ -190,6 +196,15 @@ pub fn register_or_update_session(
             .execute(&mut conn)
         {
             Ok(_) => {
+                if let Err(e) =
+                    crate::handlers::session_spawn::registered(&mut conn, existing_session.id)
+                {
+                    error!(
+                        "{}: child registration: {}",
+                        crate::markers::SPAWN_LIFECYCLE_FAILED,
+                        e
+                    );
+                }
                 info!(
                     "Session reactivated in DB: {} ({}) branch: {:?}",
                     params.session_name, params.claude_session_id, params.git_branch
@@ -362,12 +377,19 @@ fn get_user_id_from_token(
     app_state: &AppState,
     conn: &mut diesel::PgConnection,
     auth_token: Option<&str>,
+    session_id: Uuid,
+    replaces: Option<Uuid>,
 ) -> TokenAuth {
     if let Some(token) = auth_token {
-        match super::super::proxy_tokens::verify_and_get_user(app_state, conn, token) {
-            Ok((user_id, email)) => {
-                info!("JWT token verified for user: {}", email);
-                return TokenAuth::User(user_id);
+        match super::super::proxy_tokens::verify_and_get_user_with_token(app_state, conn, token) {
+            Ok(verified) => {
+                if let Some(bound) = verified.token.session_id {
+                    if bound != session_id || replaces.is_some_and(|old| old != bound) {
+                        return TokenAuth::Rejected;
+                    }
+                }
+                info!("JWT token verified for user: {}", verified.email);
+                return TokenAuth::User(verified.user_id);
             }
             Err(crate::errors::AppError::ServiceUnavailable(_)) => {
                 // The token was never evaluated — don't let a DB blip
@@ -394,6 +416,69 @@ fn get_user_id_from_token(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn bound_proxy_cannot_register_another_portal_id_or_replace_a_sibling() {
+        use crate::handlers::proxy_tokens::{issue_proxy_token, TokenPersist, LAUNCH_TOKEN_NAME};
+        let Some(pool) = crate::test_support::shared_pool() else {
+            return;
+        };
+        let state = crate::test_support::test_app_state(pool);
+        let mut conn = state.conn().unwrap();
+        let user = crate::test_support::insert_user(&mut conn, "bound-register");
+        let parent = crate::test_support::insert_session(&mut conn, user.id, "parent");
+        let child = crate::test_support::insert_session(&mut conn, user.id, "child");
+        diesel::update(crate::schema::sessions::table.find(child.id))
+            .set((
+                crate::schema::sessions::spawned_by.eq(parent.id),
+                crate::schema::sessions::spawn_depth.eq(2),
+            ))
+            .execute(&mut conn)
+            .unwrap();
+        let issued = issue_proxy_token(
+            &mut conn,
+            state.jwt_secret.as_bytes(),
+            user.id,
+            TokenPersist::Create {
+                name: LAUNCH_TOKEN_NAME,
+            },
+            None,
+        )
+        .unwrap();
+        diesel::update(crate::schema::proxy_auth_tokens::table.find(issued.row_id))
+            .set(crate::schema::proxy_auth_tokens::session_id.eq(child.id))
+            .execute(&mut conn)
+            .unwrap();
+        assert!(
+            matches!(get_user_id_from_token(&state,&mut conn,Some(&issued.token),child.id,None),TokenAuth::User(id) if id==user.id)
+        );
+        assert!(matches!(
+            get_user_id_from_token(
+                &state,
+                &mut conn,
+                Some(&issued.token),
+                Uuid::new_v4(),
+                Some(child.id)
+            ),
+            TokenAuth::Rejected
+        ));
+        assert!(matches!(
+            get_user_id_from_token(
+                &state,
+                &mut conn,
+                Some(&issued.token),
+                child.id,
+                Some(parent.id)
+            ),
+            TokenAuth::Rejected
+        ));
+        let actual = crate::schema::sessions::table
+            .find(child.id)
+            .select(crate::models::Session::as_select())
+            .first::<crate::models::Session>(&mut conn)
+            .unwrap();
+        assert_eq!(actual.spawned_by, Some(parent.id));
+        assert_eq!(actual.spawn_depth, 2);
+    }
 
     #[tokio::test]
     async fn reattach_preserves_a_name_changed_through_the_rename_api() {

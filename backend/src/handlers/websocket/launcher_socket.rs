@@ -191,6 +191,25 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                         Ok(mut conn) => {
                             match verify_and_get_user_with_token(&app_state, &mut conn, token) {
                                 Ok(verified) => {
+                                    if verified.token.session_id.is_some()
+                                        || verified.token.name
+                                            == crate::handlers::proxy_tokens::LAUNCH_TOKEN_NAME
+                                    {
+                                        let _ = ws_sender
+                                            .send(ServerToLauncher::LauncherRegisterAck {
+                                                capabilities: Vec::new(),
+                                                success: false,
+                                                fatal: true,
+                                                launcher_id,
+                                                error: Some(
+                                                    "Session credentials cannot register launchers"
+                                                        .into(),
+                                                ),
+                                                reject_reason: None,
+                                            })
+                                            .await;
+                                        return;
+                                    }
                                     info!(
                                         "Launcher authenticated as {} ({})",
                                         verified.email, verified.user_id
@@ -602,6 +621,15 @@ fn handle_launcher_message(
                     if let Ok(mut conn) = app_state.db_pool.get() {
                         use crate::schema::sessions;
                         use diesel::prelude::*;
+                        if let Err(e) =
+                            crate::handlers::session_spawn::launch_failed(&mut conn, session_id)
+                        {
+                            warn!(
+                                "{}: launch failure: {}",
+                                crate::markers::SPAWN_LIFECYCLE_FAILED,
+                                e
+                            );
+                        }
                         // Read prior status + name so we only push on a genuine
                         // active → disconnected drop (mobile-apps plan §8.1); a
                         // launch failure on a not-yet-active session is not a
@@ -830,6 +858,7 @@ fn handle_launcher_message(
             match crate::handlers::launchers::mint_launch_token(app_state, user_id) {
                 Ok(auth_token) => {
                     let launch_msg = ServerToLauncher::LaunchSession {
+                        plugin_selection: None,
                         history_restore: None,
                         request_id,
                         user_id,
@@ -1204,9 +1233,27 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
         let claude_args = crate::models::jsonb_string_vec(&session.claude_args);
         let agent_type = shared::AgentType::parse_or_default(&session.agent_type);
 
+        let child_recipe =
+            match crate::handlers::session_spawn::launch_recipe(&mut conn, session.id) {
+                Ok(recipe) => recipe,
+                Err(e) => {
+                    warn!(
+                        "{}: child recipe: {:?}",
+                        crate::markers::SPAWN_LIFECYCLE_FAILED,
+                        e
+                    );
+                    continue;
+                }
+            };
+        let initial_child = child_recipe.as_ref().is_some_and(|(_, initial)| *initial);
+        let child_worktree = child_recipe
+            .as_ref()
+            .filter(|(_, initial)| *initial)
+            .map(|(r, _)| &r.launch.worktree);
         let pending_fork = session.fork_launch_pending;
-        let create_worktree = pending_fork && session.fork_create_worktree;
-        let resume = reconcile_resume_flag(pending_fork, session.input_seq);
+        let create_worktree = (pending_fork && session.fork_create_worktree)
+            || child_worktree.is_some_and(|w| !w.is_none());
+        let resume = !initial_child && reconcile_resume_flag(pending_fork, session.input_seq);
 
         info!(
             "Reconcile relaunching session {} ({}) on launcher {}: {}, \
@@ -1226,7 +1273,8 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
         );
 
         let launch_msg = ServerToLauncher::LaunchSession {
-            history_restore,
+            plugin_selection: child_recipe.as_ref().and_then(|(r, _)| r.plugins.clone()),
+            history_restore: history_restore.map(Box::new),
             request_id,
             user_id,
             auth_token,
@@ -1238,8 +1286,11 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
             resume_session_id: Some(session.id),
             resume: Some(resume),
             create_worktree,
-            worktree_branch: create_worktree.then(|| session.session_name.clone()),
-            scratch_worktree: false,
+            worktree_branch: child_worktree
+                .and_then(|w| w.branch().map(str::to_string))
+                .or_else(|| create_worktree.then(|| session.session_name.clone())),
+            scratch_worktree: child_worktree
+                .is_some_and(|w| matches!(w, shared::WorktreeMode::Scratch { .. })),
             fork_from_session_id: pending_fork
                 .then_some(session.forked_from_session_id)
                 .flatten(),

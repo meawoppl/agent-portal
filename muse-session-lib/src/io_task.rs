@@ -228,7 +228,7 @@ fn acknowledge_delivery_if_accepted(
 /// (`args.extend`) and codex (`.extra_args`) pass the same field — muse was
 /// previously the lone agent that dropped it.
 fn build_exec_builder(config: &SessionConfig, text: &str) -> MuseExecBuilder {
-    MuseExecBuilder::new(text)
+    let mut builder = MuseExecBuilder::new(text)
         .binary(
             config
                 .runtime_command
@@ -250,7 +250,11 @@ fn build_exec_builder(config: &SessionConfig, text: &str) -> MuseExecBuilder {
         // session id, so the var cannot go stale the way claude's /clear does.
         .env("PORTAL_SESSION_ID", config.session_id.to_string())
         .yolo(config.muse_yolo)
-        .extra_args(config.extra_args.clone())
+        .extra_args(config.extra_args.clone());
+    for (key, value) in config.portal_environment() {
+        builder = builder.env(key, value);
+    }
+    builder
 }
 
 fn emit(

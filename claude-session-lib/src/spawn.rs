@@ -78,7 +78,9 @@ pub fn claude_cli_args(
         args.push(transcript_id.to_string());
     } else {
         args.push("--session-id".to_string());
-        args.push(session_id.to_string());
+        // A fresh native conversation after missing-history recovery can have
+        // its own UUID without resetting the bound Portal session/lineage.
+        args.push(transcript_id.to_string());
     }
 
     args.extend(extra_args.iter().cloned());
@@ -140,6 +142,7 @@ fn build_claude_command(claude_path: &Path, args: &[String], config: &SessionCon
     // falls back to matching on host + working directory, which is ambiguous the
     // moment two sessions share a directory. Codex and Muse already do this.
     cmd.env("PORTAL_SESSION_ID", config.session_id.to_string());
+    cmd.envs(config.portal_environment());
 
     cmd.stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -270,6 +273,18 @@ mod tests {
             command.as_std().get_args().collect::<Vec<_>>(),
             vec!["--resume", "a b"]
         );
+    }
+
+    #[test]
+    fn fresh_native_identity_does_not_rotate_portal_session() {
+        let portal = uuid::Uuid::new_v4();
+        let native = uuid::Uuid::new_v4();
+        let args = claude_cli_args(portal, false, Some(native), None, false, &[]);
+        assert!(args
+            .windows(2)
+            .any(|a| a == ["--session-id", native.to_string().as_str()]));
+        assert!(!args.iter().any(|a| a == &portal.to_string()));
+        assert!(!args.iter().any(|a| a == "--resume"));
     }
 
     #[test]

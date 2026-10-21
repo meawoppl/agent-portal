@@ -59,6 +59,8 @@ pub type ClaudeConversationIdSink = Arc<dyn Fn(uuid::Uuid) + Send + Sync>;
 /// Configuration for a proxy session
 #[derive(Clone)]
 pub struct ProxySessionConfig {
+    /// One-time transcript disclosure when missing native history was replaced.
+    pub startup_notice: Option<String>,
     pub history_restore: Option<shared::api::HistoryRestoreLaunch>,
     pub backend_url: String,
     pub session_id: Uuid,
@@ -550,7 +552,7 @@ async fn run_single_connection<A: Agent>(session: &mut SessionState<'_, A>) -> C
     // "reconnected" lines.
     if session.first_connection {
         let short_id = shared::short_uuid(&session.config.session_id);
-        let text = format!(
+        let mut text = format!(
             "**Session started** — `{}` on `{}` in `{}` ({} `{}…`)",
             session.config.session_name,
             hostname_or_unknown(),
@@ -558,6 +560,10 @@ async fn run_single_connection<A: Agent>(session: &mut SessionState<'_, A>) -> C
             config_with_branch.agent_type,
             short_id,
         );
+        if let Some(notice) = &session.config.startup_notice {
+            text.push_str("\n\n");
+            text.push_str(notice);
+        }
         let portal_content = shared::PortalMessage::text(text).to_json();
         let seq = {
             let mut buf = session.output_buffer.lock().await;
