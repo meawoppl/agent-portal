@@ -194,11 +194,15 @@ pub fn plugins_panel() -> Html {
     let can_manage = selected_launcher.as_ref().is_some_and(manages_plugins);
 
     {
-        let inventory = inventory.clone();
+        let (inventory, outcome, pending) = (inventory.clone(), outcome.clone(), pending.clone());
         use_effect_with(
             (*selected, (*directory).clone(), can_manage),
             move |(launcher, directory, can_manage)| {
                 inventory.set(None);
+                // Results and confirmations belong to the previous selection.
+                // Actions lock the picker, so none is in flight here.
+                outcome.set(None);
+                pending.set(None);
                 // A slow answer for the previous computer or directory must not
                 // land under the one now selected.
                 let current = Rc::new(Cell::new(true));
@@ -369,7 +373,7 @@ pub fn plugins_panel() -> Html {
             <form class="plugins-browser-controls" onsubmit={on_match}>
                 <label>
                     { "Computer" }
-                    <select onchange={on_select}>
+                    <select onchange={on_select} disabled={is_busy}>
                         { for list.iter().map(|l| html! {
                             <option
                                 value={l.launcher_id.to_string()}
@@ -389,7 +393,7 @@ pub fn plugins_panel() -> Html {
                         oninput={on_directory_input}
                     />
                 </label>
-                <button type="submit" class="sched-btn">{ "Match" }</button>
+                <button type="submit" class="sched-btn" disabled={is_busy}>{ "Match" }</button>
             </form>
         },
     };
