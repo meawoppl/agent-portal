@@ -27,8 +27,8 @@
 <text x="1069" y="567" font-family="sans-serif" font-size="26" fill="#9ece6a">Reconnect; retain untouched tail</text>
 <text x="1069" y="607" font-family="sans-serif" font-size="23" fill="#c0caf5">Remove only the attempted operation from the queue.</text>
 <text x="1069" y="640" font-family="sans-serif" font-size="23" fill="#c0caf5">Log ambiguity; never replay its remaining frames.</text>
-<text x="1069" y="812" font-family="sans-serif" font-size="26" fill="#9ece6a">Claim until authoritative removal</text>
-<text x="1069" y="852" font-family="sans-serif" font-size="23" fill="#c0caf5">Repeated pending snapshots cannot reclaim the ID.</text>
-<text x="1069" y="885" font-family="sans-serif" font-size="23" fill="#c0caf5">Retire claims only when the hub snapshot omits them.</text>
+<text x="1069" y="812" font-family="sans-serif" font-size="26" fill="#9ece6a">Fresh sync gates queued work</text>
+<text x="1069" y="852" font-family="sans-serif" font-size="23" fill="#c0caf5">Discard cancelled, disabled or edited identities.</text>
+<text x="1069" y="885" font-family="sans-serif" font-size="23" fill="#c0caf5">Claim continuation IDs until the hub removes them.</text>
 <text x="55" y="1170" font-family="sans-serif" font-size="22" fill="#e0af68">Scope: daemon-local queue and claims. No durable delivery identity or application acknowledgment; #1165 remains open.</text>
 </svg>

@@ -52,20 +52,23 @@ pub struct PendingLaunchInfo {
 }
 
 struct PendingLaunch {
+    task_fields: Option<shared::ScheduledTaskFields>,
     kind: PendingLaunchKind,
     pub last_session_id: Option<Uuid>,
     prompt: String,
 }
 
-struct PendingPrompt {
-    session_id: Uuid,
-    task_id: Uuid,
-    prompt: String,
+pub struct PendingPrompt {
+    pub task_fields: shared::ScheduledTaskFields,
+    pub session_id: Uuid,
+    pub task_id: Uuid,
+    pub prompt: String,
     send_at: Instant,
 }
 
 #[derive(Clone)]
 pub struct ReadyContinuation {
+    pub original: ContinuationConfig,
     pub id: Uuid,
     pub session_id: Uuid,
     pub prompt: String,
@@ -215,6 +218,7 @@ impl Scheduler {
             if due {
                 self.claimed_continuations.insert(c.id);
                 ready.push(ReadyContinuation {
+                    original: c.clone(),
                     id: c.id,
                     session_id: c.session_id,
                     prompt: c.prompt.clone(),
@@ -286,6 +290,7 @@ impl Scheduler {
                         task.config.fields.name, session_id
                     );
                     new_prompts.push(PendingPrompt {
+                        task_fields: task.config.fields.clone(),
                         session_id,
                         task_id,
                         prompt: task.config.fields.prompt.clone(),
@@ -323,6 +328,7 @@ impl Scheduler {
             new_pending.push((
                 request_id,
                 PendingLaunch {
+                    task_fields: Some(task.config.fields.clone()),
                     kind: PendingLaunchKind::ScheduledTask { task_id },
                     last_session_id,
                     prompt: task.config.fields.prompt.clone(),
@@ -359,6 +365,7 @@ impl Scheduler {
         self.pending_launches.insert(
             request_id,
             PendingLaunch {
+                task_fields: None,
                 kind: PendingLaunchKind::Continuation {
                     continuation_id: continuation.id,
                     session_id: continuation.session_id,
@@ -395,7 +402,11 @@ impl Scheduler {
             // Remember the session this task just launched so a later
             // continue-mode firing (within this connection) resumes it.
             self.last_session_by_task.insert(task_id, session_id);
+            let Some(task_fields) = pending.task_fields else {
+                return Some(kind);
+            };
             self.pending_prompts.push(PendingPrompt {
+                task_fields,
                 session_id,
                 task_id,
                 prompt: pending.prompt,
@@ -429,18 +440,19 @@ impl Scheduler {
     }
 
     /// Return prompts that are ready to send. Removes them from the queue.
-    /// Returns (session_id, task_id, prompt_content).
-    pub fn ready_prompts(&mut self) -> Vec<(Uuid, Uuid, String)> {
+    /// Retains original task fields so reconnect reconciliation can reject edits.
+    pub fn ready_prompts(&mut self) -> Vec<PendingPrompt> {
         let now = Instant::now();
         let mut ready = Vec::new();
-        self.pending_prompts.retain(|p| {
-            if p.send_at <= now {
-                ready.push((p.session_id, p.task_id, p.prompt.clone()));
-                false
+        let mut pending = Vec::new();
+        for prompt in self.pending_prompts.drain(..) {
+            if prompt.send_at <= now {
+                ready.push(prompt);
             } else {
-                true
+                pending.push(prompt);
             }
-        });
+        }
+        self.pending_prompts = pending;
         ready
     }
 
@@ -612,8 +624,8 @@ mod tests {
                 prompts.len(),
                 usize::from(mode == shared::SessionMode::Continue)
             );
-            if let Some((target, _, _)) = prompts.first() {
-                assert_eq!(*target, session_id);
+            if let Some(prompt) = prompts.first() {
+                assert_eq!(prompt.session_id, session_id);
             }
             assert!(scheduler.next_fire_duration().is_some());
 
@@ -802,9 +814,26 @@ mod tests {
         assert!(
             ready
                 .iter()
-                .any(|(sid, tid, _)| *sid == s1 && *tid == task_id),
+                .any(|p| p.session_id == s1 && p.task_id == task_id),
             "prompt should be queued for the active session"
         );
+    }
+
+    #[test]
+    fn delayed_prompt_keeps_original_fields_after_task_edit() {
+        let mut scheduler = Scheduler::new();
+        let original = make_task("original", "* * * * *");
+        scheduler.update_tasks(vec![original.clone()]);
+        make_due(&mut scheduler);
+        let launch = scheduler.fire_due_tasks().remove(0);
+        let mut edited = original.clone();
+        edited.fields.prompt = "replacement".into();
+        scheduler.update_tasks(vec![edited]);
+        scheduler.on_session_spawned(launch.request_id, Uuid::new_v4());
+        scheduler.pending_prompts[0].send_at = Instant::now();
+        let prompt = scheduler.ready_prompts().remove(0);
+        assert_eq!(prompt.task_fields, original.fields);
+        assert_eq!(prompt.prompt, original.fields.prompt);
     }
 
     #[test]

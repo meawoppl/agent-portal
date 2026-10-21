@@ -1,4 +1,4 @@
-use super::supervisor::Delivery;
+use super::supervisor::{Delivery, WorkIdentity};
 use crate::scheduler::Scheduler;
 use shared::LauncherToServer;
 use tracing::{info, warn};
@@ -33,6 +33,10 @@ pub(super) fn due_tasks(scheduler: &mut Scheduler) -> Vec<Delivery> {
         frames.push(msg);
         deliveries.push(Delivery {
             label: format!("scheduled task {}", task_to_fire.config.id),
+            identity: WorkIdentity::Task {
+                id: task_to_fire.config.id,
+                fields: task_to_fire.config.fields.clone(),
+            },
             frames,
         });
     }
@@ -43,7 +47,10 @@ pub(super) fn due_tasks(scheduler: &mut Scheduler) -> Vec<Delivery> {
 pub(super) fn due_prompts(scheduler: &mut Scheduler) -> Vec<Delivery> {
     let mut deliveries = Vec::new();
 
-    for (session_id, task_id, content) in scheduler.ready_prompts() {
+    for prompt in scheduler.ready_prompts() {
+        let session_id = prompt.session_id;
+        let task_id = prompt.task_id;
+        let content = prompt.prompt;
         let mut frames = Vec::new();
         info!(
             "Injecting prompt for task {} into session {}",
@@ -63,6 +70,10 @@ pub(super) fn due_prompts(scheduler: &mut Scheduler) -> Vec<Delivery> {
         frames.push(inject);
         deliveries.push(Delivery {
             label: format!("scheduled prompt {task_id} for {session_id}"),
+            identity: WorkIdentity::Task {
+                id: task_id,
+                fields: prompt.task_fields,
+            },
             frames,
         });
     }
@@ -123,6 +134,7 @@ pub(super) fn due_continuations(scheduler: &mut Scheduler, running: &[Uuid]) -> 
         }
         deliveries.push(Delivery {
             label: format!("continuation {}", continuation.id),
+            identity: WorkIdentity::Continuation(continuation.original),
             frames,
         });
     }

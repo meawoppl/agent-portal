@@ -1,5 +1,5 @@
 //! Local lifecycle cleanup happens even if its report cannot reach the hub.
-use super::supervisor::Delivery;
+use super::supervisor::{Delivery, WorkIdentity};
 use crate::process_manager::{ProcessManager, SessionExited};
 use crate::scheduler::Scheduler;
 use shared::LauncherToServer;
@@ -26,6 +26,7 @@ pub(super) fn exited(
     }
     Delivery {
         label: format!("session exit {}", exited.session_id),
+        identity: WorkIdentity::Notification,
         frames,
     }
 }

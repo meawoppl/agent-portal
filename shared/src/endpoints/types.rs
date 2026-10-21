@@ -143,7 +143,7 @@ pub struct ScheduledTaskConfig {
     pub last_session_id: Option<Uuid>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ContinuationConfig {
     pub id: Uuid,
     pub session_id: Uuid,

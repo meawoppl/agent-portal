@@ -510,7 +510,9 @@ session's cgroup.
 `LAUNCHER_DELIVERY_AMBIGUOUS` means a scheduled launch, prompt, continuation,
 or exit report hit a socket send error. A send failure cannot prove whether the
 hub accepted that operation. The launcher reconnects and preserves later,
-untouched operations, but does not replay the uncertain operation or send its
+untouched operations. Queued scheduled work waits for a fresh authoritative
+schedule/continuation snapshot after reconnect; removed, disabled or edited
+work is discarded. The launcher does not replay the uncertain operation or send its
 remaining frames (for example, `ContinuationFired` after an uncertain injection).
 Check the named session/task and its transcript before scheduling a replacement.
 

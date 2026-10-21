@@ -223,13 +223,8 @@ pub async fn run_launcher_loop(
                     }
                 }
 
-                // Resume only operations never attempted on the old connection.
-                if !supervisor
-                    .flush(async |frame| ws_sender.send(frame).await)
-                    .await
-                {
-                    continue;
-                }
+                // RegisterAck alone does not authorize stale queued work.
+                supervisor.reconnect();
 
                 // Background native reads return through this connection-owned
                 // queue so history copying never blocks heartbeats or controls.
@@ -264,6 +259,9 @@ pub async fn run_launcher_loop(
                 let mut ack_seen = false;
 
                 loop {
+                    for request_id in supervisor.cancelled_launches() {
+                        scheduler.clear_pending_launch(&request_id);
+                    }
                     let sched_dur = scheduler
                         .next_fire_duration()
                         .unwrap_or(Duration::from_secs(3600));
@@ -281,106 +279,108 @@ pub async fn run_launcher_loop(
                     tokio::pin!(continuation_sleep);
 
                     tokio::select! {
-                                                               Some(reply) = import_reply_rx.recv() => {
-                                                                   if ws_sender.send(reply).await.is_err() { break; }
-                                                               }
-                                                               result = ws_receiver.recv() => {
-                                                                   match result {
-                                                                       Some(Ok(msg)) => {
-                                                                           // A heartbeat echo proves the control socket
-                                                                           // is live end-to-end; record it and arm the
-                                                                           // watchdog. Handled here (not in
-                                                                           // `handle_message`) so the liveness state
-                                                                           // stays local to the loop.
-                                                                           if matches!(msg, ServerToLauncher::LauncherHeartbeatAck) {
-                                                                               last_ack = Instant::now();
-                                                                               ack_seen = true;
-                                                                           } else {
-                                                                               handle_message(
-                                                                                   msg,
-                                                                                   &mut ws_sender,
-                                                                                   &mut process_manager,
-                                                                                   &mut scheduler,
-                                                                                   &mut login_registry,
-                                                                                   &import_reply_tx,
-                                                                               ).await;
-                                                                           }
-                                                                       }
-                                                                       Some(Err(e)) => {
-                                                                           warn!("Decode error: {}", e);
-                                                                           continue;
-                                                                       }
-                                                                       None => {
-                                                                           info!("WebSocket closed by server");
-                                                                           break;
-                                                                       }
-                                                                   }
-                                                               }
+                        Some(reply) = import_reply_rx.recv() => {
+                            if ws_sender.send(reply).await.is_err() { break; }
+                        }
+                        result = ws_receiver.recv() => {
+                            match result {
+                                Some(Ok(msg)) => {
+                                    supervisor.observe(&msg);
+                                    // A heartbeat echo proves the control socket
+                                    // is live end-to-end; record it and arm the
+                                    // watchdog. Handled here (not in
+                                    // `handle_message`) so the liveness state
+                                    // stays local to the loop.
+                                    if matches!(msg, ServerToLauncher::LauncherHeartbeatAck) {
+                                        last_ack = Instant::now();
+                                        ack_seen = true;
+                                    } else {
+                                        handle_message(
+                                        msg,
+                                        &mut ws_sender,
+                                        &mut process_manager,
+                                        &mut scheduler,
+                                        &mut login_registry,
+                                        &import_reply_tx,
+                                        ).await;
+                                    }
+                                    if !supervisor.flush(async |frame| ws_sender.send(frame).await).await { break; }
+                                }
+                                Some(Err(e)) => {
+                                    warn!("Decode error: {}", e);
+                                    continue;
+                                }
+                                None => {
+                                    info!("WebSocket closed by server");
+                                    break;
+                                }
+                            }
+                        }
 
-                                                               _ = heartbeat_timer.tick() => {
-                                                                   // Half-open detection: if the backend has been
-                                                                   // echoing heartbeats but has now gone silent past
-                                                                   // the timeout, our sends are buffering into a dead
-                                                                   // TCP connection — reconnect rather than believe the
-                                                                   // socket is fine while the hub marks our sessions
-                                                                   // disconnected (#1366).
-                                                                   if control_socket_half_open(ack_seen, last_ack.elapsed()) {
-                                                                       warn!(
-                                                                           "No launcher heartbeat ack for {}s — control socket half-open; reconnecting to re-establish sessions",
-                                                                           last_ack.elapsed().as_secs()
-                                                                       );
-                                                                       break;
-                                                                   }
-                                                                   let hb = LauncherToServer::LauncherHeartbeat {
-                                                                       launcher_id,
-                                                                       running_sessions: process_manager.running_session_ids(),
-                                                                       uptime_secs: start.elapsed().as_secs(),
-                                                                       system: Some(sysmon.sample()),
-                                                                   };
-                                                                   if ws_sender.send(hb).await.is_err() {
-                                                                       warn!("Failed to send heartbeat");
-                                                                       break;
-                                                                   }
+                        _ = heartbeat_timer.tick() => {
+                            // Half-open detection: if the backend has been
+                            // echoing heartbeats but has now gone silent past
+                            // the timeout, our sends are buffering into a dead
+                            // TCP connection — reconnect rather than believe the
+                            // socket is fine while the hub marks our sessions
+                            // disconnected (#1366).
+                            if control_socket_half_open(ack_seen, last_ack.elapsed()) {
+                                warn!(
+                                "No launcher heartbeat ack for {}s — control socket half-open; reconnecting to re-establish sessions",
+                                last_ack.elapsed().as_secs()
+                                );
+                                break;
+                            }
+                            let hb = LauncherToServer::LauncherHeartbeat {
+                                launcher_id,
+                                running_sessions: process_manager.running_session_ids(),
+                                uptime_secs: start.elapsed().as_secs(),
+                                system: Some(sysmon.sample()),
+                            };
+                            if ws_sender.send(hb).await.is_err() {
+                                warn!("Failed to send heartbeat");
+                                break;
+                            }
 
-                                                                   // Enforce max runtime on scheduled sessions
-                                                                   for session_id in scheduler.timed_out_sessions() {
-                                                                       process_manager.stop(&session_id).await;
-                                                                   }
-                                                               }
+                            // Enforce max runtime on scheduled sessions
+                            for session_id in scheduler.timed_out_sessions() {
+                                process_manager.stop(&session_id).await;
+                            }
+                        }
 
-                                                               _ = stats_timer.tick(), if fast_stats => {
-                                                                   let frame = LauncherToServer::SystemStats {
-                                                                       launcher_id,
-                                                                       sample: sysmon.sample(),
-                                                                   };
-                                                                   if ws_sender.send(frame).await.is_err() {
-                                                                       warn!("Failed to send system stats");
-                                                                       break;
-                                                                   }
-                                                               }
+                        _ = stats_timer.tick(), if fast_stats => {
+                            let frame = LauncherToServer::SystemStats {
+                                launcher_id,
+                                sample: sysmon.sample(),
+                            };
+                            if ws_sender.send(frame).await.is_err() {
+                                warn!("Failed to send system stats");
+                                break;
+                            }
+                        }
 
-                                                               Some(exited) = exit_rx.recv() => {
-                     supervisor.extend([process_events::exited(&mut process_manager, &mut scheduler, exited)]);
-                     if !supervisor.flush(async |frame| ws_sender.send(frame).await).await { break; }
+                        Some(exited) = exit_rx.recv() => {
+                            supervisor.extend([process_events::exited(&mut process_manager, &mut scheduler, exited)]);
+                            if !supervisor.flush(async |frame| ws_sender.send(frame).await).await { break; }
+                        }
+
+                        // Scheduler: fire due tasks
+                        _ = &mut sched_sleep, if supervisor.schedule_ready() => {
+                            supervisor.extend(scheduler_events::due_tasks(&mut scheduler));
+                            if !supervisor.flush(async |frame| ws_sender.send(frame).await).await { break; }
+                        }
+
+                        // Scheduler: send pending prompts after delay
+                        _ = &mut prompt_sleep, if supervisor.schedule_ready() => {
+                            supervisor.extend(scheduler_events::due_prompts(&mut scheduler));
+                            if !supervisor.flush(async |frame| ws_sender.send(frame).await).await { break; }
+                        }
+
+                        _ = &mut continuation_sleep, if supervisor.continuations_ready() => {
+                            supervisor.extend(scheduler_events::due_continuations(&mut scheduler, &process_manager.running_session_ids()));
+                            if !supervisor.flush(async |frame| ws_sender.send(frame).await).await { break; }
+                        }
                     }
-
-                                                               // Scheduler: fire due tasks
-                                                               _ = &mut sched_sleep => {
-                                        supervisor.extend(scheduler_events::due_tasks(&mut scheduler));
-                                        if !supervisor.flush(async |frame| ws_sender.send(frame).await).await { break; }
-                                        }
-
-                                                               // Scheduler: send pending prompts after delay
-                                                               _ = &mut prompt_sleep => {
-                                        supervisor.extend(scheduler_events::due_prompts(&mut scheduler));
-                                        if !supervisor.flush(async |frame| ws_sender.send(frame).await).await { break; }
-                                        }
-
-                                                               _ = &mut continuation_sleep => {
-                                        supervisor.extend(scheduler_events::due_continuations(&mut scheduler, &process_manager.running_session_ids()));
-                                        if !supervisor.flush(async |frame| ws_sender.send(frame).await).await { break; }
-                                        }
-                                                           }
                 }
             }
             Err(e) => {
