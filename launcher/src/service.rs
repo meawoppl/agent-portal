@@ -78,6 +78,12 @@ fn service_file_path() -> Result<std::path::PathBuf> {
         .join(format!("{}.service", SERVICE_NAME)))
 }
 
+/// The launcher's user unit. Every session, and every build or test a session
+/// runs, shares this unit's cgroup, so the OOM settings decide whether one
+/// runaway `ld` costs one command or every session on the machine:
+/// `OOMPolicy=continue` keeps the service up when the kernel kills a process
+/// inside it (systemd's default, `stop`, tears the whole unit down), and
+/// `ManagedOOMPreference=avoid` asks `systemd-oomd` to pick other cgroups first.
 #[cfg(target_os = "linux")]
 fn generate_unit(binary_path: &str) -> String {
     let path = service_path(binary_path);
@@ -93,6 +99,8 @@ Environment=PATH={path}
 ExecStart={binary_path} --no-update
 Restart=on-failure
 RestartSec=5
+OOMPolicy=continue
+ManagedOOMPreference=avoid
 
 [Install]
 WantedBy=default.target
@@ -666,6 +674,20 @@ mod tests {
                 "unit PATH missing exe dir: {path_line}"
             );
         }
+    }
+
+    /// One OOM-killed build must not take every session down with it (#2230).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn unit_survives_an_oom_kill_inside_it() {
+        let unit = super::generate_unit("/home/u/.config/claude-portal/agent-portal");
+        let service: Vec<&str> = unit
+            .lines()
+            .skip_while(|l| *l != "[Service]")
+            .take_while(|l| !l.starts_with("[Install]"))
+            .collect();
+        assert!(service.contains(&"OOMPolicy=continue"), "{unit}");
+        assert!(service.contains(&"ManagedOOMPreference=avoid"), "{unit}");
     }
 }
 
