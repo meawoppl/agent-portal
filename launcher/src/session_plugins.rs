@@ -223,12 +223,28 @@ fn context_path(session: Uuid) -> PathBuf {
 
 /// Record what a launch injected, replacing the previous launch's record.
 pub(crate) fn record_injected(session: Uuid, entries: &[PluginContextEntry]) {
-    let written = serde_json::to_string(entries)
-        .map_err(anyhow::Error::from)
-        .and_then(|json| config::write_config_atomic(&context_path(session), &json));
-    if let Err(error) = written {
+    if let Err(error) = record_injected_at(&context_path(session), entries) {
         tracing::warn!("Could not record plugin context for {session}: {error:#}");
     }
+}
+
+/// Replace the record at `path`. If the new one can't be written the old one
+/// is removed, so a previous process's context is never shown as current.
+fn record_injected_at(path: &Path, entries: &[PluginContextEntry]) -> Result<()> {
+    let written = serde_json::to_string(entries)
+        .map_err(anyhow::Error::from)
+        .and_then(|json| config::write_config_atomic(path, &json));
+    if written.is_err() {
+        if let Err(error) = fs::remove_file(path) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                tracing::warn!(
+                    "Could not clear stale plugin context {}: {error}",
+                    path.display()
+                );
+            }
+        }
+    }
+    written
 }
 
 /// A session launched before recording existed, or whose record is damaged,
@@ -673,9 +689,28 @@ mod tests {
             estimated_tokens: 3,
             text: "# Layout".into(),
         };
-        fs::write(&path, serde_json::to_string(std::slice::from_ref(&entry)).unwrap()).unwrap();
+        fs::write(
+            &path,
+            serde_json::to_string(std::slice::from_ref(&entry)).unwrap(),
+        )
+        .unwrap();
         assert_eq!(read_injected(&path), vec![entry]);
         fs::write(&path, "broken").unwrap();
+        assert!(read_injected(&path).is_empty());
+    }
+
+    /// A failed replacement leaves no record rather than the previous
+    /// process's, which would read as current.
+    #[test]
+    fn failed_record_write_clears_the_stale_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.context.json");
+        record_injected_at(&path, &[]).unwrap();
+        assert!(path.exists());
+        // The atomic write goes through `<path>.tmp`; a directory there fails it.
+        fs::create_dir(dir.path().join("s.context.json.tmp")).unwrap();
+        assert!(record_injected_at(&path, &[]).is_err());
+        assert!(!path.exists());
         assert!(read_injected(&path).is_empty());
     }
 

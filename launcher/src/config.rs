@@ -57,18 +57,31 @@ pub struct PluginSkillContext {
 /// Text kept per injected file for inspection; the agent reads the file.
 const INJECTED_TEXT_LIMIT: usize = 64 * 1024;
 
-fn injected_skill(plugin: &str, name: &str, path: &Path) -> PluginContextEntry {
-    let text = std::fs::read_to_string(path).unwrap_or_default();
-    let bytes = text.len() as u64;
-    let mut kept = text;
-    if kept.len() > INJECTED_TEXT_LIMIT {
-        let mut cut = INJECTED_TEXT_LIMIT;
-        while !kept.is_char_boundary(cut) {
-            cut -= 1;
-        }
-        kept.truncate(cut);
-        kept.push_str("\n…");
+/// The source file's size and a bounded preview of it, read without loading
+/// more than [`INJECTED_TEXT_LIMIT`].
+fn source_preview(path: &Path) -> (u64, String) {
+    use std::io::Read;
+    let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    let mut bytes = Vec::new();
+    let read = std::fs::File::open(path).and_then(|file| {
+        file.take(INJECTED_TEXT_LIMIT as u64)
+            .read_to_end(&mut bytes)
+    });
+    if read.is_err() {
+        return (size, String::new());
     }
+    let mut preview = String::from_utf8_lossy(&bytes).into_owned();
+    if size > INJECTED_TEXT_LIMIT as u64 {
+        preview.push_str("\n…");
+    }
+    (size, preview)
+}
+
+/// A skill made available at launch. The agent reads its body on demand, so
+/// only `listed` (its catalog or reminder line) entered the context; the
+/// source is recorded as its size and a preview, not as injected text.
+fn available_skill(plugin: &str, name: &str, path: &Path, listed: &str) -> PluginContextEntry {
+    let (size, preview) = source_preview(path);
     PluginContextEntry {
         plugin: plugin.to_string(),
         name: name.to_string(),
@@ -77,9 +90,9 @@ fn injected_skill(plugin: &str, name: &str, path: &Path) -> PluginContextEntry {
         // Filled from the plugin's resolution by the caller.
         activation: PluginActivation::Detected,
         reason: String::new(),
-        context_bytes: bytes,
-        estimated_tokens: bytes.div_ceil(4),
-        text: kept,
+        context_bytes: size,
+        estimated_tokens: (listed.len() as u64).div_ceil(4),
+        text: preview,
     }
 }
 
@@ -300,9 +313,11 @@ fn plugin_skill_context_from_config(
                 && materialize_claude_skill(&claude_root, &skill_name, &path).is_ok()
             {
                 has_claude_skill = true;
+                // Claude's skill catalog carries the name and description.
+                let listed = format!("{skill_name}: {}", description.as_deref().unwrap_or(""));
                 context
                     .injected
-                    .push(injected_skill(plugin_name, &skill_name, &path));
+                    .push(available_skill(plugin_name, &skill_name, &path, &listed));
             }
             let reminder_agent = match agent_type {
                 AgentType::Codex => Some("codex"),
@@ -315,13 +330,14 @@ fn plugin_skill_context_from_config(
                     .as_deref()
                     .map(|description| format!(" - {description}"))
                     .unwrap_or_default();
-                lines.push(format!(
+                let line = format!(
                     "- `{plugin_name}:{skill_name}`{description}: {}",
                     path.display()
-                ));
+                );
                 context
                     .injected
-                    .push(injected_skill(plugin_name, &skill_name, &path));
+                    .push(available_skill(plugin_name, &skill_name, &path, &line));
+                lines.push(line);
             }
         }
         if has_claude_skill {

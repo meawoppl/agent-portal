@@ -248,8 +248,12 @@ pub struct PluginContextEntry {
     pub kind: PluginContextKind,
     pub activation: PluginActivation,
     pub reason: String,
+    /// Size of the source file.
     pub context_bytes: u64,
+    /// Tokens that entered the agent's context: a skill's catalog or reminder
+    /// line (its body is read on demand), or a prompt's whole text.
     pub estimated_tokens: u64,
+    /// The source, capped, for inspection.
     pub text: String,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

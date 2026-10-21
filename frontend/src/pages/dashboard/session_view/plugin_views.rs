@@ -1,7 +1,7 @@
 //! Controlled plugin views. SessionView owns inventory fetching, surface state,
 //! and persisted notice expansion; these components only render and emit intent.
 use crate::components::plugin_discovery::{
-    plugin_context_label, run_plugin_action, suggested_plugins, PluginCard, PLUGINS_BROWSER,
+    run_plugin_action, suggested_plugins, PluginCard, PLUGINS_BROWSER,
 };
 use shared::api::{
     PluginAction, PluginActivation, PluginContextEntry, PluginContextKind, PluginPolicy,
@@ -36,6 +36,14 @@ pub(super) struct PluginDiscoverySurfaceProps {
     pub on_close: Callback<MouseEvent>,
 }
 
+fn source_size(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else {
+        format!("{:.1} KiB", bytes as f64 / 1024.0)
+    }
+}
+
 fn activation_label(activation: PluginActivation) -> &'static str {
     match activation {
         PluginActivation::Explicit => "chosen for this session",
@@ -67,7 +75,6 @@ pub(super) fn plugin_context_notice(props: &PluginContextNoticeProps) -> Html {
             .find(|plugin| plugin.name == name)
             .map_or_else(|| name.to_string(), |plugin| plugin.display_name.clone())
     };
-    let context_bytes = props.entries.iter().map(|e| e.context_bytes).sum::<u64>();
     let estimated_tokens = props
         .entries
         .iter()
@@ -125,10 +132,10 @@ pub(super) fn plugin_context_notice(props: &PluginContextNoticeProps) -> Html {
                 aria-expanded={expanded.to_string()}
             >
                 <span class="plugin-context-caret">{ if expanded { "▾" } else { "▸" } }</span>
-                <span class="plugin-context-title">{ "Plugin context at launch" }</span>
+                <span class="plugin-context-title">{ "Plugins available to this session" }</span>
                 <span class="plugin-context-names">{ label }</span>
                 <span class="plugin-context-size">
-                    { plugin_context_label(context_bytes, estimated_tokens) }
+                    { format!("~{estimated_tokens} tokens in context") }
                 </span>
             </button>
             if expanded {
@@ -137,14 +144,13 @@ pub(super) fn plugin_context_notice(props: &PluginContextNoticeProps) -> Html {
                         <div class="edit-stack-error">{ error }</div>
                     }
                     { for by_plugin.iter().map(|(name, entries)| {
-                        let bytes = entries.iter().map(|e| e.context_bytes).sum::<u64>();
                         let tokens = entries.iter().map(|e| e.estimated_tokens).sum::<u64>();
                         let first = entries[0];
                         html! {
                             <article class="plugin-context-plugin" key={name.to_string()}>
                                 <div class="plugin-context-plugin-title">
                                     <span>{ display_name(name) }</span>
-                                    <span>{ plugin_context_label(bytes, tokens) }</span>
+                                    <span>{ format!("~{tokens} tokens in context") }</span>
                                 </div>
                                 <div class="plugin-context-detail">
                                     { format!("{} · {}", first.reason, activation_label(first.activation)) }
@@ -157,7 +163,7 @@ pub(super) fn plugin_context_notice(props: &PluginContextNoticeProps) -> Html {
                                             </span>
                                             <span>{ &entry.name }</span>
                                             <span class="plugin-context-size">
-                                                { plugin_context_label(entry.context_bytes, entry.estimated_tokens) }
+                                                { format!("{} source · ~{} tokens in context", source_size(entry.context_bytes), entry.estimated_tokens) }
                                             </span>
                                         </summary>
                                         <code class="plugin-context-source">{ &entry.path }</code>
