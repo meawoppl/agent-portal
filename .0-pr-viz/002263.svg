@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="arr-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+  </defs>
+
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2263 · Hide scheduled runs from the rail and link them from Schedule</text>
+
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">Every cron firing added a pill to the session rail; runs now stay out of it</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">and Settings / Schedule lists each task's runs with a link to the log.</text>
+  <line x1="55" y1="166" x2="1945" y2="166" stroke="#3d4666" stroke-width="1"/>
+
+  <text x="55" y="215" font-size="22" font-weight="bold" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1045" y="215" font-size="22" font-weight="bold" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1140" stroke="#3d4666" stroke-width="2" stroke-dasharray="10 8"/>
+
+  <!-- BEFORE -->
+  <rect x="55" y="245" width="900" height="190" rx="10" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+  <text x="79" y="285" font-size="26" fill="#c0caf5">session_rail.rs partition</text>
+  <text x="79" y="325" font-size="23" fill="#a9b1d6">scheduled_task_id.is_some() counted as hidden</text>
+  <text x="79" y="360" font-size="23" fill="#f7768e">expanded hidden section: one "Cron" pill per run</text>
+  <text x="79" y="395" font-size="23" fill="#a9b1d6">and each one added to the hidden count</text>
+
+  <rect x="55" y="485" width="900" height="150" rx="10" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+  <text x="79" y="525" font-size="26" fill="#c0caf5">Settings / Schedule</text>
+  <text x="79" y="565" font-size="23" fill="#a9b1d6">upcoming firings only (next 72 hours)</text>
+  <text x="79" y="600" font-size="23" fill="#f7768e">no way to find a past run's output</text>
+
+  <rect x="55" y="685" width="900" height="150" rx="10" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+  <text x="79" y="725" font-size="26" fill="#c0caf5">GET /api/scheduled-tasks/{id}/runs</text>
+  <text x="79" y="765" font-size="23" fill="#a9b1d6">no callers</text>
+  <text x="79" y="800" font-size="23" fill="#f7768e">returned the raw backend Session model</text>
+
+  <!-- AFTER -->
+  <rect x="1045" y="245" width="900" height="190" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1069" y="285" font-size="26" fill="#c0caf5">session_rail.rs + page.rs</text>
+  <text x="1069" y="325" font-size="23" fill="#9ece6a">cron sessions filtered out before the split</text>
+  <text x="1069" y="360" font-size="23" fill="#a9b1d6">in effective_hidden_sessions: no focus/keys</text>
+  <text x="1069" y="395" font-size="23" fill="#a9b1d6">mobile picker skips them; Cron badge removed</text>
+
+  <rect x="1045" y="485" width="900" height="150" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1069" y="525" font-size="26" fill="#c0caf5">Settings / Schedule: Recent Runs</text>
+  <text x="1069" y="565" font-size="23" fill="#9ece6a">archived: View log, /history/{user}/{session}</text>
+  <text x="1069" y="600" font-size="23" fill="#a9b1d6">not yet: Open session, /dashboard?session=...</text>
+  <line x1="1495" y1="685" x2="1495" y2="640" stroke="#9ece6a" stroke-width="2" marker-end="url(#arr-green)"/>
+
+  <rect x="1045" y="685" width="900" height="150" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1069" y="725" font-size="26" fill="#c0caf5">GET /api/scheduled-tasks/{id}/runs</text>
+  <text x="1069" y="765" font-size="23" fill="#9ece6a">ScheduledTaskRunsResponse (shared, typed)</text>
+  <text x="1069" y="800" font-size="23" fill="#a9b1d6">session_id, user_id, started_at, active, archived</text>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">Not changed: runs still launch, archive, and expire exactly as before; only where they are shown moves.</text>
+</svg>
