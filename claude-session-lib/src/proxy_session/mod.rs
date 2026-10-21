@@ -719,7 +719,6 @@ mod tests {
     }
 
     use super::*;
-    use uuid::Uuid;
 
     /// The Claude proxy-edge re-parse gate (#1165 item 2, slice 1). Valid Claude
     /// frames parse to `Some`, so the typed side-effects (wiggum DONE,
