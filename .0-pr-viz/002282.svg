@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26" />
+<text x="55" y="52" fill="#a9b1d6" font-family="sans-serif" font-size="24">PR #2282 · RustSec gate and expiring exceptions</text>
+<text x="55" y="104" fill="#e6e9f5" font-family="sans-serif" font-size="34">New advisories can arrive without a code change. Audit the lockfile daily</text>
+<text x="55" y="148" fill="#e6e9f5" font-family="sans-serif" font-size="34">and make every exposure exception owned, bounded and reviewable.</text>
+<path d="M55 177H1945 M1000 190V1140" stroke="#565f89" stroke-dasharray="8 8" />
+<text x="65" y="225" fill="#f7768e" font-family="sans-serif" font-size="24">BEFORE</text>
+<text x="1055" y="225" fill="#9ece6a" font-family="sans-serif" font-size="24">AFTER</text>
+<rect x="65" y="260" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666" />
+<text x="90" y="304" fill="#a9b1d6" font-family="sans-serif" font-size="28">Dependency updates</text>
+<text x="90" y="351" fill="#c0caf5" font-family="sans-serif" font-size="24">No scheduled RustSec gate.</text>
+<text x="90" y="392" fill="#c0caf5" font-family="sans-serif" font-size="24">A quiet lockfile could conceal a new advisory.</text>
+<rect x="65" y="470" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666" />
+<text x="90" y="514" fill="#a9b1d6" font-family="sans-serif" font-size="28">SDK maintenance</text>
+<text x="90" y="561" fill="#c0caf5" font-family="sans-serif" font-size="24">Typed SDK ownership was implicit.</text>
+<text x="90" y="602" fill="#c0caf5" font-family="sans-serif" font-size="24">Update review cadence was undocumented.</text>
+<rect x="65" y="680" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666" />
+<text x="90" y="724" fill="#a9b1d6" font-family="sans-serif" font-size="28">Exposure exceptions</text>
+<text x="90" y="771" fill="#c0caf5" font-family="sans-serif" font-size="24">A bare ignore can outlive its rationale.</text>
+<text x="90" y="812" fill="#c0caf5" font-family="sans-serif" font-size="24">An unreviewed exception can silently remain.</text>
+<rect x="65" y="890" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666" />
+<text x="90" y="934" fill="#a9b1d6" font-family="sans-serif" font-size="28">Scope of assurance</text>
+<text x="90" y="981" fill="#c0caf5" font-family="sans-serif" font-size="24">Dependency checks are not a full security audit.</text>
+<text x="90" y="1022" fill="#c0caf5" font-family="sans-serif" font-size="24">Warnings still need assessment.</text>
+<rect x="1055" y="260" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666" />
+<text x="1080" y="304" fill="#9ece6a" font-family="sans-serif" font-size="28">Fresh full-workspace audit</text>
+<text x="1080" y="351" fill="#c0caf5" font-family="sans-serif" font-size="24">Daily, PR, main-push and manual execution.</text>
+<text x="1080" y="392" fill="#c0caf5" font-family="sans-serif" font-size="24">Pinned cargo-audit; advisory failures fail CI.</text>
+<rect x="1055" y="470" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666" />
+<text x="1080" y="514" fill="#9ece6a" font-family="sans-serif" font-size="28">Explicit ownership</text>
+<text x="1080" y="561" fill="#c0caf5" font-family="sans-serif" font-size="24">Weekly dependency and SDK review.</text>
+<text x="1080" y="602" fill="#c0caf5" font-family="sans-serif" font-size="24">Targeted updates, typed fixtures and CI.</text>
+<rect x="1055" y="680" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666" />
+<text x="1080" y="724" fill="#9ece6a" font-family="sans-serif" font-size="28">Machine-enforced review</text>
+<text x="1080" y="771" fill="#c0caf5" font-family="sans-serif" font-size="24">One ES256-only VAPID exposure exception.</text>
+<text x="1080" y="812" fill="#c0caf5" font-family="sans-serif" font-size="24">Owner, reason, UTC expiry; maximum 31 days.</text>
+<rect x="1055" y="890" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666" />
+<text x="1080" y="934" fill="#9ece6a" font-family="sans-serif" font-size="28">Visible limitations</text>
+<text x="1080" y="981" fill="#c0caf5" font-family="sans-serif" font-size="24">Unsound, unmaintained and yanked warnings stay.</text>
+<text x="1080" y="1022" fill="#c0caf5" font-family="sans-serif" font-size="24">No target filtering or blanket suppressions.</text>
+<text x="55" y="1172" fill="#a9b1d6" font-family="sans-serif" font-size="22">Scope: known RustSec findings only. No claim of zero risk; operating-system and npm packages are outside this gate.</text>
+</svg>
