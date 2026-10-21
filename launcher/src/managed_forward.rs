@@ -309,6 +309,77 @@ fn current(root: &Path, recipe: &Recipe) -> bool {
         .is_some_and(|r| r.generation == recipe.generation)
 }
 type Credentials = std::sync::Arc<dyn Fn() -> Result<(String, String)> + Send + Sync>;
+
+/// How often a running service is health-checked and its forward confirmed.
+const POLL: Duration = if cfg!(test) {
+    Duration::from_millis(200)
+} else {
+    Duration::from_secs(5)
+};
+/// How long the forward must stay missing before it counts as closed or
+/// replaced. A restarting backend or a reconnect can report no forward or a
+/// 404 for a while; tearing the service down then would also delete the
+/// recipe it needs to come back (#2264).
+const ABSENCE_GRACE: Duration = if cfg!(test) {
+    Duration::from_secs(1)
+} else {
+    Duration::from_secs(90)
+};
+/// Consecutive polls that must agree the forward is gone.
+const ABSENCE_CONFIRMATIONS: u32 = 3;
+
+/// Tracks how long the forward has been missing from the backend.
+#[derive(Default)]
+struct Absence {
+    since: Option<std::time::Instant>,
+    seen: u32,
+}
+
+impl Absence {
+    /// Record one poll's answer; true once the forward has been missing on
+    /// enough consecutive polls for long enough. Seeing it again resets.
+    fn observe(&mut self, missing: bool, now: std::time::Instant) -> bool {
+        if !missing {
+            *self = Self::default();
+            return false;
+        }
+        let since = *self.since.get_or_insert(now);
+        self.seen += 1;
+        self.seen >= ABSENCE_CONFIRMATIONS && now.duration_since(since) >= ABSENCE_GRACE
+    }
+}
+
+/// Ask the backend whether the session still forwards `port`. `None` when the
+/// answer is unknown (unreachable, auth or server error), which counts for
+/// neither side; `Some(Some(reason))` when it is missing; `Some(None)` when it
+/// is there.
+async fn forward_missing(
+    client: &reqwest::Client,
+    base: &str,
+    token: &str,
+    session: Uuid,
+    port: u16,
+) -> Option<Option<String>> {
+    let response = client
+        .get(format!("{base}/api/agent/sessions/{session}/forwards"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .ok()?;
+    let status = response.status();
+    if status.as_u16() == 404 || status.as_u16() == 410 {
+        return Some(Some(format!("HTTP {status}")));
+    }
+    if !status.is_success() {
+        return None;
+    }
+    let forwards = response.json::<SessionForwardsResponse>().await.ok()?;
+    if forwards.forwards.iter().any(|f| f.port == port) {
+        return Some(None);
+    }
+    let ports: Vec<u16> = forwards.forwards.iter().map(|f| f.port).collect();
+    Some(Some(format!("forwards now {ports:?}")))
+}
 async fn serve(root: PathBuf, recipe: Recipe, credentials: Credentials) -> Result<()> {
     let old = read_status(&root, recipe.session).filter(|s| s.generation == recipe.generation);
     // Keep the public relay port across daemon restarts. Never adopt an unrelated listener.
@@ -368,28 +439,34 @@ async fn serve(root: PathBuf, recipe: Recipe, credentials: Credentials) -> Resul
             status.ready = true;
             atomic_json(&status_path(&root, recipe.session), &status)?;
             let mut unhealthy = 0;
+            let mut absence = Absence::default();
             loop {
                 tokio::select! {
                     exit = process.child.wait() => { bail!("service exited: {}", exit?); }
-                    _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                    _ = tokio::time::sleep(POLL) => {
                         if !current(&root, &recipe) { return Ok(()); }
                         if client.get(&health).send().await.is_ok_and(|r| r.status().is_success()) { unhealthy = 0; } else { unhealthy += 1; }
                         if unhealthy >= 3 { bail!("service failed three health checks"); }
-                        // A user closing or replacing the forward wins over recovery.
+                        // A user closing or replacing the forward wins over recovery,
+                        // but only once its absence has lasted: a backend restart or
+                        // reconnect can briefly report no forward or a 404.
                         let (current_base, token) = credentials()?;
                         if current_base != base { bail!("configured backend changed; register the service again"); }
-                        if let Ok(response) = client.get(format!("{base}/api/agent/sessions/{}/forwards", recipe.session)).bearer_auth(token).send().await {
-                            if response.status().as_u16() == 404 || response.status().as_u16() == 410 {
-                                remove_at(&root, recipe.session, Some(recipe.generation))?;
-                                return Ok(());
-                            }
-                            if response.status().is_success() {
-                                let forwards = response.json::<SessionForwardsResponse>().await?;
-                                if !forwards.forwards.iter().any(|f| f.port == port) {
-                                    remove_at(&root, recipe.session, Some(recipe.generation))?;
-                                    return Ok(());
-                                }
-                            }
+                        let Some(missing) = forward_missing(&client, &base, &token, recipe.session, port).await else { continue };
+                        if absence.observe(missing.is_some(), tokio::time::Instant::now().into_std()) {
+                            let reason = missing.unwrap_or_default();
+                            tracing::warn!(
+                                session = %recipe.session,
+                                generation = %recipe.generation,
+                                port,
+                                %reason,
+                                "managed forward closed or replaced; stopping the service"
+                            );
+                            status.ready = false;
+                            status.error = Some(format!("forward closed or replaced ({reason})"));
+                            atomic_json(&status_path(&root, recipe.session), &status)?;
+                            remove_at(&root, recipe.session, Some(recipe.generation))?;
+                            return Ok(());
                         }
                     }
                 }
@@ -633,6 +710,20 @@ mod tests {
             client.get(&url).send().await.unwrap().text().await.unwrap(),
             third.child_port.to_string()
         );
+        // A brief gap, as during a backend restart, keeps the service and its
+        // recipe: the forward reappears before the absence is confirmed.
+        forwarded.store(0, Ordering::SeqCst);
+        tokio::time::sleep(POLL * 2 + POLL / 2).await;
+        forwarded.store(first.port, Ordering::SeqCst);
+        tokio::time::sleep(ABSENCE_GRACE + POLL * 2).await;
+        assert!(recipe_path(root.path(), recipe.session).exists());
+        assert!(
+            !restored.is_finished(),
+            "a transient gap must not stop the service"
+        );
+        assert!(read_status(root.path(), recipe.session).is_some_and(|s| s.ready));
+
+        // A lasting absence is a close: the service stops and the recipe goes.
         forwarded.store(0, Ordering::SeqCst);
         tokio::time::timeout(Duration::from_secs(12), restored)
             .await
@@ -645,6 +736,26 @@ mod tests {
             1,
             "revoked forwards must not be recreated"
         );
+        let stopped = read_status(root.path(), recipe.session).unwrap();
+        assert!(!stopped.ready, "a stopped service must not read as ready");
+    }
+
+    #[test]
+    fn absence_counts_only_when_sustained_and_consecutive() {
+        let start = std::time::Instant::now();
+        let at = |s: u64| start + Duration::from_millis(s);
+        let mut absence = Absence::default();
+        // Three misses inside the grace window: not yet.
+        assert!(!absence.observe(true, at(0)));
+        assert!(!absence.observe(true, at(10)));
+        assert!(!absence.observe(true, at(20)));
+        // Seen again: the count starts over.
+        assert!(!absence.observe(false, at(30)));
+        let grace = ABSENCE_GRACE.as_millis() as u64;
+        assert!(!absence.observe(true, at(40)));
+        assert!(!absence.observe(true, at(40 + grace)));
+        // Third consecutive miss, past the grace window.
+        assert!(absence.observe(true, at(50 + grace)));
     }
     #[test]
     fn injected_port_does_not_shell_interpret_arguments() {
