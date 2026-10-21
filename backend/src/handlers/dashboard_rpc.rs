@@ -57,6 +57,9 @@ async fn execute_inner(
     user: Uuid,
     request: Request,
 ) -> Result<Response, AppError> {
+    // The dashboard socket upgrade rejects session-bound credentials before
+    // this owner-scoped RPC dispatcher is reachable. HTTP handlers still apply
+    // their own credential gate for direct callers.
     let state = State(state);
     let user = CurrentUserId(user);
     Ok(match request {
@@ -82,6 +85,7 @@ async fn execute_inner(
             super::session_imports::import_session(
                 state,
                 user,
+                axum::http::HeaderMap::new(),
                 Path((launcher_id, agent_type.as_str().to_owned())),
                 Json(request),
             )
@@ -107,7 +111,7 @@ async fn execute_inner(
                 .0,
         ),
         Request::Launch(request) => Response::Launched(
-            launchers::launch_session(state, user, Json(request))
+            launchers::launch_session(state, user, axum::http::HeaderMap::new(), Json(request))
                 .await?
                 .0,
         ),
