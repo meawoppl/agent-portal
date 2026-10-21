@@ -287,8 +287,10 @@ pub async fn upcoming_tasks_handler(
 pub async fn create_task_handler(
     State(app_state): State<Arc<AppState>>,
     CurrentUserId(user_id): CurrentUserId,
+    headers: axum::http::HeaderMap,
     Json(req): Json<CreateScheduledTaskRequest>,
 ) -> Result<Json<ScheduledTaskInfo>, AppError> {
+    crate::auth::require_manual_launch_credential(&app_state, &headers)?;
     if let Err(err) = validate_cron_expression(&req.fields.cron_expression) {
         warn!("Invalid cron expression: {}", req.fields.cron_expression);
         return Err(err);
@@ -338,9 +340,11 @@ pub async fn create_task_handler(
 pub async fn update_task_handler(
     State(app_state): State<Arc<AppState>>,
     CurrentUserId(user_id): CurrentUserId,
+    headers: axum::http::HeaderMap,
     Path(task_id): Path<Uuid>,
     Json(req): Json<UpdateScheduledTaskRequest>,
 ) -> Result<Json<ScheduledTaskInfo>, AppError> {
+    crate::auth::require_manual_launch_credential(&app_state, &headers)?;
     let mut conn = app_state.conn()?;
 
     // Verify ownership

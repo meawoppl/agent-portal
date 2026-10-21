@@ -72,7 +72,7 @@ launcher's owner token for these commands. The server verifies that the token
 is bound to the parent session, not just that it belongs to the same user.
 Runtime credentials are excluded from session snapshots and Debug output.
 
-Session tokens cannot use the manual launch/fork APIs, mint or renew owner
+Session tokens cannot use the manual launch/fork APIs, create/update schedules, import/restore sessions, mint or renew owner
 credentials, register a launcher socket, or register a different Portal session UUID to bypass spawn policy. Legacy stop/pause/delete calls accept only self or direct children for session credentials; manually resuming requires an owner credential. Missing native Claude history starts a new native conversation under the same Portal UUID with an explicit transcript notice. Browser
 consent endpoints reject Authorization headers and require the owner's signed
 cookie, including in development mode. Owner personal API tokens retain their

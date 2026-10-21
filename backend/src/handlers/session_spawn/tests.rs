@@ -316,7 +316,7 @@ fn policy_bounds_and_default_consent() {
 async fn concurrent_requests_cannot_overbook_one_remaining_slot() {
     let Some(f) = fixture() else { return };
     save_policy(
-        &mut *f.state.conn().unwrap(),
+        &mut f.state.conn().unwrap(),
         f.parent.id,
         &SpawnPolicy {
             max_children: 1,
@@ -349,7 +349,7 @@ async fn concurrent_requests_cannot_overbook_one_remaining_slot() {
 async fn idle_children_pause_without_stopping_unrelated_sessions() {
     let Some(f) = fixture() else { return };
     save_policy(
-        &mut *f.state.conn().unwrap(),
+        &mut f.state.conn().unwrap(),
         f.parent.id,
         &SpawnPolicy {
             approval_mode: SpawnApprovalMode::Auto,

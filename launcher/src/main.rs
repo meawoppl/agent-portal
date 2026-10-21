@@ -499,6 +499,42 @@ mod path_tests {
     use std::os::unix::fs::PermissionsExt;
 
     #[test]
+    fn child_cli_requires_a_brief_and_accepts_explicit_retry() {
+        assert!(
+            Args::try_parse_from(["agent-portal", "session", "start", "--dir", "/tmp"]).is_err()
+        );
+        assert!(Args::try_parse_from([
+            "agent-portal",
+            "session",
+            "start",
+            "--dir",
+            "/tmp",
+            "--prompt",
+            "Review parser",
+            "--json",
+            "--worktree",
+            "scratch",
+            "--request-id",
+            "00000000-0000-0000-0000-000000000001"
+        ])
+        .is_ok());
+        assert!(Args::try_parse_from([
+            "agent-portal",
+            "session",
+            "start",
+            "--dir",
+            "/tmp",
+            "--prompt",
+            "x",
+            "--prompt-file",
+            "brief.txt"
+        ])
+        .is_err());
+        assert!(Args::try_parse_from(["agent-portal", "session", "list", "--json"]).is_ok());
+        assert!(Args::try_parse_from(["agent-portal", "session", "stop", "not-a-uuid"]).is_err());
+    }
+
+    #[test]
     fn managed_forward_cli_accepts_script_health_path_and_literal_arguments() {
         let parsed = Args::try_parse_from([
             "agent-portal",
