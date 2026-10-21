@@ -180,9 +180,10 @@ agent-portal plugin list
 
 The split is deliberate. Portal owns sessions, the UI, lifecycle, and the
 plugin runtime. A plugin owns its domain: tools, agent skills, commands, and
-optionally a workbench surface docked beside the chat. A plugin's skills load
-into a session only where its detect rules match the project (`.kicad_pcb`
-files, say), and can be switched per session. Current plugins:
+optionally a workbench surface docked beside the chat. By default a plugin's
+skills load where its detect rules match the project (`.kicad_pcb` files,
+say); an explicit per-session choice overrides that and applies after a
+restart. Current plugins:
 
 - **kicadmium**: KiCad review, checks, and fabrication export
 - **visilog**: interactive Verilog exploration with live values
