@@ -256,10 +256,12 @@ mod tests {
             insert(conn, session.id, user.id, "first");
             worker = Some(std::thread::spawn(move || {
                 let mut conn = second_pool.get().unwrap();
+                ready_tx.send(()).unwrap();
                 let id = insert(&mut conn, session.id, user.id, "second");
                 tx.send(id).unwrap();
             }));
             // The second insert must not commit its cursor ahead of the first.
+            ready_rx.recv_timeout(Duration::from_secs(5)).unwrap();
             assert!(rx.recv_timeout(Duration::from_millis(100)).is_err());
             Ok(())
         })
