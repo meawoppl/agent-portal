@@ -230,3 +230,46 @@ These scripts are designed to work in CI environments:
     curl http://localhost:3000/
     ./scripts/dev.sh stop
 ```
+
+### Remote review of a PR
+
+From a checkout of this repository, run:
+
+```bash
+./scripts/dev.sh preview 1234 --forward --ssh-host user@build-host
+```
+
+This builds the PR's **fetched head**, in a new detached worktree, first with
+Trunk and then Cargo (the backend embeds that frontend). It starts a fresh
+Postgres container with no persistent volume, applies the PR's migrations at
+backend startup, waits for health, then prints a private Portal URL. Your
+current branch, working changes, development database and existing servers are
+untouched. The printed SHA identifies exactly what is being reviewed; restart
+the command to fetch subsequent PR changes. Cold builds can take several minutes.
+
+Prerequisites: Python 3, Git, Docker, Rust with the WASM target, Trunk, and an
+authenticated `origin` remote. `--forward` additionally needs `agent-portal` in
+an active session with no existing forward. Only run **trusted PR code**: build
+scripts run with your account's permissions, just as with `cargo build`.
+
+For the reviewer, sign in to the regular Portal in the same browser, then open
+the printed URL. Give the reviewer session access through Share Session first.
+The forward remains private; this command never makes a dev-mode backend public.
+Do not use a logged-out incognito window: the Portal's access gate still applies.
+Forwarded service workers are blocked by the Portal, so no manual unregister is
+needed. The preview itself uses the isolated `testing@testing.local` account.
+
+For same-machine review, omit `--forward` and open the printed `127.0.0.1` URL.
+For remote review without Portal, the command prints a ready-to-paste `ssh -L`
+command. SSH authenticates the reviewer and carries traffic to the loopback-only
+backend; no public dev-mode listener is created. If the reviewer's local port is
+occupied, change only the first port in `-L` and the browser URL. All printed URLs
+use explicit IPv4 loopback, avoiding IPv6 `localhost` ambiguity.
+
+Keep the command running while reviewing. Ctrl-C stops its backend, removes its
+forward (if requested), removes its worktree/build output and destroys its
+preview database. The small `backend.log` in the printed temporary directory
+remains for diagnosis. Do not change this session's forward while previewing.
+No production data or services are used. Do not connect a real launcher to this
+disposable preview. To survive terminal disconnection, run the command in a
+terminal multiplexer or a user systemd service; stop that service to clean up.

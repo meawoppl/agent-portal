@@ -23,6 +23,9 @@ jobs:
       # build, so the build.rs commit-count version (#1096) doesn't apply.
       - uses: actions/checkout@v7
 
+      - name: Test isolated PR preview lifecycle
+        run: python3 scripts/test_preview.py
+
       - name: Check migration naming convention
         run: ./scripts/check-migration-names.sh
 

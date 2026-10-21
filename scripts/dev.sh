@@ -383,7 +383,7 @@ nuke_db() {
 
 # Print usage
 usage() {
-    echo "Usage: $0 {start|stop|status|logs|restart|build|nuke-db}"
+    echo "Usage: $0 {start|stop|status|logs|restart|build|preview|nuke-db}"
     echo ""
     echo "Commands:"
     echo "  start   - Start all services (db, backend)"
@@ -392,12 +392,17 @@ usage() {
     echo "  logs    - Tail backend logs (or: logs db)"
     echo "  restart - Stop and start all services"
     echo "  build   - Rebuild frontend only"
+    echo "  preview PR [--forward] - Build and serve an isolated PR for review"
     echo "  nuke-db - Delete all database data and start fresh"
     echo ""
 }
 
 # Main command handler
 case "${1:-}" in
+    preview)
+        shift
+        exec python3 "$SCRIPT_DIR/preview.py" "$@"
+        ;;
     start)
         do_start
         ;;
