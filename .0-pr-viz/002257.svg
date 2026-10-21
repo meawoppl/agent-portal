@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="DejaVu Sans, sans-serif">
+<text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2257 · Update claude-codes and dismiss withdrawn prompts</text>
+<text x="55" y="108" font-size="34" fill="#e6e9f5">Claude can withdraw a permission request; the portal now clears its matching prompt.</text>
+<text x="55" y="150" font-size="34" fill="#e6e9f5">Cancellation clears replay state and the live dialog without sending a reply.</text>
+<path d="M55 176 H1945 M1000 190 V1140" stroke="#3d4666" stroke-width="2" stroke-dasharray="8 8"/>
+<text x="70" y="235" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1070" y="235" font-size="22" fill="#9ece6a">AFTER</text>
+<g><rect x="70" y="270" width="830" height="180" rx="14" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="95" y="312" font-size="26" fill="#f7768e">claude-codes 2.1.304</text>
+<text x="95" y="356" font-size="23" fill="#c0caf5">control_cancel_request is not a typed output.</text>
+<text x="95" y="390" font-size="23" fill="#c0caf5">ClaudeAdapter falls back to Visible(raw).</text>
+</g>
+<g><rect x="1070" y="270" width="830" height="180" rx="14" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1095" y="312" font-size="26" fill="#9ece6a">claude-codes 2.1.306</text>
+<text x="1095" y="356" font-size="23" fill="#c0caf5">ControlCancelRequest becomes PermissionCancelled.</text>
+<text x="1095" y="390" font-size="23" fill="#c0caf5">The request_id follows the control side channel.</text>
+</g>
+<path d="M485 460 v40 m-10 -10 l10 10 l10 -10" fill="none" stroke="#565f89" stroke-width="3"/>
+<path d="M1485 460 v40 m-10 -10 l10 10 l10 -10" fill="none" stroke="#565f89" stroke-width="3"/>
+<g><rect x="70" y="515" width="830" height="180" rx="14" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="95" y="557" font-size="26" fill="#f7768e">Pending permission survives</text>
+<text x="95" y="601" font-size="23" fill="#c0caf5">Session stays WaitingForPermission.</text>
+<text x="95" y="635" font-size="23" fill="#c0caf5">pending_permission_requests keeps its replay row.</text>
+</g>
+<g><rect x="1070" y="515" width="830" height="180" rx="14" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1095" y="557" font-size="26" fill="#9ece6a">Match session and request_id</text>
+<text x="1095" y="601" font-size="23" fill="#c0caf5">Session clears only its matching pending request.</text>
+<text x="1095" y="635" font-size="23" fill="#c0caf5">handle_permission_cancelled removes its replay row.</text>
+</g>
+<path d="M485 705 v40 m-10 -10 l10 10 l10 -10" fill="none" stroke="#565f89" stroke-width="3"/>
+<path d="M1485 705 v40 m-10 -10 l10 10 l10 -10" fill="none" stroke="#565f89" stroke-width="3"/>
+<g><rect x="70" y="760" width="830" height="180" rx="14" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="95" y="802" font-size="26" fill="#f7768e">Browser retains a withdrawn prompt</text>
+<text x="95" y="846" font-size="23" fill="#c0caf5">No cancellation reaches PermissionHandler.</text>
+<text x="95" y="880" font-size="23" fill="#c0caf5">The user can still see a stale approval dialog.</text>
+</g>
+<g><rect x="1070" y="760" width="830" height="180" rx="14" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1095" y="802" font-size="26" fill="#9ece6a">PermissionUpdate clears the dialog</text>
+<text x="1095" y="846" font-size="23" fill="#c0caf5">Cancelled ignores IDs for older requests.</text>
+<text x="1095" y="880" font-size="23" fill="#c0caf5">Reset clears stale UI before reconnect replay.</text>
+</g>
+<text x="70" y="1020" font-size="24" fill="#f7768e">Control frames can become transcript content.</text>
+<text x="1070" y="1020" font-size="24" fill="#9ece6a">No transcript entry; no control response.</text>
+<text x="55" y="1172" font-size="22" fill="#a9b1d6">Requires updated proxy, backend and frontend. DB deletion failures emit PERMISSION_CANCEL_PERSIST_FAILED.</text>
+</g>
+</svg>
