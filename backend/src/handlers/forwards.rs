@@ -84,8 +84,8 @@ fn label_candidate() -> String {
 }
 
 /// Mint a *fresh* auto subdomain label for this session's forward, replacing
-/// any existing one. Called only when the forward's port **changes** (a
-/// different local service), so a stale service worker, cookie, or browser
+/// any existing one. Called for a new forward or when its port **changes**
+/// (a different local service), so a stale service worker, cookie, or browser
 /// cache from the previous app cannot poison the new URL. Same-port
 /// re-registration instead reuses the existing label via
 /// [`ensure_subdomain_label`] (idempotent — see `create_forward`). Admin
@@ -301,15 +301,10 @@ pub async fn create_forward(
             .filter(session_forwards::session_id.eq(session_id))
             .select(SessionForward::as_select())
             .first(conn)?;
-        // Label policy: mint a *fresh* label only when the port actually
-        // changed — a different local service, so a stale service worker /
-        // cookie / cache from the old app must not poison the new URL. A
-        // same-port re-registration (or the first registration) is
-        // idempotent: keep the existing URL. Re-running `forward <port>` is
-        // exactly what an agent does while troubleshooting, and rotating the
-        // hostname out from under a tab the user still has open was its own
-        // failure mode (the retired URL just timed out) — #1476.
-        let label = if replaced_port.is_some() {
+        // Closing removes the active forward, not its historical label. A new
+        // forward therefore needs a fresh origin even when that label exists.
+        // Only an active same-port re-registration is idempotent (#1476).
+        let label = if needs_fresh_origin(previous_port, req.port) {
             rotate_subdomain_label(conn, session_id)?
         } else {
             ensure_subdomain_label(conn, session_id)?
@@ -575,9 +570,21 @@ pub async fn set_forward_public(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// A closed-and-reopened preview must not inherit a previous app's worker.
+fn needs_fresh_origin(previous_port: Option<u16>, port: u16) -> bool {
+    previous_port != Some(port)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reopened_and_replaced_forwards_get_fresh_origins() {
+        assert!(needs_fresh_origin(None, 3000));
+        assert!(needs_fresh_origin(Some(3000), 3001));
+        assert!(!needs_fresh_origin(Some(3000), 3000));
+    }
 
     #[test]
     fn auto_label_candidates_are_short_lower_hex() {

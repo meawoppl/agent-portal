@@ -256,8 +256,8 @@ For the reviewer, sign in to the regular Portal in the same browser, then open
 the printed URL. Give the reviewer session access through Share Session first.
 The forward remains private; this command never makes a dev-mode backend public.
 Do not use a logged-out incognito window: the Portal's access gate still applies.
-Forwarded service workers are blocked by the Portal, so no manual unregister is
-needed. The preview itself uses the isolated `testing@testing.local` account.
+A new forward gets a fresh automatic subdomain, so previous service workers
+cannot control it. Use the printed URL, not a stable custom alias. The preview itself uses the isolated `testing@testing.local` account.
 
 For same-machine review, omit `--forward` and open the printed `127.0.0.1` URL.
 For remote review without Portal, the command prints a ready-to-paste `ssh -L`

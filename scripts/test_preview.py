@@ -12,6 +12,22 @@ spec.loader.exec_module(preview)
 
 
 class PreviewTests(unittest.TestCase):
+    def test_interrupted_build_terminates_its_process_group(self):
+        process = Mock(pid=123)
+        process.communicate.side_effect = [KeyboardInterrupt(), ('', '')]
+        with patch.object(preview.subprocess, 'Popen', return_value=process) as start, \
+             patch.object(preview.os, 'killpg') as kill:
+            with self.assertRaises(KeyboardInterrupt):
+                preview.run('cargo', 'build')
+        self.assertTrue(start.call_args.kwargs['start_new_session'])
+        kill.assert_called_once_with(123, preview.signal.SIGTERM)
+        self.assertEqual(process.communicate.call_count, 2)
+
+    def test_cleanup_preserves_a_changed_forward(self):
+        with patch.object(preview.subprocess, 'run', return_value=Mock(returncode=0, stdout=':4000  https://other  ')) as run:
+            preview.close_forward(':3000  https://preview  ')
+        self.assertEqual(run.call_count, 1)
+
     def test_runtime_cannot_inherit_production_integrations(self):
         with patch.dict(os.environ, {'DATABASE_URL': 'production', 'PORTAL_SESSION_ARCHIVE_BACKEND': 's3',
                                      'GOOGLE_CLIENT_SECRET': 'secret', 'PORTAL_VAPID_PRIVATE_KEY': 'secret'}):
@@ -53,7 +69,7 @@ class PreviewTests(unittest.TestCase):
                 return Mock(stdout='No active forwards.')
             if args[:2] == ('docker', 'port'):
                 return Mock(stdout='127.0.0.1:5555')
-            return Mock(stdout='abc123')
+            return Mock(stdout='https://preview.example')
         process = Mock()
         process.wait.return_value = 0
         process.poll.return_value = 0
@@ -62,7 +78,8 @@ class PreviewTests(unittest.TestCase):
              patch.object(preview, 'run', side_effect=run), \
              patch.object(preview, 'await_ready'), \
              patch.object(preview.subprocess, 'Popen', return_value=process) as start, \
-             patch.object(preview.subprocess, 'run') as cleanup:
+             patch.object(preview.subprocess, 'run', return_value=Mock(returncode=0, stdout=':4321  https://preview.example  (0 / 8 connections)')) as cleanup, \
+             patch.object(preview, 'free_port', return_value=4321):
             preview.main()
         build_tools = [call[0] for call in calls if call[0] in ('trunk', 'cargo')]
         self.assertEqual(build_tools, ['trunk', 'cargo'])
@@ -85,10 +102,10 @@ class PreviewTests(unittest.TestCase):
              patch.object(preview.subprocess, 'run') as cleanup:
             with self.assertRaises(subprocess.CalledProcessError):
                 preview.main()
-        self.assertIn('pull/123/head', calls[0])
+        self.assertTrue(calls[0][-1].startswith('pull/123/head:refs/portal-preview/'))
         self.assertTrue(any('--detach' in call for call in calls))
         self.assertFalse(any(call[0] == 'cargo' for call in calls))
-        cleaned = cleanup.call_args_list[-1].args[0]
+        cleaned = next(c.args[0] for c in cleanup.call_args_list if 'worktree' in c.args[0])
         self.assertIn('worktree', cleaned)
         self.assertIn('remove', cleaned)
         self.assertIn('portal-preview-123-', cleaned[-1])

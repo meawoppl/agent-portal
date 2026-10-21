@@ -16,7 +16,24 @@ import urllib.request
 
 
 def run(*args, **kwargs):
-    return subprocess.run(args, check=True, text=True, **kwargs)
+    # Build tools spawn compilers/linkers. Own their process group so a service
+    # SIGTERM (not only a terminal's group-wide Ctrl-C) cannot orphan a build.
+    if kwargs.pop('capture_output', False):
+        kwargs.update(stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    process = subprocess.Popen(args, text=True, start_new_session=True, **kwargs)
+    try:
+        stdout, stderr = process.communicate()
+    except BaseException:
+        os.killpg(process.pid, signal.SIGTERM)
+        try:
+            process.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.communicate()
+        raise
+    if process.returncode:
+        raise subprocess.CalledProcessError(process.returncode, args, stdout, stderr)
+    return subprocess.CompletedProcess(args, process.returncode, stdout, stderr)
 
 
 def free_port():
@@ -59,6 +76,15 @@ def stop(process):
             process.wait()
 
 
+def close_forward(identity):
+    current = subprocess.run(['agent-portal', 'forward', 'list'], text=True,
+                             capture_output=True, check=False)
+    if current.returncode == 0 and any(line.startswith(identity) for line in current.stdout.splitlines()):
+        subprocess.run(['agent-portal', 'forward', 'close'], check=False)
+    else:
+        print('Forward changed or unavailable; leaving it untouched.', flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('pr', type=int, help='PR number in this repository (trusted code only)')
@@ -82,13 +108,15 @@ def main():
     scratch = Path(tempfile.mkdtemp(prefix=f'portal-preview-{args.pr}-', dir=cache))
     tree = scratch / 'source'
     container = f'portal-preview-{args.pr}-{secrets.token_hex(6)}'
+    preview_ref = f'refs/portal-preview/{secrets.token_hex(16)}'
     backend = None
-    forwarded = False
+    forward_identity = None
     tree_added = False
     try:
-        # Fetch an immutable head into FETCH_HEAD; never checkout/reset the user's branch.
-        run('git', '-C', str(root), 'fetch', 'origin', f'pull/{args.pr}/head')
-        commit = run('git', '-C', str(root), 'rev-parse', 'FETCH_HEAD', capture_output=True).stdout.strip()
+        # FETCH_HEAD is shared across worktrees. A private ref cannot be
+        # overwritten by another reviewer's concurrent fetch.
+        run('git', '-C', str(root), 'fetch', 'origin', f'pull/{args.pr}/head:{preview_ref}')
+        commit = run('git', '-C', str(root), 'rev-parse', preview_ref, capture_output=True).stdout.strip()
         run('git', '-C', str(root), 'worktree', 'add', '--detach', str(tree), commit)
         tree_added = True
         print(f'Building PR #{args.pr} at {commit}; work directory: {scratch}', flush=True)
@@ -120,8 +148,10 @@ def main():
                     return response.status == 200 and json.load(response).get('app_title') == title
             await_ready(healthy, backend)
             if args.forward:
-                run('agent-portal', 'forward', str(port))
-                forwarded = True
+                opened = run('agent-portal', 'forward', str(port), stdout=subprocess.PIPE)
+                url = opened.stdout.strip()
+                forward_identity = f':{port}  {url}  '
+                print(url, flush=True)
                 print('Private forward: sign in to the main Portal in this browser first. Share session access with reviewers.')
             print(f'PR #{args.pr} ({commit[:12]}) ready: http://127.0.0.1:{port}/', flush=True)
             print('Remote fallback (run on the reviewer’s machine):', flush=True)
@@ -132,12 +162,13 @@ def main():
             if code:
                 raise RuntimeError(f'Preview backend exited ({code})')
     finally:
-        if forwarded:
-            subprocess.run(['agent-portal', 'forward', 'close'], check=False)
+        if forward_identity:
+            close_forward(forward_identity)
         stop(backend)
         subprocess.run(['docker', 'rm', '-f', container], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if tree_added:
             subprocess.run(['git', '-C', str(root), 'worktree', 'remove', '--force', str(tree)], check=False)
+        subprocess.run(['git', '-C', str(root), 'update-ref', '-d', preview_ref], check=False)
         # Keep the small log for diagnosis; build/source and the disposable DB are gone.
         shutil.rmtree(scratch / 'target', ignore_errors=True)
         print(f'Preview stopped. Diagnostic log: {scratch / "backend.log"}', flush=True)
