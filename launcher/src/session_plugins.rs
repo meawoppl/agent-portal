@@ -230,6 +230,8 @@ pub(crate) fn record_injected(session: Uuid, entries: &[PluginContextEntry]) {
 
 /// Sessions whose latest record couldn't be written. Their file on disk, if
 /// any, describes an earlier process and must not be read as current.
+/// Process-local: a restarted launcher relaunches its sessions, and each spawn
+/// writes (or marks stale) its record again.
 static STALE_RECORDS: Mutex<BTreeSet<Uuid>> = Mutex::new(BTreeSet::new());
 
 /// Replace `session`'s record at `path`. When that fails the session is
