@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" fill="#a9b1d6" font-family="sans-serif" font-size="24">PR #2271 · Real WebSocket round-trip contracts</text>
+<text x="55" y="104" fill="#e6e9f5" font-family="sans-serif" font-size="34">The harness stopped at registration. Real sockets now exercise the turn</text>
+<text x="55" y="148" fill="#e6e9f5" font-family="sans-serif" font-size="34">and both reconnect paths against PostgreSQL.</text>
+<path d="M55 177H1945 M1000 190V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="65" y="225" fill="#f7768e" font-family="sans-serif" font-size="24">BEFORE</text>
+<text x="1055" y="225" fill="#9ece6a" font-family="sans-serif" font-size="24">AFTER</text>
+<rect x="65" y="260" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="90" y="304" fill="#a9b1d6" font-family="sans-serif" font-size="28">Handshake coverage</text>
+<text x="90" y="351" fill="#c0caf5" font-family="sans-serif" font-size="24">Fake proxy registers over /ws/session.</text>
+<text x="90" y="392" fill="#c0caf5" font-family="sans-serif" font-size="24">RegisterAck confirms success.</text>
+<rect x="65" y="470" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="90" y="514" fill="#a9b1d6" font-family="sans-serif" font-size="28">Turn contract not exercised</text>
+<text x="90" y="561" fill="#c0caf5" font-family="sans-serif" font-size="24">No browser input or permission round-trip</text>
+<text x="90" y="602" fill="#c0caf5" font-family="sans-serif" font-size="24">in the real-socket harness.</text>
+<rect x="65" y="680" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="90" y="724" fill="#a9b1d6" font-family="sans-serif" font-size="28">Reconnect coverage missing</text>
+<text x="90" y="771" fill="#c0caf5" font-family="sans-serif" font-size="24">No browser history watermark replay.</text>
+<text x="90" y="812" fill="#c0caf5" font-family="sans-serif" font-size="24">No unacknowledged input reconnect case.</text>
+<rect x="65" y="890" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="90" y="934" fill="#a9b1d6" font-family="sans-serif" font-size="28">Legacy register untested</text>
+<text x="90" y="981" fill="#c0caf5" font-family="sans-serif" font-size="24">Modern typed RegisterFields only.</text>
+<text x="90" y="1022" fill="#c0caf5" font-family="sans-serif" font-size="24">No frozen capability-free wire fixture.</text>
+<rect x="1055" y="260" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="1080" y="304" fill="#9ece6a" font-family="sans-serif" font-size="28">Browser + fake proxy + real backend</text>
+<text x="1080" y="351" fill="#c0caf5" font-family="sans-serif" font-size="24">SequencedInput and three delivery stages.</text>
+<text x="1080" y="392" fill="#c0caf5" font-family="sans-serif" font-size="24">Permission request and decision round-trip.</text>
+<rect x="1055" y="470" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="1080" y="514" fill="#9ece6a" font-family="sans-serif" font-size="28">Completed turn persists</text>
+<text x="1080" y="561" fill="#c0caf5" font-family="sans-serif" font-size="24">Assistant output supplies a live watermark.</text>
+<text x="1080" y="602" fill="#c0caf5" font-family="sans-serif" font-size="24">Result is acknowledged while browser is offline.</text>
+<rect x="1055" y="680" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="1080" y="724" fill="#9ece6a" font-family="sans-serif" font-size="28">Both reconnect directions</text>
+<text x="1080" y="771" fill="#c0caf5" font-family="sans-serif" font-size="24">Browser replays only unseen output.</text>
+<text x="1080" y="812" fill="#c0caf5" font-family="sans-serif" font-size="24">Proxy replays the same pending input identity.</text>
+<rect x="1055" y="890" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="1080" y="934" fill="#9ece6a" font-family="sans-serif" font-size="28">Explicit compatibility + CI</text>
+<text x="1080" y="981" fill="#c0caf5" font-family="sans-serif" font-size="24">Old Register omits capabilities: no data ticket.</text>
+<text x="1080" y="1022" fill="#c0caf5" font-family="sans-serif" font-size="24">Postgres job also runs agent_follow DB tests.</text>
+<text x="55" y="1172" fill="#a9b1d6" font-family="sans-serif" font-size="22">Scope: real backend and persistence; fake agent, no CLI process or browser DOM. Broader #1209 work remains open.</text>
+</svg>
