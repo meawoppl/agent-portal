@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build and serve a trusted PR in an isolated, disposable local environment."""
 import argparse
+import json
 import os
 from pathlib import Path
 import secrets
@@ -24,14 +25,14 @@ def free_port():
         return sock.getsockname()[1]
 
 
-def runtime_env(port, database):
+def runtime_env(port, database, title='Agent Portal PR preview'):
     # Never inherit production OAuth, archive, notification or database settings.
     # Run outside the checkout as well: backend startup loads .env from its cwd.
     return {'PATH': os.environ.get('PATH', '/usr/bin:/bin'),
             'HOST': '127.0.0.1', 'PORT': str(port), 'DATABASE_URL': database,
             'SESSION_SECRET': secrets.token_hex(64),
             'BASE_URL': f'http://127.0.0.1:{port}',
-            'APP_TITLE': 'Agent Portal PR preview', 'RUST_LOG': 'info'}
+            'APP_TITLE': title, 'RUST_LOG': 'info'}
 
 
 def await_ready(check, process=None, timeout=90):
@@ -105,12 +106,13 @@ def main():
         db_port = int(binding.rsplit(':', 1)[1])
         port = free_port()
         database = f'postgresql://preview:{password}@127.0.0.1:{db_port}/preview'
+        title = f'PR #{args.pr} preview {secrets.token_hex(8)}'
         with (scratch / 'backend.log').open('w') as log:
             backend = subprocess.Popen([str(scratch / 'target/debug/backend'), '--dev-mode'],
-                                       cwd=scratch, env=runtime_env(port, database), stdout=log, stderr=log)
+                                       cwd=scratch, env=runtime_env(port, database, title), stdout=log, stderr=log)
             def healthy():
-                with urllib.request.urlopen(f'http://127.0.0.1:{port}/api/health', timeout=2) as response:
-                    return response.status == 200
+                with urllib.request.urlopen(f'http://127.0.0.1:{port}/api/config', timeout=2) as response:
+                    return response.status == 200 and json.load(response).get('app_title') == title
             await_ready(healthy, backend)
             if args.forward:
                 run('agent-portal', 'forward', str(port))

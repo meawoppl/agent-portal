@@ -45,6 +45,33 @@ class PreviewTests(unittest.TestCase):
                 preview.main()
         run.assert_called_once_with('agent-portal', 'forward', 'list', capture_output=True)
 
+    def test_success_builds_frontend_first_and_cleans_private_forward(self):
+        calls = []
+        def run(*args, **kwargs):
+            calls.append(args)
+            if args[:3] == ('agent-portal', 'forward', 'list'):
+                return Mock(stdout='No active forwards.')
+            if args[:2] == ('docker', 'port'):
+                return Mock(stdout='127.0.0.1:5555')
+            return Mock(stdout='abc123')
+        process = Mock()
+        process.wait.return_value = 0
+        process.poll.return_value = 0
+        with patch('sys.argv', ['preview.py', '123', '--forward']), \
+             patch.object(preview.shutil, 'which', return_value='/bin/tool'), \
+             patch.object(preview, 'run', side_effect=run), \
+             patch.object(preview, 'await_ready'), \
+             patch.object(preview.subprocess, 'Popen', return_value=process) as start, \
+             patch.object(preview.subprocess, 'run') as cleanup:
+            preview.main()
+        build_tools = [call[0] for call in calls if call[0] in ('trunk', 'cargo')]
+        self.assertEqual(build_tools, ['trunk', 'cargo'])
+        self.assertIn('127.0.0.1::5432', next(call for call in calls if call[:2] == ('docker', 'run')))
+        self.assertEqual(start.call_args.kwargs['env']['HOST'], '127.0.0.1')
+        self.assertIn(':5555/preview', start.call_args.kwargs['env']['DATABASE_URL'])
+        self.assertNotEqual(start.call_args.kwargs['cwd'].name, 'source')
+        cleanup.assert_any_call(['agent-portal', 'forward', 'close'], check=False)
+
     def test_build_failure_cleans_only_own_worktree(self):
         calls = []
         def run(*args, **kwargs):

@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="55" fill="#a9b1d6" font-family="sans-serif" font-size="24">PR #2265 · Isolated remote PR previews</text>
+<text x="55" y="110" fill="#e6e9f5" font-family="sans-serif" font-size="34">Remote review needed manual builds and shared services.</text>
+<text x="55" y="155" fill="#e6e9f5" font-family="sans-serif" font-size="34">One command now builds the PR head and serves a disposable preview.</text>
+<path d="M1000 190V1135" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="70" y="230" fill="#f7768e" font-family="sans-serif" font-size="28">BEFORE</text>
+<text x="1050" y="230" fill="#9ece6a" font-family="sans-serif" font-size="28">AFTER</text>
+<rect x="70" y="300" width="870" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="94" y="355" fill="#7aa2f7" font-family="sans-serif" font-size="30">Manual checkout and build</text>
+<text x="94" y="410" fill="#c0caf5" font-family="sans-serif" font-size="24">Frontend must precede embedded backend.</text>
+<rect x="70" y="540" width="870" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="94" y="595" fill="#7aa2f7" font-family="sans-serif" font-size="30">Shared development database</text>
+<text x="94" y="650" fill="#c0caf5" font-family="sans-serif" font-size="24">Parallel reviews can change the same data.</text>
+<rect x="70" y="780" width="870" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="94" y="835" fill="#7aa2f7" font-family="sans-serif" font-size="30">Ad hoc remote access</text>
+<text x="94" y="890" fill="#c0caf5" font-family="sans-serif" font-size="24">Reviewer must arrange a tunnel and ports.</text>
+<rect x="1050" y="300" width="870" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1074" y="355" fill="#7aa2f7" font-family="sans-serif" font-size="30">dev.sh preview PR</text>
+<text x="1074" y="410" fill="#c0caf5" font-family="sans-serif" font-size="24">Fetch head; detached worktree; Trunk then Cargo.</text>
+<rect x="1050" y="540" width="870" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1074" y="595" fill="#7aa2f7" font-family="sans-serif" font-size="30">Isolated local services</text>
+<text x="1074" y="650" fill="#c0caf5" font-family="sans-serif" font-size="24">Disposable PostgreSQL; sanitized backend env.</text>
+<rect x="1050" y="780" width="870" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1074" y="835" fill="#7aa2f7" font-family="sans-serif" font-size="30">Private forward or SSH</text>
+<text x="1074" y="890" fill="#c0caf5" font-family="sans-serif" font-size="24">Readiness check; Ctrl-C removes owned resources.</text>
+<text x="55" y="1170" fill="#e0af68" font-family="sans-serif" font-size="22">Trusted PRs only: build scripts run as your user. Cold builds take time; preview data is discarded.</text>
+</svg>
