@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="Arial, sans-serif">
+<text x="55" y="52" fill="#a9b1d6" font-size="24">PR #2276 · Rollback pooled test fixtures</text>
+<text x="55" y="110" fill="#e6e9f5" font-size="34">Test fixtures left transactions open on shared connections.</text>
+<text x="55" y="153" fill="#e6e9f5" font-size="34">Scoped test_transaction rolls them back before pool return.</text>
+<path d="M55 179H1945 M1000 205V1125" stroke="#565f89" fill="none"/>
+<text x="55" y="235" fill="#f7768e" font-size="26">BEFORE</text>
+<g><rect x="55" y="280" width="890" height="205" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="80" y="327" fill="#f7768e" font-size="30">begin_test_transaction()</text>
+<text x="80" y="384" fill="#c0caf5" font-size="27">Archive, retention and edit-stack tests</text>
+<text x="80" y="423" fill="#c0caf5" font-size="27">insert fixtures inside a test transaction.</text>
+</g>
+<path d="M500 490V538 l-8 -12 m8 12 l8 -12" stroke="#f7768e" stroke-width="3" fill="none"/>
+<g><rect x="55" y="550" width="890" height="205" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="80" y="597" fill="#f7768e" font-size="30">Return pooled connection</text>
+<text x="80" y="654" fill="#c0caf5" font-size="27">Test transaction remains open.</text>
+<text x="80" y="693" fill="#c0caf5" font-size="27">A later test reuses that connection.</text>
+</g>
+<path d="M500 760V808 l-8 -12 m8 12 l8 -12" stroke="#f7768e" stroke-width="3" fill="none"/>
+<g><rect x="55" y="820" width="890" height="205" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="80" y="867" fill="#f7768e" font-size="30">Cross-checkout reads disagree</text>
+<text x="80" y="924" fill="#c0caf5" font-size="27">A handler writes on one checkout.</text>
+<text x="80" y="963" fill="#c0caf5" font-size="27">Another cannot see its uncommitted change.</text>
+</g>
+<text x="1055" y="235" fill="#9ece6a" font-size="26">AFTER</text>
+<g><rect x="1055" y="280" width="890" height="205" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="327" fill="#9ece6a" font-size="30">conn.test_transaction(...)</text>
+<text x="1080" y="384" fill="#c0caf5" font-size="27">The same fixtures and assertions</text>
+<text x="1080" y="423" fill="#c0caf5" font-size="27">execute inside a bounded closure.</text>
+</g>
+<path d="M1500 490V538 l-8 -12 m8 12 l8 -12" stroke="#9ece6a" stroke-width="3" fill="none"/>
+<g><rect x="1055" y="550" width="890" height="205" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="597" fill="#9ece6a" font-size="30">Rollback before returning</text>
+<text x="1080" y="654" fill="#c0caf5" font-size="27">Diesel closes the transaction</text>
+<text x="1080" y="693" fill="#c0caf5" font-size="27">before the pool gets its connection back.</text>
+</g>
+<path d="M1500 760V808 l-8 -12 m8 12 l8 -12" stroke="#9ece6a" stroke-width="3" fill="none"/>
+<g><rect x="1055" y="820" width="890" height="205" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="867" fill="#9ece6a" font-size="30">Independent checkouts agree</text>
+<text x="1080" y="924" fill="#c0caf5" font-size="27">All 424 backend library tests pass</text>
+<text x="1080" y="963" fill="#c0caf5" font-size="27">against isolated PostgreSQL.</text>
+</g>
+<text x="55" y="1172" fill="#a9b1d6" font-size="22">Scope: test fixtures only; production queries and transaction behavior are unchanged.</text>
+</g></svg>
