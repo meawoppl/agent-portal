@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" fill="#a9b1d6" font-family="sans-serif" font-size="24">PR #2285 · Replay turn activity and terminal failures</text>
+<text x="55" y="108" fill="#e6e9f5" font-family="sans-serif" font-size="34">Follow missed failed terminals and short turns; durable activity now travels</text>
+<text x="55" y="150" fill="#e6e9f5" font-family="sans-serif" font-size="34">with each journal row, so catch-up preserves the turn and its checkpoint.</text>
+<path d="M 55 177 H 1945 M 1000 190 V 1130" stroke="#565f89" stroke-dasharray="6 6"/>
+<text x="55" y="225" fill="#f7768e" font-family="sans-serif" font-size="26">BEFORE</text>
+<text x="1055" y="225" fill="#9ece6a" font-family="sans-serif" font-size="26">AFTER</text>
+<rect x="55" y="265" width="850" height="200" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="79" y="307" fill="#f7768e" font-family="sans-serif" font-size="28">Terminal failure: turn_end</text>
+<text x="79" y="350" fill="#c0caf5" font-family="sans-serif" font-size="24">Default error filter omits the failed turn.</text>
+<text x="79" y="388" fill="#c0caf5" font-family="sans-serif" font-size="24">Status-only cannot recover its activity.</text>
+<rect x="1055" y="265" width="850" height="200" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1079" y="307" fill="#9ece6a" font-family="sans-serif" font-size="28">Typed lifecycle metadata</text>
+<text x="1079" y="350" fill="#c0caf5" font-family="sans-serif" font-size="24">Failed terminal becomes error + activity: Idle.</text>
+<text x="1079" y="388" fill="#c0caf5" font-family="sans-serif" font-size="24">One row, one event, the same durable cursor.</text>
+<rect x="55" y="535" width="850" height="200" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="79" y="577" fill="#f7768e" font-family="sans-serif" font-size="28">Current status only</text>
+<text x="79" y="620" fill="#c0caf5" font-family="sans-serif" font-size="24">Busy and idle can both pass between reads.</text>
+<text x="79" y="658" fill="#c0caf5" font-family="sans-serif" font-size="24">The journal cannot identify that transition.</text>
+<rect x="1055" y="535" width="850" height="200" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1079" y="577" fill="#9ece6a" font-family="sans-serif" font-size="28">FollowEvent.activity</text>
+<text x="1079" y="620" fill="#c0caf5" font-family="sans-serif" font-size="24">Replay carries Busy, Idle or Throttled.</text>
+<text x="1079" y="658" fill="#c0caf5" font-family="sans-serif" font-size="24">Flush earlier batch before the lifecycle row.</text>
+<rect x="55" y="805" width="850" height="200" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="79" y="847" fill="#f7768e" font-family="sans-serif" font-size="28">Filters hide the useful signal</text>
+<text x="79" y="890" fill="#c0caf5" font-family="sans-serif" font-size="24">A completed failed turn is not selectable.</text>
+<text x="79" y="928" fill="#c0caf5" font-family="sans-serif" font-size="24">A quiet peer can look like a missed turn.</text>
+<rect x="1055" y="805" width="850" height="200" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1079" y="847" fill="#9ece6a" font-family="sans-serif" font-size="28">Safe status filtering</text>
+<text x="1079" y="890" fill="#c0caf5" font-family="sans-serif" font-size="24">Excluded bodies become a plain turn summary.</text>
+<text x="1079" y="928" fill="#c0caf5" font-family="sans-serif" font-size="24">Live connectivity stays explicitly separate.</text>
+<text x="55" y="1172" fill="#a9b1d6" font-family="sans-serif" font-size="22">Connectivity remains a live snapshot; no inferred commit/file taxonomy or automatic harness subscription.</text>
+</svg>
