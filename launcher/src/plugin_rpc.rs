@@ -198,7 +198,9 @@ fn read_tail(path: &Path, max: usize) -> String {
     let len = file.metadata().map(|m| m.len()).unwrap_or(0);
     let start = len.saturating_sub(max as u64);
     let mut bytes = Vec::with_capacity(max.min(len as usize));
-    if file.seek(SeekFrom::Start(start)).is_err() || file.read_to_end(&mut bytes).is_err() {
+    if file.seek(SeekFrom::Start(start)).is_err()
+        || file.take(max as u64).read_to_end(&mut bytes).is_err()
+    {
         return String::new();
     }
     if start == 0 {

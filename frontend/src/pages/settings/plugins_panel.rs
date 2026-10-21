@@ -167,6 +167,9 @@ pub fn plugins_panel() -> Html {
     // Bumped on every computer or directory change; an action answer only
     // lands if the selection it started under is still current.
     let generation = use_mut_ref(|| 0_u64);
+    // Claimed synchronously when an action starts; the `busy` state only
+    // drives rendering and lags a render behind.
+    let in_flight = use_mut_ref(|| false);
 
     {
         let launchers = launchers.clone();
@@ -243,11 +246,11 @@ pub fn plugins_panel() -> Html {
     let on_match = {
         let directory_draft = directory_draft.clone();
         let directory = directory.clone();
-        let busy = busy.is_some();
+        let in_flight = in_flight.clone();
         Callback::from(move |e: SubmitEvent| {
             e.prevent_default();
             // Enter in the field still submits while the button is disabled.
-            if busy {
+            if *in_flight.borrow() {
                 return;
             }
             let draft = directory_draft.trim().to_string();
@@ -260,14 +263,17 @@ pub fn plugins_panel() -> Html {
     let run = {
         let selected = *selected;
         let directory = (*directory).clone();
-        let already_busy = busy.is_some();
+        let in_flight = in_flight.clone();
         let generation = generation.clone();
         let (inventory, busy, outcome) = (inventory.clone(), busy.clone(), outcome.clone());
         Callback::from(move |(label, action): (String, PluginAction)| {
             let Some(launcher) = selected else { return };
-            if already_busy {
+            // Checked and set synchronously: two clicks before the next render
+            // must not both start an action.
+            if in_flight.replace(true) {
                 return;
             }
+            let in_flight = in_flight.clone();
             let request = PluginRequest {
                 working_directory: directory.clone(),
                 session_id: None,
@@ -280,6 +286,7 @@ pub fn plugins_panel() -> Html {
             outcome.set(None);
             spawn_local(async move {
                 let result = run_plugin_action(launcher, &request).await;
+                *in_flight.borrow_mut() = false;
                 busy.set(None);
                 // The answer describes the selection the action started under.
                 if *generation.borrow() != started {
