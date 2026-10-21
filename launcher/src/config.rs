@@ -142,28 +142,56 @@ pub fn plugin_root() -> PathBuf {
         })
 }
 
+/// Read the config in order to change it. Unlike [`load_config`], a file that
+/// exists but can't be read or parsed is an error: saving over it would erase
+/// every other install, the auth token, and the rest of its settings.
+fn load_config_for_write_at(path: &Path) -> anyhow::Result<LauncherConfig> {
+    use anyhow::Context;
+    match std::fs::read_to_string(path) {
+        Ok(contents) => serde_json::from_str(&contents)
+            .with_context(|| format!("{} is not valid; fix or move it aside", path.display())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(LauncherConfig::default()),
+        Err(error) => Err(error).with_context(|| format!("Could not read {}", path.display())),
+    }
+}
+
+/// Apply `change` to the config at `path`, saving only when it reports a
+/// change. Plugin installs, removals and toggles go through here.
+fn update_config_at<T>(
+    path: &Path,
+    change: impl FnOnce(&mut LauncherConfig) -> anyhow::Result<(T, bool)>,
+) -> anyhow::Result<T> {
+    let mut config = load_config_for_write_at(path)?;
+    let (result, changed) = change(&mut config)?;
+    if changed {
+        write_config_atomic(path, &serde_json::to_string_pretty(&config)?)?;
+    }
+    Ok(result)
+}
+
 pub fn save_installed_plugin(name: &str, plugin: InstalledPlugin) -> anyhow::Result<()> {
-    let mut config = load_config();
-    config.plugins.insert(name.to_string(), plugin);
-    save_config(&config)
+    update_config_at(&config_path(), |config| {
+        config.plugins.insert(name.to_string(), plugin);
+        Ok(((), true))
+    })
 }
 
 pub fn remove_installed_plugin(name: &str) -> anyhow::Result<Option<InstalledPlugin>> {
-    let mut config = load_config();
-    let removed = config.plugins.remove(name);
-    if removed.is_some() {
-        save_config(&config)?;
-    }
-    Ok(removed)
+    update_config_at(&config_path(), |config| {
+        let removed = config.plugins.remove(name);
+        let changed = removed.is_some();
+        Ok((removed, changed))
+    })
 }
 
 pub fn set_plugin_enabled(name: &str, enabled: bool) -> anyhow::Result<()> {
-    let mut config = load_config();
-    let Some(plugin) = config.plugins.get_mut(name) else {
-        anyhow::bail!("plugin `{name}` is not installed");
-    };
-    plugin.enabled = enabled;
-    save_config(&config)
+    update_config_at(&config_path(), |config| {
+        let Some(plugin) = config.plugins.get_mut(name) else {
+            anyhow::bail!("plugin `{name}` is not installed");
+        };
+        plugin.enabled = enabled;
+        Ok(((), true))
+    })
 }
 
 pub fn plugin_skill_context(
@@ -451,6 +479,44 @@ pub fn clear_sessions() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A plugin change never saves over a config it couldn't read: that would
+    /// silently drop every other install and the auth token.
+    #[test]
+    fn plugin_changes_leave_an_unreadable_config_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("launcher.json");
+        let insert = |config: &mut LauncherConfig| {
+            config.plugins.insert(
+                "kicadmium".into(),
+                InstalledPlugin {
+                    path: "/p".into(),
+                    source: "s".into(),
+                    source_subdir: None,
+                    reference: None,
+                    enabled: true,
+                    installed_at: chrono::Utc::now(),
+                    revision: None,
+                },
+            );
+            Ok(((), true))
+        };
+
+        std::fs::write(&path, "{ not json").unwrap();
+        assert!(update_config_at(&path, insert).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ not json");
+
+        std::fs::remove_file(&path).unwrap();
+        update_config_at(&path, insert).unwrap();
+        assert!(load_config_at(&path).plugins.contains_key("kicadmium"));
+        let removed = update_config_at(&path, |config| {
+            let removed = config.plugins.remove("missing");
+            let changed = removed.is_some();
+            Ok((removed, changed))
+        })
+        .unwrap();
+        assert!(removed.is_none());
+    }
 
     #[test]
     fn launcher_id_is_stable_across_calls() {
