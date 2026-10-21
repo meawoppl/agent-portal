@@ -269,7 +269,10 @@ use explicit IPv4 loopback, avoiding IPv6 `localhost` ambiguity.
 Keep the command running while reviewing. Ctrl-C stops its backend, removes its
 forward (if requested), removes its worktree/build output and destroys its
 preview database. The small `backend.log` in the printed temporary directory
-remains for diagnosis. Do not change this session's forward while previewing.
+remains for diagnosis. Build directories live under
+`$XDG_CACHE_HOME/agent-portal/previews` (normally `~/.cache`), rather than a
+potentially memory-backed `/tmp`. Debug symbols and incremental artifacts are
+disabled for these throwaway builds. Do not change this session's forward while previewing.
 No production data or services are used. Do not connect a real launcher to this
 disposable preview. To survive terminal disconnection, run the command in a
 terminal multiplexer or a user systemd service; stop that service to clean up.

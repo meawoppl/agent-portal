@@ -76,7 +76,10 @@ def main():
         if existing != 'No active forwards.':
             parser.error('This session already forwards a service. Use a separate session or omit --forward.')
     root = Path(__file__).resolve().parents[1]
-    scratch = Path(tempfile.mkdtemp(prefix=f'portal-preview-{args.pr}-'))
+    # Rust artifacts are large; /tmp may be a small memory-backed filesystem.
+    cache = Path(os.environ.get('XDG_CACHE_HOME', str(Path.home() / '.cache'))) / 'agent-portal/previews'
+    cache.mkdir(parents=True, exist_ok=True)
+    scratch = Path(tempfile.mkdtemp(prefix=f'portal-preview-{args.pr}-', dir=cache))
     tree = scratch / 'source'
     container = f'portal-preview-{args.pr}-{secrets.token_hex(6)}'
     backend = None
@@ -92,6 +95,8 @@ def main():
         build_env = os.environ.copy()
         # A unique output directory prevents another worktree overwriting our executable.
         build_env['CARGO_TARGET_DIR'] = str(scratch / 'target')
+        build_env['CARGO_PROFILE_DEV_DEBUG'] = '0'
+        build_env['CARGO_PROFILE_DEV_INCREMENTAL'] = 'false'
         build_env.pop('TRUNK_NO_COLOR', None)
         build_env.pop('NO_COLOR', None)
         run('trunk', 'build', '--locked', cwd=tree / 'frontend', env=build_env)
