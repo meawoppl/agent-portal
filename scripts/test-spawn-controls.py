@@ -50,7 +50,7 @@ async def main():
                 dialog=page.get_by_role('dialog',name='Child sessions')
                 await expect(dialog.get_by_text('/work/child',exact=True)).to_be_visible()
                 await dialog.get_by_text('Worker policy and limits',exact=True).click()
-                await expect(dialog.get_by_label('Approval',exact=True)).to_have_value('first_spawn')
+                await expect(dialog.get_by_role('combobox',name='Approval',exact=True)).to_have_value('first_spawn')
                 field=dialog.get_by_label('Maximum children',exact=True)
                 await field.fill('12')
                 await expect(field).to_be_focused()
