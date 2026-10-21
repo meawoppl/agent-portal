@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26" />
+<text x="55" y="52" fill="#a9b1d6" font-family="sans-serif" font-size="24">PR #2280 · Patch two dependency unsoundness warnings</text>
+<text x="55" y="104" fill="#e6e9f5" font-family="sans-serif" font-size="34">Two narrow patch updates remove reported unsoundness in error handling</text>
+<text x="55" y="148" fill="#e6e9f5" font-family="sans-serif" font-size="34">and event listeners. Other findings remain visible for separate remediation.</text>
+<path d="M55 177H1945 M1000 190V1140" stroke="#565f89" stroke-dasharray="8 8" />
+<text x="65" y="225" fill="#f7768e" font-family="sans-serif" font-size="24">BEFORE</text>
+<text x="1055" y="225" fill="#9ece6a" font-family="sans-serif" font-size="24">AFTER</text>
+<rect x="65" y="260" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666" />
+<text x="90" y="304" fill="#a9b1d6" font-family="sans-serif" font-size="28">anyhow 1.0.102</text>
+<text x="90" y="351" fill="#c0caf5" font-family="sans-serif" font-size="24">Error::downcast_mut reported unsound.</text>
+<text x="90" y="392" fill="#c0caf5" font-family="sans-serif" font-size="24">RUSTSEC-2026-0190.</text>
+<rect x="65" y="470" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666" />
+<text x="90" y="514" fill="#a9b1d6" font-family="sans-serif" font-size="28">event-listener 5.4.1</text>
+<text x="90" y="561" fill="#c0caf5" font-family="sans-serif" font-size="24">StackSlot with non-Send tags reported unsound.</text>
+<text x="90" y="602" fill="#c0caf5" font-family="sans-serif" font-size="24">RUSTSEC-2026-0221.</text>
+<rect x="65" y="680" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666" />
+<text x="90" y="724" fill="#a9b1d6" font-family="sans-serif" font-size="28">Dependency requirements</text>
+<text x="90" y="771" fill="#c0caf5" font-family="sans-serif" font-size="24">Existing semver requirements accept both patches.</text>
+<text x="90" y="812" fill="#c0caf5" font-family="sans-serif" font-size="24">No application API edits are necessary.</text>
+<rect x="65" y="890" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666" />
+<text x="90" y="934" fill="#a9b1d6" font-family="sans-serif" font-size="28">Audit visibility</text>
+<text x="90" y="981" fill="#c0caf5" font-family="sans-serif" font-size="24">Four unsoundness warnings in the initial audit.</text>
+<text x="90" y="1022" fill="#c0caf5" font-family="sans-serif" font-size="24">No warnings are suppressed by this update.</text>
+<rect x="1055" y="260" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666" />
+<text x="1080" y="304" fill="#9ece6a" font-family="sans-serif" font-size="28">anyhow 1.0.103</text>
+<text x="1080" y="351" fill="#c0caf5" font-family="sans-serif" font-size="24">Updates to the patched release.</text>
+<text x="1080" y="392" fill="#c0caf5" font-family="sans-serif" font-size="24">Only package version and checksum change.</text>
+<rect x="1055" y="470" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666" />
+<text x="1080" y="514" fill="#9ece6a" font-family="sans-serif" font-size="28">event-listener 5.4.2</text>
+<text x="1080" y="561" fill="#c0caf5" font-family="sans-serif" font-size="24">Updates to the patched release.</text>
+<text x="1080" y="602" fill="#c0caf5" font-family="sans-serif" font-size="24">Removes its concurrent-queue dependency edge.</text>
+<rect x="1055" y="680" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666" />
+<text x="1080" y="724" fill="#9ece6a" font-family="sans-serif" font-size="28">Bounded lockfile change</text>
+<text x="1080" y="771" fill="#c0caf5" font-family="sans-serif" font-size="24">Preserves all unrelated dependency selections.</text>
+<text x="1080" y="812" fill="#c0caf5" font-family="sans-serif" font-size="24">Backend checked with the locked dependencies.</text>
+<rect x="1055" y="890" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666" />
+<text x="1080" y="934" fill="#9ece6a" font-family="sans-serif" font-size="28">Remaining warnings</text>
+<text x="1080" y="981" fill="#c0caf5" font-family="sans-serif" font-size="24">Diesel and glib need separate assessment.</text>
+<text x="1080" y="1022" fill="#c0caf5" font-family="sans-serif" font-size="24">New audit policy will retain warning output.</text>
+<text x="55" y="1172" fill="#a9b1d6" font-family="sans-serif" font-size="22">Scope: fixes two identified warnings, not a claim that the workspace has no remaining vulnerabilities.</text>
+</svg>
