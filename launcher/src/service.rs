@@ -182,6 +182,34 @@ pub fn sync() -> Result<()> {
     Ok(())
 }
 
+/// Sync the installed unit from the daemon itself. The update and restart
+/// paths sync too, but from the binary being replaced, so a directive added in
+/// a release only reaches the unit once that release is the one running. No
+/// restart here; the unit is reloaded and applies in full on the next start.
+/// Skipped unless the unit launches this executable, so running another copy
+/// (a dev build, a manual run) never repoints the service at it.
+#[cfg(target_os = "linux")]
+pub fn sync_on_startup() -> Result<()> {
+    let Ok(installed) = std::fs::read_to_string(service_file_path()?) else {
+        return Ok(());
+    };
+    if !unit_runs(&installed, &current_exe_path()?) {
+        return Ok(());
+    }
+    sync()
+}
+
+/// Whether `unit`'s `ExecStart` launches `binary_path`.
+#[cfg(target_os = "linux")]
+fn unit_runs(unit: &str, binary_path: &str) -> bool {
+    unit.lines()
+        .filter_map(|l| l.strip_prefix("ExecStart="))
+        .any(|cmd| {
+            cmd.strip_prefix(binary_path)
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with(' '))
+        })
+}
+
 #[cfg(target_os = "linux")]
 pub fn uninstall() -> Result<()> {
     use anyhow::Context;
@@ -579,6 +607,11 @@ pub fn sync() -> Result<()> {
     Ok(())
 }
 
+#[cfg(not(target_os = "linux"))]
+pub fn sync_on_startup() -> Result<()> {
+    Ok(())
+}
+
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 pub fn uninstall() -> Result<()> {
     anyhow::bail!("Service management is not supported on this platform")
@@ -688,6 +721,25 @@ mod tests {
             .collect();
         assert!(service.contains(&"OOMPolicy=continue"), "{unit}");
         assert!(service.contains(&"ManagedOOMPreference=avoid"), "{unit}");
+    }
+
+    /// Startup sync only rewrites a unit that runs this exact executable.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn startup_sync_only_claims_its_own_unit() {
+        let exe = "/home/u/.config/claude-portal/agent-portal";
+        let unit = super::generate_unit(exe);
+        assert!(super::unit_runs(&unit, exe));
+        assert!(super::unit_runs(&format!("ExecStart={exe}"), exe));
+        assert!(!super::unit_runs(
+            &unit,
+            "/home/u/repo/target/debug/agent-portal"
+        ));
+        assert!(!super::unit_runs(
+            &unit,
+            "/home/u/.config/claude-portal/agent"
+        ));
+        assert!(!super::unit_runs("", exe));
     }
 }
 

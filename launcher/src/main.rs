@@ -695,6 +695,10 @@ async fn main() -> anyhow::Result<()> {
 
     // --- Daemon startup path ---
 
+    if let Err(e) = service::sync_on_startup() {
+        warn!("Service unit sync failed: {e}");
+    }
+
     // Agents this daemon spawns shell out to `agent-portal` (messaging, port
     // forwarding) and inherit our environment. Under systemd/launchd the
     // service PATH often doesn't cover wherever this binary actually lives, so
