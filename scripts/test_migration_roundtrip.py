@@ -17,12 +17,12 @@ spec.loader.exec_module(roundtrip)
 
 
 class DisposableDatabaseTests(unittest.TestCase):
-    def execute(self, fail=None):
+    def execute(self, fail=None, error=RuntimeError):
         calls = []
         def run(label, argv, env, capture=False):
             calls.append((label, argv, env.copy()))
             if label == fail:
-                raise RuntimeError("injected failure")
+                raise error("injected failure")
             return "schema\n" if "Generate schema" in label else "objects\n"
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -30,7 +30,7 @@ class DisposableDatabaseTests(unittest.TestCase):
             (root / "backend/src/schema.rs").write_text("schema\n")
             with patch.object(roundtrip, "ROOT", root), patch.object(roundtrip, "run", run), patch.dict(os.environ, {"DATABASE_URL": "postgresql://user:secret@localhost:5432/existing?sslmode=disable"}), contextlib.redirect_stdout(io.StringIO()):
                 if fail:
-                    with self.assertRaisesRegex(RuntimeError, "injected failure"):
+                    with self.assertRaisesRegex(error, "injected failure"):
                         roundtrip.main()
                 else:
                     roundtrip.main()
@@ -66,6 +66,22 @@ class DisposableDatabaseTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 roundtrip.main()
             run.assert_not_called()
+
+    def test_dbname_query_override_is_rejected_before_create(self):
+        for key in ["dbname", "DBNAME", "db%6eame"]:
+            with self.subTest(key=key), patch.dict(os.environ, {"DATABASE_URL": f"postgresql://localhost/maintenance?{key}=existing"}), patch.object(roundtrip, "run") as run:
+                with self.assertRaisesRegex(ValueError, "dbname query override"):
+                    roundtrip.main()
+                run.assert_not_called()
+
+    def test_interrupt_and_termination_unwind_cleanup(self):
+        for error in [KeyboardInterrupt, SystemExit]:
+            with self.subTest(error=error):
+                calls = self.execute("Revert all migrations", error=error)
+                self.assertEqual(calls[-1][1][0], "dropdb")
+        with self.assertRaises(SystemExit) as stopped:
+            roundtrip.terminate(15, None)
+        self.assertEqual(stopped.exception.code, 143)
 
     def test_schema_drift_is_a_failure(self):
         with contextlib.redirect_stdout(io.StringIO()), self.assertRaisesRegex(RuntimeError, "schema drift"):

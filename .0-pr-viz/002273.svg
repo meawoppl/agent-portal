@@ -37,6 +37,6 @@
 <rect x="1055" y="890" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
 <text x="1080" y="934" fill="#9ece6a" font-family="sans-serif" font-size="28">Cleanup on success or failure</text>
 <text x="1080" y="981" fill="#c0caf5" font-family="sans-serif" font-size="24">Only the database created by this run is dropped.</text>
-<text x="1080" y="1022" fill="#c0caf5" font-family="sans-serif" font-size="24">Five tests cover ownership, cleanup and failure.</text>
+<text x="1080" y="1022" fill="#c0caf5" font-family="sans-serif" font-size="24">Seven tests cover ownership, cleanup and failure.</text>
 <text x="55" y="1172" fill="#a9b1d6" font-family="sans-serif" font-size="22">Scope: structural roundtrip on a fresh database. Deleted production data is not restored; broader #1209 work remains.</text>
 </svg>

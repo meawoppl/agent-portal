@@ -8,10 +8,11 @@ Data-only irreversible migrations are not expected to restore deleted rows.
 import difflib
 import json
 import os
+import signal
 from pathlib import Path
 import subprocess
 import tempfile
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlsplit, urlunsplit
 import uuid
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -43,6 +44,8 @@ def main():
     url = urlsplit(maintenance)
     if url.scheme not in ("postgres", "postgresql") or not url.netloc:
         raise ValueError("DATABASE_URL must be a PostgreSQL URL with a host")
+    if any(key.lower() == "dbname" for key, _ in parse_qsl(url.query)):
+        raise ValueError("DATABASE_URL must not contain a dbname query override")
     name = "ap_migration_check_" + uuid.uuid4().hex
     database_url = urlunsplit(url._replace(path="/" + name))
     env = dict(os.environ, DATABASE_URL=database_url)
@@ -68,5 +71,12 @@ def main():
         run("Drop isolated migration database", ["dropdb", "--maintenance-db", maintenance, name], env)
 
 
+def terminate(signum, _frame):
+    # Turn normal job cancellation into stack unwinding so finally drops the DB.
+    # SIGKILL cannot be handled; CI's disposable service remains the backstop.
+    raise SystemExit(128 + signum)
+
+
 if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, terminate)
     main()

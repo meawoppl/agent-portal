@@ -263,8 +263,9 @@ python3 scripts/test_migration_roundtrip.py
 
 `DATABASE_URL` is only the maintenance connection for creating/dropping the
 owned test database; its existing database is never migrated or reverted. The
-role needs `CREATEDB`. Cleanup drops only the database successfully created by
-this run, including after migration or comparison failures. Use a local test
+role needs `CREATEDB`; `dbname` query overrides are rejected. Cleanup drops only the database successfully created by
+this run, including after migration/comparison failures, Ctrl-C or SIGTERM.
+SIGKILL cannot run cleanup; CI tears down its disposable service regardless. Use a local test
 PostgreSQL instance, as CI does.
 
 This checks structural reversibility on a fresh database, not restoration of
