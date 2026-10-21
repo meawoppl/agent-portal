@@ -167,6 +167,32 @@ timezone support. Runs **resume the same agent session**, so a nightly reviewer
 remembers what it looked at yesterday. See
 [Scheduled Tasks](docs/SCHEDULED_TASKS.md).
 
+### Plugins
+
+Domain tools live outside core, in
+[`meawoppl/agent-portal-plugins`](https://github.com/meawoppl/agent-portal-plugins),
+and are installed per machine by the launcher:
+
+```bash
+agent-portal plugin install github:meawoppl/agent-portal-plugins//kicadmium
+agent-portal plugin list
+```
+
+The split is deliberate. Portal owns sessions, the UI, lifecycle, and the
+plugin runtime. A plugin owns its domain: tools, agent skills, commands, and
+optionally a workbench surface docked beside the chat. A plugin's skills load
+into a session only where its detect rules match the project (`.kicad_pcb`
+files, say), and can be switched per session. Current plugins:
+
+- **kicadmium**: KiCad review, checks, and fabrication export
+- **visilog**: interactive Verilog exploration with live values
+- **unlinked**: Simulink model review without MATLAB
+- **yapcad**: a parametric CAD workbench with 3D/2D review
+- **engineering-presentations**: repository-backed technical decks
+
+See [Plugin Architecture](docs/PLUGIN_ARCHITECTURE.md) for the runtime and
+[Plugin Authoring](docs/PLUGIN_AUTHORING.md) to write one.
+
 ### Cost and performance visibility
 
 - Per-turn metrics: tokens, cost, duration, cache hits, service tier.
@@ -262,6 +288,7 @@ the typed Rust parsers for the agent CLIs' JSON protocols.
 | [Port Forwarding](docs/PORT_FORWARDING.md) | Tunnel design, subdomains, public forwards |
 | [Scheduled Tasks](docs/SCHEDULED_TASKS.md) | Cron tasks owned by the launcher |
 | [File Downloads](docs/PORTAL_FILE_DOWNLOADS.md) | `portal://file` links |
+| [Plugin Architecture](docs/PLUGIN_ARCHITECTURE.md) | Plugin runtime, discovery, and per-session skill selection |
 | [Plugin Authoring](docs/PLUGIN_AUTHORING.md) | Writing plugins, skills, surfaces, commands, and toolchains |
 | [Codex Support](docs/CODEX_SUPPORT.md) | Codex integration notes |
 | [Self-Hosting](docs/SELF_HOSTING.md) | Run your own portal: one host, released image, HTTPS, backups, upgrades |
