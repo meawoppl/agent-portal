@@ -22,7 +22,10 @@ for a successful `HelloAck` before exposing any dashboard or session mutation
 sender. Read-only seed snapshots arriving first are delivered normally, not
 lost. A failed config fetch, negative acknowledgement, closed connection or
 10-second acknowledgement timeout fails closed; none triggers a legacy fallback
-or automatic mutation replay. Transient transport/config/timeout failures retry
+or speculative command sends. Dashboard mutations are never automatically
+replayed. The existing home-session idempotent outbox can resume only after a
+successful compatibility check and registration; linked sessions still do not
+replay unresolved mutations. Transient transport/config/timeout failures retry
 with the existing bounded backoff; explicit major mismatches and negative acks
 stop and show update guidance. The user sees the connection error.
 
