@@ -504,3 +504,19 @@ macOS, Windows, standalone proxies and Antigravity's external IDE retain their
 existing process management. This is resource containment, not a security
 sandbox: a process with permission to start its own systemd unit can leave the
 session's cgroup.
+
+### Launcher scheduler delivery interrupted
+
+`LAUNCHER_DELIVERY_AMBIGUOUS` means a scheduled launch, prompt, continuation,
+or exit report hit a socket send error. A send failure cannot prove whether the
+hub accepted that operation. The launcher reconnects and preserves later,
+untouched operations, but does not replay the uncertain operation or send its
+remaining frames (for example, `ContinuationFired` after an uncertain injection).
+Check the named session/task and its transcript before scheduling a replacement.
+
+Continuation IDs remain claimed across reconnect snapshots until the hub's
+pending snapshot removes them. These claims and the untouched-operation queue
+live only in the daemon process. They are not a durable delivery protocol:
+daemon crashes and application acknowledgments still need backend deduplication
+and explicit delivery identities. Successful WebSocket writes alone do not
+prove execution.

@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use shared::{ContinuationConfig, ScheduledTaskConfig};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
@@ -92,6 +92,10 @@ pub struct Scheduler {
     running: HashMap<Uuid, RunningInfo>,
     pending_prompts: Vec<PendingPrompt>,
     continuations: Vec<ContinuationConfig>,
+    /// A reconnect snapshot can precede the result of an already attempted
+    /// injection. Keep its ID claimed until an authoritative sync omits it;
+    /// an elapsed timeout is not evidence that retrying is safe.
+    claimed_continuations: HashSet<Uuid>,
     /// Last session spawned per task, tracked locally so continue-mode firings
     /// resume the right conversation even within a single launcher connection.
     ///
@@ -110,6 +114,7 @@ impl Scheduler {
             running: HashMap::new(),
             pending_prompts: Vec::new(),
             continuations: Vec::new(),
+            claimed_continuations: HashSet::new(),
             last_session_by_task: HashMap::new(),
         }
     }
@@ -167,7 +172,12 @@ impl Scheduler {
             "Continuation schedule updated: {} one-shot continuation(s)",
             continuations.len()
         );
-        self.continuations = continuations;
+        let ids: HashSet<_> = continuations.iter().map(|c| c.id).collect();
+        self.claimed_continuations.retain(|id| ids.contains(id));
+        self.continuations = continuations
+            .into_iter()
+            .filter(|c| !self.claimed_continuations.contains(&c.id))
+            .collect();
     }
 
     pub fn next_continuation_duration(&self) -> Option<Duration> {
@@ -203,6 +213,7 @@ impl Scheduler {
                 })
                 .unwrap_or(false);
             if due {
+                self.claimed_continuations.insert(c.id);
                 ready.push(ReadyContinuation {
                     id: c.id,
                     session_id: c.session_id,
@@ -794,6 +805,21 @@ mod tests {
                 .any(|(sid, tid, _)| *sid == s1 && *tid == task_id),
             "prompt should be queued for the active session"
         );
+    }
+
+    #[test]
+    fn reconnect_snapshot_does_not_reclaim_already_dispatched_continuation() {
+        let mut scheduler = Scheduler::new();
+        let due = continuation(Utc::now() - chrono::Duration::seconds(600));
+        scheduler.update_continuations(vec![due.clone()]);
+        assert_eq!(scheduler.ready_continuations().len(), 1);
+        // This sync can have been queued before our injection reached the hub.
+        scheduler.update_continuations(vec![due.clone()]);
+        assert!(scheduler.ready_continuations().is_empty());
+        assert_eq!(scheduler.claimed_continuations.len(), 1);
+        // Only the hub removing the pending ID retires the claim.
+        scheduler.update_continuations(vec![]);
+        assert!(scheduler.claimed_continuations.is_empty());
     }
 
     fn continuation(reset_at: DateTime<Utc>) -> ContinuationConfig {
