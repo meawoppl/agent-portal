@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="arr-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+    <marker id="arr-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/>
+    </marker>
+  </defs>
+
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2260 · Keep the launcher service up when the kernel OOM-kills a child</text>
+
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">One OOM-killed ld used to stop agent-portal.service and every session in it;</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">now only the killed process dies and the other sessions keep running.</text>
+  <line x1="55" y1="166" x2="1945" y2="166" stroke="#3d4666" stroke-width="1"/>
+
+  <text x="55" y="215" font-size="22" font-weight="bold" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1045" y="215" font-size="22" font-weight="bold" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1140" stroke="#3d4666" stroke-width="2" stroke-dasharray="10 8"/>
+
+  <!-- BEFORE -->
+  <rect x="55" y="245" width="900" height="190" rx="10" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+  <text x="79" y="285" font-size="26" fill="#c0caf5">generate_unit() [Service]</text>
+  <text x="79" y="325" font-size="23" fill="#a9b1d6">Type=simple, ExecStart, Restart=on-failure</text>
+  <text x="79" y="360" font-size="23" fill="#f7768e">no OOM settings: systemd default OOMPolicy=stop</text>
+  <text x="79" y="395" font-size="23" fill="#f7768e">and ManagedOOMPreference=none</text>
+  <line x1="505" y1="435" x2="505" y2="480" stroke="#565f89" stroke-width="2" marker-end="url(#arr-dim)"/>
+
+  <rect x="55" y="485" width="900" height="150" rx="10" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+  <text x="79" y="525" font-size="26" fill="#c0caf5">One session runs cargo build -j 16</text>
+  <text x="79" y="565" font-size="23" fill="#a9b1d6">16 ld processes, 39 GB, all in the launcher cgroup</text>
+  <text x="79" y="600" font-size="23" fill="#a9b1d6">the kernel OOM-kills one ld (2.6 GB)</text>
+  <line x1="505" y1="635" x2="505" y2="680" stroke="#f7768e" stroke-width="2" marker-end="url(#arr-red)"/>
+
+  <rect x="55" y="685" width="900" height="190" rx="10" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+  <text x="79" y="725" font-size="26" fill="#f7768e">systemd stops the whole service</text>
+  <text x="79" y="765" font-size="23" fill="#f7768e">Failed with result 'oom-kill': every session dies</text>
+  <text x="79" y="800" font-size="23" fill="#a9b1d6">Restart=on-failure brings the launcher back after</text>
+  <text x="79" y="835" font-size="23" fill="#a9b1d6">cfl-test-bench: 5 such stops in two days</text>
+
+  <!-- AFTER -->
+  <rect x="1045" y="245" width="900" height="190" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1069" y="285" font-size="26" fill="#c0caf5">generate_unit() [Service]</text>
+  <text x="1069" y="325" font-size="23" fill="#9ece6a">OOMPolicy=continue</text>
+  <text x="1069" y="360" font-size="23" fill="#9ece6a">ManagedOOMPreference=avoid</text>
+  <text x="1069" y="395" font-size="23" fill="#a9b1d6">sync() rewrites existing units, then daemon-reload</text>
+  <line x1="1495" y1="435" x2="1495" y2="480" stroke="#565f89" stroke-width="2" marker-end="url(#arr-dim)"/>
+
+  <rect x="1045" y="485" width="900" height="150" rx="10" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+  <text x="1069" y="525" font-size="26" fill="#c0caf5">Same build, same OOM kill of one ld</text>
+  <text x="1069" y="565" font-size="23" fill="#a9b1d6">the kernel still picks one process to kill</text>
+  <text x="1069" y="600" font-size="23" fill="#a9b1d6">systemd-oomd now prefers other cgroups first</text>
+  <line x1="1495" y1="635" x2="1495" y2="680" stroke="#9ece6a" stroke-width="2" marker-end="url(#arr-green)"/>
+
+  <rect x="1045" y="685" width="900" height="190" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1069" y="725" font-size="26" fill="#9ece6a">The service keeps running</text>
+  <text x="1069" y="765" font-size="23" fill="#9ece6a">only the killed process is gone: its session sees</text>
+  <text x="1069" y="800" font-size="23" fill="#9ece6a">a failed command, every other session carries on</text>
+  <text x="1069" y="835" font-size="23" fill="#a9b1d6">systemd-analyze --user verify accepts both (255)</text>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">Still open on #2230: per-session transient scopes for per-session memory limits and OOM attribution, and a transcript notice.</text>
+</svg>
