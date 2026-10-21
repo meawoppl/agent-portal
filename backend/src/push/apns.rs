@@ -1,129 +1,195 @@
-//! Native APNs transport (mobile-apps plan C7).
+//! Native APNs transport over the backend's maintained HTTP/TLS stack.
 //!
-//! Uses direct APNs provider-token auth via the `a2` crate. The shell stores
-//! the APNs device token in `push_subscriptions.endpoint_or_token`.
+//! Apple requires HTTP/2, an ES256 provider token no older than one hour, and
+//! token reuse (refreshing more often than 20 minutes can be throttled).
+//! See https://developer.apple.com/documentation/usernotifications/establishing-a-token-based-connection-to-apns
+//! Reusing reqwest removes a2's separate, obsolete rustls 0.22 dependency.
 
-use std::fs::File;
+use std::sync::Mutex;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use a2::{
-    Client, ClientConfig, CollapseId, DefaultNotificationBuilder, Endpoint, ErrorReason,
-    NotificationBuilder, NotificationOptions, PushType,
-};
-use serde::Serialize;
+use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+use serde::{Deserialize, Serialize};
 
 use crate::models::PushSubscription;
 use crate::push::transport::{PushError, PushTransport, SendOutcome};
 use crate::push::{ApnsTransportConfig, PushPayload};
 use shared::api::PushPlatform;
 
+const PROVIDER_TOKEN_LIFETIME: u64 = 50 * 60;
+const MAX_PAYLOAD_BYTES: usize = 4096;
+const MAX_ERROR_BYTES: usize = 8192;
+
+#[derive(Serialize)]
+struct ProviderClaims<'a> {
+    iss: &'a str,
+    iat: u64,
+}
+
+struct CachedToken {
+    issued_at: u64,
+    token: String,
+}
+
 #[derive(Debug, Serialize)]
 struct ApnsCustomData<'a> {
-    session_id: &'a str,
+    session_id: String,
     event_kind: &'a str,
 }
 
+#[derive(Debug, Serialize)]
+struct ApnsAlert<'a> {
+    title: &'a str,
+    body: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+struct ApnsAps<'a> {
+    alert: ApnsAlert<'a>,
+    sound: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct ApnsBody<'a> {
+    aps: ApnsAps<'a>,
+    agent_portal: ApnsCustomData<'a>,
+}
+
+#[derive(Deserialize)]
+struct ApnsErrorBody {
+    reason: String,
+}
+
 pub struct ApnsTransport {
-    client: Client,
+    http: reqwest::Client,
     bundle_id: String,
+    key_id: String,
+    team_id: String,
+    encoding_key: EncodingKey,
+    token: Mutex<Option<CachedToken>>,
+    endpoint: String,
 }
 
 impl ApnsTransport {
     pub fn new(config: ApnsTransportConfig) -> anyhow::Result<Self> {
-        let mut key = File::open(&config.key_p8_path).map_err(|e| {
+        let key = std::fs::read(&config.key_p8_path).map_err(|e| {
             anyhow::anyhow!(
-                "failed to open PORTAL_APNS_KEY_P8_PATH {}: {e}",
+                "failed to read PORTAL_APNS_KEY_P8_PATH {}: {e}",
                 config.key_p8_path.display()
             )
         })?;
-        let client = Client::token(
-            &mut key,
-            config.key_id,
-            config.team_id,
-            ClientConfig::new(Endpoint::Production),
-        )
-        .map_err(|e| anyhow::anyhow!("failed to initialize APNs client: {e}"))?;
+        let encoding_key = EncodingKey::from_ec_pem(&key)
+            .map_err(|e| anyhow::anyhow!("invalid APNs EC private key: {e}"))?;
+        let http = Self::http_client()?;
         Ok(Self {
-            client,
+            http,
             bundle_id: config.bundle_id,
+            key_id: config.key_id,
+            team_id: config.team_id,
+            encoding_key,
+            token: Mutex::new(None),
+            endpoint: "https://api.push.apple.com".into(),
         })
     }
 
-    fn build_payload<'a>(
-        &'a self,
-        sub: &'a PushSubscription,
-        payload: &'a PushPayload,
-    ) -> Result<a2::request::payload::Payload<'a>, PushError> {
-        // Reject non-APNs rows (and any legacy/unknown platform) before building
-        // the payload. `platform_kind()` is the typed read boundary.
+    fn http_client() -> Result<reqwest::Client, reqwest::Error> {
+        reqwest::Client::builder()
+            .http2_prior_knowledge()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(Duration::from_secs(30))
+            .build()
+    }
+
+    fn provider_token(&self, now: u64) -> Result<String, PushError> {
+        let mut guard = self
+            .token
+            .lock()
+            .map_err(|_| PushError::Transport("APNs token cache poisoned".into()))?;
+        if let Some(cached) = guard.as_ref() {
+            if now >= cached.issued_at && now - cached.issued_at < PROVIDER_TOKEN_LIFETIME {
+                return Ok(cached.token.clone());
+            }
+        }
+        let mut header = Header::new(Algorithm::ES256);
+        header.kid = Some(self.key_id.clone());
+        let token = encode(
+            &header,
+            &ProviderClaims {
+                iss: &self.team_id,
+                iat: now,
+            },
+            &self.encoding_key,
+        )
+        .map_err(|e| PushError::Transport(format!("APNs provider-token signing failed: {e}")))?;
+        *guard = Some(CachedToken {
+            issued_at: now,
+            token: token.clone(),
+        });
+        Ok(token)
+    }
+
+    fn build_payload(sub: &PushSubscription, payload: &PushPayload) -> Result<Vec<u8>, PushError> {
         if sub.platform_kind() != Some(PushPlatform::Apns) {
             return Err(PushError::Transport(format!(
                 "ApnsTransport cannot deliver to platform {:?} (subscription {})",
                 sub.platform, sub.id
             )));
         }
-
-        let collapse_id = CollapseId::new(&payload.collapse_key).map_err(|e| {
-            PushError::Transport(format!(
-                "invalid APNs collapse id for subscription {}: {e}",
-                sub.id
-            ))
-        })?;
-        let options = NotificationOptions {
-            apns_topic: Some(self.bundle_id.as_str()),
-            apns_push_type: Some(PushType::Alert),
-            apns_collapse_id: Some(collapse_id),
-            ..Default::default()
-        };
-
-        let mut notification = DefaultNotificationBuilder::new()
-            .set_title(&payload.title)
-            .set_body(&payload.body)
-            .set_sound("default")
-            .build(&sub.endpoint_or_token, options);
-        let session_id = payload.session_id.to_string();
-        notification
-            .add_custom_data(
-                "agent_portal",
-                &ApnsCustomData {
-                    session_id: &session_id,
-                    event_kind: &payload.event_kind,
+        // Device tokens are hexadecimal bytes, not arbitrary URL paths. Keeping
+        // validation here prevents a stored token from changing the request URL.
+        if sub.endpoint_or_token.is_empty()
+            || !sub.endpoint_or_token.bytes().all(|b| b.is_ascii_hexdigit())
+        {
+            return Err(PushError::Transport("invalid APNs device token".into()));
+        }
+        if payload.collapse_key.len() > 64 {
+            return Err(PushError::Transport(
+                "APNs collapse id exceeds 64 bytes".into(),
+            ));
+        }
+        let body = ApnsBody {
+            aps: ApnsAps {
+                alert: ApnsAlert {
+                    title: &payload.title,
+                    body: &payload.body,
                 },
-            )
-            .map_err(|e| {
-                PushError::Transport(format!(
-                    "APNs payload serialization failed for subscription {}: {e}",
-                    sub.id
-                ))
-            })?;
-        Ok(notification)
+                sound: "default",
+            },
+            agent_portal: ApnsCustomData {
+                session_id: payload.session_id.to_string(),
+                event_kind: &payload.event_kind,
+            },
+        };
+        let bytes = serde_json::to_vec(&body)
+            .map_err(|e| PushError::Transport(format!("APNs payload serialization failed: {e}")))?;
+        if bytes.len() > MAX_PAYLOAD_BYTES {
+            return Err(PushError::Transport(
+                "APNs payload exceeds 4096 bytes".into(),
+            ));
+        }
+        Ok(bytes)
     }
 
-    fn map_send_error(err: a2::Error) -> Result<SendOutcome, PushError> {
-        match err {
-            a2::Error::ResponseError(response) => {
-                let reason = response.error.as_ref().map(|e| &e.reason);
-                if response.code == 410
-                    || matches!(
-                        reason,
-                        Some(
-                            ErrorReason::Unregistered
-                                | ErrorReason::BadDeviceToken
-                                | ErrorReason::DeviceTokenNotForTopic
-                        )
-                    )
-                {
-                    Ok(SendOutcome::GoneDeadEndpoint)
-                } else {
-                    Err(PushError::Transport(format!(
-                        "APNs returned {}: {:?}",
-                        response.code, response.error
-                    )))
-                }
-            }
-            other => Err(PushError::Transport(format!(
-                "APNs request failed: {other}"
-            ))),
+    fn map_response(status: reqwest::StatusCode, body: &[u8]) -> Result<SendOutcome, PushError> {
+        if status.is_success() {
+            return Ok(SendOutcome::Delivered);
         }
+        let reason = serde_json::from_slice::<ApnsErrorBody>(body)
+            .ok()
+            .map(|b| b.reason);
+        if status == reqwest::StatusCode::GONE
+            || matches!(
+                reason.as_deref(),
+                Some("Unregistered" | "BadDeviceToken" | "DeviceTokenNotForTopic")
+            )
+        {
+            return Ok(SendOutcome::GoneDeadEndpoint);
+        }
+        Err(PushError::Transport(format!(
+            "APNs returned {}: {}",
+            status.as_u16(),
+            reason.as_deref().unwrap_or("invalid error response")
+        )))
     }
 }
 
@@ -133,138 +199,47 @@ impl PushTransport for ApnsTransport {
         sub: &PushSubscription,
         payload: &PushPayload,
     ) -> Result<SendOutcome, PushError> {
-        let notification = self.build_payload(sub, payload)?;
-        self.client
-            .send(notification)
+        let body = Self::build_payload(sub, payload)?;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| PushError::Transport(format!("APNs clock error: {e}")))?
+            .as_secs();
+        let token = self.provider_token(now)?;
+        let mut response = self
+            .http
+            .post(format!(
+                "{}/3/device/{}",
+                self.endpoint, sub.endpoint_or_token
+            ))
+            .bearer_auth(token)
+            .header("apns-topic", &self.bundle_id)
+            .header("apns-push-type", "alert")
+            .header("apns-collapse-id", &payload.collapse_key)
+            .header("content-type", "application/json")
+            .body(body)
+            .send()
             .await
-            .map(|_| SendOutcome::Delivered)
-            .or_else(Self::map_send_error)
+            .map_err(|e| PushError::Transport(format!("APNs request failed: {e}")))?;
+        let status = response.status();
+        if status.is_success() {
+            return Ok(SendOutcome::Delivered);
+        }
+        let mut body = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|e| PushError::Transport(format!("APNs response failed: {e}")))?
+        {
+            if body.len() + chunk.len() > MAX_ERROR_BYTES {
+                return Err(PushError::Transport(
+                    "APNs error response exceeds size limit".into(),
+                ));
+            }
+            body.extend_from_slice(&chunk);
+        }
+        Self::map_response(status, &body)
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use a2::{ErrorBody, Response};
-    use chrono::Utc;
-    use uuid::Uuid;
-
-    const TEST_APNS_KEY: &str = "-----BEGIN PRIVATE KEY-----
-MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg8g/n6j9roKvnUkwu
-lCEIvbDqlUhA5FOzcakkG90E8L+hRANCAATKS2ZExEybUvchRDuKBftotMwVEus3
-jDwmlD1Gg0yJt1e38djFwsxsfr5q2hv0Rj9fTEqAPr8H7mGm0wKxZ7iQ
------END PRIVATE KEY-----";
-
-    fn test_client() -> Client {
-        Client::token(
-            std::io::Cursor::new(TEST_APNS_KEY.as_bytes()),
-            "KEYID",
-            "TEAMID",
-            ClientConfig::default(),
-        )
-        .unwrap()
-    }
-
-    fn sub(platform: &str) -> PushSubscription {
-        PushSubscription {
-            id: Uuid::new_v4(),
-            user_id: Uuid::new_v4(),
-            platform: platform.to_string(),
-            endpoint_or_token: "apns-token".to_string(),
-            p256dh: None,
-            auth: None,
-            device_label: Some("ios".to_string()),
-            created_at: Utc::now(),
-            last_success_at: None,
-            disabled_at: None,
-        }
-    }
-
-    fn payload() -> PushPayload {
-        let id = Uuid::new_v4();
-        PushPayload {
-            session_id: id,
-            event_kind: "permission_request".to_string(),
-            title: "my-session".to_string(),
-            body: "Permission needed: Bash".to_string(),
-            collapse_key: id.to_string(),
-        }
-    }
-
-    fn response_error(code: u16, reason: ErrorReason) -> a2::Error {
-        a2::Error::ResponseError(Response {
-            apns_id: None,
-            code,
-            error: Some(ErrorBody {
-                reason,
-                timestamp: None,
-            }),
-        })
-    }
-
-    #[test]
-    fn apns_payload_contains_collapse_topic_and_custom_data() {
-        let transport = ApnsTransport {
-            client: test_client(),
-            bundle_id: "io.txcl.agentportal".to_string(),
-        };
-        let payload = payload();
-        let sub = sub(PushPlatform::Apns.as_wire());
-        let notification = transport
-            .build_payload(&sub, &payload)
-            .expect("payload builds");
-        let json = serde_json::to_value(&notification).expect("serialize notification");
-        assert_eq!(json["aps"]["alert"]["title"], payload.title);
-        assert_eq!(json["aps"]["alert"]["body"], payload.body);
-        assert_eq!(
-            json["agent_portal"]["session_id"],
-            payload.session_id.to_string()
-        );
-        assert_eq!(json["agent_portal"]["event_kind"], payload.event_kind);
-        assert_eq!(notification.options.apns_topic, Some("io.txcl.agentportal"));
-        assert_eq!(
-            notification
-                .options
-                .apns_collapse_id
-                .as_ref()
-                .map(|id| id.value),
-            Some(payload.collapse_key.as_str())
-        );
-    }
-
-    #[test]
-    fn non_apns_platform_rejected_before_network() {
-        let transport = ApnsTransport {
-            client: test_client(),
-            bundle_id: "io.txcl.agentportal".to_string(),
-        };
-        let err = transport
-            .build_payload(&sub("fcm"), &payload())
-            .expect_err("wrong platform rejected");
-        let PushError::Transport(msg) = err;
-        assert!(msg.contains("fcm"));
-    }
-
-    #[test]
-    fn apns_unregistered_maps_to_dead_endpoint() {
-        assert_eq!(
-            ApnsTransport::map_send_error(response_error(410, ErrorReason::Unregistered))
-                .expect("mapped"),
-            SendOutcome::GoneDeadEndpoint
-        );
-        assert_eq!(
-            ApnsTransport::map_send_error(response_error(400, ErrorReason::BadDeviceToken))
-                .expect("mapped"),
-            SendOutcome::GoneDeadEndpoint
-        );
-    }
-
-    #[test]
-    fn apns_non_dead_error_stays_transport_error() {
-        let err =
-            ApnsTransport::map_send_error(response_error(500, ErrorReason::InternalServerError))
-                .expect_err("not dead endpoint");
-        let PushError::Transport(msg) = err;
-        assert!(msg.contains("APNs returned 500"));
-    }
-}
+mod tests;
