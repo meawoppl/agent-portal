@@ -69,11 +69,7 @@ fn fill_active_counts(
     }
 }
 
-#[derive(serde::Serialize)]
-pub struct LaunchResponse {
-    pub request_id: Uuid,
-    pub session_id: Uuid,
-}
+use shared::api::LaunchResponse;
 
 /// POST /api/launch - Request launching a new session
 pub async fn launch_session(

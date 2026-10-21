@@ -5,7 +5,6 @@ use crate::pages::settings::agents_panel::{
 };
 use crate::utils::{self, parse_version, On401};
 use futures_util::stream::{FuturesUnordered, StreamExt};
-use gloo_net::http::Request;
 use shared::{AppConfig, LauncherInfo};
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
@@ -587,18 +586,17 @@ pub fn launchers_panel() -> Html {
                     .map(|l| {
                         let id = l.launcher_id;
                         async move {
-                            let path = format!("/api/launchers/{id}/probe-agents");
-                            let state = utils::fetch_json::<shared::api::ProbeAgentsResponse>(
-                                &path,
-                                On401::Ignore,
-                            )
-                            .await
-                            .map(|resp| {
-                                ProbeState::Loaded(
-                                    resp.agents.into_iter().map(|a| (a.agent_type, a)).collect(),
-                                )
-                            })
-                            .unwrap_or(ProbeState::Unreachable);
+                            let state = crate::dashboard_rpc::probe(id)
+                                .await
+                                .map(|resp| {
+                                    ProbeState::Loaded(
+                                        resp.agents
+                                            .into_iter()
+                                            .map(|a| (a.agent_type, a))
+                                            .collect(),
+                                    )
+                                })
+                                .unwrap_or(ProbeState::Unreachable);
                             (id, state)
                         }
                     })
@@ -742,22 +740,23 @@ pub fn launchers_panel() -> Html {
             update_states.set(states);
             request_error.set(None);
 
-            let (endpoint, verb) = match mode {
-                LifecycleMode::Update => ("update", "Update"),
-                LifecycleMode::Restart => ("restart", "Restart"),
+            let (request, verb) = match mode {
+                LifecycleMode::Update => (
+                    shared::api::DashboardRequest::UpdateLauncher { launcher_id },
+                    "Update",
+                ),
+                LifecycleMode::Restart => (
+                    shared::api::DashboardRequest::RestartLauncher { launcher_id },
+                    "Restart",
+                ),
             };
             let request_error = request_error.clone();
             let update_states = update_states.clone();
             spawn_local(async move {
-                let url = utils::api_url(&format!("/api/launchers/{launcher_id}/{endpoint}"));
-                let failure = match Request::post(&url).send().await {
-                    Ok(resp) if resp.ok() => None,
-                    Ok(resp) => {
-                        let status = resp.status();
-                        let text = utils::error_body(resp).await;
-                        Some(format!("{verb} failed: {} {}", status, text))
-                    }
-                    Err(e) => Some(format!("{verb} request failed: {e:?}")),
+                let failure = match crate::dashboard_rpc::request(request).await {
+                    Ok(shared::api::DashboardResponse::Complete) => None,
+                    Ok(_) => Some(format!("{verb}: unexpected reply")),
+                    Err(e) => Some(format!("{verb} failed: {} {}", e.status, e.message)),
                 };
                 if let Some(msg) = failure {
                     // The lifecycle never started — drop the tracked entry so the

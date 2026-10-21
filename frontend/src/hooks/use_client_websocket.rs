@@ -14,6 +14,7 @@ use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
 /// Return value from the use_client_websocket hook.
+#[derive(Clone, Default, PartialEq)]
 pub struct UseClientWebSocket {
     /// Server shutdown reason (if server is shutting down).
     /// Cleared automatically on the next successful (re)connect.
@@ -56,6 +57,30 @@ pub struct UseClientWebSocket {
     pub service_cpu_history: HashMap<String, Vec<f64>>,
 }
 
+struct HomeRpcGuard(Option<u64>);
+impl Drop for HomeRpcGuard {
+    fn drop(&mut self) {
+        if let Some(generation) = self.0 {
+            crate::dashboard_rpc::disconnect(generation);
+        }
+    }
+}
+
+#[derive(Properties, PartialEq)]
+pub struct ProviderProps {
+    pub children: Children,
+}
+#[function_component(ClientWebSocketProvider)]
+pub fn provider(props: &ProviderProps) -> Html {
+    let live = use_live_client_websocket();
+    html! { <ContextProvider<UseClientWebSocket> context={live}>{props.children.clone()}</ContextProvider<UseClientWebSocket>> }
+}
+
+#[hook]
+pub fn use_client_websocket() -> UseClientWebSocket {
+    use_context::<UseClientWebSocket>().unwrap_or_default()
+}
+
 /// Decide whether `next` is strictly newer than `prev`. Falls back to string
 /// inequality when either side fails to parse (better to over-prompt than miss
 /// an upgrade because of a non-semver tag).
@@ -78,7 +103,7 @@ fn is_newer_version(prev: &str, next: &str) -> bool {
 /// * `UseClientWebSocket` - Shutdown status, pending-update version, and
 ///   turn-metrics data.
 #[hook]
-pub fn use_client_websocket() -> UseClientWebSocket {
+fn use_live_client_websocket() -> UseClientWebSocket {
     let shutdown_reason = use_state(|| None::<String>);
     let update_available = use_state(|| None::<String>);
     // Everything updated *relative to its previous value* lives in one reducer.
@@ -88,8 +113,13 @@ pub fn use_client_websocket() -> UseClientWebSocket {
     let live = use_reducer(client_websocket_events::ClientWsState::default);
 
     let home = use_portal();
+    crate::dashboard_rpc::bind_account(home.account_id());
     let registry = use_context::<Federation>();
-    let mut portals = vec![home];
+    let mut portals = if home.account_id().is_some() {
+        vec![home]
+    } else {
+        Vec::new()
+    };
     if let Some(registry) = &registry {
         portals.extend(registry.rows.iter().filter_map(|r| r.client.clone()));
     }
@@ -203,9 +233,25 @@ pub fn use_client_websocket() -> UseClientWebSocket {
                                                     known_version = Some(config.server_version);
                                                 }
                                             }
-                                            let (_sender, mut receiver) = conn.split();
+                                            let (mut sender, mut receiver) = conn.split();
+                                            let (requests, mut requests_rx) = futures_channel::mpsc::unbounded();
+                                            let _rpc_guard = HomeRpcGuard((portal.conn() == ConnId::HOME).then(|| crate::dashboard_rpc::connect(requests.clone())));
+                                            let _requests_keepalive = requests;
                                             let mut announced = false;
-                                            while let Some(result) = receiver.recv().await {
+                                            loop {
+                                                use futures_util::{FutureExt, StreamExt};
+                                                let result = futures_util::select! {
+                                                    message = requests_rx.next().fuse() => {
+                                                        if let Some(message) = message {
+                                                            if sender.send(message).await.is_err() { break; }
+                                                        }
+                                                        continue;
+                                                    },
+                                                    result = receiver.recv().fuse() => {
+                                                        let Some(result) = result else { break; };
+                                                        result
+                                                    }
+                                                };
                                                 match result {
                                                     Ok(msg) => {
                                                         if !announced {
@@ -215,7 +261,11 @@ pub fn use_client_websocket() -> UseClientWebSocket {
                                                                 registry.dispatch(FederationAction::LiveStatus(portal.conn(), None));
                                                             }
                                                         }
-                                                        handle_server_message(portal.conn(), msg, &shutdown_reason, &live);
+                                                        if let shared::ServerToClient::DashboardResult { request_id, result } = msg {
+                                                            if portal.conn() == ConnId::HOME { crate::dashboard_rpc::resolve(request_id, result); }
+                                                        } else {
+                                                            handle_server_message(portal.conn(), msg, &shutdown_reason, &live);
+                                                        }
                                                     },
                                                     Err(_) => break,
                                                 }

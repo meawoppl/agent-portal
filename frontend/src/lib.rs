@@ -1,4 +1,5 @@
 mod components;
+mod dashboard_rpc;
 mod federation;
 mod health_timer;
 mod hooks;
@@ -89,10 +90,12 @@ fn switch(routes: Route) -> Html {
 fn app() -> Html {
     html! {
         <federation::FederationProvider>
+            <hooks::ClientWebSocketProvider>
             <BrowserRouter>
                 <Switch<Route> render={switch} />
                 <HealthTimerReminder />
             </BrowserRouter>
+            </hooks::ClientWebSocketProvider>
         </federation::FederationProvider>
     }
 }

@@ -7,7 +7,6 @@
 //! that), waits for confirmation, then POSTs to the install endpoint. On
 //! success it fires `on_success` so the matrix re-probes.
 
-use gloo_net::http::Request;
 use shared::api::InstallAgentResponse;
 use shared::{AgentType, LauncherInfo};
 use uuid::Uuid;
@@ -141,20 +140,16 @@ async fn install_agent(
     launcher_id: Uuid,
     agent_type: AgentType,
 ) -> Result<InstallAgentResponse, String> {
-    let url = utils::api_url(&format!(
-        "/api/launchers/{launcher_id}/agents/{}/install",
-        agent_type.as_str()
-    ));
-    let resp = Request::post(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !resp.ok() {
-        return Err(utils::error_body(resp).await);
+    match crate::dashboard_rpc::request(shared::api::DashboardRequest::InstallAgent {
+        launcher_id,
+        agent_type,
+    })
+    .await
+    .map_err(|e| e.message)?
+    {
+        shared::api::DashboardResponse::AgentInstalled(response) => Ok(response),
+        _ => Err("Unexpected install reply".into()),
     }
-    resp.json::<InstallAgentResponse>()
-        .await
-        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

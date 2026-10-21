@@ -60,6 +60,8 @@ pub async fn handle_web_client_socket(
     let (tx, mut rx) =
         super::session_manager::conn_channel::<ServerToClient>(super::WEB_CLIENT_CHANNEL_CAPACITY);
 
+    let mut dashboard_jobs = tokio::task::JoinSet::new();
+    let mut dashboard_ids = std::collections::HashSet::new();
     let mut session_key: Option<SessionId> = None;
     let mut verified_session_id: Option<Uuid> = None;
     let mut pending_uploads: HashMap<String, PendingUpload> = HashMap::new();
@@ -87,6 +89,12 @@ pub async fn handle_web_client_socket(
     let mut recheck = tokio::time::interval(LINKED_RECHECK_INTERVAL);
     loop {
         tokio::select! {
+            completed = dashboard_jobs.join_next(), if !dashboard_jobs.is_empty() => {
+                if let Some(Ok((request_id, result))) = completed {
+                    dashboard_ids.remove(&request_id);
+                    let _ = tx.send(ServerToClient::DashboardResult { request_id, result });
+                }
+            }
             _ = recheck.tick(), if linked.is_some() => {
                 if linked.as_ref().is_some_and(|auth| outbound_auth.check(std::time::Instant::now(), true, || auth.authorize(&app_state, shared::api::TokenScope::Read)).is_err()) { break; }
             }
@@ -100,6 +108,28 @@ pub async fn handle_web_client_socket(
                 match result {
                     Ok(client_msg) => {
                         if linked.as_ref().is_some_and(|auth| auth.authorize(&app_state, crate::handlers::federation::message_scope(&client_msg)).is_err()) { break; }
+                        if let ClientToServer::Dashboard { request_id, request } = client_msg {
+                            // Linked grants currently exclude host administration on REST;
+                            // a socket must not bypass that narrower allow-list.
+                            let error = if linked.is_some() {
+                                Some((403, "Host management requires the home account"))
+                            } else if dashboard_ids.contains(&request_id) {
+                                Some((409, "Request id is already in flight"))
+                            } else if dashboard_jobs.len() >= 32 {
+                                Some((429, "Too many pending dashboard requests"))
+                            } else { None };
+                            if let Some((status, message)) = error {
+                                let _ = tx.send(ServerToClient::DashboardResult { request_id, result: Err(shared::api::DashboardError { status, message: message.into() }) });
+                            } else {
+                                dashboard_ids.insert(request_id);
+                                let state = app_state.clone();
+                                dashboard_jobs.spawn(async move {
+                                    let result = crate::handlers::dashboard_rpc::execute(state, user_id, request).await;
+                                    (request_id, result)
+                                });
+                            }
+                            continue;
+                        }
                         if handle_web_client_message(client_msg, ctx, &mut session_key, &mut verified_session_id, &mut pending_uploads) { break; }
                     }
                     Err(e) => { warn!("WebSocket decode error: {}", e); }
@@ -152,6 +182,7 @@ fn handle_web_client_message(
         ..
     } = ctx;
     match client_msg {
+        ClientToServer::Dashboard { .. } => false, // handled asynchronously by the socket
         ClientToServer::Register(shared::RegisterFields {
             session_id,
             session_name,

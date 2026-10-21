@@ -221,7 +221,8 @@ fn route_scope(method: &Method, route: &str) -> Option<TokenScope> {
 pub fn message_scope(message: &shared::ClientToServer) -> TokenScope {
     match message {
         shared::ClientToServer::Register(_) => TokenScope::Read,
-        shared::ClientToServer::AgentInput { .. }
+        shared::ClientToServer::Dashboard { .. }
+        | shared::ClientToServer::AgentInput { .. }
         | shared::ClientToServer::PermissionResponse(_)
         | shared::ClientToServer::FileUploadStart(_)
         | shared::ClientToServer::FileUploadChunk(_)

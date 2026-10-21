@@ -375,17 +375,19 @@ async fn start_login(
     launcher_id: Uuid,
     agent_type: AgentType,
 ) -> Result<StartAgentLoginResponse, String> {
-    let request = portal.post(&format!("/api/launchers/{launcher_id}/agent-login/start"));
-    let body = StartAgentLoginRequest { agent_type };
-    let resp = utils::send_json(request, &body)
-        .await
-        .map_err(|e| e.to_string())?;
-    if !resp.ok() {
-        return Err(utils::error_body(resp).await);
+    if portal.is_linked() {
+        return Err("Sign in from the remote portal's Computers page".into());
     }
-    resp.json::<StartAgentLoginResponse>()
-        .await
-        .map_err(|e| e.to_string())
+    match crate::dashboard_rpc::request(shared::api::DashboardRequest::StartAgentLogin {
+        launcher_id,
+        request: StartAgentLoginRequest { agent_type },
+    })
+    .await
+    .map_err(|e| e.message)?
+    {
+        shared::api::DashboardResponse::LoginStarted(response) => Ok(response),
+        _ => Err("Unexpected login reply".into()),
+    }
 }
 
 async fn submit_code(
@@ -394,19 +396,20 @@ async fn submit_code(
     flow_id: Uuid,
     code: String,
 ) -> Result<AgentLoginOutcome, String> {
-    let request = portal.post(&format!(
-        "/api/launchers/{launcher_id}/agent-login/{flow_id}/code"
-    ));
-    let body = SubmitAgentLoginCodeRequest { code };
-    let resp = utils::send_json(request, &body)
-        .await
-        .map_err(|e| e.to_string())?;
-    if !resp.ok() {
-        return Err(utils::error_body(resp).await);
+    if portal.is_linked() {
+        return Err("Sign in from the remote portal's Computers page".into());
     }
-    resp.json::<AgentLoginOutcome>()
-        .await
-        .map_err(|e| e.to_string())
+    match crate::dashboard_rpc::request(shared::api::DashboardRequest::SubmitAgentLoginCode {
+        launcher_id,
+        flow_id,
+        request: SubmitAgentLoginCodeRequest { code },
+    })
+    .await
+    .map_err(|e| e.message)?
+    {
+        shared::api::DashboardResponse::LoginOutcome(response) => Ok(response),
+        _ => Err("Unexpected login reply".into()),
+    }
 }
 
 async fn poll_login(
@@ -414,29 +417,33 @@ async fn poll_login(
     launcher_id: Uuid,
     flow_id: Uuid,
 ) -> Result<AgentLoginOutcome, String> {
-    let resp = portal
-        .get(&format!(
-            "/api/launchers/{launcher_id}/agent-login/{flow_id}"
-        ))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !resp.ok() {
-        return Err(utils::error_body(resp).await);
+    if portal.is_linked() {
+        return Err("Sign in from the remote portal's Computers page".into());
     }
-    resp.json::<AgentLoginOutcome>()
-        .await
-        .map_err(|e| e.to_string())
+    match crate::dashboard_rpc::request(shared::api::DashboardRequest::PollAgentLogin {
+        launcher_id,
+        flow_id,
+    })
+    .await
+    .map_err(|e| e.message)?
+    {
+        shared::api::DashboardResponse::LoginOutcome(response) => Ok(response),
+        _ => Err("Unexpected login reply".into()),
+    }
 }
 
 /// Best-effort fire-and-forget cancel; a dropped launcher flow reaps on its own
 /// deadline, so we don't surface failures here.
 fn cancel_login(portal: &PortalClient, launcher_id: Uuid, flow_id: Uuid) {
-    let request = portal.post(&format!(
-        "/api/launchers/{launcher_id}/agent-login/{flow_id}/cancel"
-    ));
+    if portal.is_linked() {
+        return;
+    }
     spawn_local(async move {
-        let _ = request.send().await;
+        let _ = crate::dashboard_rpc::request(shared::api::DashboardRequest::CancelAgentLogin {
+            launcher_id,
+            flow_id,
+        })
+        .await;
     });
 }
 

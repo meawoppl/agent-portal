@@ -1,6 +1,7 @@
 //! Shared API request/response types for HTTP endpoints.
 
 mod auth;
+mod dashboard;
 mod device_flow;
 mod error;
 mod federation;
@@ -23,6 +24,7 @@ mod settings;
 mod users;
 
 pub use auth::*;
+pub use dashboard::*;
 pub use device_flow::*;
 pub use error::*;
 pub use federation::*;

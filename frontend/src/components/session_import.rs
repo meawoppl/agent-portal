@@ -1,8 +1,8 @@
 //! Import picker owns its drafts and is keyed by launcher, so changing machines
 //! cannot apply an old response or selected thread to the new machine.
-use gloo_net::http::Request;
 use shared::api::{
-    ExternalSession, ExternalSessionList, ImportSessionRequest, ImportSessionResponse,
+    DashboardRequest, DashboardResponse, ExternalSession, ExternalSessionQuery,
+    ImportSessionRequest,
 };
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
@@ -15,16 +15,6 @@ pub struct Props {
     pub launcher_id: Uuid,
     pub supported: bool,
     pub on_open: Callback<Uuid>,
-}
-
-async fn response_json<T: serde::de::DeserializeOwned>(
-    response: gloo_net::http::Response,
-) -> Result<T, String> {
-    if response.ok() {
-        response.json::<T>().await.map_err(|e| e.to_string())
-    } else {
-        Err(crate::utils::error_body(response).await)
-    }
 }
 
 #[function_component(SessionImport)]
@@ -41,10 +31,7 @@ pub fn session_import(props: &Props) -> Html {
     let include_history = use_state(|| true);
     let imported_count = use_state(|| 0usize);
     let applied_filters = use_state(|| (String::new(), String::new()));
-    let endpoint = format!(
-        "/api/launchers/{}/external-sessions/codex",
-        props.launcher_id
-    );
+    let launcher_id = props.launcher_id;
     let fetch: Callback<bool> = {
         let applied_filters = applied_filters.clone();
         let (sessions, cursor, search, directory, selected, failures, error, busy, loaded) = (
@@ -58,7 +45,6 @@ pub fn session_import(props: &Props) -> Html {
             busy.clone(),
             loaded.clone(),
         );
-        let endpoint = endpoint.clone();
         Callback::from(move |more: bool| {
             if *busy {
                 return;
@@ -69,16 +55,11 @@ pub fn session_import(props: &Props) -> Html {
             if !more {
                 applied_filters.set(((*search).clone(), (*directory).clone()));
             }
-            let mut url = format!(
-                "{endpoint}?search={}&working_directory={}",
-                js_sys::encode_uri_component(&search),
-                js_sys::encode_uri_component(&directory)
-            );
-            if more {
-                if let Some(c) = &*cursor {
-                    url.push_str(&format!("&cursor={}", js_sys::encode_uri_component(c)));
-                }
-            }
+            let query = ExternalSessionQuery {
+                search: Some((*search).clone()),
+                working_directory: Some((*directory).clone()),
+                cursor: if more { (*cursor).clone() } else { None },
+            };
             let (sessions, cursor, selected, failures, error, busy, loaded) = (
                 sessions.clone(),
                 cursor.clone(),
@@ -91,10 +72,18 @@ pub fn session_import(props: &Props) -> Html {
             busy.set(true);
             error.set(None);
             spawn_local(async move {
-                let result = match Request::get(&url).send().await {
-                    Ok(r) => response_json::<ExternalSessionList>(r).await,
-                    Err(e) => Err(e.to_string()),
-                };
+                let result =
+                    match crate::dashboard_rpc::request(DashboardRequest::ListExternalSessions {
+                        launcher_id,
+                        agent_type: shared::AgentType::Codex,
+                        query,
+                    })
+                    .await
+                    {
+                        Ok(DashboardResponse::ExternalSessions(page)) => Ok(page),
+                        Ok(_) => Err("Unexpected session listing reply".into()),
+                        Err(e) => Err(e.message),
+                    };
                 match result {
                     Ok(page) => {
                         let mut rows = if more { (*sessions).clone() } else { vec![] };
@@ -155,7 +144,6 @@ pub fn session_import(props: &Props) -> Html {
                 busy.clone(),
                 imported_count.clone(),
             );
-            let endpoint = endpoint.clone();
             let include_history = *include_history;
             busy.set(true);
             error.set(None);
@@ -172,9 +160,16 @@ pub fn session_import(props: &Props) -> Html {
                         include_history,
                     };
                     let result =
-                        match crate::utils::send_json(Request::post(&endpoint), &body).await {
-                            Ok(r) => response_json::<ImportSessionResponse>(r).await,
-                            Err(e) => Err(e.to_string()),
+                        match crate::dashboard_rpc::request(DashboardRequest::ImportSession {
+                            launcher_id,
+                            agent_type: shared::AgentType::Codex,
+                            request: body,
+                        })
+                        .await
+                        {
+                            Ok(DashboardResponse::Imported(imported)) => Ok(imported),
+                            Ok(_) => Err("Unexpected import reply".into()),
+                            Err(e) => Err(e.message),
                         };
                     match result {
                         Ok(imported) => {

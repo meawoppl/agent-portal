@@ -5,8 +5,9 @@ use crate::components::{DismissibleBackdrop, ModelSelect, ProxyTokenSetup};
 use crate::hooks::{use_escape_capture, use_focus_trap};
 use crate::utils::{self, FetchError, On401};
 use gloo::timers::callback::Timeout;
-use gloo_net::http::Request;
-use shared::api::{DirectoryListingResponse, LaunchRequest, ProbeAgentsResponse};
+use shared::api::{
+    DashboardRequest, DashboardResponse, DirectoryListingResponse, LaunchRequest,
+};
 use shared::{AgentInstall, DirectoryEntry, LauncherInfo};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -17,11 +18,6 @@ use yew::prelude::*;
 use super::launch_target_picker::{
     AgentTargetSelect, DirectoryTargetSelect, LauncherTargetSelect, CONNECT_NEW,
 };
-
-#[derive(serde::Deserialize)]
-struct LaunchResponse {
-    session_id: Uuid,
-}
 
 /// Storage key for the last-used launcher (machine) in localStorage (#1326).
 const LAST_LAUNCHER_STORAGE_KEY: &str = "claude-portal-last-launcher";
@@ -80,8 +76,7 @@ pub(super) fn probe_agents_for(
 ) {
     probing.set(true);
     spawn_local(async move {
-        let path = format!("/api/launchers/{}/probe-agents", launcher_id);
-        match utils::fetch_json::<ProbeAgentsResponse>(&path, On401::Ignore).await {
+        match crate::dashboard_rpc::probe(launcher_id).await {
             Ok(body) => {
                 agents.set(body.agents);
             }
@@ -224,12 +219,16 @@ async fn fetch_listing(
     launcher_id: Uuid,
     path: &str,
 ) -> Result<DirectoryListingResponse, FetchError> {
-    let api_path = format!(
-        "/api/launchers/{}/directories?path={}",
+    match crate::dashboard_rpc::request(DashboardRequest::ListDirectories {
         launcher_id,
-        js_sys::encode_uri_component(path)
-    );
-    utils::fetch_json::<DirectoryListingResponse>(&api_path, On401::Ignore).await
+        path: path.into(),
+    })
+    .await
+    .map_err(|e| FetchError::Status(e.status))?
+    {
+        DashboardResponse::Directories(listing) => Ok(listing),
+        _ => Err(FetchError::Decode("Unexpected directory reply".into())),
+    }
 }
 
 /// Map a directory-listing fetch error to a user-facing message.
@@ -621,18 +620,8 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                     create_worktree: false,
                 };
 
-                match utils::send_json(Request::post("/api/launch"), &body).await {
-                    Ok(resp) if resp.ok() => {
-                        let launched = match resp.json::<LaunchResponse>().await {
-                            Ok(launched) => launched,
-                            Err(e) => {
-                                error_msg.set(Some(format!(
-                                    "Launch succeeded but response was malformed: {e}"
-                                )));
-                                launching.set(false);
-                                return;
-                            }
-                        };
+                match crate::dashboard_rpc::request(DashboardRequest::Launch(body)).await {
+                    Ok(DashboardResponse::Launched(launched)) => {
                         // Remember which machine we launched on, and where on
                         // that machine, so reopening the dialog defaults back to
                         // this launcher + directory next time (#1326).
@@ -643,18 +632,8 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                         on_launched.emit(launched.session_id);
                         on_close.emit(());
                     }
-                    Ok(resp) => {
-                        let status = resp.status();
-                        if status == 404 {
-                            error_msg.set(Some("No connected launchers".to_string()));
-                        } else {
-                            let text = utils::error_body(resp).await;
-                            error_msg.set(Some(format!("Error {}: {}", status, text)));
-                        }
-                    }
-                    Err(e) => {
-                        error_msg.set(Some(format!("Request failed: {}", e)));
-                    }
+                    Ok(_) => error_msg.set(Some("Unexpected launch reply".into())),
+                    Err(e) => error_msg.set(Some(format!("Error {}: {}", e.status, e.message))),
                 }
                 launching.set(false);
             });

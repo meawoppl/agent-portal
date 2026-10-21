@@ -75,7 +75,10 @@ pub fn history_restore(props: &Props) -> Html {
                 match get::<HistoryRestoreStatus>(&endpoint).await {
                     Ok(s) => {
                         if s.can_restore && s.existing_session_id.is_none() {
-                            match get::<Vec<LauncherInfo>>("/api/launchers").await {
+                            match crate::dashboard_rpc::launchers()
+                                .await
+                                .map_err(|e| e.to_string())
+                            {
                                 Ok(hosts) => {
                                     if selected.is_none() {
                                         selected.set(

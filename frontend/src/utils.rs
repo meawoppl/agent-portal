@@ -64,7 +64,7 @@ pub async fn fetch_json<T: DeserializeOwned>(path: &str, on_401: On401) -> Resul
 /// probes). The path, element type, and 401 policy are identical at every
 /// call site, so they live here instead of being repeated.
 pub async fn fetch_launchers() -> Result<Vec<shared::LauncherInfo>, FetchError> {
-    fetch_json("/api/launchers", On401::Ignore).await
+    crate::dashboard_rpc::launchers().await
 }
 
 /// Read `(protocol, host)` from the browser location, with per-field fallbacks.

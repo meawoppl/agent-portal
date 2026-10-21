@@ -138,6 +138,11 @@ impl WsEndpoint for ClientEndpoint {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ClientToServer {
+    /// Correlated account-level operation (not bound to a session).
+    Dashboard {
+        request_id: Uuid,
+        request: crate::api::DashboardRequest,
+    },
     /// Register to receive updates for a session
     Register(RegisterFields),
 
@@ -181,6 +186,10 @@ pub enum ClientToServer {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ServerToClient {
+    DashboardResult {
+        request_id: Uuid,
+        result: Result<crate::api::DashboardResponse, crate::api::DashboardError>,
+    },
     /// Output from Claude Code.
     #[serde(rename = "ClaudeOutput")]
     AgentOutput {
