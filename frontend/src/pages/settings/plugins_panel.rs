@@ -4,17 +4,146 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use shared::api::PluginInventoryResponse;
+use shared::api::{
+    PluginAction, PluginInventoryResponse, PluginRequest, PluginResponse, PortalPluginInfo,
+};
 use shared::LauncherInfo;
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
 
-use crate::components::plugin_discovery::{fetch_launcher_plugins, PluginCard};
+use crate::components::plugin_discovery::{fetch_launcher_plugins, run_plugin_action, PluginCard};
 use crate::utils;
 
 const PLUGINS_REPO: &str = "https://github.com/meawoppl/agent-portal-plugins";
+
+/// A destructive action waiting for the user to confirm it.
+#[derive(Clone, PartialEq)]
+struct Pending {
+    label: String,
+    warning: String,
+    action: PluginAction,
+}
+
+/// The last finished action, kept on screen with its output.
+#[derive(Clone, PartialEq)]
+struct Outcome {
+    label: String,
+    result: Result<PluginResponse, String>,
+}
+
+fn render_outcome(outcome: &Outcome) -> Html {
+    let (ok, summary, output) = match &outcome.result {
+        Ok(response) => {
+            let status = match (response.success, response.exit_code) {
+                (true, _) => "done".to_string(),
+                (false, Some(code)) => format!("failed (exit {code})"),
+                (false, None) => "failed".to_string(),
+            };
+            (
+                response.success,
+                format!("{}: {status}", outcome.label),
+                Some((response.error.clone(), response.output.clone())),
+            )
+        }
+        Err(error) => (false, format!("{}: {error}", outcome.label), None),
+    };
+    html! {
+        <div class={classes!("plugin-outcome", (!ok).then_some("failed"))} role="status">
+            <strong>{ summary }</strong>
+            if let Some((error, output)) = output {
+                if let Some(error) = error {
+                    <p>{ error }</p>
+                }
+                if !output.trim().is_empty() {
+                    <details open={!ok}>
+                        <summary>{ "Output" }</summary>
+                        <pre>{ output }</pre>
+                    </details>
+                }
+            }
+        </div>
+    }
+}
+
+/// Lifecycle buttons for one installed plugin.
+fn plugin_actions(
+    plugin: &PortalPluginInfo,
+    host: &str,
+    disabled: bool,
+    run: &Callback<(String, PluginAction)>,
+    confirm: &Callback<Pending>,
+) -> Html {
+    let name = plugin.name.clone();
+    let title = plugin.display_name.clone();
+    let update = {
+        let run = run.clone();
+        let (name, title) = (name.clone(), title.clone());
+        Callback::from(move |_| {
+            run.emit((
+                format!("Update {title}"),
+                PluginAction::Update { name: name.clone() },
+            ))
+        })
+    };
+    let doctor = {
+        let run = run.clone();
+        let (name, title) = (name.clone(), title.clone());
+        Callback::from(move |_| {
+            run.emit((
+                format!("Doctor {title}"),
+                PluginAction::Doctor { name: name.clone() },
+            ))
+        })
+    };
+    let reinstall = plugin.source.clone().map(|source| {
+        let confirm = confirm.clone();
+        let title = title.clone();
+        let host = host.to_string();
+        Callback::from(move |_| {
+            confirm.emit(Pending {
+                label: format!("Reinstall {title}"),
+                warning: format!(
+                    "Reinstall {title} on {host} from {source}? Its checkout is replaced and setup runs again."
+                ),
+                action: PluginAction::Install {
+                    source: source.clone(),
+                    force: true,
+                },
+            })
+        })
+    });
+    let uninstall = {
+        let confirm = confirm.clone();
+        let host = host.to_string();
+        Callback::from(move |_| {
+            confirm.emit(Pending {
+                label: format!("Uninstall {title}"),
+                warning: format!(
+                    "Uninstall {title} from {host}? Its checkout and plugin data are deleted."
+                ),
+                action: PluginAction::Remove { name: name.clone() },
+            })
+        })
+    };
+    html! {
+        <div class="plugin-card-actions">
+            <button
+                class={classes!("sched-btn", (plugin.update_available == Some(true)).then_some("sched-btn-primary"))}
+                {disabled}
+                onclick={update}
+            >{ "Update" }</button>
+            if plugin.has_doctor {
+                <button class="sched-btn" {disabled} onclick={doctor}>{ "Doctor" }</button>
+            }
+            if let Some(reinstall) = reinstall {
+                <button class="sched-btn" {disabled} onclick={reinstall}>{ "Reinstall" }</button>
+            }
+            <button class="sched-btn sched-btn-danger" {disabled} onclick={uninstall}>{ "Uninstall" }</button>
+        </div>
+    }
+}
 
 fn manages_plugins(launcher: &LauncherInfo) -> bool {
     launcher.connected
@@ -31,6 +160,10 @@ pub fn plugins_panel() -> Html {
     let directory_draft = use_state(String::new);
     let directory = use_state(|| None::<String>);
     let inventory = use_state(|| None::<Result<PluginInventoryResponse, String>>);
+    let busy = use_state(|| None::<String>);
+    let outcome = use_state(|| None::<Outcome>);
+    let pending = use_state(|| None::<Pending>);
+    let install_draft = use_state(String::new);
 
     {
         let launchers = launchers.clone();
@@ -109,6 +242,121 @@ pub fn plugins_panel() -> Html {
         })
     };
 
+    // Actions run on the selected computer and answer with its refreshed
+    // inventory, which replaces the one on screen.
+    let run = {
+        let selected = *selected;
+        let directory = (*directory).clone();
+        let (inventory, busy, outcome) = (inventory.clone(), busy.clone(), outcome.clone());
+        Callback::from(move |(label, action): (String, PluginAction)| {
+            let Some(launcher) = selected else { return };
+            let request = PluginRequest {
+                working_directory: directory.clone(),
+                session_id: None,
+                action,
+            };
+            let (inventory, busy, outcome) = (inventory.clone(), busy.clone(), outcome.clone());
+            busy.set(Some(label.clone()));
+            outcome.set(None);
+            spawn_local(async move {
+                let result = run_plugin_action(launcher, &request).await;
+                if let Some(updated) = result.as_ref().ok().and_then(|r| r.inventory.clone()) {
+                    inventory.set(Some(Ok(updated)));
+                }
+                busy.set(None);
+                outcome.set(Some(Outcome { label, result }));
+            });
+        })
+    };
+    let confirm = {
+        let pending = pending.clone();
+        Callback::from(move |action: Pending| pending.set(Some(action)))
+    };
+    let on_install_input = {
+        let install_draft = install_draft.clone();
+        Callback::from(move |e: InputEvent| {
+            install_draft.set(e.target_unchecked_into::<HtmlInputElement>().value());
+        })
+    };
+    let on_install = {
+        let install_draft = install_draft.clone();
+        let run = run.clone();
+        Callback::from(move |e: SubmitEvent| {
+            e.prevent_default();
+            let source = install_draft.trim().to_string();
+            if source.is_empty() {
+                return;
+            }
+            install_draft.set(String::new());
+            run.emit((
+                format!("Install {source}"),
+                PluginAction::Install {
+                    source,
+                    force: false,
+                },
+            ));
+        })
+    };
+    let on_check_updates = {
+        let run = run.clone();
+        Callback::from(move |_| run.emit(("Check for updates".into(), PluginAction::CheckUpdates)))
+    };
+    let is_busy = busy.is_some();
+    let host = selected_launcher
+        .as_ref()
+        .map(|l| l.launcher_name.clone())
+        .unwrap_or_default();
+
+    let manage = if can_manage {
+        html! {
+            <>
+                <form class="plugins-browser-controls" onsubmit={on_install}>
+                    <label class="plugins-browser-directory">
+                        { "Install from a source" }
+                        <input
+                            type="text"
+                            placeholder="github:meawoppl/agent-portal-plugins//kicadmium"
+                            value={(*install_draft).clone()}
+                            oninput={on_install_input}
+                            disabled={is_busy}
+                        />
+                    </label>
+                    <button type="submit" class="sched-btn sched-btn-primary" disabled={is_busy}>{ "Install" }</button>
+                    <button type="button" class="sched-btn" disabled={is_busy} onclick={on_check_updates}>
+                        { "Check for updates" }
+                    </button>
+                </form>
+                if let Some(label) = &*busy {
+                    <div class="plugin-outcome running" role="status">
+                        <div class="spinner"></div>
+                        <strong>{ format!("{label} on {host}…") }</strong>
+                    </div>
+                }
+                if let Some(action) = &*pending {
+                    <div class="plugin-confirm" role="alertdialog">
+                        <p>{ &action.warning }</p>
+                        <button class="sched-btn sched-btn-danger" onclick={{
+                            let (run, pending, action) = (run.clone(), pending.clone(), action.clone());
+                            Callback::from(move |_| {
+                                pending.set(None);
+                                run.emit((action.label.clone(), action.action.clone()));
+                            })
+                        }}>{ &action.label }</button>
+                        <button class="sched-btn" onclick={{
+                            let pending = pending.clone();
+                            Callback::from(move |_| pending.set(None))
+                        }}>{ "Cancel" }</button>
+                    </div>
+                }
+                if let Some(outcome) = &*outcome {
+                    { render_outcome(outcome) }
+                }
+            </>
+        }
+    } else {
+        html! {}
+    };
+
     let picker = match &*launchers {
         None => html! { <p class="schedule-day-empty">{ "Loading computers…" }</p> },
         Some(Err(error)) => {
@@ -163,10 +411,9 @@ pub fn plugins_panel() -> Html {
             html! { <p class="settings-error">{ format!("Could not load plugins: {error}") }</p> }
         }
         (Some(l), Some(Ok(data))) if data.plugins.is_empty() => html! {
-            <div class="schedule-day-empty">
-                <p>{ format!("No plugins are installed on {}.", l.launcher_name) }</p>
-                <code>{ "agent-portal plugin install github:meawoppl/agent-portal-plugins//<name>" }</code>
-            </div>
+            <p class="schedule-day-empty">
+                { format!("No plugins are installed on {}. Install one above.", l.launcher_name) }
+            </p>
         },
         (_, Some(Ok(data))) => {
             let matched = data.plugins.iter().filter(|p| p.suggested).count();
@@ -184,7 +431,9 @@ pub fn plugins_panel() -> Html {
                     { for data.warnings.iter().map(|w| html! { <p class="schedule-warning">{ w }</p> }) }
                     <div class="plugins-browser-grid">
                         { for data.plugins.iter().map(|plugin| html! {
-                            <PluginCard key={plugin.name.clone()} plugin={plugin.clone()} />
+                            <PluginCard key={plugin.name.clone()} plugin={plugin.clone()}>
+                                { plugin_actions(plugin, &host, is_busy, &run, &confirm) }
+                            </PluginCard>
                         }) }
                     </div>
                 </>
@@ -203,6 +452,7 @@ pub fn plugins_panel() -> Html {
                 </p>
             </div>
             { picker }
+            { manage }
             { body }
         </section>
     }

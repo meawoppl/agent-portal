@@ -124,6 +124,9 @@ fn plugin_file_pills(files: &[shared::api::PortalPluginSkillInfo], class: &'stat
 #[derive(Properties, PartialEq)]
 pub struct PluginCardProps {
     pub plugin: PortalPluginInfo,
+    /// Controls rendered at the foot of the card.
+    #[prop_or_default]
+    pub children: Html,
 }
 
 /// One installed plugin: what it is, where it lives, and what it contributes.
@@ -149,6 +152,9 @@ pub fn plugin_card(props: &PluginCardProps) -> Html {
                     }
                     if let Some(version) = plugin.version.as_deref() {
                         <span class="plugin-card-version">{ version }</span>
+                    }
+                    if plugin.update_available == Some(true) {
+                        <span class="plugin-card-badge update">{ "update available" }</span>
                     }
                 </div>
                 <span class="plugin-card-context">
@@ -216,6 +222,7 @@ pub fn plugin_card(props: &PluginCardProps) -> Html {
                     { for plugin.warnings.iter().map(|warning| html! { <li>{ warning }</li> }) }
                 </ul>
             }
+            { props.children.clone() }
         </article>
     }
 }

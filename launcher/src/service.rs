@@ -54,7 +54,6 @@ fn service_path(binary_path: &str) -> String {
 /// returns the original path with the literal string ` (deleted)` appended. We
 /// strip that suffix so it cannot leak into a generated unit file / plist and
 /// produce an `ExecStart` that systemd parses as a bogus subcommand.
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) fn current_exe_path() -> Result<String> {
     use anyhow::Context;
     Ok(std::env::current_exe()

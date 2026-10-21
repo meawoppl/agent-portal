@@ -143,8 +143,12 @@ pub struct PluginRequest {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PluginAction {
     Inventory,
+    /// Inventory with `update_available` checked against each plugin's source.
+    CheckUpdates,
+    /// `force` replaces an existing install of the same name (reinstall).
     Install {
         source: String,
+        force: bool,
     },
     Update {
         name: String,

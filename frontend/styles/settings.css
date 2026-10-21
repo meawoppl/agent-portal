@@ -1456,6 +1456,66 @@
     color: var(--accent);
 }
 
+.plugin-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    padding-top: 0.3rem;
+    border-top: 1px solid rgba(86, 95, 137, 0.3);
+}
+
+.plugin-card-badge.update {
+    border-color: rgba(224, 175, 104, 0.5);
+    background: rgba(224, 175, 104, 0.12);
+    color: #e0af68;
+}
+
+.plugin-outcome,
+.plugin-confirm {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.7rem 0.9rem;
+    border: 1px solid rgba(158, 206, 106, 0.4);
+    border-radius: 8px;
+    background: rgba(158, 206, 106, 0.08);
+    font-size: 0.82rem;
+}
+
+.plugin-outcome.failed,
+.plugin-confirm {
+    border-color: rgba(247, 118, 142, 0.45);
+    background: rgba(247, 118, 142, 0.08);
+}
+
+.plugin-outcome.running {
+    border-color: rgba(122, 162, 247, 0.4);
+    background: rgba(122, 162, 247, 0.08);
+}
+
+.plugin-outcome p,
+.plugin-confirm p {
+    flex-basis: 100%;
+    margin: 0;
+    color: var(--text-secondary);
+}
+
+.plugin-outcome details {
+    flex-basis: 100%;
+}
+
+.plugin-outcome pre {
+    max-height: 22rem;
+    overflow: auto;
+    margin: 0.4rem 0 0;
+    padding: 0.6rem;
+    border-radius: 6px;
+    background: var(--bg-darker);
+    font: 0.72rem var(--font-mono);
+    white-space: pre-wrap;
+}
+
 .plugins-browser-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
