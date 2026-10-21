@@ -551,6 +551,7 @@ fn dispatch(state: Arc<AppState>, row: RequestRow) -> Result<SpawnRequestInfo, S
         launcher_id: Some(row.launcher_id),
         name: None,
         create_worktree: false,
+        plugin_selection: None,
     };
     let child = ChildLaunch {
         request_id: row.id,

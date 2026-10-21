@@ -176,7 +176,10 @@ pub(crate) fn launch_owned_session(
         .register_launch_session(request_id, session_id);
 
     let launch_msg = ServerToLauncher::LaunchSession {
-        plugin_selection: child.as_ref().and_then(|c| c.plugins.clone()),
+        plugin_selection: child
+            .as_ref()
+            .and_then(|c| c.plugins.clone())
+            .or(req.plugin_selection),
         history_restore: None,
         request_id,
         user_id,

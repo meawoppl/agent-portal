@@ -499,16 +499,35 @@
 .plugin-suggestion-pill {
     display: inline-flex;
     align-items: center;
-    max-width: 10rem;
+    gap: 0.3rem;
+    max-width: 12rem;
     min-height: 1.25rem;
     padding: 0.12rem 0.42rem;
-    border: 1px solid rgba(158, 206, 106, 0.42);
+    border: 1px solid rgba(86, 95, 137, 0.6);
     border-radius: 999px;
-    background: rgba(158, 206, 106, 0.1);
-    color: var(--success, #9ece6a);
+    background: transparent;
+    color: var(--text-muted);
+    font: inherit;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    cursor: pointer;
+}
+
+.plugin-suggestion-pill.on {
+    border-color: rgba(158, 206, 106, 0.42);
+    background: rgba(158, 206, 106, 0.1);
+    color: var(--success, #9ece6a);
+}
+
+.plugin-suggestion-pill.changed {
+    border-style: dashed;
+}
+
+.plugin-policy-mark {
+    color: var(--text-muted);
+    font-size: 0.66rem;
+    text-transform: uppercase;
 }
 
 .plugin-suggestion-error {

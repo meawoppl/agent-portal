@@ -2,6 +2,7 @@ use shared::api::{
     PluginAction, PluginInventoryResponse, PluginPolicy, PluginRequest, PluginResponse,
     PortalPluginInfo,
 };
+use std::collections::BTreeMap;
 use uuid::Uuid;
 use yew::prelude::*;
 
@@ -63,6 +64,23 @@ pub fn plugin_context_label(bytes: u64, tokens: u64) -> String {
     }
 }
 
+/// The launch-dialog choices that differ from what the session would load
+/// anyway. `None` when there are none, so the launcher leaves every plugin to
+/// policy and detection.
+pub fn plugin_overrides(
+    plugins: &[PortalPluginInfo],
+    choices: &BTreeMap<String, bool>,
+) -> Option<BTreeMap<String, bool>> {
+    let changed: BTreeMap<String, bool> = plugins
+        .iter()
+        .filter_map(|plugin| {
+            let enabled = *choices.get(&plugin.name)?;
+            (enabled != plugin.enabled).then(|| (plugin.name.clone(), enabled))
+        })
+        .collect();
+    (!changed.is_empty()).then_some(changed)
+}
+
 /// Why a plugin is on or off for a directory, for its tooltip.
 pub fn plugin_state_reason(plugin: &PortalPluginInfo) -> String {
     match (
@@ -85,42 +103,83 @@ pub struct PluginSuggestionStripProps {
     pub plugins: Vec<PortalPluginInfo>,
     #[prop_or_default]
     pub error: Option<String>,
+    /// Plugins switched on or off before launch.
+    pub choices: BTreeMap<String, bool>,
+    pub on_toggle: Callback<(String, bool)>,
 }
 
+/// The launch dialog's plugins: on where detected or required by the
+/// project's policy, and switchable for the session about to start.
 #[function_component(PluginSuggestionStrip)]
 pub fn plugin_suggestion_strip(props: &PluginSuggestionStripProps) -> Html {
-    let suggested = suggested_plugins(&props.plugins);
-    if suggested.is_empty() && props.error.is_none() {
+    let browse = html! {
+        <a class="plugin-browse-link" href={PLUGINS_BROWSER} target="_blank" rel="noopener noreferrer">{ "Browse plugins" }</a>
+    };
+    if let Some(error) = props.error.as_deref() {
         return html! {
-            <div class="plugin-suggestion-strip muted">
+            <div class="plugin-suggestion-strip">
                 <span class="plugin-suggestion-title">{ "Plugins" }</span>
-                <span>{ "No directory-specific suggestions yet" }</span>
-                <a class="plugin-browse-link" href={PLUGINS_BROWSER} target="_blank" rel="noopener noreferrer">{ "Browse plugins" }</a>
+                <span class="plugin-suggestion-error">{ error }</span>
+                { browse }
             </div>
         };
     }
-
+    if props.plugins.is_empty() {
+        return html! {
+            <div class="plugin-suggestion-strip muted">
+                <span class="plugin-suggestion-title">{ "Plugins" }</span>
+                <span>{ "None installed on this computer" }</span>
+                { browse }
+            </div>
+        };
+    }
+    let mut plugins: Vec<&PortalPluginInfo> = props.plugins.iter().collect();
+    let is_on = |plugin: &PortalPluginInfo| {
+        props
+            .choices
+            .get(&plugin.name)
+            .copied()
+            .unwrap_or(plugin.enabled)
+    };
+    plugins.sort_by_key(|plugin| (!plugin.enabled, !plugin.suggested));
     html! {
         <div class="plugin-suggestion-strip">
-            <span class="plugin-suggestion-title">{ "Suggested plugins" }</span>
-            if let Some(error) = props.error.as_deref() {
-                <span class="plugin-suggestion-error">{ error }</span>
-            } else {
-                <span class="plugin-suggestion-list">
-                    { for suggested.into_iter().map(|plugin| {
-                        let title = plugin
-                            .reason
-                            .clone()
-                            .unwrap_or_else(|| "Suggested for this directory".to_string());
-                        html! {
-                            <span class="plugin-suggestion-pill" title={title}>
-                                { &plugin.display_name }
-                            </span>
-                        }
-                    }) }
-                </span>
-            }
-            <a class="plugin-browse-link" href={PLUGINS_BROWSER} target="_blank" rel="noopener noreferrer">{ "Browse plugins" }</a>
+            <span class="plugin-suggestion-title">{ "Plugins" }</span>
+            <span class="plugin-suggestion-list">
+                { for plugins.into_iter().map(|plugin| {
+                    let on = is_on(plugin);
+                    let changed = on != plugin.enabled;
+                    let title = format!(
+                        "{}{}",
+                        plugin_state_reason(plugin),
+                        if changed { " · changed for this session" } else { "" }
+                    );
+                    let onclick = {
+                        let on_toggle = props.on_toggle.clone();
+                        let name = plugin.name.clone();
+                        Callback::from(move |_| on_toggle.emit((name.clone(), !on)))
+                    };
+                    html! {
+                        <button
+                            type="button"
+                            class={classes!(
+                                "plugin-suggestion-pill",
+                                on.then_some("on"),
+                                changed.then_some("changed"),
+                            )}
+                            aria-pressed={on.to_string()}
+                            {title}
+                            {onclick}
+                        >
+                            { &plugin.display_name }
+                            if plugin.policy != PluginPolicy::Ask {
+                                <span class="plugin-policy-mark">{ plugin_policy_label(plugin.policy) }</span>
+                            }
+                        </button>
+                    }
+                }) }
+            </span>
+            { browse }
         </div>
     }
 }

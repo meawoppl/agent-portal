@@ -74,6 +74,11 @@ pub struct LaunchRequest {
     /// older launchers ignore it via `#[serde(default)]`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub create_worktree: bool,
+    /// Plugins switched on or off in the launch dialog. `None` leaves every
+    /// plugin to the project's policy and detection; listed plugins override
+    /// them for this session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin_selection: Option<std::collections::BTreeMap<String, bool>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

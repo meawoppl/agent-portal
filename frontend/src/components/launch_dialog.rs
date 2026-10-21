@@ -1,5 +1,7 @@
 use crate::components::model_select::model_cli_args;
-use crate::components::plugin_discovery::{fetch_launcher_plugins, PluginSuggestionStrip};
+use crate::components::plugin_discovery::{
+    fetch_launcher_plugins, plugin_overrides, PluginSuggestionStrip,
+};
 use crate::components::skip_permissions::{skip_permissions_args, skip_permissions_label};
 use crate::components::{DismissibleBackdrop, ModelSelect, ProxyTokenSetup};
 use crate::hooks::{use_escape_capture, use_focus_trap};
@@ -7,7 +9,7 @@ use crate::utils::{self, FetchError};
 use gloo::timers::callback::Timeout;
 use shared::api::{DashboardRequest, DashboardResponse, DirectoryListingResponse, LaunchRequest};
 use shared::{AgentInstall, DirectoryEntry, LauncherInfo};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::HtmlInputElement;
@@ -327,6 +329,8 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     let probing_agents = use_state(|| false);
     let plugin_suggestions = use_state(Vec::<shared::api::PortalPluginInfo>::new);
     let plugin_suggestion_error = use_state(|| None::<String>);
+    // Plugins switched on or off here, keyed by name; cleared with the target.
+    let plugin_choices = use_state(BTreeMap::<String, bool>::new);
 
     // Fetch launchers on mount and on every LaunchersChanged tick (#710);
     // auto-select install mode when none are connected.
@@ -375,6 +379,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         let target = (*selected_launcher, (*dir.path).clone());
         let plugin_suggestions = plugin_suggestions.clone();
         let plugin_suggestion_error = plugin_suggestion_error.clone();
+        let plugin_choices = plugin_choices.clone();
         use_effect_with(target, move |(launcher, path)| {
             let (launcher, path) = (*launcher, path.clone());
             // Suggestions for a directory the user has already moved past must
@@ -382,6 +387,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
             let current = std::rc::Rc::new(std::cell::Cell::new(true));
             plugin_suggestions.set(Vec::new());
             plugin_suggestion_error.set(None);
+            plugin_choices.set(BTreeMap::new());
             if let Some(launcher) = launcher {
                 let current = current.clone();
                 spawn_local(async move {
@@ -550,6 +556,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     // Primary action, invoked by the Launch button and by Enter from any
     // non-button field (#1384). `Callback<()>` so both call sites can fire it.
     let launch: Callback<()> = {
+        let plugin_selection = plugin_overrides(&plugin_suggestions, &plugin_choices);
         let dir_path = dir.path.clone();
         let home_root = dir.home_root.clone();
         let extra_args = extra_args.clone();
@@ -596,6 +603,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
             let error_msg = error_msg.clone();
             let on_close = on_close.clone();
             let on_launched = on_launched.clone();
+            let plugin_selection = plugin_selection.clone();
 
             launching.set(true);
             error_msg.set(None);
@@ -616,6 +624,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                     launcher_id,
                     name,
                     create_worktree: false,
+                    plugin_selection,
                 };
 
                 match crate::dashboard_rpc::request(DashboardRequest::Launch(body)).await {
@@ -797,6 +806,15 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                     <PluginSuggestionStrip
                         plugins={(*plugin_suggestions).clone()}
                         error={(*plugin_suggestion_error).clone()}
+                        choices={(*plugin_choices).clone()}
+                        on_toggle={{
+                            let plugin_choices = plugin_choices.clone();
+                            Callback::from(move |(name, enabled): (String, bool)| {
+                                let mut choices = (*plugin_choices).clone();
+                                choices.insert(name, enabled);
+                                plugin_choices.set(choices);
+                            })
+                        }}
                     />
 
                     // Session name — shown in the dashboard/nav. Also names the

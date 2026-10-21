@@ -447,6 +447,7 @@ async fn expired_dispatch_claim_cannot_commit_a_late_child() {
             launcher_id: f.parent.launcher_id,
             name: None,
             create_worktree: false,
+            plugin_selection: None,
         },
         Some(ChildLaunch {
             request_id: req.request_id,
