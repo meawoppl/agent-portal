@@ -41,6 +41,9 @@ pub async fn dispatch(
             subagent_type,
             subagent_retry,
         },
+        Some(SessionEvent::PermissionCancelled { request_id }) => {
+            ProxyToServer::PermissionCancelled { request_id }
+        }
         Some(SessionEvent::Ephemeral(payload)) => ProxyToServer::Ephemeral {
             session_id,
             payload,

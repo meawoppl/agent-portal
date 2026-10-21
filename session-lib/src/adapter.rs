@@ -40,6 +40,8 @@ pub enum AgentOutput {
         /// serialized to JSON for slice 1). See design doc open questions.
         suggestions: Vec<serde_json::Value>,
     },
+    /// Withdraw a control request without replying to the agent.
+    PermissionCancelled { request_id: String },
     /// Fatal "conversation not found" → maps to `SessionEvent::SessionNotFound`.
     NotFound,
     /// An ephemeral tool-progress heartbeat (Claude's `tool_progress` frame).
@@ -195,6 +197,11 @@ impl AgentOutputClassifier for ClaudeAdapter {
                     vec![AgentOutput::Visible(raw)]
                 }
             }
+            // Cancellation is control state, never transcript content. The CLI
+            // ignores subsequent responses and expects no reply to this frame.
+            ClaudeOutput::ControlCancelRequest(cancel) => vec![AgentOutput::PermissionCancelled {
+                request_id: cancel.request_id,
+            }],
             // Control responses are CLI acks — internal, the consumer skips.
             ClaudeOutput::ControlResponse(_) => vec![AgentOutput::Noop],
             // Tool-progress heartbeat → ephemeral live status, never persisted.
@@ -235,6 +242,22 @@ mod tests {
     use serde_json::json;
 
     // --- classify golden tests ---------------------------------------------
+
+    #[test]
+    fn classify_control_cancel_is_not_visible_output() {
+        let mut adapter = ClaudeAdapter;
+        for raw in [
+            r#"{"type":"control_cancel_request","request_id":"permission-1"}"#,
+            r#"{"type":"control_cancel_request","request_id":"permission-1","session_id":"remote"}"#,
+        ] {
+            assert_eq!(
+                adapter.classify(serde_json::from_str(raw).unwrap()),
+                vec![AgentOutput::PermissionCancelled {
+                    request_id: "permission-1".into(),
+                }],
+            );
+        }
+    }
 
     #[test]
     fn classify_assistant_message_is_visible() {

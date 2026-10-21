@@ -75,6 +75,9 @@ pub enum ProxyToServer {
     /// Keepalive heartbeat
     Heartbeat,
 
+    /// The agent withdrew this request. Clear only the matching prompt.
+    PermissionCancelled { request_id: String },
+
     /// Permission request from Claude (tool wants to execute)
     PermissionRequest {
         request_id: String,

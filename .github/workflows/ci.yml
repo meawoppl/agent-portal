@@ -200,6 +200,7 @@ jobs:
           cargo test -p backend --test history_api
           cargo test -p backend --lib handlers::forward_proxy::stt_access_tests
           cargo test -p backend --lib handlers::websocket::registration::tests
+          cargo test -p backend --lib handlers::websocket::permissions::db_tests
           cargo test -p backend --test rename_sessions
 
   build-binaries:

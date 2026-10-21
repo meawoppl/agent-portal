@@ -33,6 +33,15 @@ pub enum PermissionResponseKind {
     AnswerQuestions(QuestionAnswers),
 }
 
+/// Permission state updates from the session socket.
+#[derive(Clone)]
+pub enum PermissionUpdate {
+    Request(PendingPermission),
+    Cancelled(String),
+    /// Reconnect discards stale state before the server replays pending requests.
+    Reset,
+}
+
 /// Inputs to the handler.
 #[derive(Properties, PartialEq)]
 pub struct PermissionHandlerProps {
@@ -44,7 +53,7 @@ pub struct PermissionHandlerProps {
     /// invoke to push a new permission request into the handler. This is the
     /// child→parent half of the wiring pattern that lets the parent stay a
     /// thin WebSocket router without storing any permission state itself.
-    pub on_register: Callback<Callback<PendingPermission>>,
+    pub on_register: Callback<Callback<PermissionUpdate>>,
     /// Fired when the handler's pending state transitions. The parent uses
     /// this to feed the `is_awaiting` computation.
     pub on_pending_changed: Callback<bool>,
@@ -62,7 +71,7 @@ pub struct PermissionHandlerProps {
 /// Internal messages.
 pub enum PermissionHandlerMsg {
     /// A new permission request arrived from the wire.
-    Receive(PendingPermission),
+    Receive(PermissionUpdate),
     /// Keyboard navigation upward through the option list.
     SelectUp,
     /// Keyboard navigation downward through the option list.
@@ -154,7 +163,7 @@ impl Component for PermissionHandler {
 
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
-            PermissionHandlerMsg::Receive(perm) => {
+            PermissionHandlerMsg::Receive(PermissionUpdate::Request(perm)) => {
                 let was_empty = self.request.is_none();
                 self.request = Some(perm);
                 self.selected = 0;
@@ -168,6 +177,34 @@ impl Component for PermissionHandler {
                     ctx.props().on_pending_changed.emit(true);
                 }
                 true
+            }
+            PermissionHandlerMsg::Receive(PermissionUpdate::Cancelled(request_id)) => {
+                if !self
+                    .request
+                    .as_ref()
+                    .is_some_and(|p| p.request_id == request_id)
+                {
+                    return false;
+                }
+                self.request = None;
+                self.question_answers.clear();
+                self.multi_select_options.clear();
+                self.submit_confirm_pending = false;
+                self.needs_focus = false;
+                ctx.props().on_pending_changed.emit(false);
+                ctx.props().on_refocus_input.emit(());
+                true
+            }
+            PermissionHandlerMsg::Receive(PermissionUpdate::Reset) => {
+                let had_request = self.request.take().is_some();
+                self.question_answers.clear();
+                self.multi_select_options.clear();
+                self.submit_confirm_pending = false;
+                self.needs_focus = false;
+                if had_request {
+                    ctx.props().on_pending_changed.emit(false);
+                }
+                had_request
             }
             PermissionHandlerMsg::SelectUp => self.navigate(-1),
             PermissionHandlerMsg::SelectDown => self.navigate(1),

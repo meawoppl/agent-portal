@@ -103,6 +103,46 @@ pub fn handle_permission_request(
     }
 }
 
+/// Withdraw only the named request so a delayed cancel cannot erase a newer
+/// prompt. Delete its replay row as well as dismissing the live dialog; this
+/// control frame is never persisted in the transcript and receives no reply.
+pub fn handle_permission_cancelled(
+    session_manager: &SessionManager,
+    session_key: &Option<SessionId>,
+    db_session_id: Option<Uuid>,
+    db_pool: &DbPool,
+    request_id: String,
+) {
+    if let Some(session_id) = db_session_id {
+        let result = db_pool
+            .get()
+            .map_err(|e| e.to_string())
+            .and_then(|mut conn| {
+                use crate::schema::pending_permission_requests;
+                diesel::delete(
+                    pending_permission_requests::table
+                        .filter(pending_permission_requests::session_id.eq(session_id))
+                        .filter(pending_permission_requests::request_id.eq(&request_id)),
+                )
+                .execute(&mut conn)
+                .map_err(|e| e.to_string())
+            });
+        if let Err(e) = result {
+            error!(
+                "{}: session {} request {}: {}",
+                crate::markers::PERMISSION_CANCEL_PERSIST_FAILED,
+                session_id,
+                request_id,
+                e
+            );
+        }
+    }
+    if let Some(key) = session_key {
+        session_manager
+            .broadcast_to_web_clients(key, ServerToClient::PermissionCancelled { request_id });
+    }
+}
+
 /// Compact one-line excerpt of a permission request's tool input for the
 /// snippet content level. Prefers the human-meaningful field the common tools
 /// put front and center (`command`, `file_path`, `url`); otherwise falls back
@@ -215,5 +255,68 @@ pub fn replay_pending_permission(db_pool: &DbPool, session_id: Uuid, tx: &WebCli
             input: pending.input,
             permission_suggestions: suggestions,
         });
+    }
+}
+
+#[cfg(test)]
+mod db_tests {
+    use super::*;
+    use crate::test_support::{insert_session, insert_user, shared_pool};
+
+    #[test]
+    fn cancellation_clears_only_matching_session_and_request_from_replay() {
+        use crate::schema::pending_permission_requests;
+        let Some(pool) = shared_pool() else { return };
+        let mut conn = pool.get().unwrap();
+        let owner = insert_user(&mut conn, "permission-cancel");
+        let session = insert_session(&mut conn, owner.id, "cancelled");
+        let other = insert_session(&mut conn, owner.id, "unaffected");
+        for session_id in [session.id, other.id] {
+            diesel::insert_into(pending_permission_requests::table)
+                .values(crate::models::NewPendingPermissionRequest {
+                    session_id,
+                    request_id: "current".into(),
+                    tool_name: "Bash".into(),
+                    input: serde_json::Value::Null,
+                    permission_suggestions: None,
+                })
+                .execute(&mut conn)
+                .unwrap();
+        }
+        let manager = SessionManager::new();
+        let key = SessionId::new(session.id.to_string());
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        manager.add_web_client(key.clone(), tx.clone());
+        handle_permission_cancelled(
+            &manager,
+            &Some(key.clone()),
+            Some(session.id),
+            &pool,
+            "older".into(),
+        );
+        assert!(
+            matches!(rx.try_recv().unwrap(), ServerToClient::PermissionCancelled { request_id } if request_id == "older")
+        );
+        replay_pending_permission(&pool, session.id, &tx);
+        assert!(
+            matches!(rx.try_recv().unwrap(), ServerToClient::PermissionRequest { request_id, .. } if request_id == "current")
+        );
+
+        handle_permission_cancelled(
+            &manager,
+            &Some(key),
+            Some(session.id),
+            &pool,
+            "current".into(),
+        );
+        assert!(
+            matches!(rx.try_recv().unwrap(), ServerToClient::PermissionCancelled { request_id } if request_id == "current")
+        );
+        replay_pending_permission(&pool, session.id, &tx);
+        assert!(rx.try_recv().is_err(), "withdrawn prompts must not replay");
+        replay_pending_permission(&pool, other.id, &tx);
+        assert!(
+            matches!(rx.try_recv().unwrap(), ServerToClient::PermissionRequest { request_id, .. } if request_id == "current")
+        );
     }
 }

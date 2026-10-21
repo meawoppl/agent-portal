@@ -28,6 +28,7 @@ pub enum WsEvent {
     /// initial load.
     HistoryBatch(Vec<RenderedMessage>, Option<String>),
     Permission(PendingPermission),
+    PermissionCancelled(String),
     BranchChanged(
         Option<String>,
         Option<String>,
@@ -241,6 +242,9 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
                 input,
                 permission_suggestions,
             }));
+        }
+        ServerToClient::PermissionCancelled { request_id } => {
+            on_event.emit(WsEvent::PermissionCancelled(request_id));
         }
         ServerToClient::FileUploadResult(fields) => {
             on_event.emit(WsEvent::UploadResult(fields));
@@ -703,6 +707,22 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn permission_cancel_routes_without_transcript_output() {
+        let sink = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let captured = sink.clone();
+        let cb = Callback::from(move |event| captured.borrow_mut().push(event));
+        handle_proxy_message(
+            ServerToClient::PermissionCancelled {
+                request_id: "withdrawn".into(),
+            },
+            &cb,
+        );
+        let events = sink.borrow();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], WsEvent::PermissionCancelled(id) if id == "withdrawn"));
+    }
+
     /// `WsEvent` doesn't `Debug` (some fields are non-Debug), so use a
     /// hand-rolled variant tag for assertion failure messages.
     fn debug_event(ev: &WsEvent) -> &'static str {
@@ -712,6 +732,7 @@ mod tests {
             WsEvent::Output(_) => "Output",
             WsEvent::HistoryBatch(_, _) => "HistoryBatch",
             WsEvent::Permission(_) => "Permission",
+            WsEvent::PermissionCancelled(_) => "PermissionCancelled",
             WsEvent::BranchChanged(_, _, _, _) => "BranchChanged",
             WsEvent::ContinuationStatus { .. } => "ContinuationStatus",
             WsEvent::TurnMetrics(_) => "TurnMetrics",

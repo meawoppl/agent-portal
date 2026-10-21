@@ -127,6 +127,9 @@ pub enum SessionEvent {
         permission_suggestions: Vec<serde_json::Value>,
     },
 
+    /// The agent withdrew a permission request; no response should be sent.
+    PermissionCancelled { request_id: String },
+
     /// Session not found locally (e.g., when resuming an expired session).
     SessionNotFound,
 

@@ -43,7 +43,7 @@ use super::helpers::{
 use super::input_bar::{InputBar, InputBarInbound};
 use super::outbox::Outbox;
 use super::permission_handler::{
-    build_permission_response, PermissionHandler, PermissionResponseKind,
+    build_permission_response, PermissionHandler, PermissionResponseKind, PermissionUpdate,
 };
 use super::plugin_selector::PluginSelector;
 use super::plugin_views::{PluginContextNotice, PluginDiscoverySurface};
@@ -327,7 +327,7 @@ pub enum SessionViewMsg {
     /// PermissionHandler is mounted and handed us its inbound-request
     /// dispatcher. We store it so live `WsEvent::Permission` frames can be
     /// forwarded without the parent owning any permission state.
-    PermissionDispatcherRegistered(Callback<PendingPermission>),
+    PermissionDispatcherRegistered(Callback<PermissionUpdate>),
     /// PermissionHandler reports a transition in its pending state. We
     /// track the flag for the `is_awaiting` computation.
     PermissionPendingChanged(bool),
@@ -469,7 +469,7 @@ pub struct SessionView {
     /// `create` time via `PermissionDispatcherRegistered`; live permission
     /// frames off the wire are forwarded through it so this component holds
     /// zero permission UI state itself.
-    permission_dispatcher: Option<Callback<PendingPermission>>,
+    permission_dispatcher: Option<Callback<PermissionUpdate>>,
     /// Mirror of the handler's pending state, kept in sync via
     /// `PermissionPendingChanged`. Feeds the `is_awaiting` computation.
     has_pending_permission: bool,
@@ -1700,6 +1700,12 @@ impl SessionView {
     fn handle_ws_event(&mut self, ctx: &Context<Self>, event: WsEvent) -> bool {
         match event {
             WsEvent::Connected(sender) => {
+                // Pending requests are replayed after registration. Reset first
+                // so a cancellation missed while offline cannot leave a dialog.
+                self.last_permission_request = None;
+                if let Some(dispatcher) = &self.permission_dispatcher {
+                    dispatcher.emit(PermissionUpdate::Reset);
+                }
                 ctx.link()
                     .send_message(SessionViewMsg::WebSocketConnected(sender));
                 false
@@ -1754,7 +1760,20 @@ impl SessionView {
                 let perm = enrich_codex_file_change_permission(perm, &self.messages);
                 self.last_permission_request = Some(perm.clone());
                 if let Some(ref dispatcher) = self.permission_dispatcher {
-                    dispatcher.emit(perm);
+                    dispatcher.emit(PermissionUpdate::Request(perm));
+                }
+                false
+            }
+            WsEvent::PermissionCancelled(request_id) => {
+                if self
+                    .last_permission_request
+                    .as_ref()
+                    .is_some_and(|p| p.request_id == request_id)
+                {
+                    self.last_permission_request = None;
+                }
+                if let Some(dispatcher) = &self.permission_dispatcher {
+                    dispatcher.emit(PermissionUpdate::Cancelled(request_id));
                 }
                 false
             }

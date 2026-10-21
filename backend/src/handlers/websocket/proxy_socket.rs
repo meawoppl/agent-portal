@@ -3,7 +3,7 @@ use super::message_handlers::{
     handle_claude_output, replay_forward_opens_from_db, replay_pending_inputs_from_db,
     ClaudeOutputContext, ClaudeOutputFrame,
 };
-use super::permissions::handle_permission_request;
+use super::permissions::{handle_permission_cancelled, handle_permission_request};
 use super::registration::{register_or_update_session, RegistrationParams};
 use super::turn_metrics::handle_turn_metrics_report;
 use super::{ProxySender, SessionId, SessionManager};
@@ -389,6 +389,15 @@ fn handle_proxy_message(
                 tool_name,
                 input,
                 permission_suggestions,
+            );
+        }
+        ProxyToServer::PermissionCancelled { request_id } => {
+            handle_permission_cancelled(
+                session_manager,
+                session_key,
+                *db_session_id,
+                db_pool,
+                request_id,
             );
         }
         ProxyToServer::SessionUpdate {

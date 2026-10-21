@@ -268,6 +268,19 @@ impl<A: Agent> Session<A> {
                                 permission_suggestions: suggestions,
                             });
                         }
+                        AgentOutput::PermissionCancelled { request_id } => {
+                            // A late cancellation for an older request must not
+                            // clear a newer prompt or change its waiting state.
+                            if self
+                                .pending_permission
+                                .as_ref()
+                                .is_some_and(|pending| pending.request_id == request_id)
+                            {
+                                self.pending_permission = None;
+                                self.state = SessionState::Running;
+                            }
+                            return Some(SessionEvent::PermissionCancelled { request_id });
+                        }
                         // User-visible output: buffer the raw value and forward it
                         // verbatim — the same path the codex `RawOutput` arm below
                         // takes. Both agents now converge on this neutral channel.
@@ -648,6 +661,69 @@ mod tests {
                 }
             }))
         }
+    }
+
+    #[tokio::test]
+    async fn permission_cancel_matches_id_and_never_replies_or_buffers() {
+        struct PermissionAgent;
+        impl Agent for PermissionAgent {
+            fn spawn_io_task(
+                _config: SessionConfig,
+                mut commands: mpsc::UnboundedReceiver<IoCommand>,
+                events: mpsc::UnboundedSender<IoEvent>,
+            ) -> Result<tokio::task::JoinHandle<()>, SessionError> {
+                Ok(tokio::spawn(async move {
+                    events
+                        .send(IoEvent::Classified(AgentOutput::PermissionRequest {
+                            request_id: "current".into(),
+                            tool_name: "Bash".into(),
+                            input: serde_json::Value::Null,
+                            suggestions: vec![],
+                        }))
+                        .unwrap();
+                    for id in ["older", "current", "current"] {
+                        events
+                            .send(IoEvent::Classified(AgentOutput::PermissionCancelled {
+                                request_id: id.into(),
+                            }))
+                            .unwrap();
+                    }
+                    match commands.recv().await {
+                        Some(IoCommand::Shutdown { completed }) => {
+                            let _ = completed.send(());
+                        }
+                        _ => panic!("Cancellation must not send a response"),
+                    }
+                }))
+            }
+        }
+        let mut session = Session::<PermissionAgent>::new(SessionConfig::default())
+            .await
+            .unwrap();
+        assert!(matches!(
+            session.next_event().await,
+            Some(SessionEvent::PermissionRequest { .. })
+        ));
+        assert!(
+            matches!(session.next_event().await, Some(SessionEvent::PermissionCancelled { request_id }) if request_id == "older")
+        );
+        assert_eq!(session.pending_permission().unwrap().request_id, "current");
+        assert!(matches!(session.state, SessionState::WaitingForPermission));
+        for _ in 0..2 {
+            assert!(
+                matches!(session.next_event().await, Some(SessionEvent::PermissionCancelled { request_id }) if request_id == "current")
+            );
+            assert!(!session.has_pending_permission());
+            assert!(matches!(session.state, SessionState::Running));
+        }
+        assert!(matches!(
+            session
+                .respond_permission("current", PermissionResponse::default())
+                .await,
+            Err(SessionError::InvalidPermissionResponse(_))
+        ));
+        assert!(session.buffer.is_empty());
+        session.stop().await.unwrap();
     }
 
     #[tokio::test]

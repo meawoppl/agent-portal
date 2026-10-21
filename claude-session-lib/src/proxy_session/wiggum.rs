@@ -419,6 +419,9 @@ pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
                 "Ephemeral should be handled before calling handle_session_event_with_wiggum"
             );
         }
+        Some(SessionEvent::PermissionCancelled { .. }) => {
+            unreachable!("PermissionCancelled is handled by agent-neutral dispatch");
+        }
         Some(SessionEvent::ToolProgress { .. }) => {
             // Handled in run_main_loop (session_event::handle_next_event) before
             // calling this function — forwarded as a typed side-channel.

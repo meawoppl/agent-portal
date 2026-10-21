@@ -152,6 +152,11 @@ pub const SESSION_LAUNCH_CRASHLOOP_PAUSED: &str = "SESSION_LAUNCH_CRASHLOOP_PAUS
 /// a compatible backend. Preserve the recipe and source archive when repairing.
 pub const HISTORY_RESTORE_INVALID: &str = "HISTORY_RESTORE_INVALID";
 
+/// A withdrawn permission prompt could not be removed from replay storage.
+/// A burst indicates DB/pool failure; a one-off may be transient. Check DB
+/// health and remove the named stale pending request if it is replayed.
+pub const PERMISSION_CANCEL_PERSIST_FAILED: &str = "PERMISSION_CANCEL_PERSIST_FAILED";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,6 +174,7 @@ mod tests {
         MEDIA_ARCHIVE_FAILED,
         SESSION_LAUNCH_CRASHLOOP_PAUSED,
         HISTORY_RESTORE_INVALID,
+        PERMISSION_CANCEL_PERSIST_FAILED,
     ];
 
     #[test]
@@ -208,6 +214,7 @@ mod tests {
     fn every_marker_is_referenced_by_an_emit_site() {
         let sources: &[&str] = &[
             include_str!("background.rs"),
+            include_str!("handlers/websocket/permissions.rs"),
             include_str!("push/dispatcher.rs"),
             include_str!("handlers/websocket/session_manager/input_queue.rs"),
             include_str!("handlers/media_archive.rs"),
