@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" fill="#a9b1d6" font-family="sans-serif" font-size="24">PR #2274 · Patch vulnerable dependency chains</text>
+<text x="55" y="104" fill="#e6e9f5" font-family="sans-serif" font-size="34">The lockfile had 16 RustSec vulnerability entries. Three narrow updates</text>
+<text x="55" y="148" fill="#e6e9f5" font-family="sans-serif" font-size="34">remove eight of them without changing application APIs or hiding findings.</text>
+<path d="M55 177H1945 M1000 190V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="65" y="225" fill="#f7768e" font-family="sans-serif" font-size="24">BEFORE</text>
+<text x="1055" y="225" fill="#9ece6a" font-family="sans-serif" font-size="24">AFTER</text>
+<rect x="65" y="260" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="90" y="304" fill="#a9b1d6" font-family="sans-serif" font-size="28">HTTP/2: h2 0.4.14</text>
+<text x="90" y="351" fill="#c0caf5" font-family="sans-serif" font-size="24">Unbounded empty DATA-frame processing.</text>
+<text x="90" y="392" fill="#c0caf5" font-family="sans-serif" font-size="24">RUSTSEC-2026-0258.</text>
+<rect x="65" y="470" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="90" y="514" fill="#a9b1d6" font-family="sans-serif" font-size="28">QUIC: quinn-proto 0.11.14</text>
+<text x="90" y="561" fill="#c0caf5" font-family="sans-serif" font-size="24">Five advisories: panics and memory exhaustion.</text>
+<text x="90" y="602" fill="#c0caf5" font-family="sans-serif" font-size="24">Connection IDs, streams, datagrams and ACK delay.</text>
+<rect x="65" y="680" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="90" y="724" fill="#a9b1d6" font-family="sans-serif" font-size="28">Object store: 0.14.0</text>
+<text x="90" y="771" fill="#c0caf5" font-family="sans-serif" font-size="24">Brings quick-xml 0.40.1 into the lockfile.</text>
+<text x="90" y="812" fill="#c0caf5" font-family="sans-serif" font-size="24">Duplicate attributes and namespace allocation.</text>
+<rect x="65" y="890" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="90" y="934" fill="#a9b1d6" font-family="sans-serif" font-size="28">Audit baseline</text>
+<text x="90" y="981" fill="#c0caf5" font-family="sans-serif" font-size="24">16 vulnerability entries in the fresh RustSec DB.</text>
+<text x="90" y="1022" fill="#c0caf5" font-family="sans-serif" font-size="24">No existing vulnerability ignores.</text>
+<rect x="1055" y="260" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="1080" y="304" fill="#9ece6a" font-family="sans-serif" font-size="28">HTTP/2: h2 0.4.16</text>
+<text x="1080" y="351" fill="#c0caf5" font-family="sans-serif" font-size="24">Patched release within the existing requirement.</text>
+<text x="1080" y="392" fill="#c0caf5" font-family="sans-serif" font-size="24">Cargo.lock only; no application API edits.</text>
+<rect x="1055" y="470" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="1080" y="514" fill="#9ece6a" font-family="sans-serif" font-size="28">QUIC: quinn-proto 0.11.18</text>
+<text x="1080" y="561" fill="#c0caf5" font-family="sans-serif" font-size="24">Patched range covers all five reported advisories.</text>
+<text x="1080" y="602" fill="#c0caf5" font-family="sans-serif" font-size="24">Updates its small random-number dependency.</text>
+<rect x="1055" y="680" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="1080" y="724" fill="#9ece6a" font-family="sans-serif" font-size="28">Object store: 0.14.2</text>
+<text x="1080" y="771" fill="#c0caf5" font-family="sans-serif" font-size="24">Removes the vulnerable quick-xml 0.40.1 version.</text>
+<text x="1080" y="812" fill="#c0caf5" font-family="sans-serif" font-size="24">Existing archive/backend requirements accept it.</text>
+<rect x="1055" y="890" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="1080" y="934" fill="#9ece6a" font-family="sans-serif" font-size="28">Audit after updates</text>
+<text x="1080" y="981" fill="#c0caf5" font-family="sans-serif" font-size="24">Eight vulnerability entries remain visible.</text>
+<text x="1080" y="1022" fill="#c0caf5" font-family="sans-serif" font-size="24">APNs TLS and VAPID RSA assessed separately.</text>
+<text x="55" y="1172" fill="#a9b1d6" font-family="sans-serif" font-size="22">Scope: eight remaining vulnerabilities are not ignored or called fixed. APNs and audit policy follow in separate PRs.</text>
+</svg>
