@@ -11,6 +11,7 @@ from pathlib import Path
 import statistics
 import threading
 from urllib.parse import urlparse
+from uuid import UUID, uuid5
 from playwright.async_api import async_playwright, expect
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,11 +32,35 @@ def fixture(markers, prefix):
     for index in range(100):
         if index == 50:
             rows.extend(dict(type='system', subtype='thinking_tokens', session_id=SESSION,
-                             cumulative_thinking_tokens=n) for n in range(markers))
+                             uuid=str(uuid5(UUID(SESSION), f'{prefix}-thinking-{n}')),
+                             estimated_tokens=n + 1, estimated_tokens_delta=1)
+                        for n in range(markers))
         role = 'user' if index % 2 == 0 else 'assistant'
-        rows.append(dict(type=role, message=dict(role=role, content=[dict(
-            type='text', text=f'{prefix} item {index:03d}. ' + 'Deterministic transcript content. ' * 32)])))
+        message = dict(role=role, content=[dict(
+            type='text', text=f'{prefix} item {index:03d}. ' + 'Deterministic transcript content. ' * 32)])
+        if role == 'assistant':
+            message.update(id=f'msg_fixture_{prefix}_{index}', model='claude-sonnet-4-5',
+                           stop_reason='end_turn')
+        rows.append(dict(type=role, session_id=SESSION,
+                         uuid=str(uuid5(UUID(SESSION), f'{prefix}-message-{index}')),
+                         message=message))
     return rows
+
+async def assert_typed_window(page, prefix, markers):
+    """A visible sentinel alone also passes inside the raw-JSON fallback."""
+    await expect(page.locator('.raw-json')).to_have_count(0)
+    await expect(page.locator('.user-text')).to_have_count(50)
+    await expect(page.locator('.assistant-text')).to_have_count(50)
+    # All counted rows survive, rather than just the newest sentinel.
+    for index in range(100):
+        kind = '.user-text' if index % 2 == 0 else '.assistant-text'
+        await expect(page.locator(kind).filter(has_text=f'{prefix} item {index:03d}.')).to_have_count(1)
+    await expect(page.locator('.thinking-pulse-group')).to_have_count(int(markers > 0))
+    if markers:
+        # The title is the typed estimate, independent of the count-up animation.
+        await expect(page.locator('.thinking-pulse-group .message-count')).to_have_attribute(
+            'title', f'~{markers} thinking tokens')
+
 
 async def main(args):
     server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(Handler, directory=str(args.dist)))
@@ -44,6 +69,7 @@ async def main(args):
     try:
         async with async_playwright() as p:
             browser = await p.chromium.launch()
+            browser_version = browser.version
             for markers in args.markers:
                 for iteration in range(args.repeat):
                     page = await browser.new_page(viewport=dict(width=args.width, height=1000))
@@ -89,20 +115,23 @@ async def main(args):
                     await page.goto(f'http://127.0.0.1:{server.server_port}/dashboard?session={SESSION}')
                     await expect(page.get_by_text('Hydration item 099.', exact=False)).to_be_visible(timeout=60000)
                     hydration = await page.evaluate("window.hydrationMeasurement")
+                    await assert_typed_window(page, 'Hydration', markers)
                     await asyncio.wait_for(registered.wait(), timeout=15)
                     replay = fixture(markers, 'Replay')
                     await page.evaluate("benchmarkStart('replayMeasurement', 'Replay item 099.')")
                     session_sockets[-1].send(json.dumps(dict(type='HistoryBatch', entries=[dict(content=row) for row in replay], last_created_at='2026-10-21T00:00:01Z')))
                     await expect(page.get_by_text('Replay item 099.', exact=False)).to_be_visible(timeout=60000)
                     replay_ms = await page.evaluate("window.replayMeasurement")
-                    await expect(page.get_by_text('Hydration item 099.', exact=False)).to_have_count(0)
+                    await assert_typed_window(page, 'Replay', markers)
+                    await expect(page.locator('.user-text, .assistant-text').filter(has_text='Hydration item')).to_have_count(0)
                     assert not errors, errors
                     results.append(dict(markers=markers, iteration=iteration, hydration_wall_ms=round(hydration, 1), replay_wall_ms=round(replay_ms, 1), dom_nodes=await page.locator('*').count()))
                     await page.close()
             await browser.close()
     finally:
         server.shutdown()
-    report = dict(label=args.label, width=args.width, dist=str(args.dist.resolve()), samples=results,
+    report = dict(label=args.label, width=args.width, height=1000, browser_version=browser_version,
+                  fixture_version=2, dist=str(args.dist.resolve()), samples=results,
                   medians=[dict(markers=n, hydration_wall_ms=statistics.median(r['hydration_wall_ms'] for r in results if r['markers']==n), replay_wall_ms=statistics.median(r['replay_wall_ms'] for r in results if r['markers']==n)) for n in args.markers])
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2)+'\n')

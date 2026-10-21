@@ -13,7 +13,7 @@
 <rect x="1050" y="260" width="880" height="210" rx="12" fill="#1e202e" stroke="#565f89"/>
 <text x="1075" y="308" font-size="29">Ordinary retained history</text>
 <text x="1075" y="365" font-size="25">100 counted messages</text>
-<text x="1075" y="415" font-size="25">185 ms hydrate / 119 ms replay</text>
+<text x="1075" y="415" font-size="25">167 ms hydrate / 81 ms replay</text>
 <rect x="70" y="505" width="880" height="210" rx="12" fill="#1e202e" stroke="#565f89"/>
 <text x="95" y="553" font-size="29">No repeatable browser workload</text>
 <text x="95" y="610" font-size="25">Large history and replay cost are hard</text>
@@ -21,7 +21,7 @@
 <rect x="1050" y="505" width="880" height="210" rx="12" fill="#1e202e" stroke="#565f89"/>
 <text x="1075" y="553" font-size="29">Dense thinking burst</text>
 <text x="1075" y="610" font-size="25">100 messages + 5,000 markers</text>
-<text x="1075" y="660" font-size="25">518 ms hydrate / 331 ms replay</text>
+<text x="1075" y="660" font-size="25">509 ms hydrate / 341 ms replay</text>
 <rect x="70" y="750" width="880" height="210" rx="12" fill="#1e202e" stroke="#565f89"/>
 <text x="95" y="798" font-size="29">Optimization needs evidence</text>
 <text x="95" y="855" font-size="25">Changing grouping or windowing can</text>
@@ -29,8 +29,8 @@
 <rect x="1050" y="750" width="880" height="210" rx="12" fill="#1e202e" stroke="#565f89"/>
 <text x="1075" y="798" font-size="29">Narrow viewport</text>
 <text x="1075" y="855" font-size="25">390 px, same fixtures</text>
-<text x="1075" y="905" font-size="25">194 / 126 ms ordinary; 514 / 342 ms burst</text>
-<text x="70" y="1060" font-size="25">Assertions: newest content appears; old rows leave; no page errors.</text>
+<text x="1075" y="905" font-size="25">158 / 83 ms ordinary; 500 / 342 ms burst</text>
+<text x="70" y="1060" font-size="25">Assertions: 100 typed bodies; token chip; old rows leave; no raw JSON.</text>
 <text x="70" y="1120" font-size="22" fill="#a9b1d6">Release 6228fe55; Chromium; medians of 3 runs.</text>
-<text x="70" y="1160" font-size="22" fill="#a9b1d6">Includes fixture transport and two frames. Diagnostic baseline, not a production SLA.</text>
+<text x="70" y="1160" font-size="22" fill="#a9b1d6">Fixture delivery to initial layout + two frames; excludes app startup and reconnect handshake.</text>
 </g></svg>

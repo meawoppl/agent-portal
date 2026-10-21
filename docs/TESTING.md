@@ -302,20 +302,30 @@ advertises a 100,000-row history but honors the dashboard's `render_limit=100`
 contract: measuring an oversized REST response would test an unrealistic path.
 A second batch arrives through the real history-replay renderer. Assertions verify
 that the newest messages appear, old visible messages leave the render window,
-and the page raises no JavaScript errors.
+and the page raises no JavaScript errors. Fixture version 2 asserts all 50 user
+and 50 assistant bodies use typed renderers (no raw-JSON fallback), all 100
+message sentinels remain, and the thinking chip exposes the expected token
+estimate.
 
-The JSON report records hydration and replay wall time (including local fixture
-transport and browser layout), final DOM node count, individual samples and
-medians. Timing is deliberately not a CI pass/fail threshold: host contention and
+The hydration timer starts immediately before fulfilling the intercepted history
+HTTP response, after the WASM app has loaded and requested it. Replay timing
+starts immediately before injecting a `HistoryBatch` into the existing socket.
+Both stop two animation frames after the newest sentinel enters the DOM. They
+include local fixture serialization/transport and initial layout, not app
+bootstrap, a disconnect/reconnect handshake, or completion of count-up animations.
+
+The JSON report records these wall times, final whole-page DOM node count,
+individual samples, medians, browser version and fixture version. Timing is deliberately not a CI pass/fail threshold: host contention and
 browser instrumentation affect it. Record a baseline before changing retention,
 grouping, or windowing, and compare both ordinary and marker-heavy transcripts.
 This harness does not measure backend database query time or the archive viewer.
 
 The initial release-bundle baseline is in
 [`benchmarks/transcript-6228fe55.json`](benchmarks/transcript-6228fe55.json).
-On the shared Linux build host, median desktop hydration/replay was 185/119 ms
-for 100 ordinary messages and 518/331 ms with 5,000 markers. The narrow viewport
-was 194/126 ms and 514/342 ms respectively. The marker burst adds processing
+On the shared Linux build host, median desktop hydration/replay was 167/81 ms
+for 100 ordinary messages and 509/341 ms with 5,000 markers. The narrow viewport
+was 158/83 ms and 500/342 ms respectively. The marker burst adds processing
 cost without thousands of extra DOM nodes. These measurements include fixture
-transport and two animation frames, and were taken with concurrent build load;
-they establish a reproducible workload, not a production responsiveness claim.
+serialization/transport and two animation frames, without isolating other host
+activity; they establish a reproducible workload, not a production responsiveness
+claim.
