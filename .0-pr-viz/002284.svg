@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2284 · PARTIAL UPLOAD OWNERSHIP</text>
+<text x="55" y="105" font-family="sans-serif" font-size="34" fill="#e6e9f5">Interrupted uploads used to strand partial files.</text>
+<text x="55" y="150" font-family="sans-serif" font-size="34" fill="#e6e9f5">FileTransferBridge now owns cleanup, including cancelled file opens.</text>
+<path d="M55 180H1945 M1000 190V1140" stroke="#565f89" stroke-dasharray="6 8"/>
+<text x="60" y="230" font-family="sans-serif" font-size="24" fill="#f7768e">BEFORE</text>
+<text x="1050" y="230" font-family="sans-serif" font-size="24" fill="#9ece6a">AFTER</text>
+<rect x="60" y="270" width="860" height="180" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="84" y="312" font-family="sans-serif" font-size="28" fill="#7aa2f7">ConnectionState.active_uploads</text>
+<text x="84" y="355" font-family="sans-serif" font-size="24" fill="#c0caf5">Start -&gt; hidden temp file -&gt; receive chunks</text>
+<text x="84" y="389" font-family="sans-serif" font-size="24" fill="#c0caf5">Disconnect drops handles; partial path survives</text>
+<rect x="1050" y="270" width="860" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1074" y="312" font-family="sans-serif" font-size="28" fill="#9ece6a">FileTransferBridge</text>
+<text x="1074" y="355" font-family="sans-serif" font-size="24" fill="#c0caf5">Upload/download handlers in neutral session-lib</text>
+<text x="1074" y="389" font-family="sans-serif" font-size="24" fill="#c0caf5">Normal shutdown awaits removal of partials</text>
+<rect x="60" y="495" width="860" height="180" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="84" y="537" font-family="sans-serif" font-size="28" fill="#7aa2f7">Open cancellation gap</text>
+<text x="84" y="580" font-family="sans-serif" font-size="24" fill="#c0caf5">Filesystem open can finish after caller cancellation</text>
+<text x="84" y="614" font-family="sans-serif" font-size="24" fill="#c0caf5">No owner receives the newly created file</text>
+<rect x="1050" y="495" width="860" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1074" y="537" font-family="sans-serif" font-size="28" fill="#9ece6a">create_partial + PartialFile</text>
+<text x="1074" y="580" font-family="sans-serif" font-size="24" fill="#c0caf5">Blocking open returns handle AND cleanup guard</text>
+<text x="1074" y="614" font-family="sans-serif" font-size="24" fill="#c0caf5">Abandoned result still owns the temporary path</text>
+<rect x="60" y="720" width="860" height="180" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="84" y="762" font-family="sans-serif" font-size="28" fill="#7aa2f7">Explicit failure cleanup</text>
+<text x="84" y="805" font-family="sans-serif" font-size="24" fill="#c0caf5">Failure / duplicate Start remove entries first</text>
+<text x="84" y="839" font-family="sans-serif" font-size="24" fill="#c0caf5">Cancellation can interrupt the unlink await</text>
+<rect x="1050" y="720" width="860" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1074" y="762" font-family="sans-serif" font-size="28" fill="#9ece6a">Ownership survives each await</text>
+<text x="1074" y="805" font-family="sans-serif" font-size="24" fill="#c0caf5">Retain entry until cleanup or rename completes</text>
+<text x="1074" y="839" font-family="sans-serif" font-size="24" fill="#c0caf5">Drop fallback unlinks off the async runtime</text>
+<text x="65" y="990" font-family="sans-serif" font-size="25" fill="#f7768e">Disconnected partials accumulate on disk.</text>
+<text x="1055" y="990" font-family="sans-serif" font-size="25" fill="#9ece6a">Only the temporary path is a cleanup target.</text>
+<text x="65" y="1040" font-family="sans-serif" font-size="25" fill="#c0caf5">Download validation remains unchanged.</text>
+<text x="1055" y="1040" font-family="sans-serif" font-size="25" fill="#9ece6a">Committed destination files survive teardown.</text>
+<text x="55" y="1172" font-family="sans-serif" font-size="22" fill="#a9b1d6">Limit: Drop cleanup is best effort on process termination; unlink/thread failures are logged. No replay changes.</text>
+</svg>
