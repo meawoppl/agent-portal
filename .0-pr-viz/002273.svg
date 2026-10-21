@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" fill="#a9b1d6" font-family="sans-serif" font-size="24">PR #2273 · Migration structural roundtrip</text>
+<text x="55" y="104" fill="#e6e9f5" font-family="sans-serif" font-size="34">CI applied migrations but never proved rollback or schema consistency.</text>
+<text x="55" y="148" fill="#e6e9f5" font-family="sans-serif" font-size="34">A disposable database now exercises all 74 migrations in both directions.</text>
+<path d="M55 177H1945 M1000 190V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="65" y="225" fill="#f7768e" font-family="sans-serif" font-size="24">BEFORE</text>
+<text x="1055" y="225" fill="#9ece6a" font-family="sans-serif" font-size="24">AFTER</text>
+<rect x="65" y="260" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="90" y="304" fill="#a9b1d6" font-family="sans-serif" font-size="28">Apply-only test setup</text>
+<text x="90" y="351" fill="#c0caf5" font-family="sans-serif" font-size="24">Tests migrate fresh databases before running.</text>
+<text x="90" y="392" fill="#c0caf5" font-family="sans-serif" font-size="24">No full revert and reapply contract.</text>
+<rect x="65" y="470" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="90" y="514" fill="#a9b1d6" font-family="sans-serif" font-size="28">Empty down queries fail</text>
+<text x="90" y="561" fill="#c0caf5" font-family="sans-serif" font-size="24">Three intentional data no-ops contain comments only.</text>
+<text x="90" y="602" fill="#c0caf5" font-family="sans-serif" font-size="24">PostgreSQL rejects an empty query during rollback.</text>
+<rect x="65" y="680" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="90" y="724" fill="#a9b1d6" font-family="sans-serif" font-size="28">Schema consistency unverified</text>
+<text x="90" y="771" fill="#c0caf5" font-family="sans-serif" font-size="24">No generated-schema comparison in CI.</text>
+<text x="90" y="812" fill="#c0caf5" font-family="sans-serif" font-size="24">No before/after index or constraint comparison.</text>
+<rect x="65" y="890" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="90" y="934" fill="#a9b1d6" font-family="sans-serif" font-size="28">Database lifecycle untested</text>
+<text x="90" y="981" fill="#c0caf5" font-family="sans-serif" font-size="24">Rollback needs destructive database operations.</text>
+<text x="90" y="1022" fill="#c0caf5" font-family="sans-serif" font-size="24">The application database must never be the target.</text>
+<rect x="1055" y="260" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="1080" y="304" fill="#9ece6a" font-family="sans-serif" font-size="28">Owned disposable database</text>
+<text x="1080" y="351" fill="#c0caf5" font-family="sans-serif" font-size="24">Create random ap_migration_check_* database.</text>
+<text x="1080" y="392" fill="#c0caf5" font-family="sans-serif" font-size="24">Apply all, revert all, reapply all.</text>
+<rect x="1055" y="470" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="1080" y="514" fill="#9ece6a" font-family="sans-serif" font-size="28">Executable no-op rollback</text>
+<text x="1080" y="561" fill="#c0caf5" font-family="sans-serif" font-size="24">SELECT 1 replaces comment-only down queries.</text>
+<text x="1080" y="602" fill="#c0caf5" font-family="sans-serif" font-size="24">No attempt to restore intentionally deleted data.</text>
+<rect x="1055" y="680" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="1080" y="724" fill="#9ece6a" font-family="sans-serif" font-size="28">Two schema comparisons</text>
+<text x="1080" y="771" fill="#c0caf5" font-family="sans-serif" font-size="24">Diesel print-schema matches backend/src/schema.rs.</text>
+<text x="1080" y="812" fill="#c0caf5" font-family="sans-serif" font-size="24">pg_dump schema-only matches before and after.</text>
+<rect x="1055" y="890" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666"/>
+<text x="1080" y="934" fill="#9ece6a" font-family="sans-serif" font-size="28">Cleanup on success or failure</text>
+<text x="1080" y="981" fill="#c0caf5" font-family="sans-serif" font-size="24">Only the database created by this run is dropped.</text>
+<text x="1080" y="1022" fill="#c0caf5" font-family="sans-serif" font-size="24">Five tests cover ownership, cleanup and failure.</text>
+<text x="55" y="1172" fill="#a9b1d6" font-family="sans-serif" font-size="22">Scope: structural roundtrip on a fresh database. Deleted production data is not restored; broader #1209 work remains.</text>
+</svg>

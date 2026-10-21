@@ -5,8 +5,11 @@ import io
 import os
 from pathlib import Path
 import tempfile
+import sys
 import unittest
 from unittest.mock import patch
+
+sys.dont_write_bytecode = True
 
 spec = importlib.util.spec_from_file_location("roundtrip", Path(__file__).with_name("check-migration-roundtrip.py"))
 roundtrip = importlib.util.module_from_spec(spec)
