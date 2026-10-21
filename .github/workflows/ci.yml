@@ -201,6 +201,7 @@ jobs:
       - name: Run DB-backed backend unit tests
         run: |
           cargo test -p backend --lib handlers::messages::db_tests
+          cargo test -p backend --lib handlers::agent_follow::tests
           cargo test -p backend --lib handlers::session_access::db_tests
           cargo test -p backend --lib handlers::websocket::replay::replay_tests
           cargo test -p backend --lib db::session_lifecycle::tests

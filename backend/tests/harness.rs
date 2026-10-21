@@ -1,15 +1,17 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
-//! E2E WS/protocol test harness (#1209 item 1, slice 1).
+//! E2E WS/protocol and archive test harness (#1209).
 //!
-//! Boots the real backend (dev mode) on an ephemeral port against a test
-//! Postgres, connects a fake proxy over the real `/ws/session` endpoint using
-//! the same `ws-bridge` client the proxy uses, and asserts the register
-//! handshake — the first cross-crate protocol test (proxy ↔ backend) that
-//! exercises the actual typed endpoints rather than a unit-level stub.
+//! Boots the real backend against Postgres and connects browser and fake-proxy
+//! protocol clients over real WebSockets. Covers registration, a complete turn,
+//! delivery progress, permission decisions, reconnect history and a legacy
+//! registration without capabilities. No model CLI or browser DOM is launched.
 //!
 //! Requires `DATABASE_URL` to point at a test Postgres. CI provides one; locally:
 //! `docker compose -f docker-compose.test.yml up -d db` then
 //! `DATABASE_URL=postgresql://claude_portal:dev_password_change_in_production@localhost:5432/claude_portal cargo test -p backend --test harness`.
+
+#[path = "harness/protocol.rs"]
+mod protocol;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
