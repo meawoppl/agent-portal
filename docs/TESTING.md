@@ -276,3 +276,46 @@ This checks structural reversibility on a fresh database, not restoration of
 production data. Irreversible cleanups/backfills intentionally use `SELECT 1`
 in their down migration: a comments-only file is rejected as an empty query by
 PostgreSQL. Data-bearing upgrade fixtures and recovery testing remain separate.
+
+## Long-transcript browser measurements
+
+`scripts/benchmark-transcript.py` serves a built WASM bundle with deterministic
+HTTP/WebSocket fixtures. It makes no model calls and writes no live session data.
+Build the bundle you intend to compare (release is preferred for performance), then:
+
+```bash
+uv run --with playwright python scripts/benchmark-transcript.py \
+  --label "release, current commit" --repeat 3
+uv run --with playwright python scripts/benchmark-transcript.py \
+  --label "release, current commit, narrow viewport" --width 390 --repeat 3 \
+  --output builds/transcript-benchmark-mobile.json
+```
+
+Use `--dist PATH` to compare an existing artifact without rebuilding. Install the
+Playwright Chromium browser first if it is not available. Compare the same build
+profile, browser, hardware, viewport and fixture settings; a debug bundle is a
+functional smoke test, not a production latency measurement.
+
+The two default fixtures contain 100 counted messages, either alone or with 5,000
+bodyless thinking-token markers inside that retained window. The server fixture
+advertises a 100,000-row history but honors the dashboard's `render_limit=100`
+contract: measuring an oversized REST response would test an unrealistic path.
+A second batch arrives through the real history-replay renderer. Assertions verify
+that the newest messages appear, old visible messages leave the render window,
+and the page raises no JavaScript errors.
+
+The JSON report records hydration and replay wall time (including local fixture
+transport and browser layout), final DOM node count, individual samples and
+medians. Timing is deliberately not a CI pass/fail threshold: host contention and
+browser instrumentation affect it. Record a baseline before changing retention,
+grouping, or windowing, and compare both ordinary and marker-heavy transcripts.
+This harness does not measure backend database query time or the archive viewer.
+
+The initial release-bundle baseline is in
+[`benchmarks/transcript-6228fe55.json`](benchmarks/transcript-6228fe55.json).
+On the shared Linux build host, median desktop hydration/replay was 185/119 ms
+for 100 ordinary messages and 518/331 ms with 5,000 markers. The narrow viewport
+was 194/126 ms and 514/342 ms respectively. The marker burst adds processing
+cost without thousands of extra DOM nodes. These measurements include fixture
+transport and two animation frames, and were taken with concurrent build load;
+they establish a reproducible workload, not a production responsiveness claim.

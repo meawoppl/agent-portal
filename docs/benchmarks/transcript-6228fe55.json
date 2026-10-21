@@ -1,0 +1,127 @@
+{
+  "frontend_commit": "6228fe55",
+  "profile": "trunk build --release",
+  "environment": "Headless Chromium on shared Linux build host; concurrent build load, not a production SLA",
+  "reports": [
+    {
+      "label": "release-6228fe55",
+      "width": 1440,
+      "samples": [
+        {
+          "markers": 0,
+          "iteration": 0,
+          "hydration_wall_ms": 177.6,
+          "replay_wall_ms": 124,
+          "dom_nodes": 1271
+        },
+        {
+          "markers": 0,
+          "iteration": 1,
+          "hydration_wall_ms": 184.9,
+          "replay_wall_ms": 118.6,
+          "dom_nodes": 1271
+        },
+        {
+          "markers": 0,
+          "iteration": 2,
+          "hydration_wall_ms": 190.2,
+          "replay_wall_ms": 117.9,
+          "dom_nodes": 1271
+        },
+        {
+          "markers": 5000,
+          "iteration": 0,
+          "hydration_wall_ms": 531.6,
+          "replay_wall_ms": 334.3,
+          "dom_nodes": 1274
+        },
+        {
+          "markers": 5000,
+          "iteration": 1,
+          "hydration_wall_ms": 487.5,
+          "replay_wall_ms": 330.7,
+          "dom_nodes": 1274
+        },
+        {
+          "markers": 5000,
+          "iteration": 2,
+          "hydration_wall_ms": 518.3,
+          "replay_wall_ms": 322.3,
+          "dom_nodes": 1274
+        }
+      ],
+      "medians": [
+        {
+          "markers": 0,
+          "hydration_wall_ms": 184.9,
+          "replay_wall_ms": 118.6
+        },
+        {
+          "markers": 5000,
+          "hydration_wall_ms": 518.3,
+          "replay_wall_ms": 330.7
+        }
+      ]
+    },
+    {
+      "label": "release-6228fe55-mobile",
+      "width": 390,
+      "samples": [
+        {
+          "markers": 0,
+          "iteration": 0,
+          "hydration_wall_ms": 194.9,
+          "replay_wall_ms": 125.6,
+          "dom_nodes": 1256
+        },
+        {
+          "markers": 0,
+          "iteration": 1,
+          "hydration_wall_ms": 193.6,
+          "replay_wall_ms": 125.8,
+          "dom_nodes": 1256
+        },
+        {
+          "markers": 0,
+          "iteration": 2,
+          "hydration_wall_ms": 188.3,
+          "replay_wall_ms": 146.7,
+          "dom_nodes": 1256
+        },
+        {
+          "markers": 5000,
+          "iteration": 0,
+          "hydration_wall_ms": 517,
+          "replay_wall_ms": 352.9,
+          "dom_nodes": 1259
+        },
+        {
+          "markers": 5000,
+          "iteration": 1,
+          "hydration_wall_ms": 501.1,
+          "replay_wall_ms": 329.4,
+          "dom_nodes": 1259
+        },
+        {
+          "markers": 5000,
+          "iteration": 2,
+          "hydration_wall_ms": 513.5,
+          "replay_wall_ms": 341.6,
+          "dom_nodes": 1259
+        }
+      ],
+      "medians": [
+        {
+          "markers": 0,
+          "hydration_wall_ms": 193.6,
+          "replay_wall_ms": 125.8
+        },
+        {
+          "markers": 5000,
+          "hydration_wall_ms": 513.5,
+          "replay_wall_ms": 341.6
+        }
+      ]
+    }
+  ]
+}
