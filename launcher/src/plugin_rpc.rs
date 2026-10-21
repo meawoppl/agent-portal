@@ -53,7 +53,7 @@ pub(crate) fn handle(request: PluginRequest) -> Result<PluginResponse> {
                 crate::config::load_config().plugins.contains_key(&name),
                 "Plugin is not installed: {name}"
             );
-            crate::plugin_policy::set(Path::new(project), &name, policy)?;
+            crate::plugin_policy::set(project, &name, policy)?;
             Ok(inventory_response(crate::session_plugins::host_inventory(
                 directory,
             )?))
