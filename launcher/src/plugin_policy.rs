@@ -67,26 +67,14 @@ impl Policies {
         resolved
     }
 
-    /// Store `policy` at `key`. `Ask` is stored too when an ancestor says
-    /// otherwise, so "load when detected" in a subdirectory overrides a
-    /// repository-wide always or never; with nothing to override, the entry
-    /// is dropped to keep the file minimal.
+    /// Store `policy` at `key`. Every choice is kept, `Ask` included: the UI
+    /// offers "load when detected" as a choice for this directory, so a policy
+    /// later set on a parent must not silently change it.
     fn set(&mut self, key: &Path, plugin: &str, policy: PluginPolicy) {
-        let inherited = key
-            .parent()
-            .map(|parent| self.resolve(parent))
-            .and_then(|parents| parents.get(plugin).copied())
-            .unwrap_or_default();
-        let name = key.to_string_lossy().into_owned();
-        let entries = self.0.entry(name.clone()).or_default();
-        if policy == PluginPolicy::Ask && inherited == PluginPolicy::Ask {
-            entries.remove(plugin);
-        } else {
-            entries.insert(plugin.to_string(), policy);
-        }
-        if entries.is_empty() {
-            self.0.remove(&name);
-        }
+        self.0
+            .entry(key.to_string_lossy().into_owned())
+            .or_default()
+            .insert(plugin.to_string(), policy);
     }
 }
 
@@ -119,7 +107,7 @@ mod tests {
     }
 
     #[test]
-    fn nearest_ancestor_decides_and_redundant_ask_is_dropped() {
+    fn nearest_ancestor_decides() {
         let dir = tempfile::tempdir().unwrap();
         let store = dir.path().join("policy.json");
         let repo = dir.path().join("repo");
@@ -141,11 +129,30 @@ mod tests {
         assert!(policies.resolve(&canonical(dir.path())).is_empty());
 
         set_at(&store, &repo, "kicadmium", PluginPolicy::Ask).unwrap();
-        set_at(&store, &repo, "visilog", PluginPolicy::Ask).unwrap();
-        set_at(&store, &worktree, "kicadmium", PluginPolicy::Ask).unwrap();
         let policies = Policies::read(&store).unwrap();
-        assert!(policies.resolve(&repo).is_empty());
-        assert!(policies.0.is_empty(), "nothing left to override");
+        assert_eq!(policies.resolve(&repo)["kicadmium"], PluginPolicy::Ask);
+        assert_eq!(
+            policies.resolve(&worktree)["kicadmium"],
+            PluginPolicy::Always
+        );
+    }
+
+    /// A subdirectory's "load when detected" survives a policy set on its
+    /// parent afterwards.
+    #[test]
+    fn a_child_ask_is_kept_when_the_parent_changes_later() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = dir.path().join("policy.json");
+        let repo = dir.path().join("repo");
+        let sub = repo.join("firmware");
+        fs::create_dir_all(&sub).unwrap();
+        let (repo, sub) = (canonical(&repo), canonical(&sub));
+
+        set_at(&store, &sub, "kicadmium", PluginPolicy::Ask).unwrap();
+        set_at(&store, &repo, "kicadmium", PluginPolicy::Always).unwrap();
+        let policies = Policies::read(&store).unwrap();
+        assert_eq!(policies.resolve(&sub)["kicadmium"], PluginPolicy::Ask);
+        assert_eq!(policies.resolve(&repo)["kicadmium"], PluginPolicy::Always);
     }
 
     /// "Load when detected" in a subdirectory must beat a repository-wide
