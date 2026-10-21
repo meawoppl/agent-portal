@@ -40,12 +40,12 @@
   <!-- AFTER -->
   <rect x="1045" y="245" width="900" height="150" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
   <text x="1069" y="285" font-size="26" fill="#c0caf5">record_injected(session, entries)</text>
-  <text x="1069" y="325" font-size="23" fill="#9ece6a">PluginContextEntry per skill handed over</text>
+  <text x="1069" y="325" font-size="23" fill="#9ece6a">PluginContextEntry per skill made available</text>
   <text x="1069" y="360" font-size="23" fill="#a9b1d6">session-plugins/{session}.context.json</text>
   <line x1="1495" y1="395" x2="1495" y2="440" stroke="#9ece6a" stroke-width="2" marker-end="url(#arr-green)"/>
 
   <rect x="1045" y="445" width="900" height="150" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
-  <text x="1069" y="485" font-size="26" fill="#c0caf5">"Plugin context at launch"</text>
+  <text x="1069" y="485" font-size="26" fill="#c0caf5">"Plugins available to this session"</text>
   <text x="1069" y="525" font-size="23" fill="#9ece6a">from inventory.injected_context (the record)</text>
   <text x="1069" y="560" font-size="23" fill="#a9b1d6">reason + activation per plugin; UI, not transcript</text>
   <line x1="1495" y1="595" x2="1495" y2="640" stroke="#9ece6a" stroke-width="2" marker-end="url(#arr-green)"/>
