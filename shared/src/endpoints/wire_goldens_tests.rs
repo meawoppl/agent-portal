@@ -882,3 +882,50 @@ fn server_to_client_session_progress_reset_golden() {
         ServerToClient::SessionProgressReset
     ));
 }
+
+#[test]
+fn explicit_transport_version_survives_registration_and_ack() {
+    let mut fields = reg_fields("current");
+    fields.protocol_version = Some(crate::protocol::PROTOCOL_VERSION);
+    let value = serde_json::to_value(ProxyToServer::Register(fields)).unwrap();
+    assert_eq!(value["protocol_version"], json!(1));
+    let decoded: ProxyToServer = serde_json::from_value(value).unwrap();
+    assert!(matches!(
+        decoded,
+        ProxyToServer::Register(RegisterFields {
+            protocol_version: Some(1),
+            ..
+        })
+    ));
+
+    assert_golden(
+        &ServerToProxy::RegisterAck {
+            protocol_version: Some(1),
+            success: false,
+            session_id: nil(),
+            error: Some("Incompatible protocol".into()),
+            max_image_mb: 20,
+            retryable: false,
+            tunnel_data_ticket: None,
+            tunnel_sizing: None,
+        },
+        json!({"type":"RegisterAck","protocol_version":1,"success":false,
+        "session_id":nil(),"error":"Incompatible protocol","max_image_mb":20,"retryable":false}),
+    );
+}
+
+#[test]
+fn legacy_ack_missing_version_remains_version_one() {
+    let ack: ServerToProxy = serde_json::from_value(json!({
+        "type":"RegisterAck","success":true,"session_id":nil(),"max_image_mb":20
+    }))
+    .unwrap();
+    let ServerToProxy::RegisterAck {
+        protocol_version, ..
+    } = ack
+    else {
+        unreachable!()
+    };
+    assert_eq!(protocol_version, None);
+    assert!(crate::protocol::check_protocol_version(protocol_version, "server").is_ok());
+}

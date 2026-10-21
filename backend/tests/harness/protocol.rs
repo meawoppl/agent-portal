@@ -303,3 +303,86 @@ async fn unacknowledged_input_replays_when_proxy_reconnects() {
         .await
         .unwrap();
 }
+
+#[tokio::test]
+async fn incompatible_proxy_is_rejected_before_session_creation() {
+    if std::env::var("DATABASE_URL").is_err() {
+        return;
+    }
+    use diesel::prelude::*;
+    let url = format!("ws://{}", spawn_test_app().await);
+    for version in [0, shared::protocol::PROTOCOL_VERSION + 1, u32::MAX] {
+        let mut fields = test_register_fields();
+        fields.protocol_version = Some(version);
+        let session_id = fields.session_id;
+        let mut socket = connect::<SessionEndpoint>(&url).await.unwrap();
+        socket.send(ProxyToServer::Register(fields)).await.unwrap();
+        let ack = receive::<SessionEndpoint>(&mut socket, |f| {
+            matches!(f, ServerToProxy::RegisterAck { .. })
+        })
+        .await;
+        let ServerToProxy::RegisterAck {
+            success,
+            retryable,
+            error,
+            protocol_version,
+            ..
+        } = ack
+        else {
+            unreachable!()
+        };
+        assert!(!success);
+        assert!(!retryable);
+        assert_eq!(protocol_version, Some(shared::protocol::PROTOCOL_VERSION));
+        assert!(error.unwrap().contains("Update"));
+        let count: i64 = backend::schema::sessions::table
+            .find(session_id)
+            .count()
+            .get_result(&mut test_pool().get().unwrap())
+            .unwrap();
+        assert_eq!(count, 0, "rejected peers must not create sessions");
+    }
+}
+
+#[tokio::test]
+async fn incompatible_launcher_gets_fatal_actionable_ack() {
+    if std::env::var("DATABASE_URL").is_err() {
+        return;
+    }
+    let url = format!("ws://{}", spawn_test_app().await);
+    let mut socket = connect::<shared::LauncherEndpoint>(&url).await.unwrap();
+    socket
+        .send(shared::LauncherToServer::LauncherRegister {
+            protocol_version: Some(shared::protocol::PROTOCOL_VERSION + 1),
+            launcher_id: uuid::Uuid::new_v4(),
+            launcher_name: "incompatible".into(),
+            auth_token: None,
+            hostname: "test".into(),
+            working_directory: Some("/tmp".into()),
+            version: Some("test".into()),
+            capabilities: Vec::new(),
+        })
+        .await
+        .unwrap();
+    let ack = receive::<shared::LauncherEndpoint>(&mut socket, |f| {
+        matches!(f, shared::ServerToLauncher::LauncherRegisterAck { .. })
+    })
+    .await;
+    let shared::ServerToLauncher::LauncherRegisterAck {
+        success,
+        fatal,
+        error,
+        reject_reason,
+        ..
+    } = ack
+    else {
+        unreachable!()
+    };
+    assert!(!success);
+    assert!(fatal);
+    assert!(error.unwrap().contains("Update"));
+    assert_eq!(
+        reject_reason,
+        Some(shared::LauncherRejectReason::ProtocolIncompatible)
+    );
+}

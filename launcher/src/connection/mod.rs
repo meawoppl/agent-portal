@@ -64,6 +64,9 @@ fn control_socket_half_open(ack_seen: bool, since_last_ack: Duration) -> bool {
 /// The one-line operator instruction for a parked launcher.
 fn parked_instruction(reason: LauncherRejectReason) -> &'static str {
     match reason {
+        LauncherRejectReason::ProtocolIncompatible => {
+            "Incompatible protocol — update agent-portal and the Portal server to compatible releases. Retrying slowly."
+        }
         LauncherRejectReason::AuthFailed => {
             "Authentication failed — run `agent-portal login` to re-authenticate. \
              The launcher will keep retrying slowly and recover on its own once \
@@ -171,7 +174,7 @@ pub async fn run_launcher_loop(
                                 shared::protocol::check_protocol_version(protocol_version, "server")
                             {
                                 error!("{error}");
-                                break Err(classify_fatal(None, &error));
+                                break Err(LauncherRejectReason::ProtocolIncompatible);
                             }
                             if success {
                                 info!("Registration successful");
@@ -450,6 +453,7 @@ mod tests {
     #[test]
     fn every_park_reason_has_an_instruction() {
         for reason in [
+            LauncherRejectReason::ProtocolIncompatible,
             LauncherRejectReason::AuthFailed,
             LauncherRejectReason::TooManyLaunchers,
             LauncherRejectReason::DuplicateLauncher,
