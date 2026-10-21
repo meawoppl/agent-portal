@@ -179,10 +179,10 @@ impl Component for PermissionHandler {
                 true
             }
             PermissionHandlerMsg::Receive(PermissionUpdate::Cancelled(request_id)) => {
-                if !self
+                if self
                     .request
                     .as_ref()
-                    .is_some_and(|p| p.request_id == request_id)
+                    .is_none_or(|p| p.request_id != request_id)
                 {
                     return false;
                 }
