@@ -64,6 +64,8 @@ pub type ClaudeConversationIdSink = Arc<dyn Fn(uuid::Uuid) + Send + Sync>;
 pub struct ProxySessionConfig {
     /// One-time transcript disclosure when missing native history was replaced.
     pub startup_notice: Option<String>,
+    /// Context changes the launcher posts while this session runs.
+    pub context_updates: session_lib::ContextInbox,
     pub history_restore: Option<shared::api::HistoryRestoreLaunch>,
     pub backend_url: String,
     pub session_id: Uuid,

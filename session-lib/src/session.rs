@@ -230,6 +230,11 @@ impl<A: Agent> Session<A> {
         self.config.recovery_context.take()
     }
 
+    /// Claim the context change posted since the last input, if any.
+    pub fn take_context_update(&self) -> Option<String> {
+        self.config.context_updates.lock().ok()?.take()
+    }
+
     /// Poll for the next event.
     ///
     /// Returns `None` if the session has exited and no more events are
@@ -822,6 +827,15 @@ mod tests {
             Some("quoted past request")
         );
         assert_eq!(session.take_recovery_context(), None);
+
+        // A change posted through the shared inbox is claimed exactly once,
+        // and a newer post replaces an undelivered one.
+        let inbox = session.config().context_updates.clone();
+        assert_eq!(session.take_context_update(), None);
+        *inbox.lock().unwrap() = Some("first".into());
+        *inbox.lock().unwrap() = Some("second".into());
+        assert_eq!(session.take_context_update().as_deref(), Some("second"));
+        assert_eq!(session.take_context_update(), None);
         session.stop().await.unwrap();
     }
 

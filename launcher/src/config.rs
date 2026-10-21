@@ -262,19 +262,7 @@ pub fn plugin_skill_context(
             .join(session_id.to_string()),
         agent_type,
     );
-    for entry in &mut context.injected {
-        let activation = resolutions
-            .get(&entry.plugin)
-            .and_then(|resolution| resolution.activation)
-            .unwrap_or(PluginActivation::Detected);
-        entry.activation = activation;
-        entry.reason = match activation {
-            PluginActivation::Explicit => "Chosen for this session",
-            PluginActivation::Policy => "Always loaded in this project",
-            PluginActivation::Detected => "Detected in this directory",
-        }
-        .to_string();
-    }
+    annotate_activation(&mut context.injected, &resolutions);
     crate::session_plugins::record_injected(session_id, &context.injected);
     context
 }
@@ -347,14 +335,145 @@ fn plugin_skill_context_from_config(
     if !context.claude_plugin_dirs.is_empty() {
         context.cleanup_dir = Some(generated_root.to_path_buf());
     }
+    let mut sections = Vec::new();
     if !lines.is_empty() {
         lines.sort();
-        context.reminder = Some(format!(
+        sections.push(format!(
             "## Plugin Skills\n\nInstalled Agent Portal plugins provide these skills. When a user task matches one, read its `SKILL.md` completely before acting, then follow its instructions:\n\n{}",
             lines.join("\n")
         ));
     }
+    let (prompts, prompt_entries) = plugin_prompts(config);
+    context.injected.extend(prompt_entries);
+    sections.extend(prompts);
+    if !sections.is_empty() {
+        context.reminder = Some(sections.join("\n\n"));
+    }
     context
+}
+
+/// Enabled plugins' `[[prompts]]`, as one reminder section plus their record.
+/// Every agent gets them as text; there is no native loader for prompts.
+fn plugin_prompts(config: &LauncherConfig) -> (Option<String>, Vec<PluginContextEntry>) {
+    let mut parts = Vec::new();
+    let mut entries = Vec::new();
+    for (plugin_name, plugin) in config.plugins.iter().filter(|(_, p)| p.enabled) {
+        let root = PathBuf::from(&plugin.path);
+        let Ok(manifest) = crate::plugin::load_manifest(&root) else {
+            continue;
+        };
+        for prompt in manifest.prompts {
+            let path = root.join(&prompt.path);
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            if text.trim().is_empty() {
+                continue;
+            }
+            parts.push(format!(
+                "### {plugin_name}: {}\n\n{}",
+                prompt.name,
+                text.trim()
+            ));
+            let mut entry = available_skill(plugin_name, &prompt.name, &path, &text);
+            entry.kind = PluginContextKind::Prompt;
+            entries.push(entry);
+        }
+    }
+    let section = (!parts.is_empty()).then(|| {
+        format!(
+            "## Plugin Prompts\n\nInstalled Agent Portal plugins add this guidance:\n\n{}",
+            parts.join("\n\n")
+        )
+    });
+    (section, entries)
+}
+
+/// Say why each recorded plugin was loaded, from its resolution.
+fn annotate_activation(
+    entries: &mut [PluginContextEntry],
+    resolutions: &crate::session_plugins::Resolutions,
+) {
+    for entry in entries {
+        let activation = resolutions
+            .get(&entry.plugin)
+            .and_then(|resolution| resolution.activation)
+            .unwrap_or(PluginActivation::Detected);
+        entry.activation = activation;
+        entry.reason = match activation {
+            PluginActivation::Explicit => "Chosen for this session",
+            PluginActivation::Policy => "Always loaded in this project",
+            PluginActivation::Detected => "Detected in this directory",
+        }
+        .to_string();
+    }
+}
+
+/// What a running session should switch to after its plugin selection
+/// changed: the skills and prompts a fresh launch would now get, as text it
+/// can act on without a restart. Skills are listed by path even for Claude,
+/// whose native plugin directories were fixed at launch. The record the
+/// session card shows is replaced with this context.
+pub fn plugin_context_update(
+    agent_type: AgentType,
+    session_id: Uuid,
+    working_directory: &Path,
+) -> anyhow::Result<(String, Vec<PluginContextEntry>)> {
+    let mut config = load_config();
+    let resolutions =
+        crate::session_plugins::apply_selection(&mut config, session_id, working_directory)?;
+    let mut lines = Vec::new();
+    let mut entries = Vec::new();
+    for (plugin_name, plugin) in config.plugins.iter().filter(|(_, p)| p.enabled) {
+        let root = PathBuf::from(&plugin.path);
+        let Some(manifest) = read_plugin_manifest(&root) else {
+            continue;
+        };
+        for skill in manifest
+            .skills
+            .iter()
+            .filter(|skill| skill_applies_to(skill, agent_type.as_str()))
+        {
+            let path = root.join(&skill.path);
+            if !path.is_file() {
+                continue;
+            }
+            let metadata = read_skill_metadata(&path);
+            let skill_name = metadata.name.unwrap_or_else(|| skill.name.clone());
+            let description = metadata
+                .description
+                .map(|description| format!(" - {description}"))
+                .unwrap_or_default();
+            let line = format!(
+                "- `{plugin_name}:{skill_name}`{description}: {}",
+                path.display()
+            );
+            entries.push(available_skill(plugin_name, &skill_name, &path, &line));
+            lines.push(line);
+        }
+    }
+    let (prompts, prompt_entries) = plugin_prompts(&config);
+    entries.extend(prompt_entries);
+    annotate_activation(&mut entries, &resolutions);
+    crate::session_plugins::record_injected(session_id, &entries);
+
+    lines.sort();
+    let skills = if lines.is_empty() {
+        "No plugin skills are enabled for this session now. Stop using any plugin skill you were given earlier.".to_string()
+    } else {
+        format!(
+            "Use only these plugin skills from now on, and stop using any others you were given earlier. Read a skill's `SKILL.md` completely before acting on it:\n\n{}",
+            lines.join("\n")
+        )
+    };
+    let mut update = format!(
+        "## Plugin context changed\n\nThe user changed which Agent Portal plugins this session uses. {skills}"
+    );
+    if let Some(prompts) = prompts {
+        update.push_str("\n\n");
+        update.push_str(&prompts);
+    }
+    Ok((update, entries))
 }
 
 fn read_plugin_manifest(root: &Path) -> Option<PluginManifest> {
@@ -550,6 +669,51 @@ pub fn clear_sessions() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `[[prompts]]` reach every agent as text, and the record lists them.
+    #[test]
+    fn plugin_prompts_join_the_reminder_for_every_agent() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("board");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("agent-portal-plugin.toml"),
+            "name = \"board\"\n[[prompts]]\nname = \"conventions\"\npath = \"prompt.md\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("prompt.md"),
+            "Nets are named in SCREAMING_CASE.\n",
+        )
+        .unwrap();
+        let mut config = LauncherConfig::default();
+        config.plugins.insert(
+            "board".into(),
+            InstalledPlugin {
+                path: root.to_string_lossy().into_owned(),
+                source: "s".into(),
+                source_subdir: None,
+                reference: None,
+                enabled: true,
+                installed_at: chrono::Utc::now(),
+                revision: None,
+            },
+        );
+        let generated = dir.path().join("generated");
+        for agent in [AgentType::Claude, AgentType::Codex, AgentType::Muse] {
+            let context = plugin_skill_context_from_config(&config, &generated, agent);
+            let reminder = context.reminder.expect("prompts make a reminder");
+            assert!(reminder.contains("## Plugin Prompts"));
+            assert!(reminder.contains("### board: conventions"));
+            assert!(reminder.contains("SCREAMING_CASE"));
+            assert_eq!(context.injected.len(), 1);
+            assert_eq!(context.injected[0].kind, PluginContextKind::Prompt);
+        }
+
+        config.plugins.get_mut("board").unwrap().enabled = false;
+        let context = plugin_skill_context_from_config(&config, &generated, AgentType::Codex);
+        assert!(context.reminder.is_none() && context.injected.is_empty());
+    }
 
     /// A plugin change never saves over a config it couldn't read: that would
     /// silently drop every other install and the auth token.

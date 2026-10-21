@@ -13,6 +13,10 @@ pub struct PluginInventoryResponse {
     /// The session launcher supports saving per-session skill selection.
     #[serde(default)]
     pub session_selection_supported: bool,
+    /// The selection change was handed to the running session, which picks it
+    /// up on its next turn; otherwise it applies at the next launch.
+    #[serde(default)]
+    pub applies_live: bool,
     #[serde(default)]
     pub injected_context: Vec<PluginContextEntry>,
     #[serde(default)]

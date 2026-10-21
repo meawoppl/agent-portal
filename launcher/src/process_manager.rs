@@ -348,6 +348,9 @@ struct ManagedTask {
     /// conversation found"); the map key stays the id the spawn was asked for,
     /// so the heartbeat, stop and dedup paths consult this instead.
     live_id: LiveSessionId,
+    agent_type: shared::AgentType,
+    /// Where a plugin change reaches the running session (#2031).
+    context_updates: session_lib::ContextInbox,
 }
 
 /// Shared handle to a task's current session id, updated on rotation.
@@ -445,6 +448,15 @@ impl ProcessManager {
     }
 
     /// Map a session id (original or rotated) to the key of the task running it.
+    /// A running session's agent and the inbox its context changes go to.
+    pub fn context_inbox(
+        &self,
+        session_id: &Uuid,
+    ) -> Option<(shared::AgentType, session_lib::ContextInbox)> {
+        let task = self.tasks.get(&self.task_key(session_id)?)?;
+        Some((task.agent_type, task.context_updates.clone()))
+    }
+
     fn task_key(&self, session_id: &Uuid) -> Option<Uuid> {
         if self.tasks.contains_key(session_id) {
             return Some(*session_id);
@@ -604,8 +616,10 @@ impl ProcessManager {
                 }
             }
         }
+        let context_updates = session_lib::ContextInbox::default();
         let proxy_config = ProxySessionConfig {
             startup_notice: None,
+            context_updates: context_updates.clone(),
             history_restore: params.history_restore,
             backend_url: self.backend_url.clone(),
             session_id,
@@ -665,6 +679,8 @@ impl ProcessManager {
                 handle,
                 cancel,
                 live_id,
+                agent_type: params.agent_type,
+                context_updates,
             },
         );
 
@@ -929,6 +945,7 @@ async fn run_session_task(
                     token: token.clone(),
                 }
             }),
+            context_updates: config.context_updates.clone(),
             recovery_context: config
                 .history_restore
                 .as_ref()
@@ -1147,6 +1164,8 @@ mod live_id_tests {
                 handle,
                 cancel,
                 live_id: live_id.clone(),
+                agent_type: shared::AgentType::Claude,
+                context_updates: Default::default(),
             },
         );
         (pm, live_id)
@@ -1261,6 +1280,7 @@ mod tests {
         let path = temp.path().join("conversations.json");
         let mut config = ProxySessionConfig {
             startup_notice: None,
+            context_updates: Default::default(),
             history_restore: None,
             backend_url: "ws://localhost".into(),
             session_id: id,

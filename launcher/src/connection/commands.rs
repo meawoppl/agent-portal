@@ -422,9 +422,28 @@ pub(super) async fn handle_message(
             selection,
         } => {
             let sender = import_reply_tx.clone();
+            // A selection change reaches a session already running here on its
+            // next turn, instead of waiting for a restart.
+            let live = selection
+                .is_some()
+                .then(|| process_manager.context_inbox(&session_id))
+                .flatten();
             tokio::spawn(async move {
                 let result = tokio::task::spawn_blocking(move || {
-                    crate::session_plugins::request(session_id, working_directory, selection)
+                    let directory = std::path::PathBuf::from(&working_directory);
+                    let mut response =
+                        crate::session_plugins::request(session_id, working_directory, selection)?;
+                    if let Some((agent_type, inbox)) = live {
+                        let (update, entries) = crate::config::plugin_context_update(
+                            agent_type, session_id, &directory,
+                        )?;
+                        if let Ok(mut pending) = inbox.lock() {
+                            *pending = Some(update);
+                        }
+                        response.injected_context = entries;
+                        response.applies_live = true;
+                    }
+                    anyhow::Ok(response)
                 })
                 .await
                 .map_err(|error| error.to_string())

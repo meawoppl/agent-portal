@@ -59,6 +59,13 @@ where
         claude_session.take_recovery_context()
     };
     let inject_reminder = !slash_command && reminder_pending.swap(false, Ordering::SeqCst);
+    // A plugin change posted while the session ran. It supersedes the plugin
+    // part of the launch-time reminder, so it rides along with that too.
+    let context_update = if slash_command {
+        None
+    } else {
+        claude_session.take_context_update()
+    };
     let (text, display_event) = if inject_reminder || recovery.is_some() {
         let mut context = claude_session
             .config()
@@ -69,10 +76,21 @@ where
             context.push_str("\n\n");
             context.push_str(&recovery);
         }
+        if let Some(update) = context_update {
+            context.push_str("\n\n");
+            context.push_str(&update);
+        }
         portal_reminder::fold_session_start_reminder(
             input.text,
             input.display_event,
             Some(&context),
+            default_display,
+        )
+    } else if let Some(update) = context_update {
+        portal_reminder::fold_context_update(
+            input.text,
+            input.display_event,
+            &update,
             default_display,
         )
     } else {

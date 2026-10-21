@@ -52,7 +52,8 @@ fn activation_label(activation: PluginActivation) -> &'static str {
     }
 }
 
-/// What this session's process was launched with, from the launcher's record,
+/// The plugin context this session is using, from the launcher's record (set at
+/// launch, replaced when a selection change reaches the running session),
 /// with each file's text one click away rather than in the transcript.
 #[function_component(PluginContextNotice)]
 pub(super) fn plugin_context_notice(props: &PluginContextNoticeProps) -> Html {

@@ -135,7 +135,7 @@ pub(super) fn plugin_selector(props: &PluginSelectorProps) -> Html {
             <summary class="session-header-action plugin-action" title="Choose plugins for this session">{format!("Plugins {count} ▾")}</summary>
             <div class="plugin-selector-menu" aria-label="Session plugins" aria-busy={busy.to_string()}>
                 <strong>{"Plugins for this session"}</strong>
-                <p>{"Choose installed plugin skills. These are the skills the next launch loads; unchosen plugins are on where their files are detected. Changes apply after restarting this session."}</p>
+                <p>{"Choose installed plugin skills. Unchosen plugins follow the project policy, or load where their files are detected. A running session picks up a change on its next turn."}</p>
                 if !props.is_owner { <p>{"Only the session owner can change this selection."}</p> }
                 if let Some(message) = &*error { <p role="alert" class="plugin-selector-error">{message}</p> }
                 if *busy { <p role="status">{"Loading / saving…"}</p> }
@@ -183,7 +183,7 @@ pub(super) fn plugin_selector(props: &PluginSelectorProps) -> Html {
                     })}
                 </div>
                 if !*busy && inventory.plugins.is_empty() && error.is_none() { <p>{"No plugins installed on this session’s machine."}</p> }
-                if *saved { <p role="status">{"Saved. Restart this session to apply."}</p> }
+                if *saved { <p role="status">{ if inventory.applies_live { "Saved. The session uses this from its next turn." } else { "Saved. It applies when this session next starts." } }</p> }
                 <div class="plugin-selector-actions">
                     <button type="button" class="session-header-action" onclick={on_refresh} disabled={*busy}>{"Refresh"}</button>
                     <button type="button" class="session-header-action" onclick={details} disabled={*busy}>{"Plugin details"}</button>
