@@ -5,9 +5,7 @@ use crate::components::{DismissibleBackdrop, ModelSelect, ProxyTokenSetup};
 use crate::hooks::{use_escape_capture, use_focus_trap};
 use crate::utils::{self, FetchError, On401};
 use gloo::timers::callback::Timeout;
-use shared::api::{
-    DashboardRequest, DashboardResponse, DirectoryListingResponse, LaunchRequest,
-};
+use shared::api::{DashboardRequest, DashboardResponse, DirectoryListingResponse, LaunchRequest};
 use shared::{AgentInstall, DirectoryEntry, LauncherInfo};
 use std::collections::HashMap;
 use uuid::Uuid;

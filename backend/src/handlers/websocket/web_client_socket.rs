@@ -92,7 +92,12 @@ pub async fn handle_web_client_socket(
             completed = dashboard_jobs.join_next(), if !dashboard_jobs.is_empty() => {
                 if let Some(Ok((request_id, result))) = completed {
                     dashboard_ids.remove(&request_id);
-                    let _ = tx.send(ServerToClient::DashboardResult { request_id, result });
+                    if tx.send(ServerToClient::DashboardResult { request_id, result }).is_err() { break; }
+                } else {
+                    // A failed task has no trustworthy correlated reply. Closing
+                    // fails all browser waiters immediately; none are replayed.
+                    warn!("Dashboard task failed; closing client socket");
+                    break;
                 }
             }
             _ = recheck.tick(), if linked.is_some() => {
@@ -119,7 +124,7 @@ pub async fn handle_web_client_socket(
                                 Some((429, "Too many pending dashboard requests"))
                             } else { None };
                             if let Some((status, message)) = error {
-                                let _ = tx.send(ServerToClient::DashboardResult { request_id, result: Err(shared::api::DashboardError { status, message: message.into() }) });
+                                if tx.send(ServerToClient::DashboardResult { request_id, result: Err(shared::api::DashboardError { status, message: message.into() }) }).is_err() { break; }
                             } else {
                                 dashboard_ids.insert(request_id);
                                 let state = app_state.clone();

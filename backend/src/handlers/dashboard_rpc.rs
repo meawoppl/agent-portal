@@ -7,6 +7,7 @@ use axum::{
     response::IntoResponse,
     Json,
 };
+use diesel::prelude::*;
 use shared::api::{DashboardError, DashboardRequest as Request, DashboardResponse as Response};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -16,7 +17,26 @@ pub async fn execute(
     user: Uuid,
     request: Request,
 ) -> Result<Response, DashboardError> {
-    match execute_inner(state, user, request).await {
+    // A user socket outlives its HTTP upgrade: bans must apply to each action.
+    let result = async {
+        let mut conn = state.conn()?;
+        let disabled = crate::schema::users::table
+            .find(user)
+            .select(crate::schema::users::disabled)
+            .first::<bool>(&mut conn)
+            .optional()?;
+        if disabled != Some(false) {
+            return Err(AppError::Forbidden);
+        }
+        drop(conn);
+        execute_inner(state, user, request).await
+    }
+    .await;
+    encode_result(result).await
+}
+
+async fn encode_result(result: Result<Response, AppError>) -> Result<Response, DashboardError> {
+    match result {
         Ok(response) => Ok(response),
         Err(error) => {
             let response = error.into_response();
@@ -195,6 +215,35 @@ mod tests {
         (state, owner, host, receiver)
     }
 
+    async fn execute_adapter(
+        state: Arc<AppState>,
+        user: Uuid,
+        request: Request,
+    ) -> Result<Response, DashboardError> {
+        encode_result(execute_inner(state, user, request).await).await
+    }
+
+    #[tokio::test]
+    async fn disabled_account_cannot_act_through_an_existing_socket() {
+        let Some(pool) = crate::test_support::shared_pool() else {
+            return;
+        };
+        let user = {
+            let mut conn = pool.get().unwrap();
+            let user = crate::test_support::insert_user(&mut conn, "dashboard-disabled");
+            diesel::update(crate::schema::users::table.find(user.id))
+                .set(crate::schema::users::disabled.eq(true))
+                .execute(&mut conn)
+                .unwrap();
+            user
+        };
+        let state = Arc::new(crate::test_support::test_app_state(pool));
+        let result = execute(state, user.id, Request::ListLaunchers)
+            .await
+            .unwrap_err();
+        assert_eq!(result.status, 403);
+    }
+
     #[tokio::test]
     async fn websocket_adapters_keep_host_ownership_for_reads_and_writes() {
         let (state, _owner, host, mut receiver) = fixture();
@@ -207,7 +256,9 @@ mod tests {
                 path: "~".into(),
             },
         ] {
-            let denied = execute(state.clone(), attacker, request).await.unwrap_err();
+            let denied = execute_adapter(state.clone(), attacker, request)
+                .await
+                .unwrap_err();
             assert_eq!(denied.status, 403);
             assert_eq!(denied.message, "Forbidden");
         }
@@ -215,7 +266,7 @@ mod tests {
             receiver.try_recv().is_err(),
             "denied request must never reach the host"
         );
-        let Response::Launchers(rows) = execute(state, attacker, Request::ListLaunchers)
+        let Response::Launchers(rows) = execute_adapter(state, attacker, Request::ListLaunchers)
             .await
             .unwrap()
         else {
@@ -229,13 +280,15 @@ mod tests {
         let (state, owner, host, mut receiver) = fixture();
         let probe = tokio::spawn({
             let state = state.clone();
-            async move { execute(state, owner, Request::ProbeAgents { launcher_id: host }).await }
+            async move {
+                execute_adapter(state, owner, Request::ProbeAgents { launcher_id: host }).await
+            }
         });
         let Some(ServerToLauncher::ProbeAgents { request_id }) = receiver.recv().await else {
             panic!("expected probe")
         };
         assert!(matches!(
-            execute(
+            execute_adapter(
                 state.clone(),
                 owner,
                 Request::RestartLauncher { launcher_id: host }

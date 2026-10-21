@@ -211,6 +211,7 @@ jobs:
           cargo test -p backend --lib handlers::websocket::registration::tests
           cargo test -p backend --lib handlers::websocket::permissions::db_tests
           cargo test -p backend --test rename_sessions
+          cargo test -p backend --lib handlers::dashboard_rpc::tests
 
   build-binaries:
     name: ${{ matrix.job-name }}
