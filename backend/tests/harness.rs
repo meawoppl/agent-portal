@@ -117,7 +117,9 @@ async fn proxy_register_returns_ack_success() {
         .await
         .expect("connect to /ws/session");
 
-    conn.send(ProxyToServer::Register(test_register_fields()))
+    let mut fields = test_register_fields();
+    fields.protocol_version = Some(shared::protocol::PROTOCOL_VERSION);
+    conn.send(ProxyToServer::Register(fields))
         .await
         .expect("send Register");
 

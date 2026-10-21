@@ -3,7 +3,7 @@
 use crate::portal_client::PortalClient;
 use futures_util::StreamExt;
 use shared::api::EditStackItem;
-use shared::{ClientEndpoint, ClientToServer, InputDeliveryStage, ServerToClient, TurnMetrics};
+use shared::{ClientToServer, InputDeliveryStage, ServerToClient, TurnMetrics};
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 use yew::Callback;
@@ -127,15 +127,10 @@ pub fn connect_websocket(
     let portal = portal.clone();
     let send_lifetime = lifetime.clone();
     lifetime.spawn(async move {
-        let ws_endpoint = match portal.socket_url().await {
-            Ok(url) => url,
-            Err(error) => {
-                on_event.emit(WsEvent::Error(format!("Portal connection failed: {error}")));
-                return;
-            }
-        };
-        match ws_bridge::yew_client::connect_to::<ClientEndpoint>(&ws_endpoint) {
-            Ok(conn) => {
+        match crate::browser_protocol::connect(&portal, |msg| handle_proxy_message(msg, &on_event))
+            .await
+        {
+            Ok((conn, _config)) => {
                 let (mut sender, mut receiver) = conn.split();
 
                 let register_msg = ClientToServer::Register(shared::RegisterFields {
@@ -207,6 +202,8 @@ pub fn connect_websocket(
 /// Handle incoming server message and emit appropriate events
 fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
     match msg {
+        // Consumed by browser_protocol before exposing the session sender.
+        ServerToClient::HelloAck { .. } => {}
         ServerToClient::AgentOutput {
             content,
             // agent_type is plumbed through the wire (per-message tag) for

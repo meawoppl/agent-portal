@@ -413,6 +413,14 @@ async fn incompatible_browser_cannot_register_or_send_pipelined_input() {
         .await
         .unwrap();
     // Race the server's rejection deliberately. Neither command may dispatch.
+    let _ = browser
+        .send(ClientToServer::Dashboard {
+            request_id: uuid::Uuid::new_v4(),
+            request: shared::api::DashboardRequest::RestartLauncher {
+                launcher_id: uuid::Uuid::new_v4(),
+            },
+        })
+        .await;
     let _ = browser.send(ClientToServer::Register(fields)).await;
     let _ = browser.send(ClientToServer::AgentInput {
         content: serde_json::json!({"type":"user","message":{"role":"user","content":"must not run"}}),

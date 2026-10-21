@@ -8,7 +8,7 @@ use crate::portal_client::{use_portal, ConnId, SessionKey};
 use crate::utils::{calculate_backoff, parse_version, On401};
 use client_websocket_events::handle_server_message;
 use shared::api::TurnMetricsResponse;
-use shared::{AppConfig, ClientEndpoint, ServiceStats, TurnMetrics};
+use shared::{ServiceStats, TurnMetrics};
 use std::collections::HashMap;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
@@ -204,34 +204,16 @@ fn use_live_client_websocket() -> UseClientWebSocket {
                                         registry.dispatch(FederationAction::LiveStatus(portal.conn(), Some("Connecting live updates".into())));
                                     }
                                 }
-                                match portal.socket_url().await {
-                                    Ok(endpoint) => match ws_bridge::yew_client::connect_to::<
-                                        ClientEndpoint,
-                                    >(
-                                        &endpoint
-                                    ) {
-                                        Ok(conn) => {
+                                match crate::browser_protocol::connect(&portal, |msg| {
+                                    handle_server_message(portal.conn(), msg, &shutdown_reason, &live);
+                                }).await {
+                                        Ok((conn, config)) => {
                                             if portal.conn() == ConnId::HOME {
                                                 shutdown_reason.set(None);
-                                                if let Ok(config) = portal
-                                                    .fetch_json::<AppConfig>(
-                                                        "/api/config",
-                                                        On401::Ignore,
-                                                    )
-                                                    .await
-                                                {
-                                                    if known_version.as_ref().is_some_and(|old| {
-                                                        is_newer_version(
-                                                            old,
-                                                            &config.server_version,
-                                                        )
-                                                    }) {
-                                                        update_available.set(Some(
-                                                            config.server_version.clone(),
-                                                        ));
-                                                    }
-                                                    known_version = Some(config.server_version);
+                                                if known_version.as_ref().is_some_and(|old| is_newer_version(old, &config.server_version)) {
+                                                    update_available.set(Some(config.server_version.clone()));
                                                 }
+                                                known_version = Some(config.server_version);
                                             }
                                             let (mut sender, mut receiver) = conn.split();
                                             let (requests, mut requests_rx) = futures_channel::mpsc::unbounded();
@@ -275,15 +257,17 @@ fn use_live_client_websocket() -> UseClientWebSocket {
                                                 }
                                             }
                                         }
-                                        Err(_) => log::warn!(
-                                            "Portal user channel unavailable: {}",
-                                            portal.origin()
-                                        ),
-                                    },
-                                    Err(_) => log::warn!(
-                                        "Portal user channel authorization failed: {}",
-                                        portal.origin()
-                                    ),
+                                        Err(error) => {
+                                            if portal.conn() == ConnId::HOME {
+                                                shutdown_reason.set(Some(error.clone()));
+                                            }
+                                            if let Some(registry) = &registry {
+                                                registry.dispatch(FederationAction::LiveStatus(portal.conn(), Some(error)));
+                                            }
+                                            // No sender was exposed; do not replay mutations or
+                                            // turn a failed handshake into a legacy connection.
+                                            break;
+                                        }
                                 }
                                 if portal.is_linked() {
                                     live.dispatch(client_websocket_events::ClientWsAction::SessionProgressReset(portal.conn()));

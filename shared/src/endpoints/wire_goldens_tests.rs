@@ -929,3 +929,29 @@ fn legacy_ack_missing_version_remains_version_one() {
     assert_eq!(protocol_version, None);
     assert!(crate::protocol::check_protocol_version(protocol_version, "server").is_ok());
 }
+
+#[test]
+fn browser_hello_wire_contract() {
+    assert_golden(
+        &ClientToServer::Hello {
+            protocol_version: 1,
+        },
+        json!({"type":"Hello","protocol_version":1}),
+    );
+    assert_golden(
+        &ServerToClient::HelloAck {
+            protocol_version: 1,
+            success: true,
+            error: None,
+        },
+        json!({"type":"HelloAck","protocol_version":1,"success":true}),
+    );
+    assert_golden(
+        &ServerToClient::HelloAck {
+            protocol_version: 1,
+            success: false,
+            error: Some("Update the browser".into()),
+        },
+        json!({"type":"HelloAck","protocol_version":1,"success":false,"error":"Update the browser"}),
+    );
+}

@@ -1693,3 +1693,6 @@ mod tests {
         assert_eq!(upload_milestone_percent(1000, 1000), 100);
     }
 }
+
+#[cfg(test)]
+mod registration_compatibility_tests;
