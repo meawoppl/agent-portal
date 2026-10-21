@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26" />
+<text x="55" y="52" fill="#a9b1d6" font-family="sans-serif" font-size="24">PR #2283 · Negotiate transport compatibility</text>
+<text x="55" y="104" fill="#e6e9f5" font-family="sans-serif" font-size="34">Matching application versions are not a protocol contract. Negotiate the</text>
+<text x="55" y="148" fill="#e6e9f5" font-family="sans-serif" font-size="34">transport major before exposing command senders or creating sessions.</text>
+<path d="M55 177H1945 M1000 190V1140" stroke="#565f89" stroke-dasharray="8 8" />
+<text x="65" y="225" fill="#f7768e" font-family="sans-serif" font-size="24">BEFORE</text>
+<text x="1055" y="225" fill="#9ece6a" font-family="sans-serif" font-size="24">AFTER</text>
+<rect x="65" y="260" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666" />
+<text x="90" y="304" fill="#a9b1d6" font-family="sans-serif" font-size="28">Proxy and launcher registration</text>
+<text x="90" y="351" fill="#c0caf5" font-family="sans-serif" font-size="24">No explicit transport major.</text>
+<text x="90" y="392" fill="#c0caf5" font-family="sans-serif" font-size="24">A future incompatible peer could be accepted.</text>
+<rect x="65" y="470" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666" />
+<text x="90" y="514" fill="#a9b1d6" font-family="sans-serif" font-size="28">Browser mutation sender</text>
+<text x="90" y="561" fill="#c0caf5" font-family="sans-serif" font-size="24">Socket establishment exposed the command queue.</text>
+<text x="90" y="602" fill="#c0caf5" font-family="sans-serif" font-size="24">No explicit peer compatibility acknowledgement.</text>
+<rect x="65" y="680" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666" />
+<text x="90" y="724" fill="#a9b1d6" font-family="sans-serif" font-size="28">Legacy ambiguity</text>
+<text x="90" y="771" fill="#c0caf5" font-family="sans-serif" font-size="24">Missing metadata could be confused with latest.</text>
+<text x="90" y="812" fill="#c0caf5" font-family="sans-serif" font-size="24">Capabilities describe features, not base versions.</text>
+<rect x="65" y="890" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666" />
+<text x="90" y="934" fill="#a9b1d6" font-family="sans-serif" font-size="28">Failure handling</text>
+<text x="90" y="981" fill="#c0caf5" font-family="sans-serif" font-size="24">Connection trouble is not proof of compatibility.</text>
+<text x="90" y="1022" fill="#c0caf5" font-family="sans-serif" font-size="24">Mutation replay can duplicate side effects.</text>
+<rect x="1055" y="260" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666" />
+<text x="1080" y="304" fill="#9ece6a" font-family="sans-serif" font-size="28">Two-sided version checks</text>
+<text x="1080" y="351" fill="#c0caf5" font-family="sans-serif" font-size="24">Register and ack carry an optional major.</text>
+<text x="1080" y="392" fill="#c0caf5" font-family="sans-serif" font-size="24">Reject skew with actionable update guidance.</text>
+<rect x="1055" y="470" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666" />
+<text x="1080" y="514" fill="#9ece6a" font-family="sans-serif" font-size="28">Per-portal Hello and HelloAck</text>
+<text x="1080" y="561" fill="#c0caf5" font-family="sans-serif" font-size="24">Fetch config using the correct origin and account.</text>
+<text x="1080" y="602" fill="#c0caf5" font-family="sans-serif" font-size="24">Expose mutation queues only after positive ack.</text>
+<rect x="1055" y="680" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666" />
+<text x="1080" y="724" fill="#9ece6a" font-family="sans-serif" font-size="28">Explicit legacy v1 rule</text>
+<text x="1080" y="771" fill="#c0caf5" font-family="sans-serif" font-size="24">Only missing metadata in valid config means legacy.</text>
+<text x="1080" y="812" fill="#c0caf5" font-family="sans-serif" font-size="24">Keep feature capability negotiation independent.</text>
+<rect x="1055" y="890" width="875" height="175" rx="12" fill="#1e202e" stroke="#3d4666" />
+<text x="1080" y="934" fill="#9ece6a" font-family="sans-serif" font-size="28">Fail closed and preserve state</text>
+<text x="1080" y="981" fill="#c0caf5" font-family="sans-serif" font-size="24">Config errors and ack timeouts send no commands.</text>
+<text x="1080" y="1022" fill="#c0caf5" font-family="sans-serif" font-size="24">Deliver read-only seed frames; never replay writes.</text>
+<text x="55" y="1172" fill="#a9b1d6" font-family="sans-serif" font-size="22">Scope: real socket skew tests and pinned wire contracts; this does not replace authentication or feature capability checks.</text>
+</svg>

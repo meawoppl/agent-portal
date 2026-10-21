@@ -3,7 +3,7 @@
 use crate::portal_client::PortalClient;
 use futures_util::StreamExt;
 use shared::api::EditStackItem;
-use shared::{ClientEndpoint, ClientToServer, InputDeliveryStage, ServerToClient, TurnMetrics};
+use shared::{ClientToServer, InputDeliveryStage, ServerToClient, TurnMetrics};
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 use yew::Callback;
@@ -16,6 +16,7 @@ use super::types::{PendingPermission, WsSender};
 pub enum WsEvent {
     Connected(WsSender),
     Error(String),
+    Incompatible(String),
     /// Live `ClaudeOutput`. Second field is the server-assigned `created_at`
     /// for the persisted DB row (`None` if the backend didn't send one — the
     /// pre-#784 wire shape and the rare error-envelope paths that don't go
@@ -127,18 +128,14 @@ pub fn connect_websocket(
     let portal = portal.clone();
     let send_lifetime = lifetime.clone();
     lifetime.spawn(async move {
-        let ws_endpoint = match portal.socket_url().await {
-            Ok(url) => url,
-            Err(error) => {
-                on_event.emit(WsEvent::Error(format!("Portal connection failed: {error}")));
-                return;
-            }
-        };
-        match ws_bridge::yew_client::connect_to::<ClientEndpoint>(&ws_endpoint) {
-            Ok(conn) => {
+        match crate::browser_protocol::connect(&portal, |msg| handle_proxy_message(msg, &on_event))
+            .await
+        {
+            Ok((conn, _config)) => {
                 let (mut sender, mut receiver) = conn.split();
 
                 let register_msg = ClientToServer::Register(shared::RegisterFields {
+                    protocol_version: Some(shared::protocol::PROTOCOL_VERSION),
                     session_id,
                     session_name: session_id.to_string(),
                     auth_token: None,
@@ -197,7 +194,11 @@ pub fn connect_websocket(
                 }
             }
             Err(e) => {
-                report_ws_error(&on_event, "Failed to connect WebSocket", e);
+                if e.retryable {
+                    on_event.emit(WsEvent::Error(e.message));
+                } else {
+                    on_event.emit(WsEvent::Incompatible(e.message));
+                }
             }
         }
     });
@@ -206,6 +207,8 @@ pub fn connect_websocket(
 /// Handle incoming server message and emit appropriate events
 fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
     match msg {
+        // Consumed by browser_protocol before exposing the session sender.
+        ServerToClient::HelloAck { .. } => {}
         ServerToClient::AgentOutput {
             content,
             // agent_type is plumbed through the wire (per-message tag) for
@@ -729,6 +732,7 @@ mod tests {
         match ev {
             WsEvent::Connected(_) => "Connected",
             WsEvent::Error(_) => "Error",
+            WsEvent::Incompatible(_) => "Incompatible",
             WsEvent::Output(_) => "Output",
             WsEvent::HistoryBatch(_, _) => "HistoryBatch",
             WsEvent::Permission(_) => "Permission",

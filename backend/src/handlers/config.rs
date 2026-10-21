@@ -10,6 +10,7 @@ use std::sync::Arc;
 /// GET /api/config - Returns application configuration
 pub async fn get_config(State(app_state): State<Arc<AppState>>) -> Json<AppConfig> {
     Json(AppConfig {
+        protocol_version: Some(shared::protocol::PROTOCOL_VERSION),
         app_title: app_state.app_title.clone(),
         server_version: shared::VERSION.to_string(),
         git_hash: shared::GIT_HASH.to_string(),

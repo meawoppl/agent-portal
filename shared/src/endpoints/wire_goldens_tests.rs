@@ -66,6 +66,7 @@ where
 
 fn reg_fields(session_name: &str) -> RegisterFields {
     RegisterFields {
+        protocol_version: None,
         session_id: nil(),
         session_name: session_name.into(),
         auth_token: None,
@@ -550,6 +551,7 @@ fn proxy_to_server_ephemeral_golden() {
 #[test]
 fn server_to_proxy_register_ack_golden_omits_absent_ticket() {
     let ack = ServerToProxy::RegisterAck {
+        protocol_version: None,
         success: true,
         session_id: nil(),
         error: None,
@@ -879,4 +881,110 @@ fn server_to_client_session_progress_reset_golden() {
         serde_json::from_value::<ServerToClient>(v).unwrap(),
         ServerToClient::SessionProgressReset
     ));
+}
+
+#[test]
+fn explicit_transport_version_survives_registration_and_ack() {
+    let mut fields = reg_fields("current");
+    fields.protocol_version = Some(crate::protocol::PROTOCOL_VERSION);
+    let value = serde_json::to_value(ProxyToServer::Register(fields)).unwrap();
+    assert_eq!(value["protocol_version"], json!(1));
+    let decoded: ProxyToServer = serde_json::from_value(value).unwrap();
+    assert!(matches!(
+        decoded,
+        ProxyToServer::Register(RegisterFields {
+            protocol_version: Some(1),
+            ..
+        })
+    ));
+
+    assert_golden(
+        &ServerToProxy::RegisterAck {
+            protocol_version: Some(1),
+            success: false,
+            session_id: nil(),
+            error: Some("Incompatible protocol".into()),
+            max_image_mb: 20,
+            retryable: false,
+            tunnel_data_ticket: None,
+            tunnel_sizing: None,
+        },
+        json!({"type":"RegisterAck","protocol_version":1,"success":false,
+        "session_id":nil(),"error":"Incompatible protocol","max_image_mb":20,"retryable":false}),
+    );
+}
+
+#[test]
+fn legacy_ack_missing_version_remains_version_one() {
+    let ack: ServerToProxy = serde_json::from_value(json!({
+        "type":"RegisterAck","success":true,"session_id":nil(),"max_image_mb":20
+    }))
+    .unwrap();
+    let ServerToProxy::RegisterAck {
+        protocol_version, ..
+    } = ack
+    else {
+        unreachable!()
+    };
+    assert_eq!(protocol_version, None);
+    assert!(crate::protocol::check_protocol_version(protocol_version, "server").is_ok());
+}
+
+#[test]
+fn browser_hello_wire_contract() {
+    assert_golden(
+        &ClientToServer::Hello {
+            protocol_version: 1,
+        },
+        json!({"type":"Hello","protocol_version":1}),
+    );
+    assert_golden(
+        &ServerToClient::HelloAck {
+            protocol_version: 1,
+            success: true,
+            error: None,
+        },
+        json!({"type":"HelloAck","protocol_version":1,"success":true}),
+    );
+    assert_golden(
+        &ServerToClient::HelloAck {
+            protocol_version: 1,
+            success: false,
+            error: Some("Update the browser".into()),
+        },
+        json!({"type":"HelloAck","protocol_version":1,"success":false,"error":"Update the browser"}),
+    );
+}
+
+#[test]
+fn version_rejection_remains_decodable_by_pre_version_launchers() {
+    // Frozen legacy rejection decoder: adding a new enum value here would
+    // defeat the compatibility test, even if the new launcher understands it.
+    #[derive(serde::Deserialize)]
+    enum LegacyReason {
+        AuthFailed,
+        TooManyLaunchers,
+        DuplicateLauncher,
+    }
+    #[derive(serde::Deserialize)]
+    struct LegacyAck {
+        success: bool,
+        fatal: bool,
+        error: Option<String>,
+        reject_reason: Option<LegacyReason>,
+    }
+    let current = ServerToLauncher::LauncherRegisterAck {
+        protocol_version: Some(1),
+        success: false,
+        launcher_id: nil(),
+        error: Some("Incompatible launcher protocol; update compatible releases".into()),
+        fatal: true,
+        capabilities: Vec::new(),
+        reject_reason: None,
+    };
+    let old: LegacyAck = serde_json::from_value(serde_json::to_value(current).unwrap()).unwrap();
+    assert!(!old.success);
+    assert!(old.fatal);
+    assert!(old.error.unwrap().contains("update"));
+    assert!(old.reject_reason.is_none());
 }

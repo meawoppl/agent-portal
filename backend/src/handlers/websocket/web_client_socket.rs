@@ -62,6 +62,7 @@ pub async fn handle_web_client_socket(
 
     let mut dashboard_jobs = tokio::task::JoinSet::new();
     let mut dashboard_ids = std::collections::HashSet::new();
+    let mut compatibility_checked = false;
     let mut session_key: Option<SessionId> = None;
     let mut verified_session_id: Option<Uuid> = None;
     let mut pending_uploads: HashMap<String, PendingUpload> = HashMap::new();
@@ -113,6 +114,35 @@ pub async fn handle_web_client_socket(
                 match result {
                     Ok(client_msg) => {
                         if linked.as_ref().is_some_and(|auth| auth.authorize(&app_state, crate::handlers::federation::message_scope(&client_msg)).is_err()) { break; }
+                        // Negotiate inline: a rejection must reach the socket before
+                        // closing, and no later pipelined mutation may dispatch.
+                        let version = match &client_msg {
+                            ClientToServer::Hello { protocol_version } => Some(Some(*protocol_version)),
+                            ClientToServer::Register(fields) => Some(fields.protocol_version),
+                            // An old dashboard can start without Register or Hello.
+                            // Treat that as v1, never as whichever major is current.
+                            _ if !compatibility_checked => Some(None),
+                            _ => None,
+                        };
+                        if let Some(version) = version {
+                            let error = shared::protocol::check_protocol_version(version, "browser").err();
+                            compatibility_checked = error.is_none();
+                            if matches!(client_msg, ClientToServer::Hello { .. }) {
+                                let rejected = error.is_some();
+                                if ws_sender.send(ServerToClient::HelloAck {
+                                    protocol_version: shared::protocol::PROTOCOL_VERSION,
+                                    success: !rejected,
+                                    error,
+                                }).await.is_err() || rejected { break; }
+                                continue;
+                            }
+                            if let Some(message) = error {
+                                // Legacy browsers know Error, not HelloAck. Keep the
+                                // rejection decodable even across a future major bump.
+                                let _ = ws_sender.send(ServerToClient::Error { message }).await;
+                                break;
+                            }
+                        }
                         if let ClientToServer::Dashboard { request_id, request } = client_msg {
                             // Linked grants currently exclude host administration on REST;
                             // a socket must not bypass that narrower allow-list.
@@ -188,6 +218,8 @@ fn handle_web_client_message(
     } = ctx;
     match client_msg {
         ClientToServer::Dashboard { .. } => false, // handled asynchronously by the socket
+        // Consumed by the socket handshake before command dispatch.
+        ClientToServer::Hello { .. } => false,
         ClientToServer::Register(shared::RegisterFields {
             session_id,
             session_name,

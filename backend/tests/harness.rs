@@ -77,6 +77,7 @@ async fn spawn_test_app() -> SocketAddr {
 
 fn test_register_fields() -> RegisterFields {
     RegisterFields {
+        protocol_version: None,
         session_id: uuid::Uuid::new_v4(),
         session_name: "harness".to_string(),
         // dev mode resolves the seeded dev user, so no real token is needed.
@@ -116,7 +117,9 @@ async fn proxy_register_returns_ack_success() {
         .await
         .expect("connect to /ws/session");
 
-    conn.send(ProxyToServer::Register(test_register_fields()))
+    let mut fields = test_register_fields();
+    fields.protocol_version = Some(shared::protocol::PROTOCOL_VERSION);
+    conn.send(ProxyToServer::Register(fields))
         .await
         .expect("send Register");
 

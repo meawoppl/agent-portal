@@ -61,18 +61,29 @@ fn control_socket_half_open(ack_seen: bool, since_last_ack: Duration) -> bool {
     ack_seen && since_last_ack > HEARTBEAT_ACK_TIMEOUT
 }
 
+/// Local-only reason: do not add a new wire enum value to a major-version
+/// rejection that an older launcher must still be able to decode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ParkedReason {
+    Server(LauncherRejectReason),
+    ProtocolIncompatible,
+}
+
 /// The one-line operator instruction for a parked launcher.
-fn parked_instruction(reason: LauncherRejectReason) -> &'static str {
+fn parked_instruction(reason: ParkedReason) -> &'static str {
     match reason {
-        LauncherRejectReason::AuthFailed => {
+        ParkedReason::ProtocolIncompatible => {
+            "Incompatible protocol — update agent-portal and the Portal server to compatible releases. Retrying slowly."
+        }
+        ParkedReason::Server(LauncherRejectReason::AuthFailed) => {
             "Authentication failed — run `agent-portal login` to re-authenticate. \
              The launcher will keep retrying slowly and recover on its own once \
              you log in."
         }
-        LauncherRejectReason::TooManyLaunchers => {
+        ParkedReason::Server(LauncherRejectReason::TooManyLaunchers) => {
             "Launcher limit reached — disconnect another launcher. Retrying slowly."
         }
-        LauncherRejectReason::DuplicateLauncher => {
+        ParkedReason::Server(LauncherRejectReason::DuplicateLauncher) => {
             "Another launcher is already connected from this host — stop it (or \
              this one). Retrying slowly."
         }
@@ -101,7 +112,7 @@ pub async fn run_launcher_loop(
     // The reason whose instruction was last shown; re-emit when it changes so
     // an operator who fixes auth and then hits the launcher limit sees the new
     // guidance, not just "Still parked".
-    let mut last_parked_reason: Option<LauncherRejectReason> = None;
+    let mut last_parked_reason: Option<ParkedReason> = None;
     let mut scheduler = Scheduler::new();
     let mut supervisor = LauncherConnectionSupervisor::default();
     let mut login_registry = crate::login_registry::LoginRegistry::new();
@@ -125,6 +136,7 @@ pub async fn run_launcher_loop(
 
                 // Send registration
                 let register = LauncherToServer::LauncherRegister {
+                    protocol_version: Some(shared::protocol::PROTOCOL_VERSION),
                     launcher_id,
                     launcher_name: launcher_name.to_string(),
                     auth_token: auth_token.clone(),
@@ -158,6 +170,7 @@ pub async fn run_launcher_loop(
                 let ack_ok = loop {
                     match ws_receiver.recv().await {
                         Some(Ok(ServerToLauncher::LauncherRegisterAck {
+                            protocol_version,
                             success,
                             error,
                             fatal,
@@ -165,6 +178,12 @@ pub async fn run_launcher_loop(
                             capabilities,
                             ..
                         })) => {
+                            if let Err(error) =
+                                shared::protocol::check_protocol_version(protocol_version, "server")
+                            {
+                                error!("{error}");
+                                break Err(ParkedReason::ProtocolIncompatible);
+                            }
                             if success {
                                 info!("Registration successful");
                                 server_capabilities = capabilities;
@@ -173,7 +192,10 @@ pub async fn run_launcher_loop(
                             let msg = error.unwrap_or_default();
                             if fatal {
                                 error!("Registration rejected (fatal): {}", msg);
-                                break Err(classify_fatal(reject_reason, &msg));
+                                break Err(ParkedReason::Server(classify_fatal(
+                                    reject_reason,
+                                    &msg,
+                                )));
                             }
                             error!("Registration failed: {}", msg);
                             break Ok(false);
@@ -442,13 +464,17 @@ mod tests {
     #[test]
     fn every_park_reason_has_an_instruction() {
         for reason in [
-            LauncherRejectReason::AuthFailed,
-            LauncherRejectReason::TooManyLaunchers,
-            LauncherRejectReason::DuplicateLauncher,
+            ParkedReason::ProtocolIncompatible,
+            ParkedReason::Server(LauncherRejectReason::AuthFailed),
+            ParkedReason::Server(LauncherRejectReason::TooManyLaunchers),
+            ParkedReason::Server(LauncherRejectReason::DuplicateLauncher),
         ] {
             assert!(!parked_instruction(reason).is_empty());
         }
-        assert!(parked_instruction(LauncherRejectReason::AuthFailed).contains("agent-portal login"));
+        assert!(
+            parked_instruction(ParkedReason::Server(LauncherRejectReason::AuthFailed))
+                .contains("agent-portal login")
+        );
     }
 
     #[test]

@@ -303,3 +303,224 @@ async fn unacknowledged_input_replays_when_proxy_reconnects() {
         .await
         .unwrap();
 }
+
+#[tokio::test]
+async fn incompatible_proxy_is_rejected_before_session_creation() {
+    if std::env::var("DATABASE_URL").is_err() {
+        return;
+    }
+    use diesel::prelude::*;
+    let url = format!("ws://{}", spawn_test_app().await);
+    for version in [0, shared::protocol::PROTOCOL_VERSION + 1, u32::MAX] {
+        let mut fields = test_register_fields();
+        fields.protocol_version = Some(version);
+        let session_id = fields.session_id;
+        let mut socket = connect::<SessionEndpoint>(&url).await.unwrap();
+        socket.send(ProxyToServer::Register(fields)).await.unwrap();
+        let ack = receive::<SessionEndpoint>(&mut socket, |f| {
+            matches!(f, ServerToProxy::RegisterAck { .. })
+        })
+        .await;
+        let ServerToProxy::RegisterAck {
+            success,
+            retryable,
+            error,
+            protocol_version,
+            ..
+        } = ack
+        else {
+            unreachable!()
+        };
+        assert!(!success);
+        assert!(!retryable);
+        assert_eq!(protocol_version, Some(shared::protocol::PROTOCOL_VERSION));
+        assert!(error.unwrap().contains("Update"));
+        let count: i64 = backend::schema::sessions::table
+            .find(session_id)
+            .count()
+            .get_result(&mut test_pool().get().unwrap())
+            .unwrap();
+        assert_eq!(count, 0, "rejected peers must not create sessions");
+    }
+}
+
+#[tokio::test]
+async fn incompatible_launcher_gets_fatal_actionable_ack() {
+    if std::env::var("DATABASE_URL").is_err() {
+        return;
+    }
+    let url = format!("ws://{}", spawn_test_app().await);
+    let mut socket = connect::<shared::LauncherEndpoint>(&url).await.unwrap();
+    socket
+        .send(shared::LauncherToServer::LauncherRegister {
+            protocol_version: Some(shared::protocol::PROTOCOL_VERSION + 1),
+            launcher_id: uuid::Uuid::new_v4(),
+            launcher_name: "incompatible".into(),
+            auth_token: None,
+            hostname: "test".into(),
+            working_directory: Some("/tmp".into()),
+            version: Some("test".into()),
+            capabilities: Vec::new(),
+        })
+        .await
+        .unwrap();
+    let ack = receive::<shared::LauncherEndpoint>(&mut socket, |f| {
+        matches!(f, shared::ServerToLauncher::LauncherRegisterAck { .. })
+    })
+    .await;
+    let shared::ServerToLauncher::LauncherRegisterAck {
+        success,
+        fatal,
+        error,
+        reject_reason,
+        ..
+    } = ack
+    else {
+        unreachable!()
+    };
+    assert!(!success);
+    assert!(fatal);
+    assert!(error.unwrap().contains("Update"));
+    assert_eq!(
+        reject_reason, None,
+        "legacy launchers must decode rejection"
+    );
+}
+
+#[tokio::test]
+async fn incompatible_browser_cannot_register_or_send_pipelined_input() {
+    if std::env::var("DATABASE_URL").is_err() {
+        return;
+    }
+    use diesel::prelude::*;
+    let url = format!("ws://{}", spawn_test_app().await);
+    let fields = test_register_fields();
+    let session_id = fields.session_id;
+    let mut proxy = connect::<SessionEndpoint>(&url).await.unwrap();
+    proxy
+        .send(ProxyToServer::Register(fields.clone()))
+        .await
+        .unwrap();
+    receive::<SessionEndpoint>(&mut proxy, |f| {
+        matches!(f, ServerToProxy::RegisterAck { success: true, .. })
+    })
+    .await;
+    let mut browser = connect::<ClientEndpoint>(&url).await.unwrap();
+    browser
+        .send(ClientToServer::Hello {
+            protocol_version: u32::MAX,
+        })
+        .await
+        .unwrap();
+    // Race the server's rejection deliberately. Neither command may dispatch.
+    let _ = browser
+        .send(ClientToServer::Dashboard {
+            request_id: uuid::Uuid::new_v4(),
+            request: shared::api::DashboardRequest::RestartLauncher {
+                launcher_id: uuid::Uuid::new_v4(),
+            },
+        })
+        .await;
+    let _ = browser.send(ClientToServer::Register(fields)).await;
+    let _ = browser.send(ClientToServer::AgentInput {
+        content: serde_json::json!({"type":"user","message":{"role":"user","content":"must not run"}}),
+        send_mode: None, reasoning_effort: None, client_msg_id: Some(uuid::Uuid::new_v4()),
+    }).await;
+    let ack = receive::<ClientEndpoint>(&mut browser, |f| {
+        matches!(f, ServerToClient::HelloAck { .. })
+    })
+    .await;
+    assert!(matches!(
+        ack,
+        ServerToClient::HelloAck {
+            success: false,
+            error: Some(_),
+            ..
+        }
+    ));
+    // Closure proves all buffered inbound frames have been discarded, avoiding
+    // a sleep-based assertion racing a still-running server command handler.
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while let Some(frame) = browser.recv().await {
+            if frame.is_err() {
+                break;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    let input_seq: i64 = backend::schema::sessions::table
+        .find(session_id)
+        .select(backend::schema::sessions::input_seq)
+        .first(&mut test_pool().get().unwrap())
+        .unwrap();
+    assert_eq!(input_seq, 0);
+}
+
+#[tokio::test]
+async fn browser_hello_accepts_current_and_then_registration() {
+    if std::env::var("DATABASE_URL").is_err() {
+        return;
+    }
+    let url = format!("ws://{}", spawn_test_app().await);
+    let fields = test_register_fields();
+    let mut proxy = connect::<SessionEndpoint>(&url).await.unwrap();
+    proxy
+        .send(ProxyToServer::Register(fields.clone()))
+        .await
+        .unwrap();
+    receive::<SessionEndpoint>(&mut proxy, |f| {
+        matches!(f, ServerToProxy::RegisterAck { success: true, .. })
+    })
+    .await;
+    let mut browser = connect::<ClientEndpoint>(&url).await.unwrap();
+    browser
+        .send(ClientToServer::Hello {
+            protocol_version: shared::protocol::PROTOCOL_VERSION,
+        })
+        .await
+        .unwrap();
+    let ack = receive::<ClientEndpoint>(&mut browser, |f| {
+        matches!(f, ServerToClient::HelloAck { .. })
+    })
+    .await;
+    assert!(matches!(
+        ack,
+        ServerToClient::HelloAck {
+            success: true,
+            error: None,
+            ..
+        }
+    ));
+    browser
+        .send(ClientToServer::Register(fields))
+        .await
+        .unwrap();
+    receive::<ClientEndpoint>(&mut browser, |f| {
+        matches!(f, ServerToClient::AgentProgress { .. })
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn browser_register_skew_uses_legacy_error_frame() {
+    if std::env::var("DATABASE_URL").is_err() {
+        return;
+    }
+    let url = format!("ws://{}", spawn_test_app().await);
+    let mut fields = test_register_fields();
+    fields.protocol_version = Some(u32::MAX);
+    let mut browser = connect::<ClientEndpoint>(&url).await.unwrap();
+    browser
+        .send(ClientToServer::Register(fields))
+        .await
+        .unwrap();
+    let frame = receive::<ClientEndpoint>(&mut browser, |f| {
+        matches!(
+            f,
+            ServerToClient::Error { .. } | ServerToClient::HelloAck { .. }
+        )
+    })
+    .await;
+    assert!(matches!(frame, ServerToClient::Error { message } if message.contains("Update")));
+}

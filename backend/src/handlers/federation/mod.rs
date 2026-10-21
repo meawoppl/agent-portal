@@ -220,7 +220,9 @@ fn route_scope(method: &Method, route: &str) -> Option<TokenScope> {
 /// Exhaustive so new message types require an explicit scope decision.
 pub fn message_scope(message: &shared::ClientToServer) -> TokenScope {
     match message {
-        shared::ClientToServer::Register(_) => TokenScope::Read,
+        shared::ClientToServer::Register(_) | shared::ClientToServer::Hello { .. } => {
+            TokenScope::Read
+        }
         shared::ClientToServer::Dashboard { .. }
         | shared::ClientToServer::AgentInput { .. }
         | shared::ClientToServer::PermissionResponse(_)

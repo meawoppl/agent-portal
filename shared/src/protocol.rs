@@ -1,3 +1,23 @@
+/// Major version of the Portal transport contract, independent of release
+/// numbers. Additive messages remain capability-gated; bump this only when a
+/// peer cannot safely use the base contract. Missing metadata is legacy v1.
+pub const PROTOCOL_VERSION: u32 = 1;
+
+/// Reject incompatible peers before registering them or accepting mutations.
+/// Old clients deliberately remain supported: absence means the original v1
+/// contract, not "latest" (which would silently accept incompatible clients
+/// after a future major bump).
+pub fn check_protocol_version(version: Option<u32>, peer: &str) -> Result<(), String> {
+    let offered = version.unwrap_or(1);
+    if offered == PROTOCOL_VERSION {
+        Ok(())
+    } else {
+        Err(format!(
+            "Incompatible {peer} protocol version {offered}; this connection requires version {PROTOCOL_VERSION}. Update the {peer} and Portal server to compatible releases."
+        ))
+    }
+}
+
 /// Session cookie name used for web client authentication.
 /// Shared between all backend handlers that read or write the session cookie.
 pub const SESSION_COOKIE_NAME: &str = "cc_session";
@@ -56,3 +76,20 @@ pub const MAX_SECRET_DROP_BYTES: u64 = 64 * 1024;
 /// reconciling desired sessions (see `LauncherToServer::LauncherHeartbeat`
 /// handling in the backend's launcher socket).
 pub const LAUNCHER_HEARTBEAT_INTERVAL_SECS: u64 = 30;
+
+#[cfg(test)]
+mod compatibility_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_and_current_match_but_unknown_majors_are_actionable() {
+        assert!(check_protocol_version(None, "proxy").is_ok());
+        assert!(check_protocol_version(Some(PROTOCOL_VERSION), "launcher").is_ok());
+        for offered in [0, PROTOCOL_VERSION + 1, u32::MAX] {
+            let error = check_protocol_version(Some(offered), "browser").unwrap_err();
+            assert!(error.contains("browser"));
+            assert!(error.contains("Update"));
+            assert!(error.contains(&offered.to_string()));
+        }
+    }
+}
