@@ -366,14 +366,22 @@ async fn forward_missing(
         .send()
         .await
         .ok()?;
-    let status = response.status();
-    if status.as_u16() == 404 || status.as_u16() == 410 {
+    let status = response.status().as_u16();
+    let body = response.bytes().await.ok()?;
+    classify_forwards(status, &body, port)
+}
+
+/// Read one forwards answer: 404/410 mean the session or forward is gone; a
+/// readable list says whether `port` is in it; anything else (auth or server
+/// errors, a malformed body) is unknown.
+fn classify_forwards(status: u16, body: &[u8], port: u16) -> Option<Option<String>> {
+    if status == 404 || status == 410 {
         return Some(Some(format!("HTTP {status}")));
     }
-    if !status.is_success() {
+    if !(200..300).contains(&status) {
         return None;
     }
-    let forwards = response.json::<SessionForwardsResponse>().await.ok()?;
+    let forwards = serde_json::from_slice::<SessionForwardsResponse>(body).ok()?;
     if forwards.forwards.iter().any(|f| f.port == port) {
         return Some(None);
     }
@@ -452,7 +460,12 @@ async fn serve(root: PathBuf, recipe: Recipe, credentials: Credentials) -> Resul
                         // reconnect can briefly report no forward or a 404.
                         let (current_base, token) = credentials()?;
                         if current_base != base { bail!("configured backend changed; register the service again"); }
-                        let Some(missing) = forward_missing(&client, &base, &token, recipe.session, port).await else { continue };
+                        let Some(missing) = forward_missing(&client, &base, &token, recipe.session, port).await else {
+                            // An unknown answer breaks the run: only consecutive,
+                            // confirmed misses may add up to a close.
+                            absence = Absence::default();
+                            continue;
+                        };
                         if absence.observe(missing.is_some(), tokio::time::Instant::now().into_std()) {
                             let reason = missing.unwrap_or_default();
                             tracing::warn!(
@@ -756,6 +769,69 @@ mod tests {
         assert!(!absence.observe(true, at(40 + grace)));
         // Third consecutive miss, past the grace window.
         assert!(absence.observe(true, at(50 + grace)));
+    }
+
+    /// The supervisor resets on an unknown answer, so misses separated by an
+    /// outage never add up to a close.
+    #[test]
+    fn misses_around_an_outage_do_not_add_up() {
+        let start = std::time::Instant::now();
+        let grace = ABSENCE_GRACE.as_millis() as u64;
+        let at = |s: u64| start + Duration::from_millis(s);
+        let mut absence = Absence::default();
+        assert!(!absence.observe(true, at(0)));
+        assert!(!absence.observe(true, at(10)));
+        // A long stretch of unknown answers: the supervisor starts over.
+        absence = Absence::default();
+        assert!(!absence.observe(true, at(10 * grace)));
+        assert!(!absence.observe(true, at(10 * grace + 10)));
+        assert!(!absence.observe(true, at(10 * grace + 20)));
+    }
+
+    #[test]
+    fn forwards_answers_are_classified() {
+        let list = |ports: &[u16]| {
+            serde_json::to_vec(&SessionForwardsResponse {
+                forwards: ports
+                    .iter()
+                    .map(|&port| shared::api::ForwardInfo {
+                        port,
+                        url: String::new(),
+                        created_at: String::new(),
+                        public: false,
+                        listening: None,
+                        process: None,
+                    })
+                    .collect(),
+                recent_failures: vec![],
+                connections: vec![],
+                connection_limit: 512,
+            })
+            .unwrap()
+        };
+        assert_eq!(classify_forwards(200, &list(&[7000]), 7000), Some(None));
+        assert_eq!(
+            classify_forwards(200, &list(&[3000]), 7000),
+            Some(Some("forwards now [3000]".into()))
+        );
+        assert_eq!(
+            classify_forwards(200, &list(&[]), 7000),
+            Some(Some("forwards now []".into()))
+        );
+        for gone in [404, 410] {
+            assert_eq!(
+                classify_forwards(gone, b"", 7000),
+                Some(Some(format!("HTTP {gone}")))
+            );
+        }
+        for unknown in [401, 403, 500, 502, 503] {
+            assert_eq!(classify_forwards(unknown, b"", 7000), None, "{unknown}");
+        }
+        assert_eq!(
+            classify_forwards(200, b"<html>", 7000),
+            None,
+            "malformed body"
+        );
     }
     #[test]
     fn injected_port_does_not_shell_interpret_arguments() {
