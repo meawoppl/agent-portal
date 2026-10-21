@@ -382,8 +382,8 @@ async fn incompatible_launcher_gets_fatal_actionable_ack() {
     assert!(fatal);
     assert!(error.unwrap().contains("Update"));
     assert_eq!(
-        reject_reason,
-        Some(shared::LauncherRejectReason::ProtocolIncompatible)
+        reject_reason, None,
+        "legacy launchers must decode rejection"
     );
 }
 

@@ -195,7 +195,8 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                             error: Some(error),
                             fatal: true,
                             capabilities: Vec::new(),
-                            reject_reason: Some(LauncherRejectReason::ProtocolIncompatible),
+                            // Keep the rejection decodable by legacy launchers.
+                            reject_reason: None,
                         })
                         .await;
                     return;

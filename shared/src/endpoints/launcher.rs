@@ -257,8 +257,6 @@ pub enum LauncherToServer {
 /// back to a string heuristic), old launchers ignore it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LauncherRejectReason {
-    /// Peer and server use incompatible transport major versions.
-    ProtocolIncompatible,
     /// Missing, invalid, expired, or revoked auth token.
     AuthFailed,
     /// The user is at their launcher limit.

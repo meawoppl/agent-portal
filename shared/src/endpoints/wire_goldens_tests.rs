@@ -955,3 +955,36 @@ fn browser_hello_wire_contract() {
         json!({"type":"HelloAck","protocol_version":1,"success":false,"error":"Update the browser"}),
     );
 }
+
+#[test]
+fn version_rejection_remains_decodable_by_pre_version_launchers() {
+    // Frozen legacy rejection decoder: adding a new enum value here would
+    // defeat the compatibility test, even if the new launcher understands it.
+    #[derive(serde::Deserialize)]
+    enum LegacyReason {
+        AuthFailed,
+        TooManyLaunchers,
+        DuplicateLauncher,
+    }
+    #[derive(serde::Deserialize)]
+    struct LegacyAck {
+        success: bool,
+        fatal: bool,
+        error: Option<String>,
+        reject_reason: Option<LegacyReason>,
+    }
+    let current = ServerToLauncher::LauncherRegisterAck {
+        protocol_version: Some(1),
+        success: false,
+        launcher_id: nil(),
+        error: Some("Incompatible launcher protocol; update compatible releases".into()),
+        fatal: true,
+        capabilities: Vec::new(),
+        reject_reason: None,
+    };
+    let old: LegacyAck = serde_json::from_value(serde_json::to_value(current).unwrap()).unwrap();
+    assert!(!old.success);
+    assert!(old.fatal);
+    assert!(old.error.unwrap().contains("update"));
+    assert!(old.reject_reason.is_none());
+}
