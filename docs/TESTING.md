@@ -265,7 +265,10 @@ python3 scripts/test_migration_roundtrip.py
 owned test database; its existing database is never migrated or reverted. The
 role needs `CREATEDB`; `dbname` query overrides are rejected. Cleanup drops only the database successfully created by
 this run, including after migration/comparison failures, Ctrl-C or SIGTERM.
-SIGKILL cannot run cleanup; CI tears down its disposable service regardless. Use a local test
+Cancellation while `createdb` itself is running can leave the newly named test
+database behind: ownership is only recorded after successful creation, so a
+failed creation never drops a database it cannot prove it created. SIGKILL also
+cannot run cleanup; CI tears down its disposable service regardless. Use a local test
 PostgreSQL instance, as CI does.
 
 This checks structural reversibility on a fresh database, not restoration of
