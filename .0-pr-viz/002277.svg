@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="sans-serif" fill="#c0caf5">
+<text x="60" y="60" font-size="24">PR #2277 - Transcript performance baseline</text>
+<text x="60" y="120" font-size="40">Measure the existing window before changing rendering</text>
+<path d="M60 160H1940 M1000 185V1090" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="70" y="220" fill="#f7768e" font-size="28">BEFORE</text>
+<text x="1050" y="220" fill="#9ece6a" font-size="28">AFTER</text>
+<rect x="70" y="260" width="880" height="210" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="95" y="308" font-size="29">A bounded view already exists</text>
+<text x="95" y="365" font-size="25">REST asks for render_limit=100.</text>
+<text x="95" y="415" font-size="25">Markers ride along inside the retained tail.</text>
+<rect x="1050" y="260" width="880" height="210" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1075" y="308" font-size="29">Ordinary retained history</text>
+<text x="1075" y="365" font-size="25">100 counted messages</text>
+<text x="1075" y="415" font-size="25">185 ms hydrate / 119 ms replay</text>
+<rect x="70" y="505" width="880" height="210" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="95" y="553" font-size="29">No repeatable browser workload</text>
+<text x="95" y="610" font-size="25">Large history and replay cost are hard</text>
+<text x="95" y="660" font-size="25">to compare without the same fixture.</text>
+<rect x="1050" y="505" width="880" height="210" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1075" y="553" font-size="29">Dense thinking burst</text>
+<text x="1075" y="610" font-size="25">100 messages + 5,000 markers</text>
+<text x="1075" y="660" font-size="25">518 ms hydrate / 331 ms replay</text>
+<rect x="70" y="750" width="880" height="210" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="95" y="798" font-size="29">Optimization needs evidence</text>
+<text x="95" y="855" font-size="25">Changing grouping or windowing can</text>
+<text x="95" y="905" font-size="25">hide messages or inflate the DOM.</text>
+<rect x="1050" y="750" width="880" height="210" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1075" y="798" font-size="29">Narrow viewport</text>
+<text x="1075" y="855" font-size="25">390 px, same fixtures</text>
+<text x="1075" y="905" font-size="25">194 / 126 ms ordinary; 514 / 342 ms burst</text>
+<text x="70" y="1060" font-size="25">Assertions: newest content appears; old rows leave; no page errors.</text>
+<text x="70" y="1120" font-size="22" fill="#a9b1d6">Release 6228fe55; Chromium; medians of 3 runs.</text>
+<text x="70" y="1160" font-size="22" fill="#a9b1d6">Includes fixture transport and two frames. Diagnostic baseline, not a production SLA.</text>
+</g></svg>
