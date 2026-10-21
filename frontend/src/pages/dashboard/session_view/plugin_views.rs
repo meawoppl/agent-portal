@@ -135,7 +135,7 @@ pub(super) fn plugin_context_notice(props: &PluginContextNoticeProps) -> Html {
                 <span class="plugin-context-title">{ "Plugins available to this session" }</span>
                 <span class="plugin-context-names">{ label }</span>
                 <span class="plugin-context-size">
-                    { format!("~{estimated_tokens} tokens in context") }
+                    { format!("~{estimated_tokens} estimated catalog tokens") }
                 </span>
             </button>
             if expanded {
@@ -150,7 +150,7 @@ pub(super) fn plugin_context_notice(props: &PluginContextNoticeProps) -> Html {
                             <article class="plugin-context-plugin" key={name.to_string()}>
                                 <div class="plugin-context-plugin-title">
                                     <span>{ display_name(name) }</span>
-                                    <span>{ format!("~{tokens} tokens in context") }</span>
+                                    <span>{ format!("~{tokens} estimated catalog tokens") }</span>
                                 </div>
                                 <div class="plugin-context-detail">
                                     { format!("{} · {}", first.reason, activation_label(first.activation)) }
@@ -163,7 +163,7 @@ pub(super) fn plugin_context_notice(props: &PluginContextNoticeProps) -> Html {
                                             </span>
                                             <span>{ &entry.name }</span>
                                             <span class="plugin-context-size">
-                                                { format!("{} source · ~{} tokens in context", source_size(entry.context_bytes), entry.estimated_tokens) }
+                                                { format!("{} source · ~{} estimated catalog tokens", source_size(entry.context_bytes), entry.estimated_tokens) }
                                             </span>
                                         </summary>
                                         <code class="plugin-context-source">{ &entry.path }</code>
