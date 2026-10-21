@@ -92,7 +92,9 @@ impl Drop for PartialFile {
         };
         // Cancellation and runtime teardown cannot await cleanup. Keep any
         // blocking filesystem work off the reactor and do not require Tokio
-        // to remain alive. Process termination is still best effort.
+        // to remain alive. This fallback uses one thread per dropped partial;
+        // normal shutdown awaits removal and disarms guards instead. Abrupt
+        // process termination or thread exhaustion remains best effort.
         if let Err(error) = std::thread::Builder::new()
             .name("portal-upload-cleanup".into())
             .spawn(move || {
