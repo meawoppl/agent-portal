@@ -233,6 +233,8 @@ mod tests {
             paused: false,
             claude_args: Vec::new(),
             last_model: None,
+            spawned_by: None,
+            spawn_depth: 1,
             forked_from_session_id: None,
             fork_point_turn_id: None,
         }

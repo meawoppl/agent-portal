@@ -774,6 +774,12 @@ pub struct SessionInfo {
     /// keeps older proxies/clients wire-compatible.
     #[serde(default)]
     pub last_model: Option<String>,
+    /// Parent of an agent-created child. Null for human-created sessions.
+    #[serde(default)]
+    pub spawned_by: Option<Uuid>,
+    /// Root=1; retained even when a parent is deleted, so depth cannot reset.
+    #[serde(default = "default_spawn_depth")]
+    pub spawn_depth: u32,
     /// Source portal session for a fork. The agent history remains local to the
     /// source launcher; this link provides durable portal-side provenance.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -782,6 +788,10 @@ pub struct SessionInfo {
     /// the latest persisted turn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fork_point_turn_id: Option<String>,
+}
+
+fn default_spawn_depth() -> u32 {
+    1
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
