@@ -1434,6 +1434,28 @@
     flex: 1 1 18rem;
 }
 
+.plugins-browser-controls input,
+.plugins-browser-controls select {
+    box-sizing: border-box;
+    width: 100%;
+    padding: 0.4rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-dark);
+    color: var(--text-primary);
+    font-size: 0.85rem;
+}
+
+.plugins-browser-controls input:focus,
+.plugins-browser-controls select:focus {
+    border-color: var(--accent);
+    outline: none;
+}
+
+.plugins-browser a {
+    color: var(--accent);
+}
+
 .plugins-browser-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
