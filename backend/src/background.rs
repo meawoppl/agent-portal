@@ -1162,83 +1162,86 @@ mod archive_pending_sessions_db_tests {
             return;
         };
         let mut conn = pool.get().expect("conn");
-        conn.begin_test_transaction().unwrap();
-        let user = crate::test_support::insert_user(&mut conn, "archive-eligible");
+        conn.test_transaction::<_, diesel::result::Error, _>(|conn| {
+            let user = crate::test_support::insert_user(&mut *conn, "archive-eligible");
 
-        // Cutoff is now - ARCHIVE_IDLE_SECS (3600s). Use wide margins so the test
-        // is not flaky around the second the query captures `now`.
-        let now = chrono::Utc::now().naive_utc();
-        let idle = now - chrono::Duration::hours(2);
-        let recent = now - chrono::Duration::minutes(30);
-        let stale_archived = idle - chrono::Duration::hours(1);
-        let fresh_archived = idle + chrono::Duration::minutes(10);
-        let cutoff_exact = now - chrono::Duration::seconds(crate::archive::ARCHIVE_IDLE_SECS);
+            // Cutoff is now - ARCHIVE_IDLE_SECS (3600s). Use wide margins so the test
+            // is not flaky around the second the query captures `now`.
+            let now = chrono::Utc::now().naive_utc();
+            let idle = now - chrono::Duration::hours(2);
+            let recent = now - chrono::Duration::minutes(30);
+            let stale_archived = idle - chrono::Duration::hours(1);
+            let fresh_archived = idle + chrono::Duration::minutes(10);
+            let cutoff_exact = now - chrono::Duration::seconds(crate::archive::ARCHIVE_IDLE_SECS);
 
-        // Seven cases spanning the predicate.
-        let active_never = insert_session(&mut conn, user.id, "active", idle, None);
-        let recent_inactive = insert_session(&mut conn, user.id, "disconnected", recent, None);
-        let never_archived = insert_session(&mut conn, user.id, "disconnected", idle, None);
-        let stale = insert_session(
-            &mut conn,
-            user.id,
-            "disconnected",
-            idle,
-            Some(stale_archived),
-        );
-        let fresh = insert_session(
-            &mut conn,
-            user.id,
-            "disconnected",
-            idle,
-            Some(fresh_archived),
-        );
-        let boundary = insert_session(&mut conn, user.id, "disconnected", cutoff_exact, None);
-        let unknown_status = insert_session(&mut conn, user.id, "paused", idle, None);
+            // Seven cases spanning the predicate.
+            let active_never = insert_session(&mut *conn, user.id, "active", idle, None);
+            let recent_inactive = insert_session(&mut *conn, user.id, "disconnected", recent, None);
+            let never_archived = insert_session(&mut *conn, user.id, "disconnected", idle, None);
+            let stale = insert_session(
+                &mut *conn,
+                user.id,
+                "disconnected",
+                idle,
+                Some(stale_archived),
+            );
+            let fresh = insert_session(
+                &mut *conn,
+                user.id,
+                "disconnected",
+                idle,
+                Some(fresh_archived),
+            );
+            let boundary = insert_session(&mut *conn, user.id, "disconnected", cutoff_exact, None);
+            let unknown_status = insert_session(&mut *conn, user.id, "paused", idle, None);
 
-        // Use the SAME shared fn as production — filter drift cannot escape the test.
-        let cutoff = now - chrono::Duration::seconds(crate::archive::ARCHIVE_IDLE_SECS);
-        let eligible: Vec<Uuid> = crate::background::load_archive_eligible(&mut conn, cutoff, 100)
-            .expect("query eligible")
-            .into_iter()
-            .map(|s| s.id)
-            .filter(|id| {
-                [
-                    active_never,
-                    recent_inactive,
-                    never_archived,
-                    stale,
-                    fresh,
-                    boundary,
-                    unknown_status,
-                ]
-                .contains(id)
-            })
-            .collect();
+            // Use the SAME shared fn as production — filter drift cannot escape the test.
+            let cutoff = now - chrono::Duration::seconds(crate::archive::ARCHIVE_IDLE_SECS);
+            let eligible: Vec<Uuid> =
+                crate::background::load_archive_eligible(&mut *conn, cutoff, 100)
+                    .expect("query eligible")
+                    .into_iter()
+                    .map(|s| s.id)
+                    .filter(|id| {
+                        [
+                            active_never,
+                            recent_inactive,
+                            never_archived,
+                            stale,
+                            fresh,
+                            boundary,
+                            unknown_status,
+                        ]
+                        .contains(id)
+                    })
+                    .collect();
 
-        assert!(!eligible.contains(&active_never), "active never eligible");
-        assert!(
-            !eligible.contains(&recent_inactive),
-            "recent (< cutoff) not eligible"
-        );
-        assert!(
-            eligible.contains(&never_archived),
-            "never-archived idle should be eligible"
-        );
-        assert!(eligible.contains(&stale), "stale should be eligible");
-        assert!(!eligible.contains(&fresh), "fresh should not be eligible");
-        assert!(
-            !eligible.contains(&boundary),
-            "==cutoff is exclusive (lt), not eligible"
-        );
-        assert!(
-            eligible.contains(&unknown_status),
-            "unknown non-active status follows inactive path"
-        );
-        assert_eq!(
-            eligible.len(),
-            3,
-            "exactly never+stale+unknown should be selected"
-        );
+            assert!(!eligible.contains(&active_never), "active never eligible");
+            assert!(
+                !eligible.contains(&recent_inactive),
+                "recent (< cutoff) not eligible"
+            );
+            assert!(
+                eligible.contains(&never_archived),
+                "never-archived idle should be eligible"
+            );
+            assert!(eligible.contains(&stale), "stale should be eligible");
+            assert!(!eligible.contains(&fresh), "fresh should not be eligible");
+            assert!(
+                !eligible.contains(&boundary),
+                "==cutoff is exclusive (lt), not eligible"
+            );
+            assert!(
+                eligible.contains(&unknown_status),
+                "unknown non-active status follows inactive path"
+            );
+            assert_eq!(
+                eligible.len(),
+                3,
+                "exactly never+stale+unknown should be selected"
+            );
+            Ok(())
+        });
     }
 }
 
@@ -1291,22 +1294,28 @@ mod retention_archive_hold_tests {
             return;
         };
         let mut conn = pool.get().expect("conn");
-        conn.begin_test_transaction().unwrap();
-        let user = crate::test_support::insert_user(&mut conn, "retention-disabled");
-        let sid = make_session(&mut conn, user.id);
-        let old = chrono::Utc::now().naive_utc() - chrono::Duration::days(40);
-        insert_old_message(&mut conn, sid, user.id, old);
+        conn.test_transaction::<_, diesel::result::Error, _>(|conn| {
+            let user = crate::test_support::insert_user(&mut *conn, "retention-disabled");
+            let sid = make_session(&mut *conn, user.id);
+            let old = chrono::Utc::now().naive_utc() - chrono::Duration::days(40);
+            insert_old_message(&mut *conn, sid, user.id, old);
 
-        let config = RetentionConfig::new(100, 30);
-        // Archive disabled -> held set empty per `run_retention_cleanup` None branch.
-        let held: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
-        // Verify the candidate would be trimmed if not held.
-        let (age_deleted, _) =
-            crate::handlers::retention::run_retention_cleanup(&mut conn, vec![], config, &held);
-        assert!(
-            age_deleted >= 1,
-            "with no held, old message should be deleted"
-        );
+            let config = RetentionConfig::new(100, 30);
+            // Archive disabled -> held set empty per `run_retention_cleanup` None branch.
+            let held: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
+            // Verify the candidate would be trimmed if not held.
+            let (age_deleted, _) = crate::handlers::retention::run_retention_cleanup(
+                &mut *conn,
+                vec![],
+                config,
+                &held,
+            );
+            assert!(
+                age_deleted >= 1,
+                "with no held, old message should be deleted"
+            );
+            Ok(())
+        });
     }
 
     #[test]
@@ -1315,28 +1324,31 @@ mod retention_archive_hold_tests {
             return;
         };
         let mut conn = pool.get().expect("conn");
-        conn.begin_test_transaction().unwrap();
-        let user = crate::test_support::insert_user(&mut conn, "retention-local-ok");
-        let sid = make_session(&mut conn, user.id);
-        let old = chrono::Utc::now().naive_utc() - chrono::Duration::days(40);
-        insert_old_message(&mut conn, sid, user.id, old);
+        conn.test_transaction::<_, diesel::result::Error, _>(|conn| {
+            let user = crate::test_support::insert_user(&mut *conn, "retention-local-ok");
+            let sid = make_session(&mut *conn, user.id);
+            let old = chrono::Utc::now().naive_utc() - chrono::Duration::days(40);
+            insert_old_message(&mut *conn, sid, user.id, old);
 
-        let tmp = tempfile::tempdir().expect("tmp");
-        let cfg = ArchiveConfig {
-            backend: crate::archive::ArchiveBackendConfig::Local {
-                root: tmp.path().to_path_buf(),
-            },
-            transcripts: true,
-            media: true,
-        };
-        let runtime = ArchiveRuntime::new(cfg).expect("runtime");
+            let tmp = tempfile::tempdir().expect("tmp");
+            let cfg = ArchiveConfig {
+                backend: crate::archive::ArchiveBackendConfig::Local {
+                    root: tmp.path().to_path_buf(),
+                },
+                transcripts: true,
+                media: true,
+            };
+            let runtime = ArchiveRuntime::new(cfg).expect("runtime");
 
-        let config = RetentionConfig::new(100, 30);
-        let held = crate::background::archive_retention_candidates(&mut conn, &runtime, &config);
-        assert!(
-            held.is_empty(),
-            "successful local archive should not hold trim, got {held:?}"
-        );
+            let config = RetentionConfig::new(100, 30);
+            let held =
+                crate::background::archive_retention_candidates(&mut *conn, &runtime, &config);
+            assert!(
+                held.is_empty(),
+                "successful local archive should not hold trim, got {held:?}"
+            );
+            Ok(())
+        });
     }
 
     #[test]
@@ -1345,35 +1357,42 @@ mod retention_archive_hold_tests {
             return;
         };
         let mut conn = pool.get().expect("conn");
-        conn.begin_test_transaction().unwrap();
-        let user = crate::test_support::insert_user(&mut conn, "retention-fail");
-        let sid = make_session(&mut conn, user.id);
-        let old = chrono::Utc::now().naive_utc() - chrono::Duration::days(40);
-        insert_old_message(&mut conn, sid, user.id, old);
+        conn.test_transaction::<_, diesel::result::Error, _>(|conn| {
+            let user = crate::test_support::insert_user(&mut *conn, "retention-fail");
+            let sid = make_session(&mut *conn, user.id);
+            let old = chrono::Utc::now().naive_utc() - chrono::Duration::days(40);
+            insert_old_message(&mut *conn, sid, user.id, old);
 
-        // Unwritable / invalid local path should make archive_one_session fail.
-        // When running as root, permission bits are ignored, so use a file as the
-        // path — LocalArchiveStore will fail to create a directory there.
-        let tmp_file = tempfile::NamedTempFile::new().expect("tmp file");
-        let cfg = ArchiveConfig {
-            backend: crate::archive::ArchiveBackendConfig::Local {
-                root: tmp_file.path().to_path_buf(),
-            },
-            transcripts: true,
-            media: true,
-        };
-        let runtime = match ArchiveRuntime::new(cfg) {
-            Ok(r) => r,
-            Err(e) => panic!("ArchiveRuntime::new failed for file-as-dir: {e}"),
-        };
+            // Unwritable / invalid local path should make archive_one_session fail.
+            // When running as root, permission bits are ignored, so use a file as the
+            // path — LocalArchiveStore will fail to create a directory there.
+            let tmp_file = tempfile::NamedTempFile::new().expect("tmp file");
+            let cfg = ArchiveConfig {
+                backend: crate::archive::ArchiveBackendConfig::Local {
+                    root: tmp_file.path().to_path_buf(),
+                },
+                transcripts: true,
+                media: true,
+            };
+            let runtime = match ArchiveRuntime::new(cfg) {
+                Ok(r) => r,
+                Err(e) => panic!("ArchiveRuntime::new failed for file-as-dir: {e}"),
+            };
 
-        let config = RetentionConfig::new(100, 30);
-        let held = crate::background::archive_retention_candidates(&mut conn, &runtime, &config);
-        // File-as-dir fails ENOTDIR for any user including root (not a permission check),
-        // unlike chmod which root bypasses — so this holds reliably.
-        assert!(held.contains(&sid), "failed archive should hold {sid}");
-        let (age_deleted, _) =
-            crate::handlers::retention::run_retention_cleanup(&mut conn, vec![], config, &held);
-        assert_eq!(age_deleted, 0, "held session must not be trimmed");
+            let config = RetentionConfig::new(100, 30);
+            let held =
+                crate::background::archive_retention_candidates(&mut *conn, &runtime, &config);
+            // File-as-dir fails ENOTDIR for any user including root (not a permission check),
+            // unlike chmod which root bypasses — so this holds reliably.
+            assert!(held.contains(&sid), "failed archive should hold {sid}");
+            let (age_deleted, _) = crate::handlers::retention::run_retention_cleanup(
+                &mut *conn,
+                vec![],
+                config,
+                &held,
+            );
+            assert_eq!(age_deleted, 0, "held session must not be trimmed");
+            Ok(())
+        });
     }
 }

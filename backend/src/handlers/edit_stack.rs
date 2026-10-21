@@ -838,62 +838,65 @@ mod image_tests {
             return;
         };
         let mut conn = pool.get().expect("conn");
-        conn.begin_test_transaction().unwrap();
-        let user = crate::test_support::insert_user(&mut conn, "edit-stack-images");
-        let session = crate::test_support::insert_session(&mut conn, user.id, "edit-stack-images");
-        let image = "data:image/png;base64,aGVsbG8=";
-        let item = |title: &str, with_image: bool| NewSessionEditStackItem {
-            session_id: session.id,
-            created_by: user.id,
-            title: title.into(),
-            body: "note".into(),
-            source: None,
-            context: None,
-            image_data_url: with_image.then(|| image.to_string()),
-        };
-        diesel::insert_into(session_edit_stack_items::table)
-            .values(&vec![
-                item("pending", true),
-                item("sent", true),
-                item("text", false),
-            ])
-            .execute(&mut conn)
+        conn.test_transaction::<_, diesel::result::Error, _>(|conn| {
+            let user = crate::test_support::insert_user(&mut *conn, "edit-stack-images");
+            let session =
+                crate::test_support::insert_session(&mut *conn, user.id, "edit-stack-images");
+            let image = "data:image/png;base64,aGVsbG8=";
+            let item = |title: &str, with_image: bool| NewSessionEditStackItem {
+                session_id: session.id,
+                created_by: user.id,
+                title: title.into(),
+                body: "note".into(),
+                source: None,
+                context: None,
+                image_data_url: with_image.then(|| image.to_string()),
+            };
+            diesel::insert_into(session_edit_stack_items::table)
+                .values(&vec![
+                    item("pending", true),
+                    item("sent", true),
+                    item("text", false),
+                ])
+                .execute(&mut *conn)
+                .unwrap();
+            diesel::update(
+                session_edit_stack_items::table.filter(session_edit_stack_items::title.eq("sent")),
+            )
+            .set(session_edit_stack_items::status.eq("sent"))
+            .execute(&mut *conn)
             .unwrap();
-        diesel::update(
-            session_edit_stack_items::table.filter(session_edit_stack_items::title.eq("sent")),
-        )
-        .set(session_edit_stack_items::status.eq("sent"))
-        .execute(&mut conn)
-        .unwrap();
 
-        let items = load_edit_stack_items(&mut conn, session.id).unwrap();
-        let by_title = |t: &str| items.iter().find(|i| i.title == t).unwrap();
-        let pending = by_title("pending");
-        assert_eq!(pending.image_data_url.as_deref(), Some(image));
-        assert_eq!(
-            pending.image_url.as_deref(),
-            Some(image_url_for(session.id, pending.id).as_str())
-        );
-        let sent = by_title("sent");
-        assert!(
-            sent.image_data_url.is_none(),
-            "dispatched items drop the inline image"
-        );
-        assert!(sent.image_url.is_some());
-        let text = by_title("text");
-        assert!(text.image_data_url.is_none() && text.image_url.is_none());
+            let items = load_edit_stack_items(&mut *conn, session.id).unwrap();
+            let by_title = |t: &str| items.iter().find(|i| i.title == t).unwrap();
+            let pending = by_title("pending");
+            assert_eq!(pending.image_data_url.as_deref(), Some(image));
+            assert_eq!(
+                pending.image_url.as_deref(),
+                Some(image_url_for(session.id, pending.id).as_str())
+            );
+            let sent = by_title("sent");
+            assert!(
+                sent.image_data_url.is_none(),
+                "dispatched items drop the inline image"
+            );
+            assert!(sent.image_url.is_some());
+            let text = by_title("text");
+            assert!(text.image_data_url.is_none() && text.image_url.is_none());
 
-        // What the image endpoint serves for the dispatched item.
-        let stored: Option<String> = session_edit_stack_items::table
-            .find(sent.id)
-            .select(session_edit_stack_items::image_data_url)
-            .first(&mut conn)
-            .unwrap();
-        let (mime, bytes) = decode_image_data_url(stored.as_deref().unwrap()).unwrap();
-        assert_eq!(
-            (mime.as_str(), bytes.as_slice()),
-            ("image/png", &b"hello"[..])
-        );
+            // What the image endpoint serves for the dispatched item.
+            let stored: Option<String> = session_edit_stack_items::table
+                .find(sent.id)
+                .select(session_edit_stack_items::image_data_url)
+                .first(&mut *conn)
+                .unwrap();
+            let (mime, bytes) = decode_image_data_url(stored.as_deref().unwrap()).unwrap();
+            assert_eq!(
+                (mime.as_str(), bytes.as_slice()),
+                ("image/png", &b"hello"[..])
+            );
+            Ok(())
+        });
     }
 
     #[test]
