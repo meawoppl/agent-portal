@@ -9,6 +9,8 @@ name = "agent-portal"
 path = "src/main.rs"
 
 [dependencies]
+regex = "1"
+humantime = "2"
 # Shared types
 shared = { path = "../shared" }
 portal-sysmon = { path = "../portal-sysmon" }

@@ -367,9 +367,16 @@ pub async fn peek_agent_messages(
 /// that already reached the archive. `X-Portal-History-Complete` is true only
 /// when a durable transcript archive exists; without one we return the
 /// retained DB rows but cannot prove that an older retention trim never ran.
+#[derive(serde::Deserialize, Default)]
+pub struct HistoryQuery {
+    pub since: Option<String>,
+    pub tail: Option<usize>,
+}
+
 pub async fn download_agent_history(
     State(app_state): State<Arc<AppState>>,
     Path(target_id): Path<Uuid>,
+    Query(query): Query<HistoryQuery>,
     headers: HeaderMap,
     cookies: Cookies,
 ) -> Result<Response, AppError> {
@@ -384,6 +391,32 @@ pub async fn download_agent_history(
         .select(Session::as_select())
         .first(&mut conn)
         .map_err(|_| AppError::NotFound("session"))?;
+
+    let history_window = if let Some(since) = query.since {
+        use crate::schema::{session_follow_heads, session_follow_messages};
+        let after = shared::api::parse_follow_cursor(&since, target_id).ok_or(
+            AppError::BadRequest("invalid or cross-session follow cursor"),
+        )?;
+        let head = session_follow_heads::table
+            .find(target_id)
+            .select(session_follow_heads::sequence)
+            .first::<i64>(&mut conn)
+            .optional()?
+            .unwrap_or(0);
+        if after > head {
+            return Err(AppError::Conflict("follow cursor is ahead of this session"));
+        }
+        let ids: Vec<Uuid> = session_follow_messages::table
+            .filter(session_follow_messages::session_id.eq(target_id))
+            .filter(session_follow_messages::sequence.gt(after))
+            .filter(session_follow_messages::sequence.le(head))
+            .order(session_follow_messages::sequence.asc())
+            .select(session_follow_messages::message_id)
+            .load(&mut conn)?;
+        Some((head, ids))
+    } else {
+        None
+    };
 
     type MessageRow = (Uuid, String, String, chrono::NaiveDateTime, String);
     let rows: Vec<MessageRow> = messages::table
@@ -422,7 +455,23 @@ pub async fn download_agent_history(
     } else {
         (Vec::new(), false)
     };
-    let merged = archive_format::merge_transcript_lines(archived, current);
+    let mut merged = archive_format::merge_transcript_lines(archived, current);
+    if let Some((_, ids)) = &history_window {
+        let mut by_id: std::collections::HashMap<_, _> =
+            merged.into_iter().map(|line| (line.id, line)).collect();
+        merged = ids
+            .iter()
+            .map(|id| {
+                by_id.remove(id).ok_or(AppError::Conflict(
+                    "history gap: a body is absent from both retained transcript and archive",
+                ))
+            })
+            .collect::<Result<_, _>>()?;
+    }
+    if let Some(tail) = query.tail {
+        merged.drain(..merged.len().saturating_sub(tail));
+    }
+
     let mut body = Vec::new();
     for line in &merged {
         serde_json::to_writer(&mut body, line)
@@ -432,6 +481,14 @@ pub async fn download_agent_history(
 
     let mut response = body.into_response();
     let response_headers = response.headers_mut();
+    if let Some((head, _)) = history_window {
+        response_headers.insert(
+            "x-portal-history-cursor",
+            HeaderValue::from_str(&shared::api::follow_cursor(target_id, head))
+                .map_err(|e| AppError::Internal(e.to_string()))?,
+        );
+    }
+
     response_headers.insert(
         header::CONTENT_TYPE,
         HeaderValue::from_static("application/x-ndjson"),

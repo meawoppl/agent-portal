@@ -1,0 +1,50 @@
+//! Durable peer transcript cursors. Connectivity is a live snapshot, not history.
+use super::SessionActivityState;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FollowEvent {
+    pub cursor: String,
+    pub message_id: Uuid,
+    pub kind: String,
+    pub text: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FollowPage {
+    pub cursor: String,
+    pub events: Vec<FollowEvent>,
+    pub state: SessionActivityState,
+    pub connected: bool,
+    pub more: bool,
+}
+
+/// Opaque to callers; scoped to a session to reject accidental cross-peer reuse.
+pub fn follow_cursor(session: Uuid, sequence: i64) -> String {
+    format!("v1:{session}:{sequence}")
+}
+
+pub fn parse_follow_cursor(value: &str, session: Uuid) -> Option<i64> {
+    let sequence = value
+        .strip_prefix(&format!("v1:{session}:"))?
+        .parse::<i64>()
+        .ok()?;
+    (sequence >= 0).then_some(sequence)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn cursor_is_scoped_and_nonnegative() {
+        let id = Uuid::new_v4();
+        assert_eq!(parse_follow_cursor(&follow_cursor(id, 42), id), Some(42));
+        assert_eq!(
+            parse_follow_cursor(&follow_cursor(id, 42), Uuid::new_v4()),
+            None
+        );
+        assert_eq!(parse_follow_cursor(&follow_cursor(id, -1), id), None);
+        assert_eq!(parse_follow_cursor("nonsense", id), None);
+    }
+}

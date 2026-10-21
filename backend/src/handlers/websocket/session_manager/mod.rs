@@ -203,6 +203,8 @@ pub struct ForwardHealth {
 
 #[derive(Clone)]
 pub struct SessionManager {
+    /// Bounded hints only; durable cursors are stored in PostgreSQL.
+    follow_wakes: tokio::sync::broadcast::Sender<String>,
     sessions: Arc<DashMap<SessionId, ProxyConnection>>,
     web_clients: Arc<DashMap<SessionId, Vec<WebClientSender>>>,
     user_clients: Arc<DashMap<Uuid, Vec<WebClientSender>>>,
@@ -276,6 +278,7 @@ impl Default for SessionManager {
     fn default() -> Self {
         Self {
             sessions: Arc::new(DashMap::new()),
+            follow_wakes: tokio::sync::broadcast::channel(256).0,
             web_clients: Arc::new(DashMap::new()),
             user_clients: Arc::new(DashMap::new()),
             last_ack_seq: Arc::new(DashMap::new()),
@@ -303,6 +306,10 @@ impl Default for SessionManager {
 }
 
 impl SessionManager {
+    pub fn subscribe_follow(&self) -> tokio::sync::broadcast::Receiver<String> {
+        self.follow_wakes.subscribe()
+    }
+
     pub fn new() -> Self {
         Self::default()
     }

@@ -5,6 +5,8 @@
 //! credentials. The message is delivered to the target session's agent as an
 //! input turn, attributed with the sender's session id.
 
+pub mod follow;
+
 use anyhow::{anyhow, Context, Result};
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;
@@ -442,6 +444,8 @@ pub async fn history(
     output: Option<&Path>,
     stdout: bool,
     force: bool,
+    since: Option<&str>,
+    tail: Option<usize>,
 ) -> Result<()> {
     let (base, token) = api_base()?;
     let client = reqwest::Client::new();
@@ -477,8 +481,31 @@ pub async fn history(
             )
         },
     );
-    let mut resp =
-        request_with_retry(true, || client.get(&request_url).bearer_auth(&token).send()).await?;
+    if archived_match.is_some() && (since.is_some() || tail.is_some()) {
+        anyhow::bail!("incremental history requires a retained session index; download the full archive instead");
+    }
+    let mut query = Vec::new();
+    if let Some(since) = since {
+        query.push(("since", since.to_owned()));
+    }
+    if let Some(tail) = tail {
+        query.push(("tail", tail.to_string()));
+    }
+    let mut resp = request_with_retry(true, || {
+        client
+            .get(&request_url)
+            .query(&query)
+            .bearer_auth(&token)
+            .send()
+    })
+    .await?;
+    if let Some(cursor) = resp
+        .headers()
+        .get("x-portal-history-cursor")
+        .and_then(|h| h.to_str().ok())
+    {
+        eprintln!("After consuming this history, resume follow with --since {cursor}");
+    }
     let (complete, count) = archived_match.as_ref().map_or_else(
         || {
             (

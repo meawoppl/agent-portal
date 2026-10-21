@@ -57,6 +57,7 @@ impl SessionManager {
     }
 
     pub fn broadcast_to_web_clients(&self, session_key: &str, msg: ServerToClient) {
+        let _ = self.follow_wakes.send(session_key.to_owned());
         if let Some(mut clients) = self.web_clients.get_mut(session_key) {
             fanout_to_clients(clients.value_mut(), msg);
         }

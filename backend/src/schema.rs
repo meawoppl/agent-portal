@@ -278,6 +278,21 @@ diesel::table! {
 }
 
 diesel::table! {
+    session_follow_heads (session_id) {
+        session_id -> Uuid,
+        sequence -> Int8,
+    }
+}
+
+diesel::table! {
+    session_follow_messages (session_id, sequence) {
+        session_id -> Uuid,
+        sequence -> Int8,
+        message_id -> Uuid,
+    }
+}
+
+diesel::table! {
     session_forwards (id) {
         id -> Uuid,
         session_id -> Uuid,
@@ -440,6 +455,8 @@ diesel::joinable!(session_continuations -> sessions (session_id));
 diesel::joinable!(session_continuations -> users (user_id));
 diesel::joinable!(session_edit_stack_items -> sessions (session_id));
 diesel::joinable!(session_edit_stack_items -> users (created_by));
+diesel::joinable!(session_follow_heads -> sessions (session_id));
+diesel::joinable!(session_follow_messages -> sessions (session_id));
 diesel::joinable!(session_forwards -> sessions (session_id));
 diesel::joinable!(session_members -> sessions (session_id));
 diesel::joinable!(session_members -> users (user_id));
@@ -467,6 +484,8 @@ diesel::allow_tables_to_appear_in_same_query!(
     scheduled_tasks,
     session_continuations,
     session_edit_stack_items,
+    session_follow_heads,
+    session_follow_messages,
     session_forwards,
     session_members,
     sessions,

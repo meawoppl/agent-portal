@@ -317,6 +317,12 @@ enum MessageAction {
         /// Message text
         message: String,
     },
+    /// Follow peer activity with resumable cursors (read-only)
+    Follow {
+        agent_id: String,
+        #[command(flatten)]
+        options: message::follow::Options,
+    },
     /// Peek at a session's recent activity (read-only, one line per message)
     Peek {
         /// Target session id (a unique prefix works)
@@ -324,9 +330,11 @@ enum MessageAction {
         /// Number of recent messages to show (1–50)
         #[arg(short = 'n', long = "count", default_value_t = 10)]
         count: i64,
-        /// Print the raw JSON response instead of the readable rendering
+        /// Follow activity instead of taking a snapshot
         #[arg(long)]
-        json: bool,
+        follow: bool,
+        #[command(flatten)]
+        options: message::follow::Options,
     },
     /// Download a session's complete known transcript as NDJSON
     History {
@@ -341,6 +349,12 @@ enum MessageAction {
         /// Replace an existing destination file
         #[arg(long, conflicts_with = "stdout")]
         force: bool,
+        /// Follow cursor; return only the gap after it
+        #[arg(long)]
+        since: Option<String>,
+        /// Return only the last N rows of the selected history
+        #[arg(long)]
+        tail: Option<usize>,
     },
 }
 
@@ -576,17 +590,39 @@ async fn main() -> anyhow::Result<()> {
                 MessageAction::Send { agent_id, message } => {
                     message::send(&agent_id, &message).await
                 }
+                MessageAction::Follow { agent_id, options } => {
+                    message::follow::run(&agent_id, options).await
+                }
                 MessageAction::Peek {
                     agent_id,
                     count,
-                    json,
-                } => message::peek(&agent_id, count, json).await,
+                    follow,
+                    options,
+                } => {
+                    if follow {
+                        message::follow::run(&agent_id, options).await
+                    } else {
+                        message::peek(&agent_id, count, options.json).await
+                    }
+                }
                 MessageAction::History {
                     agent_id,
                     output,
                     stdout,
                     force,
-                } => message::history(&agent_id, output.as_deref(), stdout, force).await,
+                    since,
+                    tail,
+                } => {
+                    message::history(
+                        &agent_id,
+                        output.as_deref(),
+                        stdout,
+                        force,
+                        since.as_deref(),
+                        tail,
+                    )
+                    .await
+                }
             };
         }
         Some(Command::WorkQueue { action }) => {

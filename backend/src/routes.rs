@@ -325,6 +325,10 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
             "/api/agent/sessions/{id}/history",
             get(handlers::agent_comms::download_agent_history),
         )
+        .route(
+            "/api/agent/sessions/{id}/follow",
+            get(handlers::agent_follow::follow),
+        )
         // `agent-portal show <file>`: display media in a session transcript.
         // Raise the request-body limit to the configured video cap; the
         // handler enforces the exact per-kind cap. Without this override
