@@ -138,9 +138,13 @@ pub fn set_plugin_enabled(name: &str, enabled: bool) -> anyhow::Result<()> {
     save_config(&config)
 }
 
-pub fn plugin_skill_context(agent_type: AgentType, session_id: Uuid) -> PluginSkillContext {
+pub fn plugin_skill_context(
+    agent_type: AgentType,
+    session_id: Uuid,
+    working_directory: &Path,
+) -> PluginSkillContext {
     let mut config = load_config();
-    match crate::session_plugins::apply_selection(&mut config, session_id) {
+    match crate::session_plugins::apply_selection(&mut config, session_id, working_directory) {
         Ok(()) => {}
         Err(error) => {
             // Never silently re-enable excluded skills if the selection cannot be read.
@@ -701,7 +705,8 @@ description: Route KiCad PCB layouts.
 
         let selection_path = dir.path().join("selection.json");
         std::fs::write(&selection_path, r#"{"kicad-pcb":false}"#).unwrap();
-        crate::session_plugins::apply_selection_at(&mut config, &selection_path).unwrap();
+        crate::session_plugins::apply_selection_at(&mut config, &selection_path, dir.path())
+            .unwrap();
         for agent in [AgentType::Claude, AgentType::Codex, AgentType::Antigravity] {
             let context = plugin_skill_context_from_config(&config, &generated_root, agent);
             assert!(context.claude_plugin_dirs.is_empty());

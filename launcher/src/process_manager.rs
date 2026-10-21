@@ -850,8 +850,11 @@ async fn run_session_task(
         } else {
             config.claude_args.clone()
         };
-        let plugin_skill_context =
-            config::plugin_skill_context(config.agent_type, config.session_id);
+        let plugin_skill_context = config::plugin_skill_context(
+            config.agent_type,
+            config.session_id,
+            std::path::Path::new(&config.working_directory),
+        );
         let plugin_skill_cleanup_dir = plugin_skill_context.cleanup_dir.clone();
         let plugin_skill = plugin_skill_launch_policy(
             config.agent_type,
