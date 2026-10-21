@@ -242,3 +242,32 @@ docker-compose down -v
 # Remove config (optional)
 rm -rf ~/.config/agent-portal
 ```
+
+### Migration structural roundtrip
+
+The `Migration Roundtrip` CI job uses PostgreSQL 16 and pinned `diesel_cli`
+2.3.11. `scripts/check-migration-roundtrip.py` creates its own randomly named
+`ap_migration_check_*` database, applies every migration, checks Diesel's
+printed schema against `backend/src/schema.rs`, reverts every migration, and
+reapplies them. It compares both generated Rust schema and a full schema-only
+PostgreSQL dump before/after, including indexes, constraints and functions.
+The script never rewrites `schema.rs` or edits the migration registry itself.
+
+To reproduce, install that Diesel CLI with PostgreSQL support and PostgreSQL
+client tools, then run:
+
+```sh
+DATABASE_URL=postgresql://localhost/postgres python3 scripts/check-migration-roundtrip.py
+python3 scripts/test_migration_roundtrip.py
+```
+
+`DATABASE_URL` is only the maintenance connection for creating/dropping the
+owned test database; its existing database is never migrated or reverted. The
+role needs `CREATEDB`. Cleanup drops only the database successfully created by
+this run, including after migration or comparison failures. Use a local test
+PostgreSQL instance, as CI does.
+
+This checks structural reversibility on a fresh database, not restoration of
+production data. Irreversible cleanups/backfills intentionally use `SELECT 1`
+in their down migration: a comments-only file is rejected as an empty query by
+PostgreSQL. Data-bearing upgrade fixtures and recovery testing remain separate.

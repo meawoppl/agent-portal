@@ -156,6 +156,40 @@ jobs:
       - name: Run tests
         run: cargo test --workspace
 
+  migration-roundtrip:
+    name: Migration Roundtrip
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://migration_check:migration_check@localhost:5432/postgres
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: migration_check
+          POSTGRES_PASSWORD: migration_check
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U migration_check -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          cache-key: "migration-cli"
+      - name: Install PostgreSQL tools
+        run: sudo apt-get update && sudo apt-get install -y libpq-dev postgresql-client
+      - name: Install pinned Diesel CLI
+        run: cargo install diesel_cli --version 2.3.11 --locked --no-default-features --features postgres
+      - name: Test disposable database ownership and cleanup
+        run: python3 scripts/test_migration_roundtrip.py
+      - name: Apply, revert, reapply and check schema drift
+        run: python3 scripts/check-migration-roundtrip.py
+
   e2e-tests:
     name: E2E Tests
     runs-on: ubuntu-latest
