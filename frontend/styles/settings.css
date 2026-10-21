@@ -1661,6 +1661,60 @@
     border-radius: 8px;
 }
 
+.schedule-runs {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin-top: 1.5rem;
+}
+
+.schedule-runs-task {
+    overflow: hidden;
+    background: var(--bg-darker);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+
+.schedule-runs-task h3 {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.schedule-run-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.schedule-run {
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
+    padding: 0.55rem 0.9rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.045);
+    font-size: 0.8rem;
+}
+
+.schedule-run:last-child {
+    border-bottom: none;
+}
+
+.schedule-run time {
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+}
+
+.schedule-run-live {
+    color: #9ece6a;
+    font-size: 0.72rem;
+}
+
+.schedule-run a {
+    margin-left: auto;
+    color: var(--accent);
+}
+
 @media (max-width: 768px) {
     .schedule-calendar {
         display: flex;

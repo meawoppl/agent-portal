@@ -61,6 +61,26 @@ pub struct ScheduledTaskListResponse {
     pub tasks: Vec<ScheduledTaskInfo>,
 }
 
+/// One session a scheduled task launched.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScheduledTaskRun {
+    pub session_id: uuid::Uuid,
+    /// The run's owner, which addresses it in the history view.
+    pub user_id: uuid::Uuid,
+    /// UTC ISO-8601 timestamp.
+    pub started_at: String,
+    /// The agent is still connected.
+    pub active: bool,
+    /// The archive holds a transcript, so the history view can open it.
+    pub archived: bool,
+}
+
+/// Response for `GET /api/scheduled-tasks/{id}/runs`, newest first.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScheduledTaskRunsResponse {
+    pub runs: Vec<ScheduledTaskRun>,
+}
+
 /// One enabled scheduled-task firing in the Settings calendar window.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScheduledTaskOccurrence {

@@ -11,7 +11,8 @@ use croner::Cron;
 use diesel::prelude::*;
 use shared::api::{
     CreateScheduledTaskRequest, ScheduledTaskInfo, ScheduledTaskListResponse,
-    ScheduledTaskOccurrence, UpcomingScheduledTasksResponse, UpdateScheduledTaskRequest,
+    ScheduledTaskOccurrence, ScheduledTaskRun, ScheduledTaskRunsResponse,
+    UpcomingScheduledTasksResponse, UpdateScheduledTaskRequest,
 };
 use shared::{
     AgentType, LaunchSpec, ScheduledTaskConfig, ScheduledTaskFields, ServerToLauncher, WorktreeMode,
@@ -441,7 +442,7 @@ pub async fn list_runs_handler(
     State(app_state): State<Arc<AppState>>,
     CurrentUserId(user_id): CurrentUserId,
     Path(task_id): Path<Uuid>,
-) -> Result<Json<Vec<Session>>, AppError> {
+) -> Result<Json<ScheduledTaskRunsResponse>, AppError> {
     let mut conn = app_state.conn()?;
 
     // Verify task ownership
@@ -459,7 +460,19 @@ pub async fn list_runs_handler(
         .limit(50)
         .load(&mut conn)?;
 
-    Ok(Json(runs))
+    Ok(Json(ScheduledTaskRunsResponse {
+        runs: runs.iter().map(run_info).collect(),
+    }))
+}
+
+fn run_info(s: &Session) -> ScheduledTaskRun {
+    ScheduledTaskRun {
+        session_id: s.id,
+        user_id: s.user_id,
+        started_at: s.created_at.and_utc().to_rfc3339(),
+        active: s.status == shared::SessionStatus::Active.as_str(),
+        archived: s.archived_at.is_some(),
+    }
 }
 
 #[cfg(test)]

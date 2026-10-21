@@ -223,12 +223,14 @@ pub fn dashboard_page() -> Html {
     // Paused sessions follow the same frontend convention as manually hidden
     // sessions: they remain available in the hidden rail section but do not
     // participate in focus, activation, waiting counts, or keyboard rotation.
+    // Scheduled-task runs are hidden the same way and left out of the rail
+    // entirely; Settings ▸ Schedule links to them instead.
     let effective_hidden_sessions: HashSet<SessionKey> = {
         let mut hidden = session_state.hidden_sessions.clone();
         hidden.extend(
             active_sessions
                 .iter()
-                .filter(|s| s.info.paused)
+                .filter(|s| s.info.paused || s.info.scheduled_task_id.is_some())
                 .map(|s| s.key),
         );
         hidden
@@ -794,6 +796,7 @@ pub fn dashboard_page() -> Html {
     // `effective_hidden_sessions` (hidden ∪ paused) covers all three.
     let (mobile_live, mobile_dormant): (Vec<&PortalSession>, Vec<&PortalSession>) = active_sessions
         .iter()
+        .filter(|entry| entry.info.scheduled_task_id.is_none())
         .partition(|entry| !effective_hidden_sessions.contains(&entry.key));
     let mobile_option = |entry: &&PortalSession| {
         let session = &entry.info;

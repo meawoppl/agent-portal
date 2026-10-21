@@ -502,14 +502,14 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
         })
     };
 
-    // Split sessions into visible vs hidden.
-    // Cron sessions default to hidden alongside manually-hidden sessions.
-    let (visible_indices, hidden_indices): (Vec<_>, Vec<_>) =
-        props.sessions.iter().enumerate().partition(|(_, session)| {
-            let is_hidden = props.hidden_sessions.contains(&session.key)
-                || session.info.scheduled_task_id.is_some();
-            !is_hidden
-        });
+    // Split sessions into visible vs hidden. Scheduled-task runs get no pill at
+    // all; Settings ▸ Schedule lists and links to them.
+    let (visible_indices, hidden_indices): (Vec<_>, Vec<_>) = props
+        .sessions
+        .iter()
+        .enumerate()
+        .filter(|(_, session)| session.info.scheduled_task_id.is_none())
+        .partition(|(_, session)| !props.hidden_sessions.contains(&session.key));
 
     let hidden_count = hidden_indices.len();
     let visible_count = visible_indices.len();

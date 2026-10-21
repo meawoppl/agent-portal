@@ -273,13 +273,7 @@ impl PillViewModel {
             }
         };
 
-        let agent_badge = if session.scheduled_task_id.is_some() {
-            Some(("cron", "Cron"))
-        } else if session.paused {
-            Some(("paused", "Paused"))
-        } else {
-            None
-        };
+        let agent_badge = session.paused.then_some(("paused", "Paused"));
 
         let role_badge_class = (session.my_role != shared::SessionRole::Owner)
             .then(|| format!("pill-role-badge role-{}", session.my_role.as_str()));

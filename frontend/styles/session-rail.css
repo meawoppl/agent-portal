@@ -1292,11 +1292,6 @@
     background: rgba(0, 170, 68, 0.15);
 }
 
-.pill-agent-badge.cron {
-    color: var(--accent);
-    background: rgba(125, 207, 255, 0.15);
-}
-
 .pill-agent-badge.paused {
     color: #e0af68;
     background: rgba(224, 175, 104, 0.15);
