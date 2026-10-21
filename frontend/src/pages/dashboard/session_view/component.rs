@@ -535,6 +535,8 @@ pub struct SessionView {
     plugins: Vec<PortalPluginInfo>,
     /// What the running process was launched with, recorded by the launcher.
     injected_context: Vec<PluginContextEntry>,
+    /// A posted plugin change hasn't reached the agent yet.
+    plugin_context_pending: bool,
     plugin_error: Option<String>,
     plugin_notice_expanded: bool,
     edit_stack_items: Vec<EditStackItem>,
@@ -681,6 +683,7 @@ impl Component for SessionView {
             active_surface: None,
             plugins: Vec::new(),
             injected_context: Vec::new(),
+            plugin_context_pending: false,
             plugin_error: None,
             plugin_notice_expanded: load_plugin_notice_expanded(session_id, &ctx.props().portal),
             edit_stack_items: Vec::new(),
@@ -1031,6 +1034,7 @@ impl Component for SessionView {
                 }
                 self.plugins = data.plugins;
                 self.injected_context = data.injected_context;
+                self.plugin_context_pending = data.context_pending;
                 self.plugin_error = None;
                 true
             }
@@ -1585,6 +1589,7 @@ impl Component for SessionView {
                                 }
                                 <PluginContextNotice
                                     entries={self.injected_context.clone()}
+                                    pending={self.plugin_context_pending}
                                     plugins={self.plugins.clone()}
                                     expanded={self.plugin_notice_expanded}
                                     on_toggle={ctx.link().callback(|_| SessionViewMsg::TogglePluginNotice)}

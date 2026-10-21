@@ -230,9 +230,9 @@ impl<A: Agent> Session<A> {
         self.config.recovery_context.take()
     }
 
-    /// Claim the context change posted since the last input, if any.
-    pub fn take_context_update(&self) -> Option<String> {
-        self.config.context_updates.lock().ok()?.take()
+    /// Where the launcher posts this session's plugin context changes.
+    pub fn context_inbox(&self) -> &crate::ContextInbox {
+        &self.config.context_updates
     }
 
     /// Poll for the next event.
@@ -828,14 +828,11 @@ mod tests {
         );
         assert_eq!(session.take_recovery_context(), None);
 
-        // A change posted through the shared inbox is claimed exactly once,
-        // and a newer post replaces an undelivered one.
-        let inbox = session.config().context_updates.clone();
-        assert_eq!(session.take_context_update(), None);
-        *inbox.lock().unwrap() = Some("first".into());
-        *inbox.lock().unwrap() = Some("second".into());
-        assert_eq!(session.take_context_update().as_deref(), Some("second"));
-        assert_eq!(session.take_context_update(), None);
+        // The launcher's handle and the session's are the same inbox.
+        let launcher_side = session.config().context_updates.clone();
+        assert!(!session.context_inbox().is_pending());
+        launcher_side.post(1, "current".into(), "update".into());
+        assert_eq!(session.context_inbox().pending().unwrap().text, "update");
         session.stop().await.unwrap();
     }
 

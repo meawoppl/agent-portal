@@ -17,6 +17,10 @@ pub struct PluginInventoryResponse {
     /// up on its next turn; otherwise it applies at the next launch.
     #[serde(default)]
     pub applies_live: bool,
+    /// A posted change has not reached the agent yet; it does on the
+    /// session's next input.
+    #[serde(default)]
+    pub context_pending: bool,
     #[serde(default)]
     pub injected_context: Vec<PluginContextEntry>,
     #[serde(default)]

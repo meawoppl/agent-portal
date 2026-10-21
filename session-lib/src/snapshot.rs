@@ -22,10 +22,6 @@ impl std::fmt::Debug for PortalCredentials {
     }
 }
 
-/// Where the launcher posts a running session's context change. The newest
-/// change replaces an undelivered one, since it describes the current state.
-pub type ContextInbox = std::sync::Arc<std::sync::Mutex<Option<String>>>;
-
 /// Configuration for creating a session
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SessionConfig {
@@ -46,7 +42,7 @@ pub struct SessionConfig {
     /// A change to the session's context posted while it runs (its plugins
     /// changed), folded into the next real input. Live state, never persisted.
     #[serde(skip)]
-    pub context_updates: ContextInbox,
+    pub context_updates: crate::ContextInbox,
     /// Unique session identifier
     pub session_id: Uuid,
     /// Working directory for the Claude session

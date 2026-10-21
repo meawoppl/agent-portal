@@ -16,6 +16,9 @@ use yew::prelude::*;
 pub(super) struct PluginContextNoticeProps {
     /// The launcher's record of what this session's process was given.
     pub entries: Vec<PluginContextEntry>,
+    /// A posted change hasn't reached the agent yet.
+    #[prop_or_default]
+    pub pending: bool,
     /// Current inventory, for display names and project policy.
     pub plugins: Vec<PortalPluginInfo>,
     pub expanded: bool,
@@ -141,6 +144,9 @@ pub(super) fn plugin_context_notice(props: &PluginContextNoticeProps) -> Html {
             </button>
             if expanded {
                 <div class="plugin-context-body">
+                    if props.pending {
+                        <div class="plugin-context-detail">{ "A plugin change is waiting for the session's next turn." }</div>
+                    }
                     if let Some(error) = &*error {
                         <div class="edit-stack-error">{ error }</div>
                     }

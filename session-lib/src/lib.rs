@@ -23,6 +23,7 @@
 pub mod adapter;
 pub mod agent;
 pub mod buffer;
+pub mod context_inbox;
 pub mod error;
 /// Throwaway git repositories for tests. Behind a feature so consumers can opt
 /// in (`session-lib = { features = ["test-fixtures"] }`) without shipping
@@ -47,12 +48,11 @@ pub mod turn_tracker;
 pub use adapter::{AgentOutput, AgentOutputClassifier, ClaudeAdapter, PermissionDecision};
 pub use agent::Agent;
 pub use buffer::{BufferedOutput, OutputBuffer};
+pub use context_inbox::{ContextInbox, ContextUpdate};
 pub use error::SessionError;
 pub use io::{IoCommand, IoEvent, PermissionResponse, SessionEvent};
 pub use session::Session;
-pub use snapshot::{
-    ContextInbox, PendingPermission, PortalCredentials, SessionConfig, SessionSnapshot,
-};
+pub use snapshot::{PendingPermission, PortalCredentials, SessionConfig, SessionSnapshot};
 pub use turn_tracker::{TurnOutcome, TurnTracker};
 
 // Re-export claude_codes types that appear in our public API. Per-agent

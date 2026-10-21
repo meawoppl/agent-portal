@@ -59,26 +59,19 @@ where
         claude_session.take_recovery_context()
     };
     let inject_reminder = !slash_command && reminder_pending.swap(false, Ordering::SeqCst);
-    // A plugin change posted while the session ran. It supersedes the plugin
-    // part of the launch-time reminder, so it rides along with that too.
-    let context_update = if slash_command {
-        None
-    } else {
-        claude_session.take_context_update()
-    };
+    // A plugin change posted while the session ran. Peeked, not taken: it is
+    // acknowledged only once the agent accepts this input, so a failed
+    // delivery leaves it for the next one.
+    let inbox = claude_session.context_inbox().clone();
+    let context_update = if slash_command { None } else { inbox.pending() };
     let (text, display_event) = if inject_reminder || recovery.is_some() {
-        let mut context = claude_session
-            .config()
-            .plugin_skill_reminder
-            .clone()
-            .unwrap_or_default();
+        let mut context = fresh_plugin_context(
+            &inbox,
+            claude_session.config().plugin_skill_reminder.as_deref(),
+        );
         if let Some(recovery) = recovery {
             context.push_str("\n\n");
             context.push_str(&recovery);
-        }
-        if let Some(update) = context_update {
-            context.push_str("\n\n");
-            context.push_str(&update);
         }
         portal_reminder::fold_session_start_reminder(
             input.text,
@@ -86,11 +79,11 @@ where
             Some(&context),
             default_display,
         )
-    } else if let Some(update) = context_update {
+    } else if let Some(update) = &context_update {
         portal_reminder::fold_context_update(
             input.text,
             input.display_event,
-            &update,
+            &update.text,
             default_display,
         )
     } else {
@@ -125,6 +118,9 @@ where
             return Some(ConnectionResult::AgentExited);
         }
     };
+    if let Some(update) = context_update {
+        inbox.acknowledge(update.revision);
+    }
     spawn_delivery_completion(
         ws_write.clone(),
         session_id,
@@ -133,6 +129,16 @@ where
         delivered,
     );
     None
+}
+
+/// The plugin context a fresh conversation (first input, `/clear`, a restart
+/// with recovery) starts with: the latest posted one, else the launch-time
+/// one. Covers any pending change, which a fresh start makes moot.
+fn fresh_plugin_context(inbox: &crate::ContextInbox, launch: Option<&str>) -> String {
+    inbox
+        .current()
+        .or_else(|| launch.map(str::to_string))
+        .unwrap_or_default()
 }
 
 fn spawn_delivery_completion(
@@ -178,4 +184,35 @@ fn spawn_delivery_completion(
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Toggle a plugin off, deliver the change, then `/clear`: the fresh
+    /// conversation must start with the new plugin context, not the launch one.
+    #[test]
+    fn a_fresh_conversation_uses_the_latest_plugin_context() {
+        let inbox = crate::ContextInbox::default();
+        let old = "## Plugin Skills\n- `old:skill`";
+        let launch = Some(old);
+        assert_eq!(fresh_plugin_context(&inbox, launch), old);
+
+        inbox.post(1, String::new(), "## Plugin context changed".into());
+        let delivered = inbox.pending().unwrap();
+        inbox.acknowledge(delivered.revision);
+        assert!(!inbox.is_pending());
+        assert_eq!(fresh_plugin_context(&inbox, launch), "", "no plugins now");
+
+        inbox.post(
+            2,
+            "## Plugin Skills\n- `new:skill`".into(),
+            "changed".into(),
+        );
+        assert_eq!(
+            fresh_plugin_context(&inbox, launch),
+            "## Plugin Skills\n- `new:skill`"
+        );
+    }
 }

@@ -412,13 +412,13 @@ fn annotate_activation(
 /// What a running session should switch to after its plugin selection
 /// changed: the skills and prompts a fresh launch would now get, as text it
 /// can act on without a restart. Skills are listed by path even for Claude,
-/// whose native plugin directories were fixed at launch. The record the
-/// session card shows is replaced with this context.
+/// whose native plugin directories were fixed at launch. Nothing is posted or
+/// recorded here; the caller does both, in order, under its lock.
 pub fn plugin_context_update(
     agent_type: AgentType,
     session_id: Uuid,
     working_directory: &Path,
-) -> anyhow::Result<(String, Vec<PluginContextEntry>)> {
+) -> anyhow::Result<PluginContextChange> {
     let mut config = load_config();
     let resolutions =
         crate::session_plugins::apply_selection(&mut config, session_id, working_directory)?;
@@ -455,25 +455,39 @@ pub fn plugin_context_update(
     let (prompts, prompt_entries) = plugin_prompts(&config);
     entries.extend(prompt_entries);
     annotate_activation(&mut entries, &resolutions);
-    crate::session_plugins::record_injected(session_id, &entries);
 
     lines.sort();
-    let skills = if lines.is_empty() {
-        "No plugin skills are enabled for this session now. Stop using any plugin skill you were given earlier.".to_string()
-    } else {
+    let skills = (!lines.is_empty()).then(|| {
         format!(
-            "Use only these plugin skills from now on, and stop using any others you were given earlier. Read a skill's `SKILL.md` completely before acting on it:\n\n{}",
+            "## Plugin Skills\n\nInstalled Agent Portal plugins provide these skills. When a user task matches one, read its `SKILL.md` completely before acting, then follow its instructions:\n\n{}",
             lines.join("\n")
         )
-    };
-    let mut update = format!(
-        "## Plugin context changed\n\nThe user changed which Agent Portal plugins this session uses. {skills}"
+    });
+    let current = [skills.clone(), prompts.clone()]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let update = format!(
+        "## Plugin context changed\n\nThe user changed which Agent Portal plugins this session uses. This replaces every plugin skill and plugin prompt you were given earlier: use only what follows and disregard the rest.\n\n{}\n\n{}",
+        skills.unwrap_or_else(|| "No plugin skills are enabled for this session now.".into()),
+        prompts.unwrap_or_else(|| "No plugin prompts apply now.".into()),
     );
-    if let Some(prompts) = prompts {
-        update.push_str("\n\n");
-        update.push_str(&prompts);
-    }
-    Ok((update, entries))
+    Ok(PluginContextChange {
+        current,
+        update,
+        entries,
+    })
+}
+
+/// What a running session switches to when its plugin selection changes.
+pub struct PluginContextChange {
+    /// The plugin context a fresh conversation starts with from now on.
+    pub current: String,
+    /// The notice folded into the session's next input.
+    pub update: String,
+    /// The record the session card shows once the change is posted.
+    pub entries: Vec<PluginContextEntry>,
 }
 
 fn read_plugin_manifest(root: &Path) -> Option<PluginManifest> {

@@ -199,18 +199,45 @@ fn install_selection_at(path: &Path, config: &LauncherConfig, selection: &Select
     config::write_config_atomic(path, &serde_json::to_string_pretty(selection)?)
 }
 
+/// A running session's agent and the inbox its plugin changes go to.
+pub(crate) type LiveSession = (shared::AgentType, session_lib::ContextInbox);
+
+/// Selection changes run one at a time, so the context posted last is
+/// always built from the latest saved selection.
+static LIVE_CHANGES: Mutex<()> = Mutex::new(());
+/// Revisions for posted context changes; the inbox refuses an older one.
+static CONTEXT_REVISION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 pub(crate) fn request(
     session: Uuid,
     working_directory: String,
     selection: Option<PluginOverride>,
+    live: Option<LiveSession>,
 ) -> Result<PluginInventoryResponse> {
+    let _serial = LIVE_CHANGES
+        .lock()
+        .map_err(|_| anyhow::anyhow!("Plugin change lock poisoned"))?;
     let mut config = config::load_config();
+    let changed = selection.is_some();
     if let Some(change) = selection {
         save_selection(&selection_path(session), &config, change)?;
     }
-    let resolutions = apply_selection(&mut config, session, Path::new(&working_directory))?;
+    let directory = Path::new(&working_directory).to_path_buf();
+    let resolutions = apply_selection(&mut config, session, &directory)?;
     let mut response = inventory(&config, Some(working_directory), true, &resolutions);
     response.injected_context = current_record(session, &context_path(session));
+    if let Some((agent_type, inbox)) = live {
+        if changed {
+            let change = config::plugin_context_update(agent_type, session, &directory)?;
+            let revision = CONTEXT_REVISION.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            if inbox.post(revision, change.current, change.update) {
+                record_injected(session, &change.entries);
+                response.injected_context = current_record(session, &context_path(session));
+                response.applies_live = true;
+            }
+        }
+        response.context_pending = inbox.is_pending();
+    }
     Ok(response)
 }
 
