@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2281 · PROXY CONNECTION SUPERVISOR</text>
+<text x="55" y="105" font-family="sans-serif" font-size="34" fill="#e6e9f5">Reconnect policy now has one testable transition function.</text>
+<text x="55" y="150" font-family="sans-serif" font-size="34" fill="#e6e9f5">Pending output is persisted before either retrying or exiting.</text>
+<path d="M55 180H1945 M1000 190V1140" stroke="#565f89" stroke-dasharray="6 8"/>
+<text x="60" y="230" font-family="sans-serif" font-size="24" fill="#a9b1d6">BEFORE</text>
+<text x="1050" y="230" font-family="sans-serif" font-size="24" fill="#9ece6a">AFTER</text>
+<rect x="60" y="270" width="860" height="180" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="84" y="312" font-family="sans-serif" font-size="28" fill="#7aa2f7">proxy_session/mod.rs</text>
+<text x="84" y="355" font-family="sans-serif" font-size="24" fill="#c0caf5">Session state, backoff and replay</text>
+<text x="84" y="389" font-family="sans-serif" font-size="24" fill="#c0caf5">alongside registration and the live select loop</text>
+<rect x="1050" y="270" width="860" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1074" y="312" font-family="sans-serif" font-size="28" fill="#9ece6a">supervisor.rs</text>
+<text x="1074" y="355" font-family="sans-serif" font-size="24" fill="#c0caf5">SessionState + Backoff + output replay</text>
+<text x="1074" y="389" font-family="sans-serif" font-size="24" fill="#c0caf5">Public exports remain compatible</text>
+<rect x="60" y="495" width="860" height="180" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="84" y="537" font-family="sans-serif" font-size="28" fill="#7aa2f7">run_connection_loop</text>
+<text x="84" y="580" font-family="sans-serif" font-size="24" fill="#c0caf5">Retry / terminal branches each persist output</text>
+<text x="84" y="614" font-family="sans-serif" font-size="24" fill="#c0caf5">Sleep and retry decisions live inside async code</text>
+<rect x="1050" y="495" width="860" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1074" y="537" font-family="sans-serif" font-size="28" fill="#9ece6a">transition_after_connection</text>
+<text x="1074" y="580" font-family="sans-serif" font-size="24" fill="#c0caf5">Terminal result -&gt; Stop; disconnect -&gt; Retry</text>
+<text x="1074" y="614" font-family="sans-serif" font-size="24" fill="#c0caf5">Pure policy tested without a socket or timer</text>
+<rect x="60" y="720" width="860" height="180" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="84" y="762" font-family="sans-serif" font-size="28" fill="#7aa2f7">Existing transport behavior</text>
+<text x="84" y="805" font-family="sans-serif" font-size="24" fill="#c0caf5">Sequenced replay, acknowledgments and heartbeat</text>
+<text x="84" y="839" font-family="sans-serif" font-size="24" fill="#c0caf5">Permissions, uploads and downloads</text>
+<rect x="1050" y="720" width="860" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1074" y="762" font-family="sans-serif" font-size="28" fill="#9ece6a">run_connection_loop</text>
+<text x="1074" y="805" font-family="sans-serif" font-size="24" fill="#c0caf5">Persist once -&gt; Stop OR sleep -&gt; retry</text>
+<text x="1074" y="839" font-family="sans-serif" font-size="24" fill="#c0caf5">Server delay preserved; advance after sleep</text>
+<text x="65" y="990" font-family="sans-serif" font-size="25" fill="#c0caf5">Existing backoff and outage tests move with the policy.</text>
+<text x="1055" y="990" font-family="sans-serif" font-size="25" fill="#9ece6a">New tests: all exits, restart + retries, stable reset.</text>
+<text x="65" y="1040" font-family="sans-serif" font-size="25" fill="#c0caf5">No changes to the live message-loop select arms.</text>
+<text x="1055" y="1040" font-family="sans-serif" font-size="25" fill="#c0caf5">Registration remains in mod.rs for protocol changes.</text>
+<text x="55" y="1172" font-family="sans-serif" font-size="22" fill="#a9b1d6">Scope: #1165 slice only. File-transfer extraction remains; replay and delivery guarantees are unchanged.</text>
+</svg>
