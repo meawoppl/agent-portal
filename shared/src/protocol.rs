@@ -13,25 +13,8 @@ pub fn check_protocol_version(version: Option<u32>, peer: &str) -> Result<(), St
         Ok(())
     } else {
         Err(format!(
-            "Incompatible {peer} protocol version {offered}; this server requires version {PROTOCOL_VERSION}. Update the {peer} and Portal server to compatible releases."
+            "Incompatible {peer} protocol version {offered}; this connection requires version {PROTOCOL_VERSION}. Update the {peer} and Portal server to compatible releases."
         ))
-    }
-}
-
-#[cfg(test)]
-mod compatibility_tests {
-    use super::*;
-
-    #[test]
-    fn legacy_and_current_match_but_unknown_majors_are_actionable() {
-        assert!(check_protocol_version(None, "proxy").is_ok());
-        assert!(check_protocol_version(Some(PROTOCOL_VERSION), "launcher").is_ok());
-        for offered in [0, PROTOCOL_VERSION + 1, u32::MAX] {
-            let error = check_protocol_version(Some(offered), "browser").unwrap_err();
-            assert!(error.contains("browser"));
-            assert!(error.contains("Update"));
-            assert!(error.contains(&offered.to_string()));
-        }
     }
 }
 
@@ -93,3 +76,20 @@ pub const MAX_SECRET_DROP_BYTES: u64 = 64 * 1024;
 /// reconciling desired sessions (see `LauncherToServer::LauncherHeartbeat`
 /// handling in the backend's launcher socket).
 pub const LAUNCHER_HEARTBEAT_INTERVAL_SECS: u64 = 30;
+
+#[cfg(test)]
+mod compatibility_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_and_current_match_but_unknown_majors_are_actionable() {
+        assert!(check_protocol_version(None, "proxy").is_ok());
+        assert!(check_protocol_version(Some(PROTOCOL_VERSION), "launcher").is_ok());
+        for offered in [0, PROTOCOL_VERSION + 1, u32::MAX] {
+            let error = check_protocol_version(Some(offered), "browser").unwrap_err();
+            assert!(error.contains("browser"));
+            assert!(error.contains("Update"));
+            assert!(error.contains(&offered.to_string()));
+        }
+    }
+}
