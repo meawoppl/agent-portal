@@ -1456,6 +1456,24 @@
     color: var(--accent);
 }
 
+.plugin-policy-control {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+}
+
+.plugin-policy-control select {
+    padding: 0.25rem 0.4rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-dark);
+    color: var(--text-primary);
+    font-size: 0.75rem;
+}
+
 .plugin-card-actions {
     display: flex;
     flex-wrap: wrap;

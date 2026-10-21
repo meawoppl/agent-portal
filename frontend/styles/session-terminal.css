@@ -1112,6 +1112,11 @@
     color: var(--success, #9ece6a);
 }
 
+.plugin-card-policy {
+    color: #e0af68;
+    font-size: 0.75rem;
+}
+
 .plugin-card-source {
     display: block;
     overflow: hidden;

@@ -1,11 +1,12 @@
 //! Session-local skill selection. Host installs remain shared; overrides live
 //! separately from launcher.json so editing one session cannot lose other config.
 use crate::config::{self, LauncherConfig};
+use crate::plugin_policy::DirectoryPolicy;
 use anyhow::{Context, Result};
 use shared::{
     api::{
-        PluginInventoryResponse, PluginOverride, PortalPluginCommandInfo, PortalPluginInfo,
-        PortalPluginSkillInfo,
+        PluginActivation, PluginInventoryResponse, PluginOverride, PluginPolicy,
+        PortalPluginCommandInfo, PortalPluginInfo, PortalPluginSkillInfo,
     },
     plugin_manifest::InventoryManifest,
 };
@@ -59,40 +60,102 @@ fn detected_in(plugin_root: &Path, working_directory: &Path) -> bool {
     })
 }
 
-/// The session's effective plugins. An explicit per-session choice wins.
-/// Without one, a host-enabled plugin is on only where its detect rules match
-/// the session's working directory, so every installed plugin doesn't load its
-/// skills into every session.
+/// Why a plugin is, or isn't, loaded into a session.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct Resolution {
+    pub policy: PluginPolicy,
+    pub activation: Option<PluginActivation>,
+    /// Detected here, but the project's policy keeps it out.
+    pub disabled_by_policy: bool,
+}
+
+pub(crate) type Resolutions = BTreeMap<String, Resolution>;
+
+/// One plugin's effective state. An explicit per-session choice wins, then the
+/// project's policy; with neither, a host-enabled plugin is on only where its
+/// detect rules match.
+fn resolve(
+    host_enabled: bool,
+    choice: Option<bool>,
+    policy: PluginPolicy,
+    detected: impl FnOnce() -> bool,
+) -> (bool, Resolution) {
+    let mut resolution = Resolution {
+        policy,
+        ..Default::default()
+    };
+    let enabled = match (choice, policy) {
+        (Some(enabled), _) => {
+            resolution.activation = Some(PluginActivation::Explicit);
+            enabled
+        }
+        (None, PluginPolicy::Always) => {
+            resolution.activation = Some(PluginActivation::Policy);
+            true
+        }
+        (None, PluginPolicy::Never) => {
+            resolution.activation = Some(PluginActivation::Policy);
+            resolution.disabled_by_policy = host_enabled && detected();
+            false
+        }
+        (None, PluginPolicy::Ask) => {
+            let enabled = host_enabled && detected();
+            resolution.activation = enabled.then_some(PluginActivation::Detected);
+            enabled
+        }
+    };
+    (enabled, resolution)
+}
+
+/// The session's effective plugins; see [`resolve`] for the precedence, so
+/// every installed plugin doesn't load its skills into every session.
 ///
 /// This selects which plugin *skills* a session is launched with, and is what
 /// the inventory shows. It is not an authorization boundary: plugin commands
 /// and runtimes (`plugin open`/`start`/commands) still go by the host-level
 /// `enabled` flag. Detection runs at launch and on each inventory request, so
 /// a file added afterwards changes the next launch, not the running session.
-fn apply(config: &mut LauncherConfig, selection: &Selection, working_directory: &Path) {
+fn apply(
+    config: &mut LauncherConfig,
+    selection: &Selection,
+    policy: &DirectoryPolicy,
+    working_directory: &Path,
+) -> Resolutions {
+    let mut resolutions = Resolutions::new();
     for (name, plugin) in &mut config.plugins {
-        plugin.enabled = match selection.get(name) {
-            Some(enabled) => *enabled,
-            None => plugin.enabled && detected_in(Path::new(&plugin.path), working_directory),
-        };
+        let (enabled, resolution) = resolve(
+            plugin.enabled,
+            selection.get(name).copied(),
+            policy.get(name).copied().unwrap_or_default(),
+            || detected_in(Path::new(&plugin.path), working_directory),
+        );
+        plugin.enabled = enabled;
+        resolutions.insert(name.clone(), resolution);
     }
+    resolutions
 }
 
 pub(crate) fn apply_selection(
     config: &mut LauncherConfig,
     session: Uuid,
     working_directory: &Path,
-) -> Result<()> {
-    apply_selection_at(config, &selection_path(session), working_directory)
+) -> Result<Resolutions> {
+    let policy = crate::plugin_policy::for_directory(working_directory)?;
+    apply_selection_at(config, &selection_path(session), &policy, working_directory)
 }
 
 pub(crate) fn apply_selection_at(
     config: &mut LauncherConfig,
     path: &Path,
+    policy: &DirectoryPolicy,
     working_directory: &Path,
-) -> Result<()> {
-    apply(config, &read_selection(path)?, working_directory);
-    Ok(())
+) -> Result<Resolutions> {
+    Ok(apply(
+        config,
+        &read_selection(path)?,
+        policy,
+        working_directory,
+    ))
 }
 
 fn save_selection(path: &Path, config: &LauncherConfig, change: PluginOverride) -> Result<()> {
@@ -118,19 +181,29 @@ pub(crate) fn request(
     if let Some(change) = selection {
         save_selection(&selection_path(session), &config, change)?;
     }
-    apply_selection(&mut config, session, Path::new(&working_directory))?;
-    Ok(inventory(&config, Some(working_directory), true))
+    let resolutions = apply_selection(&mut config, session, Path::new(&working_directory))?;
+    Ok(inventory(
+        &config,
+        Some(working_directory),
+        true,
+        &resolutions,
+    ))
 }
 
 /// Host inventory for the Plugins browser and launch suggestions. With a
 /// directory, `enabled` is what a new session there would load; without one it
 /// is the host-level install flag.
-pub(crate) fn host_inventory(working_directory: Option<String>) -> PluginInventoryResponse {
+pub(crate) fn host_inventory(working_directory: Option<String>) -> Result<PluginInventoryResponse> {
     let mut config = config::load_config();
-    if let Some(directory) = &working_directory {
-        apply(&mut config, &Selection::new(), Path::new(directory));
-    }
-    inventory(&config, working_directory, false)
+    let resolutions = match &working_directory {
+        Some(directory) => {
+            let directory = Path::new(directory);
+            let policy = crate::plugin_policy::for_directory(directory)?;
+            apply(&mut config, &Selection::new(), &policy, directory)
+        }
+        None => Resolutions::new(),
+    };
+    Ok(inventory(&config, working_directory, false, &resolutions))
 }
 
 /// The text a skill or prompt describes itself with: the frontmatter
@@ -177,6 +250,7 @@ fn inventory(
     config: &LauncherConfig,
     working_directory: Option<String>,
     session_selection_supported: bool,
+    resolutions: &Resolutions,
 ) -> PluginInventoryResponse {
     let root = working_directory.as_deref().map(Path::new);
     let mut response = PluginInventoryResponse {
@@ -202,6 +276,11 @@ fn inventory(
                 .or_else(|| installed.reference.clone()),
             ..Default::default()
         };
+        if let Some(resolution) = resolutions.get(name) {
+            plugin.policy = resolution.policy;
+            plugin.activation = resolution.activation;
+            plugin.disabled_by_policy = resolution.disabled_by_policy;
+        }
         match manifest {
             Err(error) => plugin.warnings.push(format!("{error:#}")),
             Ok(manifest) => {
@@ -324,6 +403,7 @@ mod tests {
         apply(
             &mut selected,
             &read_selection(&path).unwrap(),
+            &DirectoryPolicy::new(),
             Path::new("/missing"),
         );
         assert!(selected.plugins.values().all(|p| !p.enabled));
@@ -374,7 +454,7 @@ mod tests {
     fn inventory_uses_installed_config_including_disabled_or_broken_plugins() {
         let mut config = config();
         config.plugins.get_mut("slowbooks").unwrap().enabled = false;
-        let report = inventory(&config, Some("/missing".into()), true);
+        let report = inventory(&config, Some("/missing".into()), true, &Resolutions::new());
         assert!(report.session_selection_supported);
         assert_eq!(report.plugins.len(), 2);
         assert!(report.plugins[0].enabled);
@@ -441,7 +521,12 @@ mod tests {
         // No choice: only the host-enabled, detected plugin. An unreadable
         // manifest is never detected, so `broken` stays off.
         let mut session = host();
-        apply(&mut session, &Selection::new(), project.path());
+        apply(
+            &mut session,
+            &Selection::new(),
+            &DirectoryPolicy::new(),
+            project.path(),
+        );
         assert_eq!(enabled(&session), vec!["kicadmium"]);
 
         // Explicit choices win in both directions, including turning on a
@@ -452,7 +537,12 @@ mod tests {
             ("kicadmium".into(), false),
             ("kicad-off".into(), true),
         ]);
-        apply(&mut session, &choices, project.path());
+        apply(
+            &mut session,
+            &choices,
+            &DirectoryPolicy::new(),
+            project.path(),
+        );
         assert_eq!(enabled(&session), vec!["kicad-off", "unlinked"]);
 
         // A session in a worktree under a hidden directory detects from that
@@ -461,8 +551,42 @@ mod tests {
         fs::create_dir_all(&worktree).unwrap();
         fs::write(worktree.join("other.kicad_pcb"), "").unwrap();
         let mut session = host();
-        apply(&mut session, &Selection::new(), &worktree);
+        apply(
+            &mut session,
+            &Selection::new(),
+            &DirectoryPolicy::new(),
+            &worktree,
+        );
         assert_eq!(enabled(&session), vec!["kicadmium"]);
+    }
+
+    /// A session's own choice beats the project policy, which beats detection.
+    #[test]
+    fn choice_then_policy_then_detection() {
+        use PluginActivation::*;
+        use PluginPolicy::*;
+        let on = |host, choice, policy, detected| resolve(host, choice, policy, || detected);
+
+        assert!(!on(true, Some(false), Always, true).0);
+        assert_eq!(
+            on(false, Some(true), Never, false).1.activation,
+            Some(Explicit)
+        );
+
+        let (enabled, r) = on(true, None, Always, false);
+        assert!(enabled && r.activation == Some(Policy) && !r.disabled_by_policy);
+        let (enabled, r) = on(true, None, Never, true);
+        assert!(!enabled && r.activation == Some(Policy) && r.disabled_by_policy);
+        let (_, r) = on(true, None, Never, false);
+        assert!(
+            !r.disabled_by_policy,
+            "only a detected plugin is disabled *by* policy"
+        );
+
+        let (enabled, r) = on(true, None, Ask, true);
+        assert!(enabled && r.activation == Some(Detected));
+        let (enabled, r) = on(false, None, Ask, true);
+        assert!(!enabled && r.activation.is_none());
     }
 
     #[test]
@@ -526,7 +650,7 @@ run = "true"
             },
         );
 
-        let report = inventory(&config, None, false);
+        let report = inventory(&config, None, false, &Resolutions::new());
         assert!(!report.scanned && !report.session_selection_supported);
         let info = &report.plugins[0];
         assert_eq!(

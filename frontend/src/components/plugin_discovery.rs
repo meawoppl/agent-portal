@@ -1,5 +1,6 @@
 use shared::api::{
-    PluginAction, PluginInventoryResponse, PluginRequest, PluginResponse, PortalPluginInfo,
+    PluginAction, PluginInventoryResponse, PluginPolicy, PluginRequest, PluginResponse,
+    PortalPluginInfo,
 };
 use uuid::Uuid;
 use yew::prelude::*;
@@ -62,6 +63,23 @@ pub fn plugin_context_label(bytes: u64, tokens: u64) -> String {
     }
 }
 
+/// Why a plugin is on or off for a directory, for its tooltip.
+pub fn plugin_state_reason(plugin: &PortalPluginInfo) -> String {
+    match (
+        plugin.policy,
+        plugin.disabled_by_policy,
+        plugin.reason.as_deref(),
+    ) {
+        (PluginPolicy::Always, _, _) => "Always on in this project".to_string(),
+        (PluginPolicy::Never, true, Some(reason)) => {
+            format!("{reason}, but never loaded in this project")
+        }
+        (PluginPolicy::Never, _, _) => "Never loaded in this project".to_string(),
+        (PluginPolicy::Ask, _, Some(reason)) => reason.to_string(),
+        (PluginPolicy::Ask, _, None) => "Not detected in this directory".to_string(),
+    }
+}
+
 #[derive(Properties, PartialEq)]
 pub struct PluginSuggestionStripProps {
     pub plugins: Vec<PortalPluginInfo>,
@@ -107,6 +125,14 @@ pub fn plugin_suggestion_strip(props: &PluginSuggestionStripProps) -> Html {
     }
 }
 
+pub fn plugin_policy_label(policy: PluginPolicy) -> &'static str {
+    match policy {
+        PluginPolicy::Ask => "ask",
+        PluginPolicy::Always => "always",
+        PluginPolicy::Never => "never",
+    }
+}
+
 fn plugin_file_pills(files: &[shared::api::PortalPluginSkillInfo], class: &'static str) -> Html {
     html! {
         <div class="plugin-skill-list">
@@ -147,7 +173,9 @@ pub fn plugin_card(props: &PluginCardProps) -> Html {
                     if is_suggested {
                         <span class="plugin-card-badge">{ "suggested" }</span>
                     }
-                    if !plugin.enabled {
+                    if plugin.disabled_by_policy {
+                        <span class="plugin-card-badge muted" title={plugin_state_reason(plugin)}>{ "off by policy" }</span>
+                    } else if !plugin.enabled {
                         <span class="plugin-card-badge muted">{ "off" }</span>
                     }
                     if let Some(version) = plugin.version.as_deref() {
@@ -166,6 +194,9 @@ pub fn plugin_card(props: &PluginCardProps) -> Html {
             }
             if let Some(reason) = plugin.reason.as_deref() {
                 <div class="plugin-card-reason">{ reason }</div>
+            }
+            if plugin.policy != PluginPolicy::Ask {
+                <div class="plugin-card-policy">{ plugin_state_reason(plugin) }</div>
             }
             <dl class="plugin-card-facts">
                 <dt>{ "Agents" }</dt>

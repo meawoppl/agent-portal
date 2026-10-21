@@ -201,7 +201,7 @@ pub fn plugin_skill_context(
 ) -> PluginSkillContext {
     let mut config = load_config();
     match crate::session_plugins::apply_selection(&mut config, session_id, working_directory) {
-        Ok(()) => {}
+        Ok(_) => {}
         Err(error) => {
             // Never silently re-enable excluded skills if the selection cannot be read.
             tracing::error!("Could not read session plugin selection: {error:#}");
@@ -800,8 +800,13 @@ description: Route KiCad PCB layouts.
 
         let selection_path = dir.path().join("selection.json");
         std::fs::write(&selection_path, r#"{"kicad-pcb":false}"#).unwrap();
-        crate::session_plugins::apply_selection_at(&mut config, &selection_path, dir.path())
-            .unwrap();
+        crate::session_plugins::apply_selection_at(
+            &mut config,
+            &selection_path,
+            &Default::default(),
+            dir.path(),
+        )
+        .unwrap();
         for agent in [AgentType::Claude, AgentType::Codex, AgentType::Antigravity] {
             let context = plugin_skill_context_from_config(&config, &generated_root, agent);
             assert!(context.claude_plugin_dirs.is_empty());

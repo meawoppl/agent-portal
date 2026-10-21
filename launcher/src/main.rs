@@ -15,6 +15,7 @@ mod pastebin;
 mod path_policy;
 mod plugin;
 mod plugin_detect;
+mod plugin_policy;
 mod plugin_preview;
 mod plugin_rpc;
 mod plugin_validate;

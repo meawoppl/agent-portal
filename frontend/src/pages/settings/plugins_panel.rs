@@ -5,7 +5,8 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use shared::api::{
-    PluginAction, PluginInventoryResponse, PluginRequest, PluginResponse, PortalPluginInfo,
+    PluginAction, PluginInventoryResponse, PluginPolicy, PluginRequest, PluginResponse,
+    PortalPluginInfo,
 };
 use shared::LauncherInfo;
 use uuid::Uuid;
@@ -13,7 +14,9 @@ use wasm_bindgen_futures::spawn_local;
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
 
-use crate::components::plugin_discovery::{fetch_launcher_plugins, run_plugin_action, PluginCard};
+use crate::components::plugin_discovery::{
+    fetch_launcher_plugins, plugin_policy_label, run_plugin_action, PluginCard,
+};
 use crate::utils;
 
 const PLUGINS_REPO: &str = "https://github.com/meawoppl/agent-portal-plugins";
@@ -64,6 +67,53 @@ fn render_outcome(outcome: &Outcome) -> Html {
                 }
             }
         </div>
+    }
+}
+
+/// The plugin's policy for the matched project directory.
+fn policy_control(
+    plugin: &PortalPluginInfo,
+    directory: &str,
+    disabled: bool,
+    run: &Callback<(String, PluginAction)>,
+) -> Html {
+    let onchange = {
+        let run = run.clone();
+        let name = plugin.name.clone();
+        let label = format!("Set {} policy", plugin.display_name);
+        Callback::from(move |e: Event| {
+            let policy = match e
+                .target_unchecked_into::<web_sys::HtmlSelectElement>()
+                .value()
+                .as_str()
+            {
+                "always" => PluginPolicy::Always,
+                "never" => PluginPolicy::Never,
+                _ => PluginPolicy::Ask,
+            };
+            run.emit((
+                label.clone(),
+                PluginAction::SetPolicy {
+                    name: name.clone(),
+                    policy,
+                },
+            ))
+        })
+    };
+    let option = |policy: PluginPolicy, text: &'static str| {
+        html! {
+            <option value={plugin_policy_label(policy)} selected={plugin.policy == policy}>{ text }</option>
+        }
+    };
+    html! {
+        <label class="plugin-policy-control" title={format!("Applies to new sessions in {directory} and below")}>
+            { "In this project" }
+            <select {onchange} {disabled}>
+                { option(PluginPolicy::Ask, "Load when detected") }
+                { option(PluginPolicy::Always, "Always load") }
+                { option(PluginPolicy::Never, "Never load") }
+            </select>
+        </label>
     }
 }
 
@@ -463,6 +513,9 @@ pub fn plugins_panel() -> Html {
                     <div class="plugins-browser-grid">
                         { for data.plugins.iter().map(|plugin| html! {
                             <PluginCard key={plugin.name.clone()} plugin={plugin.clone()}>
+                                if let (Some(dir), true) = (data.working_directory.as_deref(), data.scanned) {
+                                    { policy_control(plugin, dir, is_busy, &run) }
+                                }
                                 { plugin_actions(plugin, &host, is_busy, &run, &confirm) }
                             </PluginCard>
                         }) }

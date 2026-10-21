@@ -35,16 +35,29 @@ pub(crate) fn handle(request: PluginRequest) -> Result<PluginResponse> {
             }
         };
         let mut response = run_cli(&args)?;
-        response.inventory = Some(crate::session_plugins::host_inventory(directory.clone()));
+        response.inventory = Some(crate::session_plugins::host_inventory(directory.clone())?);
         Ok(response)
     };
     match request.action {
         PluginAction::Inventory => Ok(inventory_response(crate::session_plugins::host_inventory(
             directory,
-        ))),
+        )?)),
         PluginAction::CheckUpdates => Ok(inventory_response(with_updates(
-            crate::session_plugins::host_inventory(directory),
+            crate::session_plugins::host_inventory(directory)?,
         ))),
+        PluginAction::SetPolicy { name, policy } => {
+            let Some(project) = directory.as_deref() else {
+                anyhow::bail!("Choose a project directory to set a plugin policy for");
+            };
+            anyhow::ensure!(
+                crate::config::load_config().plugins.contains_key(&name),
+                "Plugin is not installed: {name}"
+            );
+            crate::plugin_policy::set(Path::new(project), &name, policy)?;
+            Ok(inventory_response(crate::session_plugins::host_inventory(
+                directory,
+            )?))
+        }
         PluginAction::Install { source, force } => {
             let mut args = vec!["install".to_string(), source];
             if force {
@@ -55,9 +68,7 @@ pub(crate) fn handle(request: PluginRequest) -> Result<PluginResponse> {
         PluginAction::Update { name } => lifecycle(vec!["update".into(), name]),
         PluginAction::Remove { name } => lifecycle(vec!["remove".into(), name]),
         PluginAction::Doctor { name } => lifecycle(vec!["doctor".into(), name]),
-        PluginAction::SetPolicy { .. }
-        | PluginAction::Surface { .. }
-        | PluginAction::RunCommand { .. } => {
+        PluginAction::Surface { .. } | PluginAction::RunCommand { .. } => {
             anyhow::bail!("This launcher cannot run that plugin action yet")
         }
     }
