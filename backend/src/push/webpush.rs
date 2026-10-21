@@ -197,24 +197,6 @@ mod tests {
     // scripts/generate-vapid-keys.sh; never used against a real push service.
     const TEST_VAPID_PRIVATE_B64: &str = "JFadqg_le_g7mMaPvDG8BKYAmMOQ16kugqTARPmwHdE";
 
-    /// `frontend/sw.js` reads exactly these keys; a rename here silently
-    /// breaks one-notification-per-session replacement in the browser.
-    #[test]
-    fn web_push_body_carries_the_fields_the_service_worker_reads() {
-        let body = WebPushBody {
-            session_id: "s1",
-            event_kind: "awaiting_input",
-            title: "t",
-            body: "b",
-            tag: "s1",
-        };
-        let json = serde_json::to_value(&body).unwrap();
-        for key in ["session_id", "title", "body", "tag"] {
-            assert!(json.get(key).is_some(), "missing {key}: {json}");
-        }
-        assert_eq!(json["tag"], "s1");
-    }
-
     fn sub(platform: &str, keys: bool) -> PushSubscription {
         PushSubscription {
             id: Uuid::new_v4(),

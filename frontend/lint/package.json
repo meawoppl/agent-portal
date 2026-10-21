@@ -5,7 +5,8 @@
   "description": "CSS linting for agent-portal frontend",
   "scripts": {
     "lint:css": "stylelint \"../styles/**/*.css\"",
-    "lint:css:fix": "stylelint \"../styles/**/*.css\" --fix"
+    "lint:css:fix": "stylelint \"../styles/**/*.css\" --fix",
+    "test:sw": "node --test sw.test.js"
   },
   "devDependencies": {
     "stylelint": "^16.2.0",

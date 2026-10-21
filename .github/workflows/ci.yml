@@ -52,6 +52,11 @@ jobs:
       - name: Run stylelint
         run: npm run lint:css
 
+      # The service worker is plain JS with no Rust test coverage; this runs
+      # the real sw.js push handler under Node.
+      - name: Test service worker
+        run: npm run test:sw
+
   fmt:
     name: Rustfmt
     runs-on: ubuntu-latest
