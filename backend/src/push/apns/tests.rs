@@ -160,6 +160,11 @@ async fn http2_request_has_provider_auth_headers_and_existing_payload() {
 
 #[tokio::test]
 async fn http_errors_keep_dead_tokens_distinct_from_credentials_and_server_failures() {
+    #[derive(serde::Serialize)]
+    struct ErrorResponse {
+        reason: &'static str,
+    }
+
     for (status, reason, dead) in [
         (410, "Unregistered", true),
         (400, "BadDeviceToken", true),
@@ -174,7 +179,7 @@ async fn http_errors_keep_dead_tokens_distinct_from_credentials_and_server_failu
             post(move || async move {
                 (
                     StatusCode::from_u16(status).unwrap(),
-                    axum::Json(serde_json::json!({"reason":reason})),
+                    axum::Json(ErrorResponse { reason }),
                 )
             }),
         );
