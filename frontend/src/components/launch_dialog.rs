@@ -3,7 +3,7 @@ use crate::components::plugin_discovery::{fetch_launcher_plugins, PluginSuggesti
 use crate::components::skip_permissions::{skip_permissions_args, skip_permissions_label};
 use crate::components::{DismissibleBackdrop, ModelSelect, ProxyTokenSetup};
 use crate::hooks::{use_escape_capture, use_focus_trap};
-use crate::utils::{self, FetchError, On401};
+use crate::utils::{self, FetchError};
 use gloo::timers::callback::Timeout;
 use shared::api::{DashboardRequest, DashboardResponse, DirectoryListingResponse, LaunchRequest};
 use shared::{AgentInstall, DirectoryEntry, LauncherInfo};
