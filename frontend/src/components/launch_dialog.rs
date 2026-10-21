@@ -383,30 +383,19 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
             // Suggestions for a directory the user has already moved past must
             // not overwrite the current ones.
             let current = std::rc::Rc::new(std::cell::Cell::new(true));
-            {
+            plugin_suggestions.set(Vec::new());
+            plugin_suggestion_error.set(None);
+            if let Some(launcher) = launcher {
                 let current = current.clone();
                 spawn_local(async move {
-                    let result = match launcher {
-                        Some(launcher) => Some(fetch_launcher_plugins(launcher, Some(path)).await),
-                        None => None,
-                    };
+                    let result = fetch_launcher_plugins(launcher, Some(path)).await;
                     if !current.get() {
                         return;
                     }
                     match result {
-                        None => {
-                            plugin_suggestions.set(Vec::new());
-                            plugin_suggestion_error.set(None);
-                        }
-                        Some(Ok(data)) => {
-                            plugin_suggestions.set(data.plugins);
-                            plugin_suggestion_error.set(None);
-                        }
-                        Some(Err(err)) => {
-                            plugin_suggestions.set(Vec::new());
-                            plugin_suggestion_error
-                                .set(Some(format!("Could not load plugin suggestions: {err}")));
-                        }
+                        Ok(data) => plugin_suggestions.set(data.plugins),
+                        Err(err) => plugin_suggestion_error
+                            .set(Some(format!("Could not load plugin suggestions: {err}"))),
                     }
                 });
             }
