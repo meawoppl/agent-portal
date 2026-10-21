@@ -40,6 +40,17 @@ pub fn parse_follow_cursor(value: &str, session: Uuid) -> Option<i64> {
 mod tests {
     use super::*;
     #[test]
+    fn older_follow_output_decodes_without_lifecycle_metadata() {
+        let record: FollowRecord = serde_json::from_value(serde_json::json!({
+            "kind":"batch", "cursor":"v1:old:1", "start_cursor":null,
+            "state":"idle", "connected":true,
+            "events":[{"cursor":"v1:old:1", "message_id":Uuid::nil(), "kind":"text", "text":"hello"}]
+        })).unwrap();
+        assert_eq!(record.source, None);
+        assert_eq!(record.events[0].activity, None);
+    }
+
+    #[test]
     fn cursor_is_scoped_and_nonnegative() {
         let id = Uuid::new_v4();
         assert_eq!(parse_follow_cursor(&follow_cursor(id, 42), id), Some(42));
