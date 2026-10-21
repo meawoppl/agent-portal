@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="Arial, sans-serif">
+<text x="55" y="52" fill="#a9b1d6" font-size="24">PR #2278 · Request child agents with owner consent</text>
+<text x="55" y="110" fill="#e6e9f5" font-size="34">Agents lacked a policy-gated child-session workflow.</text>
+<text x="55" y="153" fill="#e6e9f5" font-size="34">Bound credentials, browser consent and durable lineage now govern each child.</text>
+<path d="M55 179H1945 M1000 205V1125" stroke="#565f89" fill="none"/>
+<text x="55" y="235" fill="#f7768e" font-size="26">BEFORE</text>
+<g><rect x="55" y="280" width="890" height="205" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="80" y="327" fill="#f7768e" font-size="30">Manual launch and separate sessions</text>
+<text x="80" y="384" fill="#c0caf5" font-size="27">No child request, approval state</text>
+<text x="80" y="423" fill="#c0caf5" font-size="27">or parent policy in the launcher flow.</text>
+</g>
+<path d="M500 490V538 l-8 -12 m8 12 l8 -12" stroke="#f7768e" stroke-width="3" fill="none"/>
+<g><rect x="55" y="550" width="890" height="205" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="80" y="597" fill="#f7768e" font-size="30">Owner-wide launch credentials</text>
+<text x="80" y="654" fill="#c0caf5" font-size="27">No session-bound child authorization</text>
+<text x="80" y="693" fill="#c0caf5" font-size="27">or parent/depth checks.</text>
+</g>
+<path d="M500 760V808 l-8 -12 m8 12 l8 -12" stroke="#f7768e" stroke-width="3" fill="none"/>
+<g><rect x="55" y="820" width="890" height="205" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="80" y="867" fill="#f7768e" font-size="30">Missing native history rotates identity</text>
+<text x="80" y="924" fill="#c0caf5" font-size="27">A new Portal UUID loses the link</text>
+<text x="80" y="963" fill="#c0caf5" font-size="27">between the process and its parent.</text>
+</g>
+<text x="1055" y="235" fill="#9ece6a" font-size="26">AFTER</text>
+<g><rect x="1055" y="280" width="890" height="205" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="327" fill="#9ece6a" font-size="30">session start + Children control</text>
+<text x="1080" y="384" fill="#c0caf5" font-size="27">Default first-spawn browser approval;</text>
+<text x="1080" y="423" fill="#c0caf5" font-size="27">owner row lock reserves capped slots.</text>
+</g>
+<path d="M1500 490V538 l-8 -12 m8 12 l8 -12" stroke="#9ece6a" stroke-width="3" fill="none"/>
+<g><rect x="1055" y="550" width="890" height="205" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="597" fill="#9ece6a" font-size="30">Durable child and first prompt</text>
+<text x="1080" y="654" fill="#c0caf5" font-size="27">Same-user launcher, depth and rate gates;</text>
+<text x="1080" y="693" fill="#c0caf5" font-size="27">plugins and launch recipe survive restart.</text>
+</g>
+<path d="M1500 760V808 l-8 -12 m8 12 l8 -12" stroke="#9ece6a" stroke-width="3" fill="none"/>
+<g><rect x="1055" y="820" width="890" height="205" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="867" fill="#9ece6a" font-size="30">Stable Portal identity + cleanup</text>
+<text x="1080" y="924" fill="#c0caf5" font-size="27">Fresh native history keeps Portal UUID;</text>
+<text x="1080" y="963" fill="#c0caf5" font-size="27">idle/parent-end policy pauses children.</text>
+</g>
+<text x="55" y="1172" fill="#a9b1d6" font-size="22">Scope: API credential boundary, not an OS sandbox. Claude, Codex and Muse; Antigravity is not supported yet.</text>
+</g></svg>
