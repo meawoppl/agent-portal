@@ -122,10 +122,10 @@ self.addEventListener("fetch", (event) => {
 // ---------------------------------------------------------------------------
 // Web Push (mobile-apps plan D1).
 //
-// Payload contract (JSON, sent by the backend Web Push sender): {
-//   session_id, event_kind, title, body, collapse_key }. The `collapse_key`
-// becomes the notification `tag` so one visible notification per collapse key
-// is shown (newest wins) — one card per session rather than a growing stack.
+// Payload contract (JSON, `WebPushBody` in backend/src/push/webpush.rs): {
+//   session_id, event_kind, title, body, tag }. `tag` (the session's collapse
+// key) becomes the notification `tag`, so one visible notification per session
+// is shown (newest wins) rather than a growing stack.
 // Everything is best-effort and defensive: a malformed/empty payload still
 // surfaces a generic notification rather than throwing inside the SW.
 // ---------------------------------------------------------------------------
@@ -143,7 +143,7 @@ self.addEventListener("push", (event) => {
   const title = payload.title || "Agent Portal";
   const options = {
     body: payload.body || "",
-    tag: payload.collapse_key || undefined,
+    tag: payload.tag || undefined,
     icon: "/icon-192.png",
     badge: "/icon-192.png",
     data: { session_id: payload.session_id || null },
