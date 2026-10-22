@@ -14,8 +14,9 @@ use std::io::Write;
 /// nor the API changes shape.
 ///
 /// A stored value that is not an array of `T` reads as empty, with a
-/// warning, rather than failing the whole row: these columns are optional
-/// context (launch arguments, open PRs) and a session must stay loadable.
+/// warning, rather than failing the whole row. That keeps the leniency these
+/// columns always had, so a damaged row stays loadable; it is not harmless
+/// for launch arguments, which change how a session runs, hence the warning.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, AsExpression, FromSqlRow)]
 #[serde(transparent)]
 #[diesel(sql_type = Jsonb)]
