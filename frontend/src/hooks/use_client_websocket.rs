@@ -61,6 +61,11 @@ pub struct UseClientWebSocket {
     pub session_failures: HashMap<SessionKey, client_websocket_events::SessionFailure>,
     /// Dismiss a session's failure banner.
     pub dismiss_failure: Callback<SessionKey>,
+    /// Ticks when an agent sign-in finishes in this tab; computer views
+    /// re-probe agent sign-in state on it.
+    pub agent_auth_revision: u32,
+    /// Report that an agent sign-in finished.
+    pub on_agent_auth_changed: Callback<()>,
 }
 
 struct HomeRpcGuard(Option<u64>);
@@ -357,6 +362,13 @@ fn use_live_client_websocket() -> UseClientWebSocket {
             let live = live.clone();
             Callback::from(move |key| {
                 live.dispatch(client_websocket_events::ClientWsAction::DismissFailure(key))
+            })
+        },
+        agent_auth_revision: live.agent_auth_revision,
+        on_agent_auth_changed: {
+            let live = live.clone();
+            Callback::from(move |()| {
+                live.dispatch(client_websocket_events::ClientWsAction::AgentAuthChanged)
             })
         },
     }

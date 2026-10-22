@@ -1348,6 +1348,12 @@
     background: color-mix(in srgb, var(--accent, #7aa2f7) 24%, transparent);
 }
 
+.error-recovery-hint {
+    margin-top: 0.75rem;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
 .error-type {
     font-family: var(--font-mono);
     font-size: 0.75rem;

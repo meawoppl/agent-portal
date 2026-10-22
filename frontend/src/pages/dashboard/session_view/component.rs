@@ -118,6 +118,31 @@ pub struct SessionViewProps {
     pub failure: Option<crate::hooks::SessionFailure>,
     #[prop_or_default]
     pub on_dismiss_failure: Callback<SessionKey>,
+    /// Told when a sign-in to an agent finishes from this view, so views of
+    /// computers' sign-in state re-probe.
+    #[prop_or_default]
+    pub on_agent_auth_changed: Callback<()>,
+}
+
+/// Whether the session was seen starting again (going active from anything
+/// else), which is when a running agent picks up a fresh sign-in.
+fn sign_in_restart_seen(old: &shared::SessionStatus, new: &shared::SessionStatus) -> bool {
+    *old != shared::SessionStatus::Active && *new == shared::SessionStatus::Active
+}
+
+/// The note after a sign-in to Claude from this session: plain text, scoped
+/// to this view, with a dismiss.
+fn render_claude_signin_notice(hostname: &str, on_dismiss: Callback<MouseEvent>) -> Html {
+    html! {
+        <div class="session-signin-notice" role="status">
+            <span class="session-failure-text">
+                { format!("Signed in to Claude on {hostname}. The running agent may need restarting to pick up the new sign-in: pause and resume this session from its menu.") }
+            </span>
+            <button type="button" class="session-failure-dismiss" aria-label="Dismiss" onclick={on_dismiss}>
+                { "×" }
+            </button>
+        </div>
+    }
 }
 
 /// The banner for a session whose agent failed to start or exited badly.
@@ -452,6 +477,9 @@ pub enum SessionViewMsg {
     HideForkDialog,
     ShowClaudeLogin,
     HideClaudeLogin,
+    /// A sign-in to Claude finished from this view.
+    ClaudeSignedIn,
+    DismissClaudeSignInNotice,
 }
 
 /// SessionView - Main terminal view for a single session
@@ -579,6 +607,10 @@ pub struct SessionView {
     surface_escape_listener: Option<EventListener>,
     show_fork_dialog: bool,
     show_claude_login: bool,
+    /// Set after a sign-in to Claude from this view, until the agent is seen
+    /// restarting (the session going active again): the running agent may
+    /// still hold the credentials it started with.
+    claude_signin_notice: bool,
 }
 
 impl Component for SessionView {
@@ -725,6 +757,7 @@ impl Component for SessionView {
             surface_escape_listener,
             show_fork_dialog: false,
             show_claude_login: false,
+            claude_signin_notice: false,
         }
     }
 
@@ -746,7 +779,12 @@ impl Component for SessionView {
                 load_open_surface(ctx.props().session.id, &ctx.props().portal);
             self.surface_split_percent =
                 load_split_percent(ctx.props().session.id, &ctx.props().portal);
+            self.claude_signin_notice = false;
             edit_stack_fetch(ctx);
+        } else if self.claude_signin_notice
+            && sign_in_restart_seen(&old_props.session.status, &ctx.props().session.status)
+        {
+            self.claude_signin_notice = false;
         }
 
         // Detect interrupt signal change on the focused session. Textarea
@@ -842,6 +880,16 @@ impl Component for SessionView {
             }
             SessionViewMsg::ShowClaudeLogin => {
                 self.show_claude_login = true;
+                true
+            }
+            SessionViewMsg::ClaudeSignedIn => {
+                // Only a note: nothing is restarted or resent for the user.
+                self.claude_signin_notice = true;
+                ctx.props().on_agent_auth_changed.emit(());
+                true
+            }
+            SessionViewMsg::DismissClaudeSignInNotice => {
+                self.claude_signin_notice = false;
                 true
             }
             SessionViewMsg::HideClaudeLogin => {
@@ -1669,6 +1717,9 @@ impl Component for SessionView {
 
                         { self.render_permission_handler(ctx) }
                         { render_session_failure(ctx.props(), Self::session_key(ctx)) }
+                        if self.claude_signin_notice {
+                            { render_claude_signin_notice(&ctx.props().session.hostname, ctx.link().callback(|_| SessionViewMsg::DismissClaudeSignInNotice)) }
+                        }
                         { self.render_agent_progress() }
                         { self.render_input_bar(ctx) }
                     </div>
@@ -1732,7 +1783,7 @@ impl Component for SessionView {
                             agent_type={shared::AgentType::Claude}
                             agent_name={"Claude"}
                             on_close={ctx.link().callback(|_| SessionViewMsg::HideClaudeLogin)}
-                            on_success={Callback::noop()}
+                            on_success={ctx.link().callback(|_| SessionViewMsg::ClaudeSignedIn)}
                         />
                     }
                 }
@@ -2992,5 +3043,21 @@ impl SessionView {
         if let Some(ref dispatcher) = self.tasks_dispatcher {
             dispatcher.emit(msg);
         }
+    }
+}
+
+#[cfg(test)]
+mod signin_notice_tests {
+    use super::sign_in_restart_seen;
+    use shared::SessionStatus::{Active, Disconnected, Inactive};
+
+    /// The note after a sign-in clears only once the session is seen starting
+    /// again: a relaunch reads the new sign-in. Staying active is no restart.
+    #[test]
+    fn a_restart_is_the_session_going_active_again() {
+        assert!(sign_in_restart_seen(&Disconnected, &Active));
+        assert!(sign_in_restart_seen(&Inactive, &Active));
+        assert!(!sign_in_restart_seen(&Active, &Active));
+        assert!(!sign_in_restart_seen(&Active, &Disconnected));
     }
 }

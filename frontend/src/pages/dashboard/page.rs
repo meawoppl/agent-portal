@@ -1077,6 +1077,7 @@ pub fn dashboard_page() -> Html {
                                                 stt_enabled={stt_enabled}
                                                 failure={ws_hook.session_failures.get(&session.key).cloned()}
                                                 on_dismiss_failure={ws_hook.dismiss_failure.clone()}
+                                                on_agent_auth_changed={ws_hook.on_agent_auth_changed.clone()}
                                             />
                                         </div>
                                     }

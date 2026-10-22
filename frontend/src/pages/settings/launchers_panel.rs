@@ -548,13 +548,23 @@ pub fn launchers_panel() -> Html {
     let request_error = use_state(|| None::<String>);
     // Per-launcher update lifecycle, keyed by launcher id (#710 follow-up).
     let update_states = use_state(HashMap::<Uuid, UpdateEntry>::new);
+    // Live LaunchersChanged ticks (#710): a launcher restarting while this
+    // panel is open shows its reconnect without a page refresh. Its agent
+    // sign-in revision ticks when a sign-in finishes elsewhere in the tab,
+    // such as from a session.
+    let ws_hook = crate::hooks::use_client_websocket();
     // Backend's published target version, for the same-version detection.
     {
         let probes = probes.clone();
         let launchers = launchers.clone();
         // Authentication can change without any LauncherInfo field changing.
         // Re-probe explicitly after login/install instead of relying on list equality.
-        use_effect_with(((*launchers).clone(), *probe_revision), move |(list, _)| {
+        let deps = (
+            (*launchers).clone(),
+            *probe_revision,
+            ws_hook.agent_auth_revision,
+        );
+        use_effect_with(deps, move |(list, _, _)| {
             let list = list.clone();
             // Flipped by the cleanup below so a superseded run (launcher list
             // changed mid-probe) stops writing stale results over fresh ones.
@@ -626,10 +636,6 @@ pub fn launchers_panel() -> Html {
     let server_version = use_state(|| None::<String>);
     // 1s heartbeat driving elapsed-time display and timeout/auto-clear checks.
     let tick = use_state(|| 0u32);
-
-    // Live LaunchersChanged ticks (#710): a launcher restarting while this
-    // panel is open shows its reconnect without a page refresh.
-    let ws_hook = crate::hooks::use_client_websocket();
 
     let fetch_launchers = {
         let launchers = launchers.clone();

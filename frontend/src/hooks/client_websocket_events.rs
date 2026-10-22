@@ -51,6 +51,9 @@ pub(crate) struct ClientWsState {
     /// refetch, so their tabs never hold one). Cleared by a successful
     /// launch, a dismissal, or the connection going away.
     pub session_failures: HashMap<SessionKey, SessionFailure>,
+    /// Ticks when an agent sign-in finishes anywhere in this tab, so views of
+    /// computers' agent sign-in state re-probe.
+    pub agent_auth_revision: u32,
 }
 
 /// Why a session's agent isn't running, for the banner in its view.
@@ -145,6 +148,8 @@ pub(crate) enum ClientWsAction {
     /// The connection was closed (unlinked, or signed out): drop the session
     /// failures learned on it. Other maps follow their own lifecycle.
     ForgetConn(ConnId),
+    /// An agent sign-in finished.
+    AgentAuthChanged,
 }
 
 impl Reducible for ClientWsState {
@@ -160,6 +165,7 @@ impl Reducible for ClientWsState {
             service_stats: self.service_stats.clone(),
             service_cpu_history: self.service_cpu_history.clone(),
             session_failures: self.session_failures.clone(),
+            agent_auth_revision: self.agent_auth_revision,
         };
         match action {
             ClientWsAction::ServiceStats(services) => {
@@ -255,6 +261,9 @@ impl Reducible for ClientWsState {
             }
             ClientWsAction::ForgetConn(conn) => {
                 next.session_failures.retain(|key, _| key.conn != conn);
+            }
+            ClientWsAction::AgentAuthChanged => {
+                next.agent_auth_revision = next.agent_auth_revision.wrapping_add(1);
             }
         }
         Rc::new(next)
@@ -530,6 +539,15 @@ mod tests {
             .reduce(exited(linked, Reason::Error))
             .reduce(ClientWsAction::ForgetConn(ConnId::linked(1)));
         assert_eq!(state.session_failures.keys().collect::<Vec<_>>(), [&home]);
+    }
+
+    #[test]
+    fn a_finished_sign_in_ticks_the_revision_and_nothing_else() {
+        let before = Rc::new(ClientWsState::default());
+        let after = before.clone().reduce(ClientWsAction::AgentAuthChanged);
+        assert_eq!(after.agent_auth_revision, before.agent_auth_revision + 1);
+        assert_eq!(after.launch_event_counter, before.launch_event_counter);
+        assert!(after.session_failures.is_empty());
     }
 
     #[test]
