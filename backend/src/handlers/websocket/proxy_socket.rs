@@ -627,9 +627,6 @@ fn handle_session_update(
     let Some(current_session_id) = db_session_id else {
         return;
     };
-    // Store as a JSON array; the column is `jsonb NOT NULL DEFAULT '[]'`.
-    let open_prs_json =
-        serde_json::to_value(&open_prs).unwrap_or_else(|_| serde_json::Value::Array(Vec::new()));
     let mut conn = match db_pool.get() {
         Ok(conn) => conn,
         Err(e) => {
@@ -655,7 +652,7 @@ fn handle_session_update(
             sessions::git_branch.eq(&git_branch),
             sessions::pr_url.eq(&pr_url),
             sessions::repo_url.eq(&repo_url),
-            sessions::open_prs.eq(&open_prs_json),
+            sessions::open_prs.eq(crate::models::JsonVec(open_prs.clone())),
         ))
         .execute(&mut conn)
     {

@@ -1230,7 +1230,7 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
             .session_manager
             .register_launch_session(request_id, session.id);
 
-        let claude_args = crate::models::jsonb_string_vec(&session.claude_args);
+        let claude_args = session.claude_args.0.clone();
         let agent_type = shared::AgentType::parse_or_default(&session.agent_type);
 
         let child_recipe =

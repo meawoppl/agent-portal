@@ -16,7 +16,7 @@ use crate::{
     auth::CurrentUserId,
     errors::AppError,
     handlers::responses::EmptyResponse,
-    models::{jsonb_string_vec, Message, NewSessionMember, Session, SessionMember},
+    models::{Message, NewSessionMember, Session, SessionMember},
     AppState,
 };
 
@@ -385,7 +385,7 @@ pub async fn resume_session(
     }
     let auth_token = crate::handlers::launchers::mint_launch_token(&app_state, session.user_id)?;
     let request_id = Uuid::new_v4();
-    let claude_args = jsonb_string_vec(&session.claude_args);
+    let claude_args = session.claude_args.0.clone();
     let agent_type = shared::AgentType::parse_or_default(&session.agent_type);
 
     let history_restore = crate::handlers::history_restore::launch_recipe(&session)?;
@@ -742,11 +742,11 @@ mod tests {
             repo_url: None,
             scheduled_task_id: None,
             paused: false,
-            claude_args: serde_json::Value::Array(vec![]),
+            claude_args: crate::models::JsonVec::default(),
             launch_failure_count: 0,
             last_launch_attempt_at: None,
             launch_lease_until: None,
-            open_prs: serde_json::Value::Array(vec![]),
+            open_prs: crate::models::JsonVec::default(),
             archived_at: None,
             last_model: None,
             launcher_version: launcher_version.map(str::to_string),

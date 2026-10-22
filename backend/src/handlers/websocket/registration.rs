@@ -205,8 +205,7 @@ pub fn register_or_update_session(
             sessions::repo_url.eq(params.repo_url),
             sessions::launcher_id.eq(params.launcher_id),
             sessions::fork_launch_pending.eq(false),
-            sessions::claude_args.eq(serde_json::to_value(params.claude_args)
-                .unwrap_or_else(|_| serde_json::Value::Array(Vec::new()))),
+            sessions::claude_args.eq(crate::models::JsonVec(params.claude_args.clone())),
         ))
         .execute(&mut conn)
         {
@@ -336,8 +335,7 @@ fn create_new_session(
         repo_url: params.repo_url.clone(),
         scheduled_task_id: params.scheduled_task_id,
         paused: false,
-        claude_args: serde_json::to_value(params.claude_args)
-            .unwrap_or_else(|_| serde_json::Value::Array(Vec::new())),
+        claude_args: params.claude_args.clone().into(),
         launcher_version,
     };
 

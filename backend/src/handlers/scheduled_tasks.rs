@@ -25,7 +25,7 @@ use crate::{
     auth::CurrentUserId,
     errors::AppError,
     handlers::responses::EmptyResponse,
-    models::{jsonb_string_vec, NewScheduledTask, ScheduledTask, ScheduledTaskChangeset, Session},
+    models::{JsonVec, NewScheduledTask, ScheduledTask, ScheduledTaskChangeset, Session},
     schema::scheduled_tasks,
     AppState,
 };
@@ -39,7 +39,7 @@ fn task_to_fields(t: &ScheduledTask) -> ScheduledTaskFields {
         launch: LaunchSpec {
             working_directory: t.working_directory.clone(),
             session_name: t.session_name.clone(),
-            claude_args: jsonb_string_vec(&t.claude_args),
+            claude_args: t.claude_args.0.clone(),
             agent_type: AgentType::parse_or_default(&t.agent_type),
             worktree: match t.worktree_mode.as_str() {
                 "repo" => WorktreeMode::Repo {
@@ -315,7 +315,7 @@ pub async fn create_task_handler(
         hostname: req.hostname,
         working_directory: launch.working_directory,
         prompt: req.fields.prompt,
-        claude_args: serde_json::to_value(launch.claude_args).unwrap_or_default(),
+        claude_args: launch.claude_args.into(),
         agent_type: launch.agent_type.as_str().to_string(),
         worktree_mode: worktree_mode.to_string(),
         worktree_branch,
@@ -379,9 +379,7 @@ pub async fn update_task_handler(
         hostname: req.hostname,
         working_directory: req.working_directory,
         prompt: req.prompt,
-        claude_args: req
-            .claude_args
-            .map(|args| serde_json::to_value(args).unwrap_or_default()),
+        claude_args: req.claude_args.map(JsonVec::from),
         agent_type: req.agent_type.map(|at| at.as_str().to_string()),
         enabled: req.enabled,
         max_runtime_minutes: req.max_runtime_minutes,
@@ -494,7 +492,7 @@ mod tests {
             hostname: "workstation".to_string(),
             working_directory: "/tmp".to_string(),
             prompt: "check".to_string(),
-            claude_args: serde_json::Value::Array(Vec::new()),
+            claude_args: JsonVec::default(),
             agent_type: "codex".to_string(),
             enabled: true,
             max_runtime_minutes: 30,

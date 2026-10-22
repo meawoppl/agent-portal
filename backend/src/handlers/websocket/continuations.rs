@@ -9,9 +9,7 @@ use uuid::Uuid;
 
 use super::{SessionId, SessionManager};
 use crate::db::DbPool;
-use crate::models::{
-    jsonb_string_vec, NewMessage, NewSessionContinuation, Session, SessionContinuation,
-};
+use crate::models::{NewMessage, NewSessionContinuation, Session, SessionContinuation};
 use crate::AppState;
 
 /// Lifecycle state stored in `session_continuations.status`.
@@ -400,7 +398,7 @@ pub fn load_scheduled_continuations(
         .unwrap_or_default()
         .into_iter()
         .map(|(row, session)| {
-            let claude_args = jsonb_string_vec(&session.claude_args);
+            let claude_args = session.claude_args.0.clone();
             let agent_type = parse_agent_type(&session.agent_type);
             ContinuationConfig {
                 id: row.id,

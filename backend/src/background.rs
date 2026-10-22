@@ -528,7 +528,7 @@ fn archive_one_session(
             forked_from_session_id: session.forked_from_session_id,
             fork_point_turn_id: session.fork_point_turn_id.clone(),
             scheduled_task_id: session.scheduled_task_id,
-            claude_args: models::jsonb_string_vec(&session.claude_args),
+            claude_args: session.claude_args.0.clone(),
             // Per-write provenance: whichever backend runs this sweep stamps
             // its own version, so a re-archive reflects the newer writer.
             archived_by_version: Some(shared::VERSION.to_string()),

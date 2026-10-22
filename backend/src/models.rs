@@ -3,11 +3,7 @@ use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Decode a JSONB string-array column (e.g. `claude_args`) into `Vec<String>`,
-/// tolerating a malformed/absent value as empty.
-pub fn jsonb_string_vec(v: &serde_json::Value) -> Vec<String> {
-    serde_json::from_value(v.clone()).unwrap_or_default()
-}
+pub use crate::db::jsonb::JsonVec;
 
 #[derive(Debug, Queryable, Selectable, Serialize, Deserialize, Clone)]
 #[diesel(table_name = crate::schema::users)]
@@ -128,14 +124,14 @@ pub struct Session {
     pub repo_url: Option<String>,
     pub scheduled_task_id: Option<Uuid>,
     pub paused: bool,
-    pub claude_args: serde_json::Value,
+    pub claude_args: JsonVec<String>,
     pub launch_failure_count: i32,
     pub last_launch_attempt_at: Option<NaiveDateTime>,
     pub launch_lease_until: Option<NaiveDateTime>,
     /// All open PRs in the repo as a JSON array of `shared::PrRef`
     /// (`[{number,url,branch}]`). Surfaces on the wire via `SessionWithRole`'s
     /// flatten, where the frontend deserializes it into `Vec<PrRef>`.
-    pub open_prs: serde_json::Value,
+    pub open_prs: JsonVec<shared::PrRef>,
     /// When this session was last archived to long-term storage (#1258).
     /// `None` = never; the sweep re-archives when `last_activity` advances
     /// past this.
@@ -187,7 +183,7 @@ pub struct NewSessionWithId {
     pub repo_url: Option<String>,
     pub scheduled_task_id: Option<Uuid>,
     pub paused: bool,
-    pub claude_args: serde_json::Value,
+    pub claude_args: JsonVec<String>,
     /// The launcher's self-reported version at the moment this session was
     /// created, resolved from the in-memory launcher registry
     /// (`LauncherConnection.version`). Captured here — alongside `launcher_id`
@@ -510,7 +506,7 @@ pub struct ScheduledTask {
     pub hostname: String,
     pub working_directory: String,
     pub prompt: String,
-    pub claude_args: serde_json::Value,
+    pub claude_args: JsonVec<String>,
     pub agent_type: String,
     pub enabled: bool,
     pub max_runtime_minutes: i32,
@@ -534,7 +530,7 @@ pub struct NewScheduledTask {
     pub hostname: String,
     pub working_directory: String,
     pub prompt: String,
-    pub claude_args: serde_json::Value,
+    pub claude_args: JsonVec<String>,
     pub agent_type: String,
     pub max_runtime_minutes: i32,
     pub session_mode: String,
@@ -555,7 +551,7 @@ pub struct ScheduledTaskChangeset {
     pub hostname: Option<String>,
     pub working_directory: Option<String>,
     pub prompt: Option<String>,
-    pub claude_args: Option<serde_json::Value>,
+    pub claude_args: Option<JsonVec<String>>,
     pub agent_type: Option<String>,
     pub enabled: Option<bool>,
     pub max_runtime_minutes: Option<i32>,
@@ -875,15 +871,5 @@ mod tests {
         // skips-with-log rather than mis-routing a legacy/corrupt row.
         assert_eq!(push_sub("mms").platform_kind(), None);
         assert_eq!(push_sub("").platform_kind(), None);
-    }
-
-    #[test]
-    fn jsonb_string_vec_decodes_array_and_tolerates_garbage() {
-        assert_eq!(
-            jsonb_string_vec(&serde_json::json!(["--model", "opus"])),
-            vec!["--model".to_string(), "opus".to_string()]
-        );
-        assert!(jsonb_string_vec(&serde_json::json!(null)).is_empty());
-        assert!(jsonb_string_vec(&serde_json::json!({"oops": 1})).is_empty());
     }
 }
