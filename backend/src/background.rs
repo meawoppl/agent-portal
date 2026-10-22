@@ -1275,7 +1275,7 @@ mod retention_archive_hold_tests {
         session_id: Uuid,
         user_id: Uuid,
         created_at: chrono::NaiveDateTime,
-    ) {
+    ) -> Uuid {
         let mid = Uuid::new_v4();
         diesel::insert_into(messages::table)
             .values((
@@ -1289,6 +1289,7 @@ mod retention_archive_hold_tests {
             ))
             .execute(conn)
             .expect("insert message");
+        mid
     }
 
     #[test]
@@ -1306,17 +1307,14 @@ mod retention_archive_hold_tests {
             let config = RetentionConfig::new(100, 30);
             // Archive disabled -> held set empty per `run_retention_cleanup` None branch.
             let held: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
-            // Verify the candidate would be trimmed if not held.
-            let (age_deleted, _) = crate::handlers::retention::run_retention_cleanup(
-                &mut *conn,
-                vec![],
-                config,
-                &held,
-            );
-            assert!(
-                age_deleted >= 1,
-                "with no held, old message should be deleted"
-            );
+            // Verify the candidate would be trimmed if not held. The global
+            // count includes other tests' rows, so check this session's own.
+            crate::handlers::retention::run_retention_cleanup(&mut *conn, vec![], config, &held);
+            let remaining: i64 = messages::table
+                .filter(messages::session_id.eq(sid))
+                .count()
+                .get_result(&mut *conn)?;
+            assert_eq!(remaining, 0, "with no held, old message should be deleted");
             Ok(())
         });
     }
@@ -1364,7 +1362,7 @@ mod retention_archive_hold_tests {
             let user = crate::test_support::insert_user(&mut *conn, "retention-fail");
             let sid = make_session(&mut *conn, user.id);
             let old = chrono::Utc::now().naive_utc() - chrono::Duration::days(40);
-            insert_old_message(&mut *conn, sid, user.id, old);
+            let seeded = insert_old_message(&mut *conn, sid, user.id, old);
 
             // Unwritable / invalid local path should make archive_one_session fail.
             // When running as root, permission bits are ignored, so use a file as the
@@ -1388,13 +1386,19 @@ mod retention_archive_hold_tests {
             // File-as-dir fails ENOTDIR for any user including root (not a permission check),
             // unlike chmod which root bypasses — so this holds reliably.
             assert!(held.contains(&sid), "failed archive should hold {sid}");
-            let (age_deleted, _) = crate::handlers::retention::run_retention_cleanup(
-                &mut *conn,
-                vec![],
-                config,
-                &held,
+            // The cleanup is global, so its counts include other tests' rows
+            // that this transaction can see; judge only this session's own
+            // seeded row. The transaction rolls back whatever it deletes.
+            crate::handlers::retention::run_retention_cleanup(&mut *conn, vec![], config, &held);
+            let remaining: Vec<(Uuid, String)> = messages::table
+                .filter(messages::session_id.eq(sid))
+                .select((messages::id, messages::content))
+                .load(&mut *conn)?;
+            assert_eq!(
+                remaining,
+                [(seeded, "hello".to_string())],
+                "held session must not be trimmed"
             );
-            assert_eq!(age_deleted, 0, "held session must not be trimmed");
             Ok(())
         });
     }
