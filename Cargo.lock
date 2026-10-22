@@ -1310,6 +1310,7 @@ dependencies = [
  "serde_json",
  "session-lib",
  "shared",
+ "tempfile",
  "tokio",
  "tracing",
  "uuid",

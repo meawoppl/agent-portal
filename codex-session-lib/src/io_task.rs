@@ -481,6 +481,12 @@ pub(crate) async fn codex_io_task(
                 result = client.next_message() => {
                     match result {
                         Ok(Some(msg)) => {
+                            if let Err(e) = settle_unsupported_request(&mut client, &msg).await {
+                                let _ = event_tx.send(IoEvent::Error(
+                                    SessionError::CommunicationError(e.to_string()),
+                                ));
+                                break;
+                            }
                             if let Some((request_id, kind)) = approval_response_kind(&msg) {
                                 state.record_approval_request(request_id, kind);
                             }
@@ -988,6 +994,12 @@ pub(crate) async fn codex_io_task(
                 result = client.next_message() => {
                     match result {
                         Ok(Some(msg)) => {
+                            if let Err(e) = settle_unsupported_request(&mut client, &msg).await {
+                                let _ = event_tx.send(IoEvent::Error(
+                                    SessionError::CommunicationError(e.to_string()),
+                                ));
+                                break;
+                            }
                             if let Some((request_id, kind)) = approval_response_kind(&msg) {
                                 state.record_approval_request(request_id, kind);
                             }
@@ -1243,6 +1255,40 @@ fn turn_start_params(
         effort: reasoning_effort.map(codex_reasoning_effort),
         ..TurnStartParams::default()
     }
+}
+
+/// The reply to a ChatGPT token refresh. Codex asks for one only when its
+/// client supplied the tokens (`chatgptAuthTokens` sign-in); Portal never
+/// does, since its sessions use the computer's own Codex sign-in, which
+/// Codex refreshes itself. So there is nothing to hand back, only this.
+const TOKEN_REFRESH_UNSUPPORTED: &str = "Agent Portal does not supply ChatGPT tokens; sign in to Codex on this computer (codex login) and restart the session";
+
+/// Answer the server requests Portal settles itself, so Codex never waits on
+/// one: a ChatGPT token refresh gets an error at once. The request carries an
+/// account id, which is never logged. An `Err` is a transport failure, for the
+/// caller to end the session on as it would any other.
+///
+/// TODO(SDK #496): only requests that reach this loop are answered. One that
+/// arrives while our own `client.request` awaits a reply is buffered by the
+/// SDK until that reply comes, which deadlocks if Codex holds the reply for it.
+async fn settle_unsupported_request(
+    client: &mut CodexAsyncClient,
+    msg: &ServerMessage,
+) -> codex_codes::Result<()> {
+    let ServerMessage::Request {
+        id,
+        request: ServerRequest::ChatgptAuthTokensRefresh(_),
+    } = msg
+    else {
+        return Ok(());
+    };
+    tracing::warn!(
+        "Codex asked for a ChatGPT token refresh (request {}); answering that Portal cannot supply tokens",
+        format_request_id(id)
+    );
+    client
+        .respond_error(id.clone(), -32000, TOKEN_REFRESH_UNSUPPORTED)
+        .await
 }
 
 fn approval_response_kind(msg: &ServerMessage) -> Option<(String, CodexApprovalResponseKind)> {
@@ -1840,5 +1886,134 @@ mod tests {
             UserInput::Text { text, .. } => assert_eq!(text, "hello mid-turn"),
             other => panic!("expected text input, got {other:?}"),
         }
+    }
+}
+
+/// `codex_io_task` against a fake app-server: a shell script standing in for
+/// the `codex` binary that answers the handshake, starts a thread and a turn,
+/// and asks for a ChatGPT token refresh while idle and mid-turn.
+#[cfg(all(test, unix))]
+mod token_refresh_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::Duration;
+
+    /// A fake `codex` that logs every line Portal writes to it. In `close`
+    /// mode it exits right after asking for the idle refresh.
+    fn fake_codex(dir: &Path, mode: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+        let log = dir.join("from-portal.log");
+        let script = dir.join("codex");
+        let body = format!(
+            r#"#!/bin/sh
+LOG='{log}'
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "$LOG"
+  id=$(printf '%s' "$line" | sed -n 's/^{{"id":\([0-9][0-9]*\),"method":.*/\1/p')
+  method=$(printf '%s' "$line" | sed -n 's/^{{"id":[0-9]*,"method":"\([^"]*\)".*/\1/p')
+  [ -z "$id" ] && continue
+  case "$method" in
+    thread/start)
+      printf '{{"id":%s,"result":{{"approvalPolicy":"never","cwd":"/tmp","thread":{{"id":"thread-1"}}}}}}\n' "$id"
+      printf '{{"id":"refresh-idle","method":"account/chatgptAuthTokens/refresh","params":{{"reason":"unauthorized","previousAccountId":"acct-secret"}}}}\n'
+      [ '{mode}' = close ] && exit 0 ;;
+    turn/start)
+      printf '{{"id":%s,"result":{{"turn":{{"id":"turn-1","status":"inProgress"}}}}}}\n' "$id"
+      printf '{{"id":"refresh-active","method":"account/chatgptAuthTokens/refresh","params":{{"reason":"unauthorized","previousAccountId":"acct-secret"}}}}\n' ;;
+    *)
+      printf '{{"id":%s,"result":{{}}}}\n' "$id" ;;
+  esac
+done
+"#,
+            log = log.display(),
+        );
+        std::fs::write(&script, body).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        (script, log)
+    }
+
+    fn config(dir: &Path, codex: std::path::PathBuf) -> SessionConfig {
+        SessionConfig {
+            claude_path: Some(codex),
+            working_directory: dir.to_path_buf(),
+            ..Default::default()
+        }
+    }
+
+    /// Wait (bounded) for Portal's reply to the request `id`.
+    async fn reply_to(log: &Path, id: &str) -> String {
+        let needle = format!(r#""id":"{id}""#);
+        tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                let lines = std::fs::read_to_string(log).unwrap_or_default();
+                if let Some(line) = lines.lines().find(|l| l.contains(&needle)) {
+                    return line.to_string();
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("no reply to {id}"))
+    }
+
+    fn assert_refused(reply: &str) {
+        let reply: serde_json::Value = serde_json::from_str(reply).unwrap();
+        assert_eq!(reply["error"]["code"], -32000, "{reply}");
+        assert_eq!(reply["error"]["message"], TOKEN_REFRESH_UNSUPPORTED);
+        assert!(reply.get("result").is_none());
+    }
+
+    #[tokio::test]
+    async fn token_refresh_is_refused_while_idle_and_mid_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let (codex, log) = fake_codex(dir.path(), "serve");
+        let (command_tx, command_rx) = mpsc::unbounded_channel();
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let task = tokio::spawn(codex_io_task(
+            config(dir.path(), codex),
+            command_rx,
+            event_tx,
+        ));
+
+        assert_refused(&reply_to(&log, "refresh-idle").await);
+
+        command_tx
+            .send(IoCommand::UserInput {
+                text: "hello".into(),
+                reasoning_effort: None,
+                delivered: None,
+                display_event: None,
+            })
+            .unwrap();
+        assert_refused(&reply_to(&log, "refresh-active").await);
+
+        // Neither the account id nor any token went back to Codex.
+        assert!(!std::fs::read_to_string(&log)
+            .unwrap()
+            .contains("acct-secret"));
+        // And the session kept running: no transport error was raised.
+        while let Ok(event) = event_rx.try_recv() {
+            assert!(
+                !matches!(event, IoEvent::Error(_)),
+                "transport error raised"
+            );
+        }
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn a_refresh_on_a_closed_transport_ends_the_task() {
+        let dir = tempfile::tempdir().unwrap();
+        let (codex, _log) = fake_codex(dir.path(), "close");
+        let (_command_tx, command_rx) = mpsc::unbounded_channel();
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        tokio::time::timeout(
+            Duration::from_secs(20),
+            codex_io_task(config(dir.path(), codex), command_rx, event_tx),
+        )
+        .await
+        .expect("the I/O task ends once Codex is gone");
+        let ended = std::iter::from_fn(|| event_rx.try_recv().ok())
+            .any(|event| matches!(event, IoEvent::Error(_) | IoEvent::Exited { .. }));
+        assert!(ended, "the session hears that Codex is gone");
     }
 }
