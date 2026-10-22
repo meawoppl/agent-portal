@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2296 · Answer every refused session-socket mutation from a viewer</text>
+
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">Four role gates in web_client_socket.rs only logged a refusal, so the browser</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">waited forever; now each replies on the refused client's own socket.</text>
+  <line x1="55" y1="166" x2="1945" y2="166" stroke="#3d4666" stroke-width="1"/>
+
+  <text x="55" y="215" font-size="22" font-weight="bold" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1045" y="215" font-size="22" font-weight="bold" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1040" stroke="#3d4666" stroke-width="2" stroke-dasharray="10 8"/>
+
+  <!-- BEFORE -->
+  <rect x="55" y="245" width="900" height="150" rx="10" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+  <text x="79" y="285" font-size="26" fill="#c0caf5">FileUploadStart / FileUploadChunk</text>
+  <text x="79" y="325" font-size="23" fill="#a9b1d6">warn! and return false</text>
+  <text x="79" y="360" font-size="23" fill="#f7768e">pending_upload_prompt never resolves</text>
+
+  <rect x="55" y="445" width="900" height="150" rx="10" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+  <text x="79" y="485" font-size="26" fill="#c0caf5">ScheduleLimitContinuation</text>
+  <text x="79" y="525" font-size="23" fill="#a9b1d6">warn! and return false</text>
+  <text x="79" y="560" font-size="23" fill="#f7768e">button stuck on "Scheduling..."</text>
+
+  <rect x="55" y="645" width="900" height="150" rx="10" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+  <text x="79" y="685" font-size="26" fill="#c0caf5">PermissionResponse / Interrupt</text>
+  <text x="79" y="725" font-size="23" fill="#a9b1d6">warn! and return false</text>
+  <text x="79" y="760" font-size="23" fill="#f7768e">dialog closes as if answered; Stop does nothing</text>
+
+  <!-- AFTER -->
+  <rect x="1045" y="245" width="900" height="150" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1069" y="285" font-size="26" fill="#c0caf5">send_upload_failure(tx, upload_id, ...)</text>
+  <text x="1069" y="325" font-size="23" fill="#9ece6a">FileUploadResult success: false: prompt cleared</text>
+  <text x="1069" y="360" font-size="23" fill="#a9b1d6">refused chunk: pending_uploads.remove (own map)</text>
+
+  <rect x="1045" y="445" width="900" height="150" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1069" y="485" font-size="26" fill="#c0caf5">ContinuationStatus status: "failed"</text>
+  <text x="1069" y="525" font-size="23" fill="#9ece6a">this tab's button settles</text>
+  <text x="1069" y="560" font-size="23" fill="#a9b1d6">stored continuation untouched</text>
+
+  <rect x="1045" y="645" width="900" height="150" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1069" y="685" font-size="26" fill="#c0caf5">reject_viewer: ServerToClient::Error</text>
+  <text x="1069" y="725" font-size="23" fill="#9ece6a">"You don't have permission to stop the agent..."</text>
+  <text x="1069" y="760" font-size="23" fill="#a9b1d6">tx only, never broadcast; nothing replayed</text>
+
+  <rect x="1045" y="845" width="900" height="150" rx="10" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+  <text x="1069" y="885" font-size="26" fill="#c0caf5">Regression: demoted editor, DB-backed</text>
+  <text x="1069" y="925" font-size="23" fill="#a9b1d6">owner's same-id upload intact; guessed id silent</text>
+  <text x="1069" y="960" font-size="23" fill="#a9b1d6">proxy and owner socket receive nothing</text>
+</svg>
