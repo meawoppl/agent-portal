@@ -1986,22 +1986,51 @@ done
             .unwrap();
         assert_refused(&reply_to(&log, "refresh-active").await);
 
-        // Neither the account id nor any token went back to Codex.
-        assert!(!std::fs::read_to_string(&log)
-            .unwrap()
-            .contains("acct-secret"));
-        // And the session kept running: no transport error was raised.
+        // One notice per refresh in the transcript, and no transport error:
+        // the session kept running.
+        let mut notices = 0;
+        let collect = |event: IoEvent, notices: &mut usize| match event {
+            IoEvent::Error(_) => panic!("transport error raised"),
+            IoEvent::Classified(session_lib::AgentOutput::Visible(v))
+                if v.to_string().contains("sign-in needs renewing") =>
+            {
+                *notices += 1
+            }
+            _ => {}
+        };
+        tokio::time::timeout(Duration::from_secs(20), async {
+            while notices < 2 {
+                let event = event_rx.recv().await.expect("event stream open");
+                collect(event, &mut notices);
+            }
+        })
+        .await
+        .expect("a notice for each refresh");
+        tokio::time::sleep(Duration::from_millis(300)).await;
         while let Ok(event) = event_rx.try_recv() {
-            assert!(
-                !matches!(event, IoEvent::Error(_)),
-                "transport error raised"
+            collect(event, &mut notices);
+        }
+        assert_eq!(notices, 2);
+
+        // Exactly one reply to each request, and neither the account id nor
+        // any token went back to Codex.
+        let sent = std::fs::read_to_string(&log).unwrap();
+        for id in ["refresh-idle", "refresh-active"] {
+            let needle = format!(r#""id":"{id}""#);
+            assert_eq!(
+                sent.lines().filter(|l| l.contains(&needle)).count(),
+                1,
+                "{id}"
             );
         }
+        assert!(!sent.contains("acct-secret"));
         task.abort();
     }
 
+    /// Codex goes away right after asking: whether the reply fails to write
+    /// or the read sees EOF first, the task ends within a bound.
     #[tokio::test]
-    async fn a_refresh_on_a_closed_transport_ends_the_task() {
+    async fn a_closed_transport_after_a_refresh_ends_the_task() {
         let dir = tempfile::tempdir().unwrap();
         let (codex, _log) = fake_codex(dir.path(), "close");
         let (_command_tx, command_rx) = mpsc::unbounded_channel();
