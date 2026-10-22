@@ -168,6 +168,7 @@ mod tests {
             client_msg_id: Uuid::nil(),
             stage,
             message: None,
+            queued: false,
         };
         assert!(d(None).pending()); // submitted, no ack yet
         assert!(d(Some(InputDeliveryStage::ServerReceived)).pending());

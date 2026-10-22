@@ -227,6 +227,7 @@ fn handle_web_client_message(
                             client_msg_id: id,
                             stage: shared::InputDeliveryStage::Failed,
                             message: Some("permission denied".to_string()),
+                            queued: false,
                         });
                     }
                     let _ = tx.send(ServerToClient::Error {
@@ -259,6 +260,7 @@ fn handle_web_client_message(
                             client_msg_id: id,
                             stage: shared::InputDeliveryStage::AgentAccepted,
                             message: None,
+                            queued: false,
                         });
                         return false;
                     }
@@ -267,6 +269,7 @@ fn handle_web_client_message(
                             client_msg_id: id,
                             stage: shared::InputDeliveryStage::Failed,
                             message: Some("delivery previously failed".to_string()),
+                            queued: false,
                         });
                         return false;
                     }
@@ -280,6 +283,7 @@ fn handle_web_client_message(
                     client_msg_id: id,
                     stage: shared::InputDeliveryStage::ServerReceived,
                     message: None,
+                    queued: false,
                 });
             }
             handle_web_input(
@@ -601,6 +605,7 @@ fn handle_web_input(
 
     // Seq bump + best-effort persist + live delivery, shared with the
     // agent-messaging send path (see SessionManager::enqueue_input).
+    let client_msg_id = input.client_msg_id;
     let outcome = session_manager.enqueue_input(
         db_pool,
         key,
@@ -609,14 +614,22 @@ fn handle_web_input(
             content: input.content,
             send_mode: input.send_mode,
             reasoning_effort: input.reasoning_effort,
-            client_msg_id: input.client_msg_id,
+            client_msg_id,
         },
     );
-    if !outcome.delivered {
-        warn!(
-            "Failed to send to session '{}', session not found in SessionManager (input queued)",
-            key
-        );
+    if !outcome.live {
+        info!("Agent for session '{key}' is offline; input held for its reconnect");
+        // Tell only the sender it is waiting for the agent, and only when it
+        // will really replay. Nothing is resent from here; the proxy's acks
+        // after it reconnects settle the row as usual.
+        if let (Some(id), true) = (client_msg_id, outcome.durable) {
+            let _ = ctx.tx.send(ServerToClient::InputProgress {
+                client_msg_id: id,
+                stage: shared::InputDeliveryStage::ServerReceived,
+                message: None,
+                queued: true,
+            });
+        }
     }
 }
 
@@ -870,5 +883,101 @@ mod viewer_rejection_tests {
         // Nothing reached the agent, and no other member heard about it.
         assert!(proxy_rx.try_recv().is_err());
         assert!(owner_rx.try_recv().is_err());
+    }
+}
+
+#[cfg(test)]
+mod queued_input_tests {
+    use super::*;
+    use crate::models::NewPendingInput;
+    use crate::schema::{pending_inputs, sessions};
+    use crate::test_support::{insert_session, insert_user, shared_pool, test_app_state};
+
+    fn send_input(
+        state: &AppState,
+        tx: &WebClientSender,
+        user_id: Uuid,
+        session: Uuid,
+        client_msg_id: Uuid,
+    ) {
+        let ctx = WebClientCtx {
+            app_state: state,
+            session_manager: &state.session_manager,
+            db_pool: &state.db_pool,
+            tx,
+            user_id,
+            initial_replay_limit: 0,
+        };
+        handle_web_client_message(
+            ClientToServer::AgentInput {
+                content: serde_json::json!("while you were away"),
+                send_mode: None,
+                reasoning_effort: None,
+                client_msg_id: Some(client_msg_id),
+            },
+            ctx,
+            &mut Some(SessionId::from(session.to_string())),
+            &mut Some(session),
+            &mut HashMap::new(),
+        );
+    }
+
+    /// The stages the sender saw for one input, with whether each was queued.
+    fn stages(
+        rx: &mut tokio::sync::mpsc::Receiver<ServerToClient>,
+    ) -> Vec<(shared::InputDeliveryStage, bool)> {
+        std::iter::from_fn(|| rx.try_recv().ok())
+            .filter_map(|frame| match frame {
+                ServerToClient::InputProgress { stage, queued, .. } => Some((stage, queued)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// With the agent offline, an input says it is queued only once it is
+    /// durably stored; a row that fails to persist after a valid sequence
+    /// bump never claims it.
+    #[test]
+    fn offline_input_is_queued_only_when_durably_stored() {
+        use shared::InputDeliveryStage::ServerReceived;
+        let Some(pool) = shared_pool() else { return };
+        let state = test_app_state(pool);
+        let mut conn = state.conn().unwrap();
+        let owner = insert_user(&mut conn, "queued-owner");
+        let session = insert_session(&mut conn, owner.id, "queued");
+        let (tx, mut rx) = super::super::conn_channel(64);
+        let (other_tx, mut other_rx) = super::super::conn_channel(64);
+        state
+            .session_manager
+            .add_web_client(SessionId::from(session.id.to_string()), other_tx);
+
+        send_input(&state, &tx, owner.id, session.id, Uuid::new_v4());
+        assert_eq!(
+            stages(&mut rx),
+            [(ServerReceived, false), (ServerReceived, true)]
+        );
+        // The queued notice is the sender's alone.
+        assert!(!std::iter::from_fn(|| other_rx.try_recv().ok())
+            .any(|frame| matches!(frame, ServerToClient::InputProgress { queued: true, .. })));
+
+        // Occupy the next sequence: the bump succeeds, the insert conflicts.
+        let next: i64 = sessions::table
+            .find(session.id)
+            .select(sessions::input_seq)
+            .first(&mut conn)
+            .unwrap();
+        diesel::insert_into(pending_inputs::table)
+            .values(NewPendingInput {
+                session_id: session.id,
+                seq_num: next + 1,
+                content: "\"squatter\"".into(),
+                send_mode: "normal".into(),
+                client_msg_id: None,
+                reasoning_effort: None,
+            })
+            .execute(&mut conn)
+            .unwrap();
+        send_input(&state, &tx, owner.id, session.id, Uuid::new_v4());
+        assert_eq!(stages(&mut rx), [(ServerReceived, false)]);
     }
 }

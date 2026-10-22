@@ -98,6 +98,10 @@ pub struct DeliveryMeta {
     /// Failure detail (only when `stage == Some(Failed)`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// At `ServerReceived`: durably queued while the agent is offline (see
+    /// `ServerToClient::InputProgress::queued`). Cleared by any later stage.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub queued: bool,
 }
 
 impl DeliveryMeta {
@@ -248,6 +252,11 @@ pub enum ServerToClient {
         /// Populated for `Failed` (the delivery error), absent otherwise.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         message: Option<String>,
+        /// With `ServerReceived`: the agent is offline and the input was
+        /// durably stored (sequence allocated and persisted), so it is sent
+        /// when the agent reconnects. A client that predates this ignores it.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        queued: bool,
     },
 
     /// The agent withdrew this request. Clear only the matching prompt.

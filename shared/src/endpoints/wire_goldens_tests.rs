@@ -257,6 +257,7 @@ fn server_to_client_input_progress_golden_for_every_stage() {
             client_msg_id: id,
             stage,
             message: None,
+            queued: false,
         };
         let v = serde_json::to_value(&msg).unwrap();
         assert_eq!(v["type"], "InputProgress");
@@ -273,6 +274,33 @@ fn server_to_client_input_progress_golden_for_every_stage() {
             _ => panic!("wrong variant"),
         }
     }
+}
+
+#[test]
+fn server_to_client_input_progress_queued_is_additive() {
+    let id = Uuid::from_u128(0x22222222222222222222222222222222);
+    let queued = ServerToClient::InputProgress {
+        client_msg_id: id,
+        stage: InputDeliveryStage::ServerReceived,
+        message: None,
+        queued: true,
+    };
+    assert_golden(
+        &queued,
+        json!({"type": "InputProgress", "client_msg_id": id, "stage": "server_received", "queued": true}),
+    );
+    // Omitted when false, so the ordinary frames are byte-identical, and a
+    // frame without it decodes as not queued.
+    let plain = json!({"type": "InputProgress", "client_msg_id": id, "stage": "server_received"});
+    assert_golden(
+        &ServerToClient::InputProgress {
+            client_msg_id: id,
+            stage: InputDeliveryStage::ServerReceived,
+            message: None,
+            queued: false,
+        },
+        plain,
+    );
 }
 
 #[test]
@@ -795,6 +823,7 @@ fn portal_meta_default_omits_empty_fields_and_roundtrips() {
             client_msg_id: nil(),
             stage: Some(InputDeliveryStage::ProxyReceived),
             message: None,
+            queued: false,
         }),
     };
     assert_eq!(roundtrip_json(&m), m);

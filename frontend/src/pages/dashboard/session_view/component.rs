@@ -128,6 +128,7 @@ fn optimistic_user_message(
                 client_msg_id,
                 stage: None,
                 message: None,
+                queued: false,
             }),
         }),
     )
@@ -889,6 +890,7 @@ impl Component for SessionView {
                             } else {
                                 "Not sent; retry when connected"
                             }),
+                            false,
                         );
                     }
                 } else {
@@ -1824,6 +1826,7 @@ impl SessionView {
                 client_msg_id,
                 stage,
                 message,
+                queued,
             } => {
                 // Terminal outcome — the backend has taken responsibility
                 // (accepted) or given up (failed); either way stop tracking it
@@ -1839,6 +1842,7 @@ impl SessionView {
                     client_msg_id,
                     stage,
                     message.as_deref(),
+                    queued,
                 );
                 if let Some((item_id, active_client_msg_id)) = self.edit_stack_active {
                     if active_client_msg_id == client_msg_id {
@@ -2356,6 +2360,7 @@ impl SessionView {
                 dropped,
                 shared::InputDeliveryStage::Failed,
                 Some("send backlog full"),
+                false,
             );
         }
         self.transmit_input(client_msg_id, frame);

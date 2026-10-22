@@ -472,6 +472,7 @@ fn handle_proxy_message(
                         client_msg_id,
                         stage,
                         message: None,
+                        queued: false,
                     },
                 );
             }

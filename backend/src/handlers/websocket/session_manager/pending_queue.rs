@@ -21,11 +21,25 @@ pub(super) struct PendingMessage {
     pub(super) queued_at: Instant,
 }
 
+/// Where [`SessionManager::send_or_queue`] put a message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Sent {
+    /// Handed to the connected proxy.
+    Live,
+    /// No live proxy: held in memory for it to receive on reconnect.
+    Queued,
+}
+
 impl SessionManager {
     pub fn send_to_session(&self, session_key: &str, msg: ServerToProxy) -> bool {
+        self.send_or_queue(session_key, msg);
+        true
+    }
+
+    pub(crate) fn send_or_queue(&self, session_key: &str, msg: ServerToProxy) -> Sent {
         let msg = match self.sessions.get(session_key) {
             Some(conn) => match conn.sender.send(msg) {
-                Ok(()) => return true,
+                Ok(()) => return Sent::Live,
                 // A closed channel hands the message back in the error, so
                 // there's no need to clone up front just in case.
                 Err(mpsc::error::SendError(msg)) => {
@@ -40,7 +54,8 @@ impl SessionManager {
             None => msg,
         };
 
-        self.queue_pending_message(session_key, msg)
+        self.queue_pending_message(session_key, msg);
+        Sent::Queued
     }
 
     pub fn send_to_connected_session(&self, session_key: &str, msg: ServerToProxy) -> bool {
@@ -87,7 +102,7 @@ impl SessionManager {
         replayed
     }
 
-    fn queue_pending_message(&self, session_key: &str, msg: ServerToProxy) -> bool {
+    fn queue_pending_message(&self, session_key: &str, msg: ServerToProxy) {
         let mut queue = self
             .pending_messages
             .entry(SessionId::from(session_key))
@@ -113,8 +128,6 @@ impl SessionManager {
             session_key,
             queue.len()
         );
-
-        true
     }
 }
 

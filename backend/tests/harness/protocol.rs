@@ -303,3 +303,121 @@ async fn unacknowledged_input_replays_when_proxy_reconnects() {
         .await
         .unwrap();
 }
+
+/// Input sent while the agent is offline: the sender is told it is queued
+/// once it is durably stored, and when the agent registers, this scenario's
+/// replay delivers it once and the normal acks settle it. Nothing is resent
+/// by the browser or the server in between.
+#[tokio::test]
+async fn offline_input_is_queued_then_replayed_on_registration() {
+    use diesel::prelude::*;
+    if std::env::var("DATABASE_URL").is_err() {
+        return;
+    }
+    let url = format!("ws://{}", spawn_test_app().await);
+    let mut fields = test_register_fields();
+    let session_id = fields.session_id;
+    // A session whose agent has never connected, owned by the dev user.
+    {
+        let mut conn = test_pool().get().unwrap();
+        let owner: uuid::Uuid = backend::schema::users::table
+            .filter(backend::schema::users::email.eq(backend::auth::DEV_USER_EMAIL))
+            .select(backend::schema::users::id)
+            .first(&mut conn)
+            .unwrap();
+        diesel::insert_into(backend::schema::sessions::table)
+            .values((
+                backend::schema::sessions::id.eq(session_id),
+                backend::schema::sessions::user_id.eq(owner),
+                backend::schema::sessions::session_name.eq("queued harness"),
+                backend::schema::sessions::session_key.eq(session_id.to_string()),
+                backend::schema::sessions::working_directory.eq(&fields.working_directory),
+                backend::schema::sessions::status.eq("disconnected"),
+            ))
+            .execute(&mut conn)
+            .unwrap();
+        diesel::insert_into(backend::schema::session_members::table)
+            .values(backend::models::NewSessionMember {
+                session_id,
+                user_id: owner,
+                role: "owner".into(),
+            })
+            .execute(&mut conn)
+            .unwrap();
+    }
+    let mut browser = connect::<ClientEndpoint>(&url).await.unwrap();
+    browser
+        .send(ClientToServer::Register(fields.clone()))
+        .await
+        .unwrap();
+    let id = uuid::Uuid::new_v4();
+    browser
+        .send(ClientToServer::AgentInput {
+            content: serde_json::json!("while you were away"),
+            send_mode: None,
+            reasoning_effort: None,
+            client_msg_id: Some(id),
+        })
+        .await
+        .unwrap();
+    receive::<ClientEndpoint>(&mut browser, |f| matches!(f, ServerToClient::InputProgress {client_msg_id, stage: InputDeliveryStage::ServerReceived, queued: true, ..} if *client_msg_id == id)).await;
+
+    fields.resuming = true;
+    let mut proxy = connect::<SessionEndpoint>(&url).await.unwrap();
+    proxy
+        .send(ProxyToServer::Register(fields.clone()))
+        .await
+        .unwrap();
+    receive::<SessionEndpoint>(&mut proxy, |f| {
+        matches!(f, ServerToProxy::RegisterAck { success: true, .. })
+    })
+    .await;
+    let replay = receive::<SessionEndpoint>(&mut proxy, |f| {
+        matches!(f, ServerToProxy::SequencedInput { .. })
+    })
+    .await;
+    let ServerToProxy::SequencedInput {
+        seq,
+        client_msg_id: Some(replayed),
+        ..
+    } = replay
+    else {
+        panic!("replay carries the input's identity")
+    };
+    assert_eq!(replayed, id);
+    proxy
+        .send(ProxyToServer::InputAck {
+            session_id,
+            ack_seq: seq,
+        })
+        .await
+        .unwrap();
+    for stage in [
+        InputDeliveryStage::ProxyReceived,
+        InputDeliveryStage::AgentAccepted,
+    ] {
+        proxy
+            .send(ProxyToServer::InputProgressAck {
+                session_id,
+                client_msg_id: id,
+                stage,
+            })
+            .await
+            .unwrap();
+        receive::<ClientEndpoint>(&mut browser, |f| matches!(f, ServerToClient::InputProgress {client_msg_id, stage: actual, queued: false, ..} if *client_msg_id == id && *actual == stage)).await;
+    }
+    // In this scenario the input arrived once: a heartbeat round trip shows
+    // nothing else was queued behind it.
+    proxy.send(ProxyToServer::Heartbeat).await.unwrap();
+    let next = receive::<SessionEndpoint>(&mut proxy, |f| {
+        matches!(
+            f,
+            ServerToProxy::SequencedInput { .. } | ServerToProxy::Heartbeat
+        )
+    })
+    .await;
+    assert!(
+        matches!(next, ServerToProxy::Heartbeat),
+        "replayed twice: {next:?}"
+    );
+}
