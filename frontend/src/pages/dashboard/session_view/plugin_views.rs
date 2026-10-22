@@ -323,23 +323,31 @@ pub(super) fn surface_controls(props: &SurfaceControlsProps) -> Html {
     let status = use_state(|| None::<PluginSurfaceStatus>);
     let busy = use_state(|| None::<&'static str>);
     let error = use_state(|| None::<String>);
-    // Claimed synchronously, so two clicks before the next render start one
-    // action; `busy` only drives rendering.
-    let in_flight = use_mut_ref(|| false);
-    // Bumped whenever the target (computer, session, plugin) changes; an
-    // answer for an earlier target is dropped.
-    let generation = use_mut_ref(|| 0_u64);
+    // Every request gets a number; only the latest one's answer is applied,
+    // so a delayed status can't overwrite a finished start, and an answer
+    // for an earlier computer, session or plugin is dropped whole.
+    let latest = use_mut_ref(|| 0_u64);
+    // The change in progress, claimed synchronously so two clicks before the
+    // next render start one; released only by the request that claimed it.
+    let in_flight = use_mut_ref(|| None::<u64>);
     let target = (props.launcher_id, props.session_id, props.plugin.clone());
     let run = {
         let (status, busy, error) = (status.clone(), busy.clone(), error.clone());
-        let (in_flight, generation) = (in_flight.clone(), generation.clone());
+        let (latest, in_flight) = (latest.clone(), in_flight.clone());
         let (launcher_id, session_id, plugin) = target.clone();
         Callback::from(
             move |(label, action): (&'static str, PluginSurfaceAction)| {
-                // A status check is read-only and never blocked; changes take the claim.
                 let mutation = action != PluginSurfaceAction::Status;
-                if mutation && in_flight.replace(true) {
+                if mutation && in_flight.borrow().is_some() {
                     return;
+                }
+                let seq = {
+                    let mut latest = latest.borrow_mut();
+                    *latest += 1;
+                    *latest
+                };
+                if mutation {
+                    *in_flight.borrow_mut() = Some(seq);
                 }
                 let request = PluginRequest {
                     working_directory: None,
@@ -349,19 +357,18 @@ pub(super) fn surface_controls(props: &SurfaceControlsProps) -> Html {
                         action,
                     },
                 };
-                let started = *generation.borrow();
                 let (status, busy, error) = (status.clone(), busy.clone(), error.clone());
-                let (in_flight, generation) = (in_flight.clone(), generation.clone());
+                let (latest, in_flight) = (latest.clone(), in_flight.clone());
                 busy.set(Some(label));
                 spawn_local(async move {
                     let result = run_plugin_action(launcher_id, &request).await;
-                    if mutation {
-                        *in_flight.borrow_mut() = false;
+                    if *in_flight.borrow() == Some(seq) {
+                        *in_flight.borrow_mut() = None;
                     }
-                    busy.set(None);
-                    if *generation.borrow() != started {
+                    if *latest.borrow() != seq {
                         return;
                     }
+                    busy.set(None);
                     match result {
                         Ok(response) => {
                             status.set(response.surface);
@@ -375,11 +382,14 @@ pub(super) fn surface_controls(props: &SurfaceControlsProps) -> Html {
     };
     {
         let run = run.clone();
-        let (status, error, generation) = (status.clone(), error.clone(), generation.clone());
+        let (status, error, busy) = (status.clone(), error.clone(), busy.clone());
+        let in_flight = in_flight.clone();
         use_effect_with(target, move |_| {
-            *generation.borrow_mut() += 1;
+            // A new target: nothing in flight belongs to it any more.
+            *in_flight.borrow_mut() = None;
             status.set(None);
             error.set(None);
+            busy.set(None);
             run.emit(("Checking", PluginSurfaceAction::Status));
             || ()
         });
