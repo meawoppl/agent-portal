@@ -209,8 +209,17 @@ fn record_command(
     response: &PluginResponse,
 ) -> Result<(), AppError> {
     use diesel::prelude::*;
+    // Quote an argument that holds spaces (or nothing), so the card shows the
+    // arguments as they were given.
+    let shown = |arg: &String| {
+        if arg.is_empty() || arg.chars().any(char::is_whitespace) {
+            format!("'{arg}'")
+        } else {
+            arg.clone()
+        }
+    };
     let invocation = std::iter::once(format!("{plugin}:{command}"))
-        .chain(args.iter().cloned())
+        .chain(args.iter().map(shown))
         .collect::<Vec<_>>()
         .join(" ");
     let ended = match (response.success, response.exit_code, &response.error) {
