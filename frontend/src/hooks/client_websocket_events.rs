@@ -47,8 +47,8 @@ pub(crate) struct ClientWsState {
     /// reading (a repeated reading is not re-appended).
     pub service_cpu_history: HashMap<String, Vec<(u64, f64)>>,
     /// The last launch or run failure per session, from the owner's user
-    /// channel (launch results and agent exits reach only the launcher's
-    /// owner, so members' tabs never hold one). Cleared by a successful
+    /// channel (only the launcher's owner is told why; members get a bare
+    /// refetch, so their tabs never hold one). Cleared by a successful
     /// launch, a dismissal, or the connection going away.
     pub session_failures: HashMap<SessionKey, SessionFailure>,
 }
@@ -261,6 +261,22 @@ impl Reducible for ClientWsState {
     }
 }
 
+/// What an exit frame records. Only the owner is told why; a member's bare
+/// frame (no reason) is just a refetch and never touches recorded failures.
+fn exit_action(
+    conn: ConnId,
+    session_id: uuid::Uuid,
+    reason: Option<shared::SessionExitReason>,
+) -> Option<ClientWsAction> {
+    reason.map(|reason| ClientWsAction::SessionExited {
+        session: SessionKey {
+            conn,
+            id: session_id,
+        },
+        reason,
+    })
+}
+
 pub(crate) fn handle_server_message(
     conn: ConnId,
     msg: ServerToClient,
@@ -340,13 +356,9 @@ pub(crate) fn handle_server_message(
         ServerToClient::SessionExited {
             session_id, reason, ..
         } => {
-            live.dispatch(ClientWsAction::SessionExited {
-                session: SessionKey {
-                    conn,
-                    id: session_id,
-                },
-                reason,
-            });
+            if let Some(action) = exit_action(conn, session_id, reason) {
+                live.dispatch(action);
+            }
             // Refetch so the list stops showing the session as running.
             live.dispatch(ClientWsAction::LaunchEvent);
         }
@@ -518,6 +530,25 @@ mod tests {
             .reduce(exited(linked, Reason::Error))
             .reduce(ClientWsAction::ForgetConn(ConnId::linked(1)));
         assert_eq!(state.session_failures.keys().collect::<Vec<_>>(), [&home]);
+    }
+
+    #[test]
+    fn a_bare_exit_keeps_the_owners_failure() {
+        let id = Uuid::new_v4();
+        let key = SessionKey::home(id);
+        let state = Rc::new(ClientWsState::default()).reduce(ClientWsAction::LaunchResult {
+            session: key,
+            failure: Some(SessionFailure::LaunchFailed(Some("detail".into()))),
+        });
+        assert!(exit_action(ConnId::HOME, id, None).is_none());
+        let crashed = exit_action(
+            ConnId::HOME,
+            id,
+            Some(shared::SessionExitReason::CrashedEarly),
+        )
+        .expect("the owner's exit records");
+        let state = state.reduce(crashed);
+        assert_eq!(state.session_failures[&key], SessionFailure::CrashedEarly);
     }
 
     #[test]

@@ -662,14 +662,17 @@ fn handle_launcher_message(
                             .execute(&mut conn)
                         {
                             warn!("Failed to record launch failure for {}: {}", session_id, e);
-                        } else if let Some((status, session_name)) = prior {
-                            if status == SessionStatus::Active.as_str() {
-                                app_state.notifications.emit(
-                                    crate::push::NotificationEvent::SessionDisconnected {
-                                        session_id,
-                                        session_name,
-                                    },
-                                );
+                        } else {
+                            notify_members_not_running(app_state, &mut conn, session_id, user_id);
+                            if let Some((status, session_name)) = prior {
+                                if status == SessionStatus::Active.as_str() {
+                                    app_state.notifications.emit(
+                                        crate::push::NotificationEvent::SessionDisconnected {
+                                            session_id,
+                                            session_name,
+                                        },
+                                    );
+                                }
                             }
                         }
                     }
@@ -754,13 +757,14 @@ fn handle_launcher_message(
                 // launch-failure counter so reconcile backs off; a healthy run
                 // resets it. See #1045 and the crash-loop investigation.
                 record_exit_for_backoff(&mut conn, session_id, reason);
+                notify_members_not_running(app_state, &mut conn, session_id, user_id);
             }
             app_state.session_manager.broadcast_to_user(
                 &user_id,
                 ServerToClient::SessionExited {
                     session_id,
                     exit_code,
-                    reason,
+                    reason: Some(reason),
                 },
             );
         }
@@ -1355,6 +1359,53 @@ fn crashloop_give_up(failure_count: i32) -> bool {
     failure_count >= LAUNCH_CRASHLOOP_GIVEUP
 }
 
+/// Tell a session's current members, other than `owner` (who gets the
+/// detailed frames), that it is no longer running, so their dashboards
+/// refetch. The bare `SessionExited` carries no reason, exit code or launcher
+/// error: members never learn why.
+fn notify_members_not_running(
+    app_state: &AppState,
+    conn: &mut diesel::PgConnection,
+    session_id: Uuid,
+    owner: Uuid,
+) {
+    use crate::schema::session_members;
+    use diesel::prelude::*;
+    let members = session_members::table
+        .filter(session_members::session_id.eq(session_id))
+        .select(session_members::user_id)
+        .load::<Uuid>(conn);
+    for member in member_recipients(members, session_id, owner) {
+        app_state.session_manager.broadcast_to_user(
+            &member,
+            ServerToClient::SessionExited {
+                session_id,
+                exit_code: None,
+                reason: None,
+            },
+        );
+    }
+}
+
+/// Who to tell from a membership lookup: everyone but the owner, or no one
+/// if the lookup failed. Never a wider broadcast.
+fn member_recipients(
+    members: diesel::QueryResult<Vec<Uuid>>,
+    session_id: Uuid,
+    owner: Uuid,
+) -> Vec<Uuid> {
+    match members {
+        Ok(members) => members.into_iter().filter(|id| *id != owner).collect(),
+        Err(e) => {
+            warn!(
+                "{} session={session_id}: {e}",
+                crate::markers::MEMBER_STATUS_FANOUT_FAILED
+            );
+            Vec::new()
+        }
+    }
+}
+
 /// Adjust a session's launch-backoff state from why its proxy exited.
 ///
 /// A healthy `Completed` run resets `launch_failure_count`; `Stopped` is
@@ -1772,17 +1823,75 @@ mod owner_relay_tests {
     use super::*;
     use crate::test_support::{insert_session, insert_user, shared_pool, test_app_state};
 
+    fn frames(rx: &mut tokio::sync::mpsc::Receiver<ServerToClient>) -> Vec<ServerToClient> {
+        std::iter::from_fn(|| rx.try_recv().ok()).collect()
+    }
+
     /// The owner's dashboard learns which session failed to launch even when
-    /// the launcher doesn't name it, and why a session's agent exited.
+    /// the launcher doesn't name it, and why a session's agent exited. Its
+    /// other current members learn only that it stopped; a removed member
+    /// learns nothing.
     #[test]
-    fn launch_failure_and_exit_reach_the_owner_with_session_and_reason() {
+    fn owner_gets_why_members_get_a_bare_invalidation() {
+        use crate::models::NewSessionMember;
+        use crate::schema::session_members;
         let Some(pool) = shared_pool() else { return };
         let state = test_app_state(pool);
         let mut conn = state.conn().unwrap();
         let owner = insert_user(&mut conn, "launch-relay-owner");
+        let editor = insert_user(&mut conn, "launch-relay-editor");
+        let viewer = insert_user(&mut conn, "launch-relay-viewer");
+        let removed = insert_user(&mut conn, "launch-relay-removed");
         let session = insert_session(&mut conn, owner.id, "launch-relay");
-        let (tx, mut rx) = super::super::conn_channel(16);
-        state.session_manager.add_user_client(owner.id, tx);
+        for (user, role) in [
+            (owner.id, "owner"),
+            (editor.id, "editor"),
+            (viewer.id, "viewer"),
+            (removed.id, "viewer"),
+        ] {
+            diesel::insert_into(session_members::table)
+                .values(NewSessionMember {
+                    session_id: session.id,
+                    user_id: user,
+                    role: role.into(),
+                })
+                .execute(&mut conn)
+                .unwrap();
+        }
+        diesel::delete(
+            session_members::table
+                .filter(session_members::session_id.eq(session.id))
+                .filter(session_members::user_id.eq(removed.id)),
+        )
+        .execute(&mut conn)
+        .unwrap();
+        let channel = |user: Uuid| {
+            let (tx, rx) = super::super::conn_channel(16);
+            state.session_manager.add_user_client(user, tx);
+            rx
+        };
+        let (mut rx, mut editor_rx, mut viewer_rx, mut removed_rx) = (
+            channel(owner.id),
+            channel(editor.id),
+            channel(viewer.id),
+            channel(removed.id),
+        );
+        let bare = ServerToClient::SessionExited {
+            session_id: session.id,
+            exit_code: None,
+            reason: None,
+        };
+        // A member's frames, as JSON, carry nothing about why.
+        let assert_bare = |member: &mut tokio::sync::mpsc::Receiver<ServerToClient>| {
+            let received = frames(member);
+            assert_eq!(received.len(), 1, "{received:?}");
+            let wire = serde_json::to_string(&received[0]).unwrap();
+            assert_eq!(wire, serde_json::to_string(&bare).unwrap());
+            assert!(
+                !wire.contains("secret") && !wire.contains("reason"),
+                "{wire}"
+            );
+        };
 
         let request_id = Uuid::new_v4();
         state
@@ -1794,25 +1903,21 @@ mod owner_relay_tests {
                 success: false,
                 session_id: None,
                 pid: None,
-                error: Some("claude: command not found".into()),
+                error: Some("/home/alice/secret: does not exist".into()),
             },
             Uuid::new_v4(),
             owner.id,
             None,
             &state,
         );
-        match rx.try_recv().unwrap() {
-            ServerToClient::LaunchSessionResult {
-                success: false,
-                session_id,
-                error,
-                ..
-            } => {
-                assert_eq!(session_id, Some(session.id));
-                assert_eq!(error.as_deref(), Some("claude: command not found"));
-            }
-            other => panic!("expected a launch result, got {other:?}"),
-        }
+        let owner_frames = frames(&mut rx);
+        assert!(
+            matches!(owner_frames.as_slice(), [ServerToClient::LaunchSessionResult {success: false, session_id: Some(id), error: Some(e), ..}] if *id == session.id && e.contains("secret")),
+            "{owner_frames:?}"
+        );
+        assert_bare(&mut editor_rx);
+        assert_bare(&mut viewer_rx);
+        assert!(frames(&mut removed_rx).is_empty());
 
         handle_launcher_message(
             LauncherToServer::SessionExited {
@@ -1825,11 +1930,29 @@ mod owner_relay_tests {
             None,
             &state,
         );
-        let exited = std::iter::from_fn(|| rx.try_recv().ok())
-            .find(|frame| matches!(frame, ServerToClient::SessionExited { .. }));
+        let owner_frames = frames(&mut rx);
         assert!(
-            matches!(exited, Some(ServerToClient::SessionExited {session_id, reason: shared::SessionExitReason::CrashedEarly, ..}) if session_id == session.id),
-            "{exited:?}"
+            matches!(owner_frames.as_slice(), [ServerToClient::SessionExited {session_id, exit_code: Some(1), reason: Some(shared::SessionExitReason::CrashedEarly)}] if *session_id == session.id),
+            "{owner_frames:?}"
         );
+        assert_bare(&mut editor_rx);
+        assert_bare(&mut viewer_rx);
+        assert!(frames(&mut removed_rx).is_empty());
+    }
+
+    /// A membership lookup that fails tells no one, never a wider audience.
+    #[test]
+    fn member_lookup_failure_fails_closed() {
+        let (owner, member) = (Uuid::new_v4(), Uuid::new_v4());
+        assert_eq!(
+            member_recipients(Ok(vec![owner, member]), Uuid::new_v4(), owner),
+            [member]
+        );
+        assert!(member_recipients(
+            Err(diesel::result::Error::BrokenTransactionManager),
+            Uuid::new_v4(),
+            owner
+        )
+        .is_empty());
     }
 }

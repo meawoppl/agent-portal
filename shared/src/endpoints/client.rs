@@ -334,14 +334,17 @@ pub enum ServerToClient {
         error: Option<String>,
     },
 
-    /// A proxy process exited (forwarded from launcher)
+    /// A session's agent is not running. To the launcher's owner: its proxy
+    /// exited, with the launcher's classification in `reason`. To the
+    /// session's other members, the bare form (no `exit_code`, no `reason`):
+    /// the session went disconnected, after an exit or a launch that never
+    /// ran, so refetch the session list. Members never learn why.
     SessionExited {
         session_id: Uuid,
         exit_code: Option<i32>,
-        /// Why, as the launcher classified it. Absent from an older backend,
-        /// which reads as an ordinary completion.
-        #[serde(default)]
-        reason: super::launcher::SessionExitReason,
+        /// Omitted, never null, in the bare form and from older backends.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<super::launcher::SessionExitReason>,
     },
 
     /// Per-turn performance metrics row saved by the backend (PR 1 of N).

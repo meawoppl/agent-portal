@@ -698,26 +698,63 @@ fn server_to_proxy_tunnel_data_golden() {
 #[test]
 fn server_to_client_session_exited_reason_is_additive() {
     let session_id = Uuid::nil();
-    // An older backend sends no reason: an ordinary completion.
+    // An older backend sends no reason.
     let old: ServerToClient = serde_json::from_value(
         json!({"type": "SessionExited", "session_id": session_id, "exit_code": 0}),
     )
     .unwrap();
     assert!(matches!(
         old,
-        ServerToClient::SessionExited {
-            reason: SessionExitReason::Completed,
-            ..
-        }
+        ServerToClient::SessionExited { reason: None, .. }
     ));
+    let owner = ServerToClient::SessionExited {
+        session_id,
+        exit_code: Some(1),
+        reason: Some(SessionExitReason::CrashedEarly),
+    };
     assert_golden(
-        &ServerToClient::SessionExited {
-            session_id,
-            exit_code: Some(1),
-            reason: SessionExitReason::CrashedEarly,
-        },
+        &owner,
         json!({"type": "SessionExited", "session_id": session_id, "exit_code": 1, "reason": "crashed_early"}),
     );
+    // The members' bare form omits the reason (never null).
+    let bare = ServerToClient::SessionExited {
+        session_id,
+        exit_code: None,
+        reason: None,
+    };
+    assert_golden(
+        &bare,
+        json!({"type": "SessionExited", "session_id": session_id, "exit_code": null}),
+    );
+
+    // Deployed clients decode both forms: the shape shipped before reasons,
+    // and the one with a non-optional reason defaulting to Completed, which
+    // reads the bare form as an ordinary completion (no failure recorded).
+    #[derive(serde::Deserialize)]
+    #[serde(tag = "type")]
+    enum BeforeReasons {
+        SessionExited { session_id: Uuid },
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(tag = "type")]
+    enum DefaultedReason {
+        SessionExited {
+            #[serde(default)]
+            reason: SessionExitReason,
+        },
+    }
+    for frame in [&owner, &bare] {
+        let wire = serde_json::to_value(frame).unwrap();
+        let BeforeReasons::SessionExited { session_id: id } =
+            serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(id, session_id);
+        let DefaultedReason::SessionExited { reason } = serde_json::from_value(wire).unwrap();
+        let expected = match frame {
+            ServerToClient::SessionExited { reason, .. } => reason.unwrap_or_default(),
+            _ => unreachable!(),
+        };
+        assert_eq!(reason, expected);
+    }
 }
 
 // ── Launcher ───────────────────────────────────────────────────────────
