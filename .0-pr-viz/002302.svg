@@ -31,7 +31,7 @@
 
   <rect x="55" y="645" width="900" height="150" rx="10" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
   <text x="79" y="685" font-size="26" fill="#c0caf5">classifier.rs transcript text</text>
-  <text x="79" y="725" font-size="23" fill="#f7768e">"(not handled — the agent may pause)"</text>
+  <text x="79" y="725" font-size="23" fill="#f7768e">"(not handled - the agent may pause)"</text>
   <text x="79" y="760" font-size="23" fill="#a9b1d6">no action for the user</text>
 
   <!-- AFTER -->
