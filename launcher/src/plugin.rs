@@ -832,9 +832,11 @@ pub(crate) struct CommandInvocation {
     pub command: Command,
     /// The exact command line, shown for approval and kept as provenance.
     pub line: String,
-    /// Covers everything that decides what runs (the request, the line, its
-    /// environment and the manifest), so an approval of one preview runs
-    /// nothing if any of it changes before the run.
+    /// A stale-preview check over the request, the resolved line, its
+    /// environment and the manifest bytes (not the contents of files the
+    /// line runs), so approving one preview runs nothing if any of those
+    /// changed before the run. Not an authorization token: the backend's
+    /// owner check is the security boundary.
     pub fingerprint: String,
 }
 
@@ -873,8 +875,8 @@ pub(crate) fn command_invocation(
     }
     let fingerprint = {
         use std::hash::{BuildHasher, Hash, Hasher};
-        // Keyed per launcher process, so a fingerprint can't be forged from
-        // outside it and one from before a restart never matches.
+        // Seeded per launcher process, so a preview from before a restart
+        // never matches. Not a cryptographic MAC.
         static KEY: std::sync::OnceLock<std::collections::hash_map::RandomState> =
             std::sync::OnceLock::new();
         let mut hasher = KEY.get_or_init(Default::default).build_hasher();
