@@ -836,6 +836,12 @@ pub(crate) async fn surface_action(
     use shared::api::PluginSurfaceAction as Action;
     let runtime = load_runtime(name)?;
     ensure_enabled(name, &runtime.installed)?;
+    // A surface started from a shell (`plugin start`) is stopped by running
+    // its own stop hook and waiting out its process tree, which would block
+    // here; leave that one to the shell that started it.
+    if action != Action::Status && surface_state(&runtime)?.is_some_and(|s| s.managed.is_none()) {
+        bail!("`{name}`'s surface was started from a shell; stop it there with `agent-portal plugin stop {name}` first");
+    }
     match action {
         Action::Status => {}
         Action::Stop => {

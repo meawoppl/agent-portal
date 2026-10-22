@@ -1,10 +1,12 @@
 //! Named plugin actions the backend asks this host to run (`plugins.manage.v1`).
 //! Callers pick an action; they never supply a command line.
 use anyhow::{Context, Result};
-use shared::api::{PluginAction, PluginInventoryResponse, PluginRequest, PluginResponse};
+use shared::api::{
+    PluginAction, PluginInventoryResponse, PluginRequest, PluginResponse, PluginSurfaceAction,
+};
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 /// Below the backend's 600 s action timeout, so a hung setup is killed here
@@ -16,11 +18,36 @@ const MAX_OUTPUT_BYTES: usize = 64 * 1024;
 /// must not fill the disk.
 const MAX_LOG_BYTES: u64 = 32 * 1024 * 1024;
 
-/// One lifecycle change at a time: two installs racing on the same checkout
-/// would defeat the CLI's move-aside-and-restore transaction. A second request
-/// is turned away rather than queued, since waiting for the first would eat
-/// into its own time budget.
-static LIFECYCLE: Mutex<()> = Mutex::new(());
+/// One plugin change at a time: two installs racing on a checkout would defeat
+/// the CLI's move-aside-and-restore transaction, and a surface starting while
+/// its plugin is removed would race the same files. A second request is
+/// turned away rather than queued, since waiting would eat into its own time
+/// budget. An atomic flag rather than a mutex, so the claim can be held across
+/// a surface start's awaits.
+static BUSY: AtomicBool = AtomicBool::new(false);
+
+/// Held while a plugin change runs; releasing it lets the next one in.
+struct Claim;
+
+impl Claim {
+    fn take() -> Result<Self> {
+        if BUSY
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            anyhow::bail!(
+                "Another plugin action is running on this computer; try again when it finishes"
+            );
+        }
+        Ok(Self)
+    }
+}
+
+impl Drop for Claim {
+    fn drop(&mut self) {
+        BUSY.store(false, Ordering::Release);
+    }
+}
 
 /// Run one action. Surface actions wait on health checks and run here; the
 /// rest block on files and child processes and run on a blocking thread.
@@ -30,6 +57,9 @@ pub(crate) async fn handle(request: PluginRequest) -> Result<PluginResponse> {
             .session_id
             .zip(request.working_directory.as_deref())
             .map(|(id, dir)| (id.to_string(), std::path::PathBuf::from(dir)));
+        let _claim = (*action != PluginSurfaceAction::Status)
+            .then(Claim::take)
+            .transpose()?;
         let surface = crate::plugin::surface_action(name, *action, session).await?;
         return Ok(PluginResponse {
             success: true,
@@ -43,15 +73,7 @@ pub(crate) async fn handle(request: PluginRequest) -> Result<PluginResponse> {
 fn handle_blocking(request: PluginRequest) -> Result<PluginResponse> {
     let directory = request.working_directory;
     let lifecycle = |args: Vec<String>| -> Result<PluginResponse> {
-        let _guard = match LIFECYCLE.try_lock() {
-            Ok(guard) => guard,
-            Err(std::sync::TryLockError::WouldBlock) => anyhow::bail!(
-                "Another plugin action is running on this computer; try again when it finishes"
-            ),
-            Err(std::sync::TryLockError::Poisoned(_)) => {
-                anyhow::bail!("Plugin lifecycle lock poisoned")
-            }
-        };
+        let _claim = Claim::take()?;
         let mut response = run_cli(&args)?;
         response.inventory = Some(crate::session_plugins::host_inventory(directory.clone())?);
         Ok(response)
@@ -304,19 +326,48 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_second_lifecycle_action_is_turned_away() {
-        let _held = LIFECYCLE.lock().unwrap();
-        let error = handle_blocking(PluginRequest {
+    /// Lifecycle and surface changes share one claim: while any runs, the
+    /// others are turned away instead of racing the same plugin files. A
+    /// status check needs no claim.
+    #[tokio::test]
+    async fn plugin_changes_exclude_each_other() {
+        let held = Claim::take().unwrap();
+        let busy = |action| PluginRequest {
             working_directory: None,
             session_id: None,
-            action: PluginAction::Remove {
+            action,
+        };
+        for action in [
+            PluginAction::Remove {
                 name: "anything".into(),
             },
-        })
+            PluginAction::Surface {
+                name: "anything".into(),
+                action: PluginSurfaceAction::Stop,
+            },
+            PluginAction::Surface {
+                name: "anything".into(),
+                action: PluginSurfaceAction::Start,
+            },
+        ] {
+            let error = handle(busy(action)).await.unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("Another plugin action is running"),
+                "{error:#}"
+            );
+        }
+        // Status isn't turned away by the claim (it fails later, on the
+        // unknown plugin, for an unrelated reason).
+        let status = handle(busy(PluginAction::Surface {
+            name: "anything".into(),
+            action: PluginSurfaceAction::Status,
+        }))
+        .await
         .unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("Another plugin action is running"));
+        assert!(!status.to_string().contains("Another plugin action"));
+        drop(held);
+        assert!(Claim::take().is_ok(), "released with its holder");
     }
 }

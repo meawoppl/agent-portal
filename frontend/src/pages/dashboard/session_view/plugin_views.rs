@@ -323,12 +323,24 @@ pub(super) fn surface_controls(props: &SurfaceControlsProps) -> Html {
     let status = use_state(|| None::<PluginSurfaceStatus>);
     let busy = use_state(|| None::<&'static str>);
     let error = use_state(|| None::<String>);
+    // Claimed synchronously, so two clicks before the next render start one
+    // action; `busy` only drives rendering.
+    let in_flight = use_mut_ref(|| false);
+    // Bumped whenever the target (computer, session, plugin) changes; an
+    // answer for an earlier target is dropped.
+    let generation = use_mut_ref(|| 0_u64);
+    let target = (props.launcher_id, props.session_id, props.plugin.clone());
     let run = {
         let (status, busy, error) = (status.clone(), busy.clone(), error.clone());
-        let (plugin, launcher_id, session_id) =
-            (props.plugin.clone(), props.launcher_id, props.session_id);
+        let (in_flight, generation) = (in_flight.clone(), generation.clone());
+        let (launcher_id, session_id, plugin) = target.clone();
         Callback::from(
             move |(label, action): (&'static str, PluginSurfaceAction)| {
+                // A status check is read-only and never blocked; changes take the claim.
+                let mutation = action != PluginSurfaceAction::Status;
+                if mutation && in_flight.replace(true) {
+                    return;
+                }
                 let request = PluginRequest {
                     working_directory: None,
                     session_id: Some(session_id),
@@ -337,24 +349,37 @@ pub(super) fn surface_controls(props: &SurfaceControlsProps) -> Html {
                         action,
                     },
                 };
+                let started = *generation.borrow();
                 let (status, busy, error) = (status.clone(), busy.clone(), error.clone());
+                let (in_flight, generation) = (in_flight.clone(), generation.clone());
                 busy.set(Some(label));
                 spawn_local(async move {
-                    match run_plugin_action(launcher_id, &request).await {
+                    let result = run_plugin_action(launcher_id, &request).await;
+                    if mutation {
+                        *in_flight.borrow_mut() = false;
+                    }
+                    busy.set(None);
+                    if *generation.borrow() != started {
+                        return;
+                    }
+                    match result {
                         Ok(response) => {
                             status.set(response.surface);
                             error.set(None);
                         }
                         Err(e) => error.set(Some(e)),
                     }
-                    busy.set(None);
                 });
             },
         )
     };
     {
         let run = run.clone();
-        use_effect_with(props.plugin.clone(), move |_| {
+        let (status, error, generation) = (status.clone(), error.clone(), generation.clone());
+        use_effect_with(target, move |_| {
+            *generation.borrow_mut() += 1;
+            status.set(None);
+            error.set(None);
             run.emit(("Checking", PluginSurfaceAction::Status));
             || ()
         });
