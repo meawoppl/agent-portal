@@ -814,7 +814,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let config = config::load_config();
+    let config = config::load_config_checked()?;
 
     // CLI args override config file, which overrides the compile-time default
     let backend_url = resolve_backend_url(args.backend_url, config.backend_url);
@@ -875,7 +875,7 @@ async fn main() -> anyhow::Result<()> {
 
 /// `agent-portal login` — authenticate via device flow and save the token
 async fn cmd_login(args: &Args) -> anyhow::Result<()> {
-    let config = config::load_config();
+    let config = config::load_config_checked()?;
     let backend_url = resolve_backend_url(args.backend_url.clone(), config.backend_url);
 
     println!("Authenticating with {}...", backend_url);

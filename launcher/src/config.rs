@@ -127,8 +127,22 @@ pub fn config_path_display() -> String {
     config_path().display().to_string()
 }
 
+/// The config for a read that can't harm it: a file that doesn't parse reads
+/// as the defaults, with a warning. Startup and every write use
+/// [`load_config_checked`] instead.
 pub fn load_config() -> LauncherConfig {
     load_config_at(&config_path())
+}
+
+/// The config at startup: a missing file is a first run (the defaults), but
+/// one that exists and doesn't parse stops the launcher. Running on defaults
+/// would sign in to the default server, and the first save would erase every
+/// setting and plugin in the file.
+pub fn load_config_checked() -> anyhow::Result<LauncherConfig> {
+    let path = config_path();
+    let config = load_config_for_write_at(&path)?;
+    tracing::info!("Loaded config from {}", path.display());
+    Ok(config)
 }
 
 /// Session limits must never disappear because a running daemon's config was
@@ -166,14 +180,6 @@ fn load_config_at(path: &Path) -> LauncherConfig {
         },
         Err(_) => LauncherConfig::default(),
     }
-}
-
-fn save_config(config: &LauncherConfig) -> anyhow::Result<()> {
-    let path = config_path();
-    let contents = serde_json::to_string_pretty(config)?;
-    write_config_atomic(&path, &contents)?;
-    tracing::debug!("Saved config to {}", path.display());
-    Ok(())
 }
 
 pub fn plugin_root() -> PathBuf {
@@ -600,9 +606,10 @@ pub(crate) fn write_config_atomic(path: &Path, contents: &str) -> anyhow::Result
 }
 
 pub fn save_auth_token(token: &str) -> anyhow::Result<()> {
-    let mut config = load_config();
-    config.auth_token = Some(token.to_string());
-    save_config(&config)?;
+    update_config_at(&config_path(), |config| {
+        config.auth_token = Some(token.to_string());
+        Ok(((), true))
+    })?;
     tracing::info!("Saved auth token to {}", config_path().display());
     Ok(())
 }
@@ -624,12 +631,11 @@ pub fn save_credentials(backend_url: &str, token: &str) -> anyhow::Result<()> {
 /// [`save_credentials`] against an explicit path, so the atomic round-trip can
 /// be unit-tested without touching the real config location.
 fn save_credentials_at(path: &Path, backend_url: &str, token: &str) -> anyhow::Result<()> {
-    let mut config = load_config_at(path);
-    config.backend_url = Some(backend_url.to_string());
-    config.auth_token = Some(token.to_string());
-    let contents = serde_json::to_string_pretty(&config)?;
-    write_config_atomic(path, &contents)?;
-    Ok(())
+    update_config_at(path, |config| {
+        config.backend_url = Some(backend_url.to_string());
+        config.auth_token = Some(token.to_string());
+        Ok(((), true))
+    })
 }
 
 fn launcher_id_path() -> PathBuf {
@@ -671,10 +677,12 @@ fn read_or_create_id(path: &Path) -> Uuid {
 }
 
 pub fn clear_sessions() -> anyhow::Result<()> {
-    let mut config = load_config();
-    if !config.sessions.is_empty() {
+    let cleared = update_config_at(&config_path(), |config| {
+        let cleared = !config.sessions.is_empty();
         config.sessions.clear();
-        save_config(&config)?;
+        Ok((cleared, cleared))
+    })?;
+    if cleared {
         tracing::info!("Cleared launcher-local expected sessions from config");
     }
     Ok(())
@@ -827,6 +835,25 @@ mod tests {
         assert_eq!(config.auth_token.as_deref(), Some("tok_new"));
         // The load/save cycle must not drop fields it doesn't touch.
         assert_eq!(config.name.as_deref(), Some("my-launcher"));
+    }
+
+    #[test]
+    fn credentials_never_save_over_a_config_that_does_not_parse() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("launcher.json");
+        let typo = r#"{"backend_url":"wss://mine","plugins":{"kicadmium":{}},}"#;
+        std::fs::write(&path, typo).unwrap();
+
+        let error = save_credentials_at(&path, "wss://default", "tok").unwrap_err();
+        assert!(format!("{error:#}").contains("fix or move it aside"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), typo);
+        // A missing file is a first run, not an error.
+        assert_eq!(
+            load_config_for_write_at(&dir.path().join("absent.json"))
+                .unwrap()
+                .auth_token,
+            None
+        );
     }
 
     #[test]
