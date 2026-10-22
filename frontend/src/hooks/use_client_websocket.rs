@@ -163,7 +163,7 @@ fn use_live_client_websocket() -> UseClientWebSocket {
                 } else {
                     abort.abort();
                     // Unlinked or signed out: another account taking this
-                    // place must not inherit what this one learned.
+                    // place must not inherit its session failures.
                     live.dispatch(client_websocket_events::ClientWsAction::ForgetConn(*conn));
                     false
                 }

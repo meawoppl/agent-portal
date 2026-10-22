@@ -560,6 +560,13 @@
     color: var(--text-primary);
 }
 
+@media (pointer: coarse) {
+    .session-failure-dismiss {
+        min-width: 44px;
+        min-height: 44px;
+    }
+}
+
 .agent-progress {
     padding: 6px 12px;
     background: var(--bg-dark);

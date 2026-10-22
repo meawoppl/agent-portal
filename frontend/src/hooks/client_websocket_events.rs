@@ -142,8 +142,8 @@ pub(crate) enum ClientWsAction {
         reason: shared::SessionExitReason,
     },
     DismissFailure(SessionKey),
-    /// The connection was closed (unlinked, or signed out): nothing learned
-    /// on it may outlive it.
+    /// The connection was closed (unlinked, or signed out): drop the session
+    /// failures learned on it. Other maps follow their own lifecycle.
     ForgetConn(ConnId),
 }
 
