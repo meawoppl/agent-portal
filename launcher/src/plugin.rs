@@ -825,6 +825,45 @@ async fn start_managed(name: &str, session_id: String, cwd: PathBuf) -> Result<S
     Ok(state)
 }
 
+/// One `[[commands]]` entry resolved for a session (#2161): the process Portal
+/// runs (the plugin's environment, from the plugin's directory, as for its
+/// other commands) and the exact command line, shown for approval and kept as
+/// provenance. `{cwd}` and `{session_id}` come from the session; `args` are
+/// shell-quoted onto `run`, and only for a command that accepts them.
+pub(crate) fn command_invocation(
+    name: &str,
+    command: &str,
+    args: &[String],
+    session_id: &str,
+    cwd: &Path,
+) -> Result<(Command, String)> {
+    let runtime = load_runtime(name)?;
+    ensure_enabled(name, &runtime.installed)?;
+    let entry = runtime
+        .manifest
+        .commands
+        .iter()
+        .find(|c| c.name == command)
+        .ok_or_else(|| anyhow!("plugin `{name}` has no command `{command}`"))?;
+    if !args.is_empty() && !entry.accepts_args {
+        bail!("`{name}:{command}` takes no arguments");
+    }
+    let process = PluginProcess::new(&runtime);
+    let mut line = process.expand(
+        &entry.run,
+        Some(&[
+            ("session_id", session_id.to_string()),
+            ("cwd", cwd.display().to_string()),
+        ]),
+    );
+    for arg in args {
+        line.push(' ');
+        line.push_str(&process::shell_quote(arg));
+    }
+    let command = process.command(&line)?;
+    Ok((command, line))
+}
+
 /// Run one surface action for the Portal dock and report the surface (#2160).
 /// Start and restart forward to `session` (its id and working directory),
 /// as `plugin open` does from inside it; status and stop need no session.

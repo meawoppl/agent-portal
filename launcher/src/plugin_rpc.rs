@@ -12,6 +12,8 @@ use std::time::{Duration, Instant};
 /// Below the backend's 600 s action timeout, so a hung setup is killed here
 /// and reported rather than left running after the request gave up.
 const LIFECYCLE_TIMEOUT: Duration = Duration::from_secs(570);
+/// A plugin command is stopped, with its process tree, after this long.
+const COMMAND_TIMEOUT: Duration = Duration::from_secs(300);
 /// Output kept from one action; the tail carries the failure.
 const MAX_OUTPUT_BYTES: usize = 64 * 1024;
 /// An action whose log passes this is stopped: a setup script stuck printing
@@ -109,8 +111,47 @@ fn handle_blocking(request: PluginRequest) -> Result<PluginResponse> {
         PluginAction::Remove { name } => lifecycle(vec!["remove".into(), name]),
         PluginAction::Doctor { name } => lifecycle(vec!["doctor".into(), name]),
         PluginAction::Surface { .. } => unreachable!("surface actions run in `handle`"),
-        PluginAction::RunCommand { .. } => {
-            anyhow::bail!("This launcher cannot run that plugin action yet")
+        PluginAction::RunCommand {
+            name,
+            command,
+            args,
+            approved,
+        } => {
+            let (Some(session), Some(cwd)) = (request.session_id, directory.as_deref()) else {
+                anyhow::bail!("A plugin command runs for a session");
+            };
+            let (process, line) = crate::plugin::command_invocation(
+                &name,
+                &command,
+                &args,
+                &session.to_string(),
+                Path::new(cwd),
+            )?;
+            // Without approval, only say what would run, for the user to
+            // approve; nothing executes.
+            if !approved {
+                return Ok(PluginResponse {
+                    success: true,
+                    output: line,
+                    ..Default::default()
+                });
+            }
+            let _claim = Claim::take()?;
+            tracing::info!(
+                plugin = %name,
+                command = %command,
+                session = %session,
+                cwd = %cwd,
+                line = %line,
+                "running plugin command"
+            );
+            let log_dir = session_lib::paths::config_dir().join("plugin-actions");
+            run_captured(
+                process,
+                &format!("{name}:{command}"),
+                &log_dir,
+                COMMAND_TIMEOUT,
+            )
         }
     }
 }

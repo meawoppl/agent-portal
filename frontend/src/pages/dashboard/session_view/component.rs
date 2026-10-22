@@ -1681,6 +1681,10 @@ impl Component for SessionView {
                                         .map(|launcher| (launcher, ctx.props().session.id))
                                 }
                                 on_open_forward={ctx.link().callback(SessionViewMsg::OpenForwardSurface)}
+                                session_place={(
+                                    ctx.props().session.hostname.clone(),
+                                    ctx.props().session.working_directory.clone(),
+                                )}
                             />
                         }
                     }

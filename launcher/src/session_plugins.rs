@@ -420,9 +420,16 @@ fn inventory(
                 // The inventory view tolerates broken runtime fields so a bad
                 // one never hides the plugin; read them from the strict view
                 // and report a parse failure as a warning instead.
+                let mut takes_args = BTreeSet::new();
                 match crate::plugin::load_manifest(plugin_root) {
                     Ok(runtime) => {
                         plugin.homepage = runtime.homepage;
+                        takes_args = runtime
+                            .commands
+                            .into_iter()
+                            .filter(|c| c.accepts_args)
+                            .map(|c| c.name)
+                            .collect();
                         plugin.has_doctor = runtime.install.doctor.is_some();
                         for prompt in runtime.prompts {
                             plugin.prompts.push(context_file(
@@ -452,6 +459,7 @@ fn inventory(
                     .commands
                     .into_iter()
                     .map(|c| PortalPluginCommandInfo {
+                        accepts_args: takes_args.contains(&c.name),
                         name: c.name,
                         description: c.description,
                         ..Default::default()

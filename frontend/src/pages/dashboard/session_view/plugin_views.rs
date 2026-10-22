@@ -5,8 +5,8 @@ use crate::components::plugin_discovery::{
 };
 use shared::api::{
     ForwardInfo, PluginAction, PluginActivation, PluginContextEntry, PluginContextKind,
-    PluginPolicy, PluginRequest, PluginSurfaceAction, PluginSurfaceState, PluginSurfaceStatus,
-    PortalPluginInfo,
+    PluginPolicy, PluginRequest, PluginResponse, PluginSurfaceAction, PluginSurfaceState,
+    PluginSurfaceStatus, PortalPluginCommandInfo, PortalPluginInfo,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
@@ -42,6 +42,9 @@ pub(super) struct PluginDiscoverySurfaceProps {
     /// surfaces (the owner, on the home portal).
     pub surface_host: Option<(Uuid, Uuid)>,
     pub on_open_forward: Callback<ForwardInfo>,
+    /// The session's computer name and directory, shown when approving a
+    /// plugin command.
+    pub session_place: (String, String),
 }
 
 fn source_size(bytes: u64) -> String {
@@ -288,6 +291,16 @@ pub(super) fn plugin_discovery_surface(props: &PluginDiscoverySurfaceProps) -> H
                                         on_open={props.on_open_forward.clone()}
                                     />
                                 }
+                                if let (Some((launcher_id, session_id)), false) = (props.surface_host, plugin.commands.is_empty()) {
+                                    <CommandRunner
+                                        plugin={plugin.name.clone()}
+                                        commands={plugin.commands.clone()}
+                                        {launcher_id}
+                                        {session_id}
+                                        host={props.session_place.0.clone()}
+                                        working_directory={props.session_place.1.clone()}
+                                    />
+                                }
                             </PluginCard>
                         }) }
                     </div>
@@ -471,5 +484,254 @@ pub(super) fn surface_controls(props: &SurfaceControlsProps) -> Html {
                 </details>
             }
         </div>
+    }
+}
+
+#[derive(Properties, PartialEq)]
+pub(super) struct CommandRunnerProps {
+    pub plugin: String,
+    pub commands: Vec<PortalPluginCommandInfo>,
+    pub launcher_id: Uuid,
+    pub session_id: Uuid,
+    /// Where it runs, for the approval prompt.
+    pub host: String,
+    pub working_directory: String,
+}
+
+/// A command waiting for the user's approval: the exact line the launcher
+/// resolved, shown with where it will run.
+#[derive(Clone, PartialEq)]
+struct Proposal {
+    command: String,
+    args: Vec<String>,
+    line: String,
+}
+
+/// A plugin's named commands, run through Portal (#2161): pick one, give its
+/// arguments if it takes them, approve the exact command line, see the result.
+/// The run is also recorded in the transcript as a plugin command card.
+#[function_component(CommandRunner)]
+pub(super) fn command_runner(props: &CommandRunnerProps) -> Html {
+    let picked = use_state(|| None::<String>);
+    let args = use_state(String::new);
+    let proposal = use_state(|| None::<Proposal>);
+    let result = use_state(|| None::<(String, PluginResponse)>);
+    let error = use_state(|| None::<String>);
+    let busy = use_state(|| false);
+    let in_flight = use_mut_ref(|| false);
+
+    let send = {
+        let (launcher_id, session_id, plugin) =
+            (props.launcher_id, props.session_id, props.plugin.clone());
+        let (proposal, result, error, busy, in_flight) = (
+            proposal.clone(),
+            result.clone(),
+            error.clone(),
+            busy.clone(),
+            in_flight.clone(),
+        );
+        Callback::from(
+            move |(command, args, approved): (String, Vec<String>, bool)| {
+                if in_flight.replace(true) {
+                    return;
+                }
+                let request = PluginRequest {
+                    working_directory: None,
+                    session_id: Some(session_id),
+                    action: PluginAction::RunCommand {
+                        name: plugin.clone(),
+                        command: command.clone(),
+                        args: args.clone(),
+                        approved,
+                    },
+                };
+                let (proposal, result, error, busy, in_flight) = (
+                    proposal.clone(),
+                    result.clone(),
+                    error.clone(),
+                    busy.clone(),
+                    in_flight.clone(),
+                );
+                busy.set(true);
+                error.set(None);
+                spawn_local(async move {
+                    let response = run_plugin_action(launcher_id, &request).await;
+                    *in_flight.borrow_mut() = false;
+                    busy.set(false);
+                    match (response, approved) {
+                        (Ok(response), false) => proposal.set(Some(Proposal {
+                            command,
+                            args,
+                            line: response.output,
+                        })),
+                        (Ok(response), true) => {
+                            proposal.set(None);
+                            result.set(Some((command, response)));
+                        }
+                        (Err(e), _) => error.set(Some(e)),
+                    }
+                });
+            },
+        )
+    };
+    let review = {
+        let (send, picked, args, error) =
+            (send.clone(), picked.clone(), args.clone(), error.clone());
+        Callback::from(move |_: SubmitEvent| {
+            let Some(command) = (*picked).clone() else {
+                return;
+            };
+            match split_args(&args) {
+                Ok(parsed) => send.emit((command, parsed, false)),
+                Err(problem) => error.set(Some(problem.to_string())),
+            }
+        })
+    };
+
+    html! {
+        <div class="plugin-command-runner">
+            <div class="plugin-skill-list">
+                { for props.commands.iter().map(|command| {
+                    let (name, takes_args) = (command.name.clone(), command.accepts_args);
+                    let onclick = {
+                        let (send, picked, args, proposal, result) =
+                            (send.clone(), picked.clone(), args.clone(), proposal.clone(), result.clone());
+                        Callback::from(move |_| {
+                            proposal.set(None);
+                            result.set(None);
+                            args.set(String::new());
+                            if takes_args {
+                                picked.set(Some(name.clone()));
+                            } else {
+                                picked.set(None);
+                                send.emit((name.clone(), Vec::new(), false));
+                            }
+                        })
+                    };
+                    html! {
+                        <button
+                            type="button"
+                            class="surface-control"
+                            title={command.description.clone().unwrap_or_default()}
+                            disabled={*busy}
+                            {onclick}
+                        >{ format!("Run {}", command.name) }</button>
+                    }
+                }) }
+            </div>
+            if let Some(command) = &*picked {
+                <form class="plugin-command-args" onsubmit={{
+                    let review = review.clone();
+                    Callback::from(move |e: SubmitEvent| { e.prevent_default(); review.emit(e); })
+                }}>
+                    <label>
+                        { format!("Arguments for {command}") }
+                        <input
+                            type="text"
+                            value={(*args).clone()}
+                            oninput={{
+                                let args = args.clone();
+                                Callback::from(move |e: InputEvent| {
+                                    args.set(e.target_unchecked_into::<web_sys::HtmlInputElement>().value());
+                                })
+                            }}
+                        />
+                    </label>
+                    <button type="submit" class="surface-control" disabled={*busy}>{ "Review" }</button>
+                </form>
+            }
+            if let Some(p) = &*proposal {
+                <div class="plugin-command-approve" role="alertdialog">
+                    <p>{ format!("Run {}:{} on {} in {}?", props.plugin, p.command, props.host, props.working_directory) }</p>
+                    <code>{ &p.line }</code>
+                    <div class="plugin-card-actions">
+                        <button type="button" class="surface-control" disabled={*busy} onclick={{
+                            let (send, p) = (send.clone(), p.clone());
+                            Callback::from(move |_| send.emit((p.command.clone(), p.args.clone(), true)))
+                        }}>{ "Run" }</button>
+                        <button type="button" class="surface-control" onclick={{
+                            let proposal = proposal.clone();
+                            Callback::from(move |_| proposal.set(None))
+                        }}>{ "Cancel" }</button>
+                    </div>
+                </div>
+            }
+            if *busy {
+                <div class="plugin-surface-note">{ "Running…" }</div>
+            }
+            if let Some(error) = &*error {
+                <div class="edit-stack-error">{ error }</div>
+            }
+            if let Some((command, response)) = &*result {
+                <div class={classes!("plugin-command-result", (!response.success).then_some("failed"))}>
+                    <strong>{ format!("{command}: {}", match (response.success, response.exit_code) {
+                        (true, _) => "done".to_string(),
+                        (false, Some(code)) => format!("failed (exit {code})"),
+                        (false, None) => response.error.clone().unwrap_or_else(|| "failed".into()),
+                    }) }</strong>
+                    if !response.output.trim().is_empty() {
+                        <details open={!response.success}>
+                            <summary>{ "Output" }</summary>
+                            <pre>{ &response.output }</pre>
+                        </details>
+                    }
+                </div>
+            }
+        </div>
+    }
+}
+
+/// Split a typed argument string into arguments: whitespace separates them,
+/// and single or double quotes keep spaces inside one. Each argument is
+/// shell-quoted again on the launcher, so nothing here is interpreted.
+fn split_args(input: &str) -> Result<Vec<String>, &'static str> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut started = false;
+    let mut quote = None;
+    for c in input.chars() {
+        match (quote, c) {
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), c) => current.push(c),
+            (None, '\'' | '"') => {
+                quote = Some(c);
+                started = true;
+            }
+            (None, c) if c.is_whitespace() => {
+                if started {
+                    args.push(std::mem::take(&mut current));
+                    started = false;
+                }
+            }
+            (None, c) => {
+                current.push(c);
+                started = true;
+            }
+        }
+    }
+    if quote.is_some() {
+        return Err("an argument's quote is never closed");
+    }
+    if started {
+        args.push(current);
+    }
+    Ok(args)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::split_args;
+
+    #[test]
+    fn arguments_split_on_spaces_and_keep_quoted_ones_whole() {
+        assert_eq!(split_args("").unwrap(), Vec::<String>::new());
+        assert_eq!(split_args("  export  --all ").unwrap(), ["export", "--all"]);
+        assert_eq!(
+            split_args(r#"render "board v2.kicad_pcb" 'it''s'"#).unwrap(),
+            ["render", "board v2.kicad_pcb", "its"]
+        );
+        assert_eq!(split_args("--name=''").unwrap(), ["--name="]);
+        assert_eq!(split_args("''").unwrap(), [""]);
+        assert!(split_args("\"open").is_err());
     }
 }
