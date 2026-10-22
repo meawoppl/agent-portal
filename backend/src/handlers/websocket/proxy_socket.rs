@@ -431,6 +431,7 @@ fn handle_proxy_message(
             session_id: ack_session_id,
             client_msg_id,
             stage,
+            message,
         } => {
             let Some(current_session_id) = *db_session_id else {
                 return ControlFlow::Continue(());
@@ -464,14 +465,18 @@ fn handle_proxy_message(
             }
             // Relay the proxy's per-stage delivery signal to the session's web
             // clients (#939); each frontend advances the matching optimistic
-            // row by client_msg_id. Failure detail isn't carried on this hop.
+            // row by client_msg_id. A failure carries its reason, bounded,
+            // since it comes from the peer.
             if let Some(key) = session_key {
+                let message = (stage == shared::InputDeliveryStage::Failed)
+                    .then(|| message.as_deref().and_then(failure_reason))
+                    .flatten();
                 session_manager.broadcast_to_web_clients(
                     key,
                     shared::ServerToClient::InputProgress {
                         client_msg_id,
                         stage,
-                        message: None,
+                        message,
                         queued: false,
                     },
                 );
@@ -727,5 +732,43 @@ fn handle_input_ack(
         Err(e) => {
             error!("Failed to delete pending inputs: {}", e);
         }
+    }
+}
+
+/// Longest delivery-failure reason relayed to browsers, in characters.
+const MAX_FAILURE_REASON_CHARS: usize = 200;
+
+/// A peer's delivery-failure reason made safe to show: control characters
+/// dropped, at most [`MAX_FAILURE_REASON_CHARS`] characters (never splitting
+/// one), and nothing left means no reason.
+fn failure_reason(raw: &str) -> Option<String> {
+    let reason: String = raw
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(MAX_FAILURE_REASON_CHARS)
+        .collect();
+    let reason = reason.trim();
+    (!reason.is_empty()).then(|| reason.to_string())
+}
+
+#[cfg(test)]
+mod failure_reason_tests {
+    use super::*;
+
+    #[test]
+    fn reasons_are_bounded_cleaned_and_empty_is_none() {
+        assert_eq!(
+            failure_reason("The agent rejected this input").as_deref(),
+            Some("The agent rejected this input")
+        );
+        assert_eq!(failure_reason(" \n\t\u{7} "), None);
+        assert_eq!(
+            failure_reason("line\nbreak\u{1b}[31m").as_deref(),
+            Some("linebreak[31m")
+        );
+        let long = "é".repeat(500);
+        let bounded = failure_reason(&long).unwrap();
+        assert_eq!(bounded.chars().count(), MAX_FAILURE_REASON_CHARS);
+        assert!(bounded.chars().all(|c| c == 'é'));
     }
 }

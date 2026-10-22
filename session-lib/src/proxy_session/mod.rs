@@ -82,6 +82,34 @@ pub async fn emit_input_progress(
     client_msg_id: Option<uuid::Uuid>,
     stage: shared::InputDeliveryStage,
 ) {
+    send_input_progress(ws_write, session_id, client_msg_id, stage, None).await;
+}
+
+/// Report a browser-tracked message as failed, with why. The reason is a
+/// fixed string so it can never carry the prompt or an agent's raw error.
+pub async fn emit_input_failure(
+    ws_write: &SharedWsWrite,
+    session_id: uuid::Uuid,
+    client_msg_id: Option<uuid::Uuid>,
+    reason: &'static str,
+) {
+    send_input_progress(
+        ws_write,
+        session_id,
+        client_msg_id,
+        shared::InputDeliveryStage::Failed,
+        Some(reason),
+    )
+    .await;
+}
+
+async fn send_input_progress(
+    ws_write: &SharedWsWrite,
+    session_id: uuid::Uuid,
+    client_msg_id: Option<uuid::Uuid>,
+    stage: shared::InputDeliveryStage,
+    message: Option<&'static str>,
+) {
     let Some(client_msg_id) = client_msg_id else {
         return;
     };
@@ -89,6 +117,7 @@ pub async fn emit_input_progress(
         session_id,
         client_msg_id,
         stage,
+        message: message.map(str::to_string),
     };
     let mut ws = ws_write.lock().await;
     if let Err(error) = ws.send(msg).await {

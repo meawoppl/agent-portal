@@ -17,8 +17,8 @@ use crate::io_task::claude_user_echo_value;
 
 use super::git_metadata::{check_and_send_branch_update_if_branch_changed, GitMetadataState};
 use super::{
-    ack_portal_input, emit_input_progress, format_duration, truncate, ConnectionResult,
-    PortalInput, SharedWsWrite,
+    ack_portal_input, emit_input_failure, emit_input_progress, format_duration, truncate,
+    ConnectionResult, PortalInput, SharedWsWrite,
 };
 
 /// Maximum iterations for wiggum mode before auto-stopping
@@ -171,11 +171,11 @@ pub(super) async fn handle_wiggum_activation<A: Agent>(
         .await
     {
         error!("Failed to send wiggum prompt to Claude: {}", e);
-        emit_input_progress(
+        emit_input_failure(
             ws_write,
             session_id,
             wiggum_input.client_msg_id,
-            shared::InputDeliveryStage::Failed,
+            session_lib::proxy_session::input_delivery::AGENT_STOPPED,
         )
         .await;
         return Some(ConnectionResult::AgentExited);

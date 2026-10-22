@@ -471,6 +471,34 @@ fn server_to_client_tool_progress_golden() {
 // ── ProxyToServer ──────────────────────────────────────────────────────
 
 #[test]
+fn proxy_to_server_input_progress_ack_reason_is_additive() {
+    let session_id = Uuid::from_u128(1);
+    let client_msg_id = Uuid::from_u128(2);
+    // An older proxy's ack has no reason.
+    let old = json!({"type": "InputProgressAck", "session_id": session_id, "client_msg_id": client_msg_id, "stage": "failed"});
+    assert_golden(
+        &ProxyToServer::InputProgressAck {
+            session_id,
+            client_msg_id,
+            stage: InputDeliveryStage::Failed,
+            message: None,
+        },
+        old,
+    );
+    let mut with_reason = json!({"type": "InputProgressAck", "session_id": session_id, "client_msg_id": client_msg_id, "stage": "failed"});
+    with_reason["message"] = json!("The agent rejected this input");
+    assert_golden(
+        &ProxyToServer::InputProgressAck {
+            session_id,
+            client_msg_id,
+            stage: InputDeliveryStage::Failed,
+            message: Some("The agent rejected this input".into()),
+        },
+        with_reason,
+    );
+}
+
+#[test]
 fn proxy_to_server_register_golden() {
     let msg = ProxyToServer::Register(reg_fields("s"));
     let v = serde_json::to_value(&msg).unwrap();

@@ -14,12 +14,17 @@ use tracing::{debug, error};
 use uuid::Uuid;
 
 use super::{
-    ack_portal_input, emit_input_progress, portal_reminder, ConnectionResult, PortalInput,
-    PortalInputAck, SharedWsWrite,
+    ack_portal_input, emit_input_failure, emit_input_progress, portal_reminder, ConnectionResult,
+    PortalInput, PortalInputAck, SharedWsWrite,
 };
 use crate::agent::Agent;
 use crate::session::Session;
 use shared::fmt::truncate_str as truncate;
+
+/// Why an input failed, as the browser shows it on the message.
+pub const AGENT_STOPPED: &str = "The agent stopped before it could take this input";
+pub const AGENT_REJECTED: &str = "The agent rejected this input";
+pub const AGENT_CLOSED: &str = "The agent closed before accepting this input";
 
 /// Deliver one user input to the agent. Returns `Some(ConnectionResult)` to end
 /// the connection (delivery failure), or `None` to continue the loop.
@@ -111,13 +116,7 @@ where
         Ok(delivered) => delivered,
         Err(e) => {
             error!("Failed to send to Claude: {}", e);
-            emit_input_progress(
-                ws_write,
-                session_id,
-                input.client_msg_id,
-                shared::InputDeliveryStage::Failed,
-            )
-            .await;
+            emit_input_failure(ws_write, session_id, input.client_msg_id, AGENT_STOPPED).await;
             return Some(ConnectionResult::AgentExited);
         }
     };
@@ -180,24 +179,14 @@ fn spawn_delivery_completion(
                 ack_portal_input(&ws_write, ack).await;
             }
             Ok(Err(message)) => {
+                // The agent's own error stays in the log (and, for Codex, in
+                // the transcript); it can quote protocol detail.
                 error!("Agent rejected input: {}", message);
-                emit_input_progress(
-                    &ws_write,
-                    session_id,
-                    client_msg_id,
-                    shared::InputDeliveryStage::Failed,
-                )
-                .await;
+                emit_input_failure(&ws_write, session_id, client_msg_id, AGENT_REJECTED).await;
             }
             Err(_) => {
                 error!("I/O task closed before accepting input");
-                emit_input_progress(
-                    &ws_write,
-                    session_id,
-                    client_msg_id,
-                    shared::InputDeliveryStage::Failed,
-                )
-                .await;
+                emit_input_failure(&ws_write, session_id, client_msg_id, AGENT_CLOSED).await;
             }
         }
     });

@@ -93,10 +93,12 @@ async fn turn_permission_delivery_and_reconnect_replay() {
                 session_id,
                 client_msg_id,
                 stage,
+                // Only a failure carries a reason; text on a success is dropped.
+                message: Some("not shown".into()),
             })
             .await
             .unwrap();
-        receive::<ClientEndpoint>(&mut browser, |f| matches!(f, ServerToClient::InputProgress {client_msg_id:id, stage:actual, ..} if *id == client_msg_id && *actual == stage)).await;
+        receive::<ClientEndpoint>(&mut browser, |f| matches!(f, ServerToClient::InputProgress {client_msg_id:id, stage:actual, message: None, ..} if *id == client_msg_id && *actual == stage)).await;
     }
 
     let request_id = uuid::Uuid::new_v4().to_string();
@@ -401,6 +403,7 @@ async fn offline_input_is_queued_then_replayed_on_registration() {
                 session_id,
                 client_msg_id: id,
                 stage,
+                message: None,
             })
             .await
             .unwrap();
@@ -419,5 +422,81 @@ async fn offline_input_is_queued_then_replayed_on_registration() {
     assert!(
         matches!(next, ServerToProxy::Heartbeat),
         "replayed twice: {next:?}"
+    );
+}
+
+/// A proxy's failure reason reaches the browser on the matching input, an
+/// absent reason stays absent (the browser falls back to "Delivery failed"),
+/// and an ack naming another session is ignored.
+#[tokio::test]
+async fn failure_reason_reaches_the_matching_input() {
+    if std::env::var("DATABASE_URL").is_err() {
+        return;
+    }
+    let url = format!("ws://{}", spawn_test_app().await);
+    let fields = test_register_fields();
+    let session_id = fields.session_id;
+    let mut proxy = connect::<SessionEndpoint>(&url).await.unwrap();
+    proxy
+        .send(ProxyToServer::Register(fields.clone()))
+        .await
+        .unwrap();
+    receive::<SessionEndpoint>(&mut proxy, |f| {
+        matches!(f, ServerToProxy::RegisterAck { success: true, .. })
+    })
+    .await;
+    let mut browser = connect::<ClientEndpoint>(&url).await.unwrap();
+    browser
+        .send(ClientToServer::Register(fields.clone()))
+        .await
+        .unwrap();
+    let (with_reason, without_reason) = (uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
+    let failed =
+        |session_id, client_msg_id, message: Option<&str>| ProxyToServer::InputProgressAck {
+            session_id,
+            client_msg_id,
+            stage: InputDeliveryStage::Failed,
+            message: message.map(str::to_string),
+        };
+
+    // Another session's ack is dropped: the next frame for this id is the
+    // real one.
+    proxy
+        .send(failed(
+            uuid::Uuid::new_v4(),
+            with_reason,
+            Some("wrong session"),
+        ))
+        .await
+        .unwrap();
+    proxy
+        .send(failed(
+            session_id,
+            with_reason,
+            Some("The agent rejected this input\n"),
+        ))
+        .await
+        .unwrap();
+    let frame = receive::<ClientEndpoint>(&mut browser, |f| matches!(f, ServerToClient::InputProgress {client_msg_id, ..} if *client_msg_id == with_reason)).await;
+    assert!(
+        matches!(&frame, ServerToClient::InputProgress {stage: InputDeliveryStage::Failed, message: Some(m), ..} if m == "The agent rejected this input"),
+        "{frame:?}"
+    );
+
+    proxy
+        .send(failed(session_id, without_reason, None))
+        .await
+        .unwrap();
+    let frame = receive::<ClientEndpoint>(&mut browser, |f| matches!(f, ServerToClient::InputProgress {client_msg_id, ..} if *client_msg_id == without_reason)).await;
+    assert!(
+        matches!(
+            frame,
+            ServerToClient::InputProgress {
+                stage: InputDeliveryStage::Failed,
+                message: None,
+                ..
+            }
+        ),
+        "{frame:?}"
     );
 }

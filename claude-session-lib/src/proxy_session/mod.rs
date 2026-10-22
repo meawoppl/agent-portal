@@ -13,7 +13,7 @@ mod wiggum;
 // Re-exported here so internal call sites keep their `super::` paths.
 use session_lib::proxy_session::heartbeat_watchdog;
 pub(crate) use session_lib::proxy_session::portal_reminder;
-pub use session_lib::proxy_session::{ack_portal_input, emit_input_progress};
+pub use session_lib::proxy_session::{ack_portal_input, emit_input_failure, emit_input_progress};
 
 pub use session_lib::proxy_session::ws_reader::{classify_portal_input, RoutedPortalInput};
 pub use wiggum::wiggum_prompt;
