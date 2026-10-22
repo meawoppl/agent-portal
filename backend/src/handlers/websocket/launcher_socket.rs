@@ -663,7 +663,12 @@ fn handle_launcher_message(
                         {
                             warn!("Failed to record launch failure for {}: {}", session_id, e);
                         } else {
-                            notify_members_not_running(app_state, &mut conn, session_id, user_id);
+                            super::member_status::notify_members_not_running(
+                                &app_state.session_manager,
+                                &mut conn,
+                                session_id,
+                                Some(user_id),
+                            );
                             if let Some((status, session_name)) = prior {
                                 if status == SessionStatus::Active.as_str() {
                                     app_state.notifications.emit(
@@ -757,7 +762,6 @@ fn handle_launcher_message(
                 // launch-failure counter so reconcile backs off; a healthy run
                 // resets it. See #1045 and the crash-loop investigation.
                 record_exit_for_backoff(&mut conn, session_id, reason);
-                notify_members_not_running(app_state, &mut conn, session_id, user_id);
             }
             app_state.session_manager.broadcast_to_user(
                 &user_id,
@@ -1359,53 +1363,6 @@ fn crashloop_give_up(failure_count: i32) -> bool {
     failure_count >= LAUNCH_CRASHLOOP_GIVEUP
 }
 
-/// Tell a session's current members, other than `owner` (who gets the
-/// detailed frames), that it is no longer running, so their dashboards
-/// refetch. The bare `SessionExited` carries no reason, exit code or launcher
-/// error: members never learn why.
-fn notify_members_not_running(
-    app_state: &AppState,
-    conn: &mut diesel::PgConnection,
-    session_id: Uuid,
-    owner: Uuid,
-) {
-    use crate::schema::session_members;
-    use diesel::prelude::*;
-    let members = session_members::table
-        .filter(session_members::session_id.eq(session_id))
-        .select(session_members::user_id)
-        .load::<Uuid>(conn);
-    for member in member_recipients(members, session_id, owner) {
-        app_state.session_manager.broadcast_to_user(
-            &member,
-            ServerToClient::SessionExited {
-                session_id,
-                exit_code: None,
-                reason: None,
-            },
-        );
-    }
-}
-
-/// Who to tell from a membership lookup: everyone but the owner, or no one
-/// if the lookup failed. Never a wider broadcast.
-fn member_recipients(
-    members: diesel::QueryResult<Vec<Uuid>>,
-    session_id: Uuid,
-    owner: Uuid,
-) -> Vec<Uuid> {
-    match members {
-        Ok(members) => members.into_iter().filter(|id| *id != owner).collect(),
-        Err(e) => {
-            warn!(
-                "{} session={session_id}: {e}",
-                crate::markers::MEMBER_STATUS_FANOUT_FAILED
-            );
-            Vec::new()
-        }
-    }
-}
-
 /// Adjust a session's launch-backoff state from why its proxy exited.
 ///
 /// A healthy `Completed` run resets `launch_failure_count`; `Stopped` is
@@ -1828,9 +1785,10 @@ mod owner_relay_tests {
     }
 
     /// The owner's dashboard learns which session failed to launch even when
-    /// the launcher doesn't name it, and why a session's agent exited. Its
-    /// other current members learn only that it stopped; a removed member
-    /// learns nothing.
+    /// the launcher doesn't name it, and why a session's agent exited. After a
+    /// failed launch's status update its other current members learn only
+    /// that it stopped; a removed member learns nothing. An exit tells members
+    /// nothing here (the proxy disconnect does, once committed).
     #[test]
     fn owner_gets_why_members_get_a_bare_invalidation() {
         use crate::models::NewSessionMember;
@@ -1935,24 +1893,10 @@ mod owner_relay_tests {
             matches!(owner_frames.as_slice(), [ServerToClient::SessionExited {session_id, exit_code: Some(1), reason: Some(shared::SessionExitReason::CrashedEarly)}] if *session_id == session.id),
             "{owner_frames:?}"
         );
-        assert_bare(&mut editor_rx);
-        assert_bare(&mut viewer_rx);
+        // The launcher's exit report can beat the proxy's disconnect, so it
+        // tells members nothing: they hear once the status is committed.
+        assert!(frames(&mut editor_rx).is_empty());
+        assert!(frames(&mut viewer_rx).is_empty());
         assert!(frames(&mut removed_rx).is_empty());
-    }
-
-    /// A membership lookup that fails tells no one, never a wider audience.
-    #[test]
-    fn member_lookup_failure_fails_closed() {
-        let (owner, member) = (Uuid::new_v4(), Uuid::new_v4());
-        assert_eq!(
-            member_recipients(Ok(vec![owner, member]), Uuid::new_v4(), owner),
-            [member]
-        );
-        assert!(member_recipients(
-            Err(diesel::result::Error::BrokenTransactionManager),
-            Uuid::new_v4(),
-            owner
-        )
-        .is_empty());
     }
 }

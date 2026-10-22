@@ -162,10 +162,10 @@ pub const PERMISSION_CANCEL_PERSIST_FAILED: &str = "PERMISSION_CANCEL_PERSIST_FA
 /// periodic sweep retries automatically; do not manually delete request rows.
 pub const SPAWN_LIFECYCLE_FAILED: &str = "SPAWN_LIFECYCLE_FAILED";
 
-/// A session's agent stopped running (a failed launch or an exit), but its
-/// members could not be looked up to tell their dashboards
-/// (`launcher_socket.rs`). Nobody beyond the owner is told: the fan-out fails
-/// closed rather than broadcast wider.
+/// A session stopped running (a failed launch, or its proxy disconnected),
+/// but its members could not be looked up to tell their dashboards
+/// (`handlers/websocket/member_status.rs`). Nobody is told beyond the owner's
+/// own launch result: the fan-out fails closed rather than broadcast wider.
 ///
 /// - **Recurring:** DB/pool failure or schema drift on `session_members`;
 ///   members' session lists show stale "running" status until they refresh.
@@ -250,6 +250,7 @@ mod tests {
             include_str!("handlers/media_archive.rs"),
             include_str!("handlers/websocket/launcher_socket.rs"),
             include_str!("handlers/plugins.rs"),
+            include_str!("handlers/websocket/member_status.rs"),
         ];
         for m in ALL_MARKERS {
             let referenced = sources.iter().any(|s| s.contains(m));

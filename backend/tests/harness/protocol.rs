@@ -500,3 +500,75 @@ async fn failure_reason_reaches_the_matching_input() {
         "{frame:?}"
     );
 }
+
+/// Members hear that a session stopped only once its disconnected status is
+/// committed, so the refetch the frame triggers reads it; a connection that
+/// was already replaced tells no one when it closes.
+#[tokio::test]
+async fn members_hear_of_a_disconnect_after_it_is_committed() {
+    use diesel::prelude::*;
+    if std::env::var("DATABASE_URL").is_err() {
+        return;
+    }
+    let url = format!("ws://{}", spawn_test_app().await);
+    let mut fields = test_register_fields();
+    let session_id = fields.session_id;
+    let register = |fields: RegisterFields| {
+        let url = url.clone();
+        async move {
+            let mut proxy = connect::<SessionEndpoint>(&url).await.unwrap();
+            proxy.send(ProxyToServer::Register(fields)).await.unwrap();
+            receive::<SessionEndpoint>(&mut proxy, |f| {
+                matches!(f, ServerToProxy::RegisterAck { success: true, .. })
+            })
+            .await;
+            proxy
+        }
+    };
+    let status = || -> String {
+        backend::schema::sessions::table
+            .find(session_id)
+            .select(backend::schema::sessions::status)
+            .first(&mut test_pool().get().unwrap())
+            .unwrap()
+    };
+    let mut old = register(fields.clone()).await;
+    // The owner's dashboard: a user-channel socket with no session.
+    let mut dashboard = connect::<ClientEndpoint>(&url).await.unwrap();
+
+    // A newer connection takes over, then the old one closes: stale, so the
+    // session stays active and nobody is told.
+    fields.resuming = true;
+    let mut current = register(fields.clone()).await;
+    old.close().await.unwrap();
+    current.send(ProxyToServer::Heartbeat).await.unwrap();
+    receive::<SessionEndpoint>(&mut current, |f| matches!(f, ServerToProxy::Heartbeat)).await;
+    assert_eq!(status(), "active");
+
+    // The current connection closes: the bare frame arrives after the commit.
+    current.close().await.unwrap();
+    let frame = receive::<ClientEndpoint>(&mut dashboard, |f| {
+        matches!(f, ServerToClient::SessionExited { .. })
+    })
+    .await;
+    assert!(
+        matches!(frame, ServerToClient::SessionExited {session_id: id, exit_code: None, reason: None} if id == session_id),
+        "{frame:?}"
+    );
+    assert_eq!(status(), "disconnected");
+    // Had the stale close told anyone, a second frame would follow.
+    let more = tokio::time::timeout(Duration::from_millis(500), async {
+        loop {
+            match dashboard.recv().await {
+                Some(Ok(ServerToClient::SessionExited { .. })) => return true,
+                Some(Ok(_)) => continue,
+                _ => return false,
+            }
+        }
+    })
+    .await;
+    assert!(
+        !matches!(more, Ok(true)),
+        "the replaced connection notified"
+    );
+}

@@ -1,5 +1,6 @@
 mod continuations;
 pub mod launcher_socket;
+mod member_status;
 mod message_handlers;
 mod permissions;
 mod proxy_socket;

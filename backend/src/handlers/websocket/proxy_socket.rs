@@ -131,9 +131,20 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
                         .select((sessions::status, sessions::session_name))
                         .first::<(String, String)>(&mut conn)
                         .ok();
-                    let _ = diesel::update(sessions::table.find(session_id))
+                    let updated = diesel::update(sessions::table.find(session_id))
                         .set(sessions::status.eq(SessionStatus::Disconnected.as_str()))
                         .execute(&mut conn);
+                    // The disconnected status is committed now, so every
+                    // member's refetch (the owner's included) reads it. The
+                    // launcher's own exit report can arrive before this.
+                    if updated.is_ok() {
+                        super::member_status::notify_members_not_running(
+                            &session_manager,
+                            &mut conn,
+                            session_id,
+                            None,
+                        );
+                    }
                     if let Some((status, session_name)) = prior {
                         if status == SessionStatus::Active.as_str() {
                             app_state.notifications.emit(
