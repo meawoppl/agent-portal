@@ -900,7 +900,10 @@ carries a `shared::api::ApiError { code, message, retryable }`, which the
 outermost `errors::negotiate_error_body` layer sends as JSON instead, but only
 to a request whose `Accept` names `application/json` with q > 0 (a bare `*/*`
 doesn't count). The status and other headers never change, and `Vary: Accept`
-is added. `PortalClient` opts in; `utils::error_body` decodes either form.
+is added. Only `AppError` responses are typed: axum extractor rejections and
+handlers with their own error bodies pass through as they are, so a client
+must still read text. `PortalClient` opts in; `utils::error_body` decodes
+either form.
 Keep `message` safe to show (DB/internal details go to the log), and treat
 `retryable` as a hint for the UI, never a reason to resend a mutation.
 

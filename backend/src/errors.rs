@@ -116,16 +116,18 @@ fn accepts_json(accept: &str) -> bool {
     accept.split(',').any(|range| {
         let mut parts = range.split(';');
         let media = parts.next().unwrap_or_default().trim();
+        // No q means 1; a q that isn't a number in (0, 1] is not acceptance.
         let quality = parts
             .filter_map(|param| {
                 let (key, value) = param.split_once('=')?;
                 key.trim()
                     .eq_ignore_ascii_case("q")
-                    .then(|| value.trim().parse::<f32>().ok())?
+                    .then(|| value.trim().parse::<f32>().ok())
             })
             .next()
-            .unwrap_or(1.0);
-        media.eq_ignore_ascii_case("application/json") && quality > 0.0
+            .unwrap_or(Some(1.0));
+        media.eq_ignore_ascii_case("application/json")
+            && quality.is_some_and(|q| q > 0.0 && q <= 1.0)
     })
 }
 
@@ -237,6 +239,8 @@ mod negotiation_tests {
             "text/html, application/json;q=0.5",
             "Application/JSON",
             "application/json ; q=1",
+            "application/json;charset=utf-8",
+            "application/json;q=0.001",
         ] {
             assert!(accepts_json(yes), "{yes}");
         }
@@ -248,6 +252,12 @@ mod negotiation_tests {
             "text/*",
             "application/json;q=0",
             "application/json; q=0.0",
+            "application/json;q=abc",
+            "application/json;q=",
+            "application/json;q=1.5",
+            "application/json;q=inf",
+            "application/json;q=NaN",
+            "application/json;q=-1",
             "application/jsonseq",
             "application/problem+json",
         ] {
