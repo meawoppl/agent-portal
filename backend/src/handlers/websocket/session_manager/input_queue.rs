@@ -33,7 +33,8 @@ pub(crate) struct EnqueueOutcome {
     /// Whether the message was handed off: to the live proxy, or held in
     /// memory for it to receive on reconnect.
     pub delivered: bool,
-    /// Whether a connected proxy received it now.
+    /// Whether it was handed to a connected proxy's channel now. Receipt is
+    /// only known from the proxy's `ProxyReceived` / `AgentAccepted` acks.
     pub live: bool,
     /// Whether the pending-input row was persisted. `false` ⇒ it won't replay
     /// if the proxy reconnects; logged as `PENDING_INPUT_PERSIST_FAILED`.

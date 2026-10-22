@@ -24,7 +24,7 @@ pub(super) struct PendingMessage {
 /// Where [`SessionManager::send_or_queue`] put a message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Sent {
-    /// Handed to the connected proxy.
+    /// Handed to the connected proxy's channel (not yet acknowledged).
     Live,
     /// No live proxy: held in memory for it to receive on reconnect.
     Queued,
