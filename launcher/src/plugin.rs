@@ -825,18 +825,29 @@ async fn start_managed(name: &str, session_id: String, cwd: PathBuf) -> Result<S
     Ok(state)
 }
 
-/// One `[[commands]]` entry resolved for a session (#2161): the process Portal
-/// runs (the plugin's environment, from the plugin's directory, as for its
-/// other commands) and the exact command line, shown for approval and kept as
-/// provenance. `{cwd}` and `{session_id}` come from the session; `args` are
-/// shell-quoted onto `run`, and only for a command that accepts them.
+/// One `[[commands]]` entry resolved for a session (#2161).
+pub(crate) struct CommandInvocation {
+    /// What Portal runs: the plugin's environment, from the plugin's
+    /// directory, as for its other commands.
+    pub command: Command,
+    /// The exact command line, shown for approval and kept as provenance.
+    pub line: String,
+    /// Covers everything that decides what runs (the request, the line, its
+    /// environment and the manifest), so an approval of one preview runs
+    /// nothing if any of it changes before the run.
+    pub fingerprint: String,
+}
+
+/// Resolve a plugin command. `{cwd}` and `{session_id}` come from the
+/// session; `args` are shell-quoted onto `run`, and only for a command that
+/// accepts them.
 pub(crate) fn command_invocation(
     name: &str,
     command: &str,
     args: &[String],
     session_id: &str,
     cwd: &Path,
-) -> Result<(Command, String)> {
+) -> Result<CommandInvocation> {
     let runtime = load_runtime(name)?;
     ensure_enabled(name, &runtime.installed)?;
     let entry = runtime
@@ -860,8 +871,27 @@ pub(crate) fn command_invocation(
         line.push(' ');
         line.push_str(&process::shell_quote(arg));
     }
+    let fingerprint = {
+        use std::hash::{BuildHasher, Hash, Hasher};
+        // Keyed per launcher process, so a fingerprint can't be forged from
+        // outside it and one from before a restart never matches.
+        static KEY: std::sync::OnceLock<std::collections::hash_map::RandomState> =
+            std::sync::OnceLock::new();
+        let mut hasher = KEY.get_or_init(Default::default).build_hasher();
+        (name, command, args, session_id, cwd, &line).hash(&mut hasher);
+        process::plugin_command_env(&runtime).hash(&mut hasher);
+        runtime.root.hash(&mut hasher);
+        std::fs::read(runtime.root.join(MANIFEST))
+            .with_context(|| format!("failed to read `{name}`'s manifest"))?
+            .hash(&mut hasher);
+        format!("{:016x}", hasher.finish())
+    };
     let command = process.command(&line)?;
-    Ok((command, line))
+    Ok(CommandInvocation {
+        command,
+        line,
+        fingerprint,
+    })
 }
 
 /// Run one surface action for the Portal dock and report the surface (#2160).

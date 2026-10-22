@@ -447,7 +447,10 @@ pub(super) async fn handle_message(
                     .await
                     .map_err(|error| format!("{error:#}"));
                 let _ = sender
-                    .send(LauncherToServer::PluginResult { request_id, result })
+                    .send(LauncherToServer::PluginResult {
+                        request_id,
+                        result: Box::new(result),
+                    })
                     .await;
             });
         }

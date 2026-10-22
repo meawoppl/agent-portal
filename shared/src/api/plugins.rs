@@ -175,11 +175,14 @@ pub enum PluginAction {
         name: String,
         action: PluginSurfaceAction,
     },
+    /// Without `approval`, resolve the command and return the exact line and
+    /// a `proposal` fingerprint, running nothing. With the fingerprint the
+    /// user approved, run it, unless what it resolves to has changed since.
     RunCommand {
         name: String,
         command: String,
         args: Vec<String>,
-        approved: bool,
+        approval: Option<String>,
     },
 }
 
@@ -206,6 +209,12 @@ pub struct PluginResponse {
     pub inventory: Option<PluginInventoryResponse>,
     #[serde(default)]
     pub surface: Option<PluginSurfaceStatus>,
+    /// A previewed command's fingerprint, to approve it with.
+    #[serde(default)]
+    pub proposal: Option<String>,
+    /// The command ran, but recording it in the session transcript failed.
+    #[serde(default)]
+    pub transcript_error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -312,7 +321,7 @@ mod tests {
                 name: "tools".into(),
                 command: "inspect".into(),
                 args: vec!["a file; $(literal)".into()],
-                approved: false,
+                approval: Some("fingerprint".into()),
             },
         };
         let wire = serde_json::to_string(&request).unwrap();
@@ -320,8 +329,16 @@ mod tests {
             serde_json::from_str::<PluginRequest>(&wire).unwrap(),
             request
         );
-        let missing_approval = wire.replace(",\"approved\":false", "");
-        assert!(serde_json::from_str::<PluginRequest>(&missing_approval).is_err());
+        // Leaving the approval out asks for a preview: nothing runs.
+        let missing_approval = wire.replace(",\"approval\":\"fingerprint\"", "");
+        let PluginAction::RunCommand { approval, .. } =
+            serde_json::from_str::<PluginRequest>(&missing_approval)
+                .unwrap()
+                .action
+        else {
+            panic!("still a command request");
+        };
+        assert_eq!(approval, None);
     }
 
     #[test]

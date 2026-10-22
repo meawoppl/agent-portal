@@ -293,6 +293,7 @@ pub(super) fn plugin_discovery_surface(props: &PluginDiscoverySurfaceProps) -> H
                                 }
                                 if let (Some((launcher_id, session_id)), false) = (props.surface_host, plugin.commands.is_empty()) {
                                     <CommandRunner
+                                        key={format!("{launcher_id}:{session_id}:{}", plugin.name)}
                                         plugin={plugin.name.clone()}
                                         commands={plugin.commands.clone()}
                                         {launcher_id}
@@ -499,17 +500,22 @@ pub(super) struct CommandRunnerProps {
 }
 
 /// A command waiting for the user's approval: the exact line the launcher
-/// resolved, shown with where it will run.
+/// resolved, shown with where it will run, and the launcher's fingerprint of
+/// it, which is what approving sends back.
 #[derive(Clone, PartialEq)]
 struct Proposal {
     command: String,
     args: Vec<String>,
     line: String,
+    fingerprint: String,
 }
 
 /// A plugin's named commands, run through Portal (#2161): pick one, give its
 /// arguments if it takes them, approve the exact command line, see the result.
 /// The run is also recorded in the transcript as a plugin command card.
+///
+/// Rendered keyed by launcher, session and plugin, so a proposal never
+/// survives a change of target: approving runs only what was shown here.
 #[function_component(CommandRunner)]
 pub(super) fn command_runner(props: &CommandRunnerProps) -> Html {
     let picked = use_state(|| None::<String>);
@@ -531,7 +537,7 @@ pub(super) fn command_runner(props: &CommandRunnerProps) -> Html {
             in_flight.clone(),
         );
         Callback::from(
-            move |(command, args, approved): (String, Vec<String>, bool)| {
+            move |(command, args, approval): (String, Vec<String>, Option<String>)| {
                 if in_flight.replace(true) {
                     return;
                 }
@@ -542,7 +548,7 @@ pub(super) fn command_runner(props: &CommandRunnerProps) -> Html {
                         name: plugin.clone(),
                         command: command.clone(),
                         args: args.clone(),
-                        approved,
+                        approval: approval.clone(),
                     },
                 };
                 let (proposal, result, error, busy, in_flight) = (
@@ -558,13 +564,19 @@ pub(super) fn command_runner(props: &CommandRunnerProps) -> Html {
                     let response = run_plugin_action(launcher_id, &request).await;
                     *in_flight.borrow_mut() = false;
                     busy.set(false);
-                    match (response, approved) {
-                        (Ok(response), false) => proposal.set(Some(Proposal {
-                            command,
-                            args,
-                            line: response.output,
-                        })),
-                        (Ok(response), true) => {
+                    match (response, approval) {
+                        (Ok(response), None) => match response.proposal {
+                            Some(fingerprint) => proposal.set(Some(Proposal {
+                                command,
+                                args,
+                                line: response.output,
+                                fingerprint,
+                            })),
+                            None => error.set(Some(
+                                "This computer's launcher can't preview commands; update it".into(),
+                            )),
+                        },
+                        (Ok(response), Some(_)) => {
                             proposal.set(None);
                             result.set(Some((command, response)));
                         }
@@ -582,7 +594,7 @@ pub(super) fn command_runner(props: &CommandRunnerProps) -> Html {
                 return;
             };
             match split_args(&args) {
-                Ok(parsed) => send.emit((command, parsed, false)),
+                Ok(parsed) => send.emit((command, parsed, None)),
                 Err(problem) => error.set(Some(problem.to_string())),
             }
         })
@@ -604,7 +616,7 @@ pub(super) fn command_runner(props: &CommandRunnerProps) -> Html {
                                 picked.set(Some(name.clone()));
                             } else {
                                 picked.set(None);
-                                send.emit((name.clone(), Vec::new(), false));
+                                send.emit((name.clone(), Vec::new(), None));
                             }
                         })
                     };
@@ -647,7 +659,9 @@ pub(super) fn command_runner(props: &CommandRunnerProps) -> Html {
                     <div class="plugin-card-actions">
                         <button type="button" class="surface-control" disabled={*busy} onclick={{
                             let (send, p) = (send.clone(), p.clone());
-                            Callback::from(move |_| send.emit((p.command.clone(), p.args.clone(), true)))
+                            Callback::from(move |_| {
+                                send.emit((p.command.clone(), p.args.clone(), Some(p.fingerprint.clone())))
+                            })
                         }}>{ "Run" }</button>
                         <button type="button" class="surface-control" onclick={{
                             let proposal = proposal.clone();
@@ -669,6 +683,9 @@ pub(super) fn command_runner(props: &CommandRunnerProps) -> Html {
                         (false, Some(code)) => format!("failed (exit {code})"),
                         (false, None) => response.error.clone().unwrap_or_else(|| "failed".into()),
                     }) }</strong>
+                    if let Some(problem) = &response.transcript_error {
+                        <div class="edit-stack-error">{ problem }</div>
+                    }
                     if !response.output.trim().is_empty() {
                         <details open={!response.success}>
                             <summary>{ "Output" }</summary>

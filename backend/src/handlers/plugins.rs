@@ -160,7 +160,7 @@ pub async fn run_plugin_action(
             name,
             command,
             args,
-            approved: true,
+            approval: Some(_),
         } => Some((name.clone(), command.clone(), args.clone())),
         _ => None,
     };
@@ -176,9 +176,9 @@ pub async fn run_plugin_action(
         timeout,
     )
     .await?;
-    let response = match response {
+    let mut response = match response {
         shared::LauncherToServer::PluginResult { result, .. } => {
-            result.map_err(AppError::BadGatewayMessage)?
+            (*result).map_err(AppError::BadGatewayMessage)?
         }
         _ => {
             return Err(AppError::Internal(
@@ -186,10 +186,59 @@ pub async fn run_plugin_action(
             ))
         }
     };
+    // The command has run by now, so a failure to record it must not read as
+    // a failed run, which the user might repeat.
     if let (Some(session), Some((name, command, args))) = (&session, ran_command) {
-        record_command(&state, session, &name, &command, &args, &response)?;
+        let invocation = invocation(&name, &command, &args);
+        if let Err(error) = record_command(&state, session, &invocation, &response) {
+            tracing::error!(
+                "{} session={} command={invocation:?}: {error:?}",
+                crate::markers::PLUGIN_COMMAND_RECORD_FAILED,
+                session.id,
+            );
+            response.transcript_error =
+                Some("The command ran, but it could not be added to the session transcript".into());
+        }
     }
     Ok(Json(response))
+}
+
+/// A plugin command as the user asked for it, each argument shell-quoted
+/// unless it is plainly one word, so the card shows exactly what was passed.
+fn invocation(plugin: &str, command: &str, args: &[String]) -> String {
+    let plain = |arg: &str| {
+        !arg.is_empty()
+            && arg
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "-_./=:,@%+".contains(c))
+    };
+    std::iter::once(format!("{plugin}:{command}"))
+        .chain(args.iter().map(|arg| {
+            if plain(arg) {
+                arg.clone()
+            } else {
+                format!("'{}'", arg.replace('\'', r"'\''"))
+            }
+        }))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The longest run of backticks in `text`, which a code span or fence around
+/// it must outrun.
+fn longest_backtick_run(text: &str) -> usize {
+    text.split(|c| c != '`').map(str::len).max().unwrap_or(0)
+}
+
+/// `text` as a markdown code span, whatever backticks it holds.
+fn code_span(text: &str) -> String {
+    let ticks = "`".repeat(longest_backtick_run(text) + 1);
+    let pad = if text.starts_with('`') || text.ends_with('`') {
+        " "
+    } else {
+        ""
+    };
+    format!("{ticks}{pad}{text}{pad}{ticks}")
 }
 
 /// Output kept in a plugin command's transcript card; the tail carries the
@@ -203,25 +252,10 @@ const COMMAND_CARD_OUTPUT: usize = 8 * 1024;
 fn record_command(
     state: &AppState,
     session: &crate::models::Session,
-    plugin: &str,
-    command: &str,
-    args: &[String],
+    invocation: &str,
     response: &PluginResponse,
 ) -> Result<(), AppError> {
     use diesel::prelude::*;
-    // Quote an argument that holds spaces (or nothing), so the card shows the
-    // arguments as they were given.
-    let shown = |arg: &String| {
-        if arg.is_empty() || arg.chars().any(char::is_whitespace) {
-            format!("'{arg}'")
-        } else {
-            arg.clone()
-        }
-    };
-    let invocation = std::iter::once(format!("{plugin}:{command}"))
-        .chain(args.iter().map(shown))
-        .collect::<Vec<_>>()
-        .join(" ");
     let ended = match (response.success, response.exit_code, &response.error) {
         (true, _, _) => "succeeded".to_string(),
         (false, Some(code), _) => format!("failed (exit {code})"),
@@ -239,11 +273,14 @@ fn record_command(
         None => output.to_string(),
     };
     let mut text = format!(
-        "**Plugin command** `{invocation}` {ended}\n\nOn {} in `{}`",
-        session.hostname, session.working_directory
+        "**Plugin command** {} {ended}\n\nOn {} in {}",
+        code_span(invocation),
+        session.hostname,
+        code_span(&session.working_directory)
     );
     if !tail.is_empty() {
-        text.push_str(&format!("\n\n```\n{tail}\n```"));
+        let fence = "`".repeat(longest_backtick_run(&tail).max(2) + 1);
+        text.push_str(&format!("\n\n{fence}\n{tail}\n{fence}"));
     }
     let content = shared::PortalMessage::text(text).to_json();
     let inserted: crate::models::Message = diesel::insert_into(crate::schema::messages::table)
@@ -267,4 +304,25 @@ fn record_command(
         },
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn card_quotes_arguments_and_outruns_backticks() {
+        let args = [
+            "plain".into(),
+            "two words".into(),
+            "it's".into(),
+            "a`b".into(),
+            String::new(),
+        ];
+        let shown = invocation("tiny", "echo", &args);
+        assert_eq!(shown, r"tiny:echo plain 'two words' 'it'\''s' 'a`b' ''");
+        assert_eq!(code_span(&shown), format!("``{shown}``"));
+        assert_eq!(code_span("`edge`"), "`` `edge` ``");
+        assert_eq!(code_span("/home/me"), "`/home/me`");
+    }
 }

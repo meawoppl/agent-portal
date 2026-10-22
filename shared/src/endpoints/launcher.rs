@@ -49,7 +49,7 @@ pub enum LauncherToServer {
     },
     PluginResult {
         request_id: Uuid,
-        result: Result<crate::api::PluginResponse, String>,
+        result: Box<Result<crate::api::PluginResponse, String>>,
     },
     /// Register a launcher daemon
     LauncherRegister {

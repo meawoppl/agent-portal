@@ -162,6 +162,17 @@ pub const PERMISSION_CANCEL_PERSIST_FAILED: &str = "PERMISSION_CANCEL_PERSIST_FA
 /// periodic sweep retries automatically; do not manually delete request rows.
 pub const SPAWN_LIFECYCLE_FAILED: &str = "SPAWN_LIFECYCLE_FAILED";
 
+/// A plugin command the user approved ran on its launcher
+/// (`handlers/plugins.rs`), but its card could not be written to the session
+/// transcript. The run is not repeated: the result still goes back to the
+/// user, flagged as unrecorded, so the transcript is missing that provenance.
+///
+/// - **Recurring:** DB/pool failure or schema drift on `messages`.
+/// - **One-off:** a transient DB blip; only that run's card is missing.
+/// - **Action:** check DB health and the `messages` schema; the log line names
+///   the session, plugin command and line that ran.
+pub const PLUGIN_COMMAND_RECORD_FAILED: &str = "PLUGIN_COMMAND_RECORD_FAILED";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -181,6 +192,7 @@ mod tests {
         SESSION_LAUNCH_CRASHLOOP_PAUSED,
         HISTORY_RESTORE_INVALID,
         PERMISSION_CANCEL_PERSIST_FAILED,
+        PLUGIN_COMMAND_RECORD_FAILED,
     ];
 
     #[test]
@@ -225,6 +237,7 @@ mod tests {
             include_str!("handlers/websocket/session_manager/input_queue.rs"),
             include_str!("handlers/media_archive.rs"),
             include_str!("handlers/websocket/launcher_socket.rs"),
+            include_str!("handlers/plugins.rs"),
         ];
         for m in ALL_MARKERS {
             let referenced = sources.iter().any(|s| s.contains(m));

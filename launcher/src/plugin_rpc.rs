@@ -115,28 +115,40 @@ fn handle_blocking(request: PluginRequest) -> Result<PluginResponse> {
             name,
             command,
             args,
-            approved,
+            approval,
         } => {
             let (Some(session), Some(cwd)) = (request.session_id, directory.as_deref()) else {
                 anyhow::bail!("A plugin command runs for a session");
             };
-            let (process, line) = crate::plugin::command_invocation(
-                &name,
-                &command,
-                &args,
-                &session.to_string(),
-                Path::new(cwd),
-            )?;
+            let resolve = || {
+                crate::plugin::command_invocation(
+                    &name,
+                    &command,
+                    &args,
+                    &session.to_string(),
+                    Path::new(cwd),
+                )
+            };
             // Without approval, only say what would run, for the user to
             // approve; nothing executes.
-            if !approved {
+            let Some(approval) = approval else {
+                let invocation = resolve()?;
                 return Ok(PluginResponse {
                     success: true,
-                    output: line,
+                    output: invocation.line,
+                    proposal: Some(invocation.fingerprint),
                     ..Default::default()
                 });
-            }
+            };
+            // Claimed before resolving, so no plugin change can land between
+            // the check and the run.
             let _claim = Claim::take()?;
+            let invocation = resolve()?;
+            anyhow::ensure!(
+                invocation.fingerprint == approval,
+                "`{name}:{command}` changed since you reviewed it; review it again"
+            );
+            let line = invocation.line;
             tracing::info!(
                 plugin = %name,
                 command = %command,
@@ -147,7 +159,7 @@ fn handle_blocking(request: PluginRequest) -> Result<PluginResponse> {
             );
             let log_dir = session_lib::paths::config_dir().join("plugin-actions");
             run_captured(
-                process,
+                invocation.command,
                 &format!("{name}:{command}"),
                 &log_dir,
                 COMMAND_TIMEOUT,
