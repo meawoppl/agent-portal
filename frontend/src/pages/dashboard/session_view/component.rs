@@ -122,12 +122,17 @@ pub struct SessionViewProps {
     /// computers' sign-in state re-probe.
     #[prop_or_default]
     pub on_agent_auth_changed: Callback<()>,
+    /// Successful launches the owner's dashboard has seen for this session
+    /// (`ClientWsState::session_launches`).
+    #[prop_or_default]
+    pub launch_count: u32,
 }
 
-/// Whether the session was seen starting again (going active from anything
-/// else), which is when a running agent picks up a fresh sign-in.
-fn sign_in_restart_seen(old: &shared::SessionStatus, new: &shared::SessionStatus) -> bool {
-    *old != shared::SessionStatus::Active && *new == shared::SessionStatus::Active
+/// Whether the agent was relaunched since a sign-in: a new process reads the
+/// new sign-in. Only a successful launch counts; a socket reconnecting to the
+/// same process (going active again after an outage) is not one.
+fn relaunched_since(launches_at_sign_in: u32, launches_now: u32) -> bool {
+    launches_now != launches_at_sign_in
 }
 
 /// The note after a sign-in to Claude from this session: plain text, scoped
@@ -607,10 +612,10 @@ pub struct SessionView {
     surface_escape_listener: Option<EventListener>,
     show_fork_dialog: bool,
     show_claude_login: bool,
-    /// Set after a sign-in to Claude from this view, until the agent is seen
-    /// restarting (the session going active again): the running agent may
-    /// still hold the credentials it started with.
-    claude_signin_notice: bool,
+    /// After a sign-in to Claude from this view: the launch count then, kept
+    /// until a later successful launch (or a dismissal), since the running
+    /// agent may still hold the credentials it started with.
+    claude_signin_notice: Option<u32>,
 }
 
 impl Component for SessionView {
@@ -757,7 +762,7 @@ impl Component for SessionView {
             surface_escape_listener,
             show_fork_dialog: false,
             show_claude_login: false,
-            claude_signin_notice: false,
+            claude_signin_notice: None,
         }
     }
 
@@ -779,12 +784,13 @@ impl Component for SessionView {
                 load_open_surface(ctx.props().session.id, &ctx.props().portal);
             self.surface_split_percent =
                 load_split_percent(ctx.props().session.id, &ctx.props().portal);
-            self.claude_signin_notice = false;
+            self.claude_signin_notice = None;
             edit_stack_fetch(ctx);
-        } else if self.claude_signin_notice
-            && sign_in_restart_seen(&old_props.session.status, &ctx.props().session.status)
+        } else if self
+            .claude_signin_notice
+            .is_some_and(|at| relaunched_since(at, ctx.props().launch_count))
         {
-            self.claude_signin_notice = false;
+            self.claude_signin_notice = None;
         }
 
         // Detect interrupt signal change on the focused session. Textarea
@@ -884,12 +890,12 @@ impl Component for SessionView {
             }
             SessionViewMsg::ClaudeSignedIn => {
                 // Only a note: nothing is restarted or resent for the user.
-                self.claude_signin_notice = true;
+                self.claude_signin_notice = Some(ctx.props().launch_count);
                 ctx.props().on_agent_auth_changed.emit(());
                 true
             }
             SessionViewMsg::DismissClaudeSignInNotice => {
-                self.claude_signin_notice = false;
+                self.claude_signin_notice = None;
                 true
             }
             SessionViewMsg::HideClaudeLogin => {
@@ -1717,7 +1723,7 @@ impl Component for SessionView {
 
                         { self.render_permission_handler(ctx) }
                         { render_session_failure(ctx.props(), Self::session_key(ctx)) }
-                        if self.claude_signin_notice {
+                        if self.claude_signin_notice.is_some() {
                             { render_claude_signin_notice(&ctx.props().session.hostname, ctx.link().callback(|_| SessionViewMsg::DismissClaudeSignInNotice)) }
                         }
                         { self.render_agent_progress() }
@@ -3048,16 +3054,13 @@ impl SessionView {
 
 #[cfg(test)]
 mod signin_notice_tests {
-    use super::sign_in_restart_seen;
-    use shared::SessionStatus::{Active, Disconnected, Inactive};
+    use super::relaunched_since;
 
-    /// The note after a sign-in clears only once the session is seen starting
-    /// again: a relaunch reads the new sign-in. Staying active is no restart.
+    /// The note after a sign-in clears only when a later launch succeeded;
+    /// the count is unchanged by a socket reconnect to the same process.
     #[test]
-    fn a_restart_is_the_session_going_active_again() {
-        assert!(sign_in_restart_seen(&Disconnected, &Active));
-        assert!(sign_in_restart_seen(&Inactive, &Active));
-        assert!(!sign_in_restart_seen(&Active, &Active));
-        assert!(!sign_in_restart_seen(&Active, &Disconnected));
+    fn only_a_later_launch_counts_as_a_restart() {
+        assert!(!relaunched_since(3, 3));
+        assert!(relaunched_since(3, 4));
     }
 }

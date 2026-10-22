@@ -1078,6 +1078,7 @@ pub fn dashboard_page() -> Html {
                                                 failure={ws_hook.session_failures.get(&session.key).cloned()}
                                                 on_dismiss_failure={ws_hook.dismiss_failure.clone()}
                                                 on_agent_auth_changed={ws_hook.on_agent_auth_changed.clone()}
+                                                launch_count={ws_hook.session_launches.get(&session.key).copied().unwrap_or_default()}
                                             />
                                         </div>
                                     }

@@ -54,6 +54,9 @@ pub(crate) struct ClientWsState {
     /// Ticks when an agent sign-in finishes anywhere in this tab, so views of
     /// computers' agent sign-in state re-probe.
     pub agent_auth_revision: u32,
+    /// Successful launches seen per session, from the owner's launch results:
+    /// a change means a new agent process, which a socket reconnect is not.
+    pub session_launches: HashMap<SessionKey, u32>,
 }
 
 /// Why a session's agent isn't running, for the banner in its view.
@@ -146,7 +149,8 @@ pub(crate) enum ClientWsAction {
     },
     DismissFailure(SessionKey),
     /// The connection was closed (unlinked, or signed out): drop the session
-    /// failures learned on it. Other maps follow their own lifecycle.
+    /// failures and launch counts learned on it. Other maps follow their own
+    /// lifecycle.
     ForgetConn(ConnId),
     /// An agent sign-in finished.
     AgentAuthChanged,
@@ -166,6 +170,7 @@ impl Reducible for ClientWsState {
             service_cpu_history: self.service_cpu_history.clone(),
             session_failures: self.session_failures.clone(),
             agent_auth_revision: self.agent_auth_revision,
+            session_launches: self.session_launches.clone(),
         };
         match action {
             ClientWsAction::ServiceStats(services) => {
@@ -249,6 +254,8 @@ impl Reducible for ClientWsState {
                 }
                 None => {
                     next.session_failures.remove(&session);
+                    let launches = next.session_launches.entry(session).or_default();
+                    *launches = launches.wrapping_add(1);
                 }
             },
             ClientWsAction::SessionExited { session, reason } => {
@@ -261,6 +268,7 @@ impl Reducible for ClientWsState {
             }
             ClientWsAction::ForgetConn(conn) => {
                 next.session_failures.retain(|key, _| key.conn != conn);
+                next.session_launches.retain(|key, _| key.conn != conn);
             }
             ClientWsAction::AgentAuthChanged => {
                 next.agent_auth_revision = next.agent_auth_revision.wrapping_add(1);
@@ -539,6 +547,33 @@ mod tests {
             .reduce(exited(linked, Reason::Error))
             .reduce(ClientWsAction::ForgetConn(ConnId::linked(1)));
         assert_eq!(state.session_failures.keys().collect::<Vec<_>>(), [&home]);
+    }
+
+    /// A session's launch count moves only on a successful launch result: a
+    /// failed launch, an exit, or nothing at all (a socket reconnecting to
+    /// the same agent) leaves it, so a sign-in note stays until a relaunch.
+    #[test]
+    fn launch_count_moves_only_on_a_successful_launch() {
+        let id = Uuid::new_v4();
+        let key = SessionKey::home(id);
+        let launches = |state: &ClientWsState| state.session_launches.get(&key).copied();
+        let state = Rc::new(ClientWsState::default())
+            .reduce(ClientWsAction::LaunchResult {
+                session: key,
+                failure: Some(SessionFailure::LaunchFailed(None)),
+            })
+            .reduce(ClientWsAction::SessionExited {
+                session: key,
+                reason: shared::SessionExitReason::Completed,
+            });
+        assert_eq!(launches(&state), None);
+        let state = state.reduce(ClientWsAction::LaunchResult {
+            session: key,
+            failure: None,
+        });
+        assert_eq!(launches(&state), Some(1));
+        let state = state.reduce(ClientWsAction::ForgetConn(ConnId::HOME));
+        assert_eq!(launches(&state), None);
     }
 
     #[test]
