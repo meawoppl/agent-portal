@@ -117,11 +117,27 @@ pub async fn send_json(
 /// Read a non-2xx response body as the error message, falling back to the
 /// status when the body is empty or unreadable. Backends relay upstream
 /// agent-CLI text on launcher failures, which is more useful than the status.
+/// A typed [`shared::api::ApiError`] (sent to requests that accept JSON)
+/// gives its message; a portal that predates it sends the text itself.
 pub async fn error_body(resp: gloo_net::http::Response) -> String {
     let status = resp.status();
-    match resp.text().await {
-        Ok(t) if is_non_blank(&t) => t,
-        _ => format!("HTTP {status}"),
+    let json = resp
+        .headers()
+        .get("content-type")
+        .is_some_and(|t| t.starts_with("application/json"));
+    error_message(status, json, resp.text().await.ok())
+}
+
+fn error_message(status: u16, json: bool, body: Option<String>) -> String {
+    let typed = body
+        .as_deref()
+        .filter(|_| json)
+        .and_then(|body| serde_json::from_str::<shared::api::ApiError>(body).ok());
+    match (typed, body) {
+        (Some(error), _) if is_non_blank(&error.message) => error.message,
+        (Some(_), _) => format!("HTTP {status}"),
+        (None, Some(text)) if is_non_blank(&text) => text,
+        (None, _) => format!("HTTP {status}"),
     }
 }
 
@@ -262,6 +278,29 @@ pub use shared::fmt::{format_file_size, format_token_count};
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn error_message_reads_typed_errors_and_legacy_text() {
+        let typed = r#"{"code":"not_found","message":"Session not found","retryable":false}"#;
+        assert_eq!(
+            error_message(404, true, Some(typed.into())),
+            "Session not found"
+        );
+        // A newer server's unknown code still yields its message.
+        let newer = r#"{"code":"rate_limited","message":"Slow down"}"#;
+        assert_eq!(error_message(429, true, Some(newer.into())), "Slow down");
+        // An older portal's text, and JSON bodies that aren't an ApiError.
+        assert_eq!(
+            error_message(502, false, Some("Launcher gone".into())),
+            "Launcher gone"
+        );
+        assert_eq!(
+            error_message(409, true, Some(r#"{"error":"x"}"#.into())),
+            r#"{"error":"x"}"#
+        );
+        assert_eq!(error_message(500, false, Some("  ".into())), "HTTP 500");
+        assert_eq!(error_message(500, true, None), "HTTP 500");
+    }
 
     #[test]
     fn format_dollars_adds_commas_and_keeps_two_decimals() {

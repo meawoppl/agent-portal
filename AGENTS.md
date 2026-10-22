@@ -894,6 +894,16 @@ pub async fn handler(...) -> Json<T> {
 }
 ```
 
+**Typed error bodies.** Handlers return `AppError`, whose response is the
+message as plain text, the body every client has always read. It also
+carries a `shared::api::ApiError { code, message, retryable }`, which the
+outermost `errors::negotiate_error_body` layer sends as JSON instead, but only
+to a request whose `Accept` names `application/json` with q > 0 (a bare `*/*`
+doesn't count). The status and other headers never change, and `Vary: Accept`
+is added. `PortalClient` opts in; `utils::error_body` decodes either form.
+Keep `message` safe to show (DB/internal details go to the log), and treat
+`retryable` as a hint for the UI, never a reason to resend a mutation.
+
 **Use logging**:
 ```rust
 use tracing::{info, error, warn};

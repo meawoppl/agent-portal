@@ -160,7 +160,7 @@ pub(super) fn plugin_selector(props: &PluginSelectorProps) -> Html {
                             spawn_local(async move {
                                 let result = async {
                                     let response = portal.patch("/api/plugins").json(&request).map_err(|e| e.to_string())?.send().await.map_err(|e| e.to_string())?;
-                                    if !response.ok() { return Err(response.text().await.unwrap_or_else(|_| "Could not save selection".into())); }
+                                    if !response.ok() { return Err(crate::utils::error_body(response).await); }
                                     response.json::<PluginInventoryResponse>().await.map_err(|e| e.to_string())
                                 }.await;
                                 if *alive.borrow() {

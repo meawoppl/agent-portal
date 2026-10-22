@@ -648,6 +648,11 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
         .layer(axum::middleware::from_fn_with_state(
             app_state_for_linked_gate,
             handlers::federation::linked_scope_gate,
+        ))
+        // Outside everything, so an error from any route or gate above is
+        // sent typed to a client that asks for JSON.
+        .layer(axum::middleware::from_fn(
+            crate::errors::negotiate_error_body,
         )))
 }
 
