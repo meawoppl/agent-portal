@@ -338,6 +338,10 @@ pub enum ServerToClient {
     SessionExited {
         session_id: Uuid,
         exit_code: Option<i32>,
+        /// Why, as the launcher classified it. Absent from an older backend,
+        /// which reads as an ordinary completion.
+        #[serde(default)]
+        reason: super::launcher::SessionExitReason,
     },
 
     /// Per-turn performance metrics row saved by the backend (PR 1 of N).

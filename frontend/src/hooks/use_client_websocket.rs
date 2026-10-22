@@ -2,6 +2,7 @@
 
 #[path = "client_websocket_events.rs"]
 mod client_websocket_events;
+pub use client_websocket_events::SessionFailure;
 
 use crate::federation::{Federation, FederationAction};
 use crate::portal_client::{use_portal, ConnId, SessionKey};
@@ -55,6 +56,11 @@ pub struct UseClientWebSocket {
     pub service_stats: Vec<ServiceStats>,
     /// Host CPU history per service id for the header sparkline.
     pub service_cpu_history: HashMap<String, Vec<f64>>,
+    /// Why a session's agent isn't running, for the session view's banner.
+    /// Only the launcher's owner learns these; see `ClientWsState`.
+    pub session_failures: HashMap<SessionKey, client_websocket_events::SessionFailure>,
+    /// Dismiss a session's failure banner.
+    pub dismiss_failure: Callback<SessionKey>,
 }
 
 struct HomeRpcGuard(Option<u64>);
@@ -151,11 +157,14 @@ fn use_live_client_websocket() -> UseClientWebSocket {
         use_effect_with(portals.clone(), move |portals| {
             // A new linked account must not restart unrelated sockets or
             // reset home server-version tracking.
-            tasks.borrow_mut().retain(|_, (client, abort)| {
+            tasks.borrow_mut().retain(|conn, (client, abort)| {
                 if portals.contains(client) {
                     true
                 } else {
                     abort.abort();
+                    // Unlinked or signed out: another account taking this
+                    // place must not inherit what this one learned.
+                    live.dispatch(client_websocket_events::ClientWsAction::ForgetConn(*conn));
                     false
                 }
             });
@@ -338,6 +347,18 @@ fn use_live_client_websocket() -> UseClientWebSocket {
             .iter()
             .map(|(id, points)| (id.clone(), points.iter().map(|(_, v)| *v).collect()))
             .collect(),
+        session_failures: live
+            .session_failures
+            .iter()
+            .filter(|(key, _)| current.contains(&key.conn))
+            .map(|(key, failure)| (*key, failure.clone()))
+            .collect(),
+        dismiss_failure: {
+            let live = live.clone();
+            Callback::from(move |key| {
+                live.dispatch(client_websocket_events::ClientWsAction::DismissFailure(key))
+            })
+        },
     }
 }
 

@@ -1075,6 +1075,8 @@ pub fn dashboard_page() -> Html {
                                                 interrupt_signal={focus.interrupt_signal}
                                                 jump_to_latest_signal={focus.jump_to_latest_signal}
                                                 stt_enabled={stt_enabled}
+                                                failure={ws_hook.session_failures.get(&session.key).cloned()}
+                                                on_dismiss_failure={ws_hook.dismiss_failure.clone()}
                                             />
                                         </div>
                                     }

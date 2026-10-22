@@ -46,6 +46,66 @@ pub(crate) struct ClientWsState {
     /// Host CPU history per service id, oldest → newest, one point per new
     /// reading (a repeated reading is not re-appended).
     pub service_cpu_history: HashMap<String, Vec<(u64, f64)>>,
+    /// The last launch or run failure per session, from the owner's user
+    /// channel (launch results and agent exits reach only the launcher's
+    /// owner, so members' tabs never hold one). Cleared by a successful
+    /// launch, a dismissal, or the connection going away.
+    pub session_failures: HashMap<SessionKey, SessionFailure>,
+}
+
+/// Why a session's agent isn't running, for the banner in its view.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SessionFailure {
+    /// The launcher could not start it; its error, bounded, shown as text.
+    LaunchFailed(Option<String>),
+    /// It started, then exited almost at once.
+    CrashedEarly,
+    /// Its conversation to resume was gone on the host.
+    ResumeTargetMissing,
+    /// It exited with an error.
+    Errored,
+}
+
+impl SessionFailure {
+    pub fn message(&self) -> String {
+        match self {
+            Self::LaunchFailed(Some(detail)) => format!("The agent failed to start: {detail}"),
+            Self::LaunchFailed(None) => "The agent failed to start".into(),
+            Self::CrashedEarly => "The agent exited right after starting".into(),
+            Self::ResumeTargetMissing => {
+                "The agent's previous conversation was not found on its computer".into()
+            }
+            Self::Errored => "The agent exited with an error".into(),
+        }
+    }
+
+    /// The failure an exit reports, if any. A completed, stopped or
+    /// re-registering exit is not one; none of them clears a recorded
+    /// failure either, since only a launch that succeeds proves recovery.
+    fn from_exit(reason: shared::SessionExitReason) -> Option<Self> {
+        use shared::SessionExitReason as Reason;
+        match reason {
+            Reason::CrashedEarly => Some(Self::CrashedEarly),
+            Reason::ResumeTargetMissing => Some(Self::ResumeTargetMissing),
+            Reason::Error => Some(Self::Errored),
+            Reason::Completed | Reason::Stopped | Reason::RegistrationRejected => None,
+        }
+    }
+}
+
+/// Longest launcher error shown, in characters.
+const MAX_LAUNCH_DETAIL_CHARS: usize = 200;
+
+/// A launcher's error made safe to show as plain text: control characters
+/// dropped, bounded without splitting a character, empty meaning none.
+fn launch_detail(raw: Option<&str>) -> Option<String> {
+    let detail: String = raw?
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(MAX_LAUNCH_DETAIL_CHARS)
+        .collect();
+    let detail = detail.trim();
+    (!detail.is_empty()).then(|| detail.to_string())
 }
 
 pub(crate) enum ClientWsAction {
@@ -71,6 +131,20 @@ pub(crate) enum ClientWsAction {
     SessionProgressReset(ConnId),
     LaunchEvent,
     LauncherEvent,
+    /// A launch result for a session: success clears its failure.
+    LaunchResult {
+        session: SessionKey,
+        failure: Option<SessionFailure>,
+    },
+    /// A session's agent exited; records a failure when the reason is one.
+    SessionExited {
+        session: SessionKey,
+        reason: shared::SessionExitReason,
+    },
+    DismissFailure(SessionKey),
+    /// The connection was closed (unlinked, or signed out): nothing learned
+    /// on it may outlive it.
+    ForgetConn(ConnId),
 }
 
 impl Reducible for ClientWsState {
@@ -85,6 +159,7 @@ impl Reducible for ClientWsState {
             launcher_event_counter: self.launcher_event_counter,
             service_stats: self.service_stats.clone(),
             service_cpu_history: self.service_cpu_history.clone(),
+            session_failures: self.session_failures.clone(),
         };
         match action {
             ClientWsAction::ServiceStats(services) => {
@@ -162,6 +237,25 @@ impl Reducible for ClientWsState {
             ClientWsAction::LauncherEvent => {
                 next.launcher_event_counter = next.launcher_event_counter.wrapping_add(1);
             }
+            ClientWsAction::LaunchResult { session, failure } => match failure {
+                Some(failure) => {
+                    next.session_failures.insert(session, failure);
+                }
+                None => {
+                    next.session_failures.remove(&session);
+                }
+            },
+            ClientWsAction::SessionExited { session, reason } => {
+                if let Some(failure) = SessionFailure::from_exit(reason) {
+                    next.session_failures.insert(session, failure);
+                }
+            }
+            ClientWsAction::DismissFailure(session) => {
+                next.session_failures.remove(&session);
+            }
+            ClientWsAction::ForgetConn(conn) => {
+                next.session_failures.retain(|key, _| key.conn != conn);
+            }
         }
         Rc::new(next)
     }
@@ -219,7 +313,12 @@ pub(crate) fn handle_server_message(
         ServerToClient::SessionProgressReset => {
             live.dispatch(ClientWsAction::SessionProgressReset(conn));
         }
-        ServerToClient::LaunchSessionResult { success, error, .. } => {
+        ServerToClient::LaunchSessionResult {
+            success,
+            error,
+            session_id,
+            ..
+        } => {
             // Push signal from the backend that the launcher finished registering
             // (or failed). Tick the counter so the dashboard refreshes its session
             // list at the exact moment the new row becomes findable.
@@ -229,6 +328,26 @@ pub(crate) fn handle_server_message(
                     error.as_deref().unwrap_or("(no detail)")
                 );
             }
+            if let Some(id) = session_id {
+                live.dispatch(ClientWsAction::LaunchResult {
+                    session: SessionKey { conn, id },
+                    failure: (!success)
+                        .then(|| SessionFailure::LaunchFailed(launch_detail(error.as_deref()))),
+                });
+            }
+            live.dispatch(ClientWsAction::LaunchEvent);
+        }
+        ServerToClient::SessionExited {
+            session_id, reason, ..
+        } => {
+            live.dispatch(ClientWsAction::SessionExited {
+                session: SessionKey {
+                    conn,
+                    id: session_id,
+                },
+                reason,
+            });
+            // Refetch so the list stops showing the session as running.
             live.dispatch(ClientWsAction::LaunchEvent);
         }
         ServerToClient::LaunchersChanged if conn == ConnId::HOME => {
@@ -344,6 +463,74 @@ mod tests {
     /// render that made it, so every frame rebuilt the map from the mount-time
     /// value and collapsed it to a single entry — session A's context bar
     /// vanishing the moment session B reported a turn.
+    #[test]
+    fn session_failures_record_clear_only_on_success_and_stay_per_connection() {
+        use shared::SessionExitReason as Reason;
+        let id = Uuid::new_v4();
+        let home = SessionKey::home(id);
+        let linked = SessionKey {
+            conn: ConnId::linked(1),
+            id,
+        };
+        let failed = |session| ClientWsAction::LaunchResult {
+            session,
+            failure: Some(SessionFailure::LaunchFailed(launch_detail(Some(
+                "claude: not found\n",
+            )))),
+        };
+        let exited = |session, reason| ClientWsAction::SessionExited { session, reason };
+
+        // An ordinary exit is no failure.
+        let state = Rc::new(ClientWsState::default()).reduce(exited(home, Reason::Completed));
+        assert!(state.session_failures.is_empty());
+
+        let state = state
+            .reduce(failed(home))
+            .reduce(exited(linked, Reason::CrashedEarly));
+        assert_eq!(
+            state.session_failures[&home].message(),
+            "The agent failed to start: claude: not found"
+        );
+        assert_eq!(
+            state.session_failures[&linked],
+            SessionFailure::CrashedEarly
+        );
+
+        // Nothing but a successful launch proves recovery: a stop or a
+        // re-registering exit leaves the failure.
+        let state = state
+            .reduce(exited(home, Reason::Stopped))
+            .reduce(exited(home, Reason::RegistrationRejected));
+        assert!(state.session_failures.contains_key(&home));
+        let state = state.reduce(ClientWsAction::LaunchResult {
+            session: home,
+            failure: None,
+        });
+        assert!(!state.session_failures.contains_key(&home));
+        assert!(state.session_failures.contains_key(&linked));
+
+        // Dismissal, and a connection going away, clear only their own.
+        let state = state
+            .reduce(failed(home))
+            .reduce(ClientWsAction::DismissFailure(linked));
+        assert!(!state.session_failures.contains_key(&linked));
+        let state = state
+            .reduce(exited(linked, Reason::Error))
+            .reduce(ClientWsAction::ForgetConn(ConnId::linked(1)));
+        assert_eq!(state.session_failures.keys().collect::<Vec<_>>(), [&home]);
+    }
+
+    #[test]
+    fn launch_detail_is_bounded_plain_text() {
+        assert_eq!(launch_detail(None), None);
+        assert_eq!(launch_detail(Some(" \n\u{1b} ")), None);
+        let long = "é".repeat(MAX_LAUNCH_DETAIL_CHARS + 50);
+        assert_eq!(
+            launch_detail(Some(&long)).unwrap().chars().count(),
+            MAX_LAUNCH_DETAIL_CHARS
+        );
+    }
+
     #[test]
     fn linked_progress_reset_and_metrics_cannot_overwrite_home() {
         let id = Uuid::new_v4();

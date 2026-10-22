@@ -695,6 +695,31 @@ fn server_to_proxy_tunnel_data_golden() {
     let _: ServerToProxy = serde_json::from_value(v).unwrap();
 }
 
+#[test]
+fn server_to_client_session_exited_reason_is_additive() {
+    let session_id = Uuid::nil();
+    // An older backend sends no reason: an ordinary completion.
+    let old: ServerToClient = serde_json::from_value(
+        json!({"type": "SessionExited", "session_id": session_id, "exit_code": 0}),
+    )
+    .unwrap();
+    assert!(matches!(
+        old,
+        ServerToClient::SessionExited {
+            reason: SessionExitReason::Completed,
+            ..
+        }
+    ));
+    assert_golden(
+        &ServerToClient::SessionExited {
+            session_id,
+            exit_code: Some(1),
+            reason: SessionExitReason::CrashedEarly,
+        },
+        json!({"type": "SessionExited", "session_id": session_id, "exit_code": 1, "reason": "crashed_early"}),
+    );
+}
+
 // ── Launcher ───────────────────────────────────────────────────────────
 
 #[test]

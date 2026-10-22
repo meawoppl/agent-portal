@@ -528,6 +528,38 @@
 
 /* Agent progress bars (`agent-portal progress`) — pinned above the input.
    Track/fill styling is shared with the upload bar. */
+.session-failure {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: var(--bg-dark);
+    border-top: 1px solid var(--error);
+    font-size: 0.82rem;
+    color: var(--error);
+}
+
+.session-failure-text {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.session-failure-dismiss {
+    flex: none;
+    min-width: 28px;
+    min-height: 28px;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 1rem;
+    cursor: pointer;
+}
+
+.session-failure-dismiss:hover {
+    color: var(--text-primary);
+}
+
 .agent-progress {
     padding: 6px 12px;
     background: var(--bg-dark);

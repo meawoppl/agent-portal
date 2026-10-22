@@ -112,6 +112,32 @@ pub struct SessionViewProps {
     /// Forwarded to the voice button, which picks its capture strategy from it.
     #[prop_or(false)]
     pub stt_enabled: bool,
+    /// Why this session's agent isn't running, when its owner's dashboard
+    /// learned it (`ClientWsState::session_failures`); members never get one.
+    #[prop_or_default]
+    pub failure: Option<crate::hooks::SessionFailure>,
+    #[prop_or_default]
+    pub on_dismiss_failure: Callback<SessionKey>,
+}
+
+/// The banner for a session whose agent failed to start or exited badly.
+/// Its text, including any launcher error, is a plain text node, never
+/// rendered as markdown or HTML.
+fn render_session_failure(props: &SessionViewProps, session: SessionKey) -> Html {
+    let Some(failure) = &props.failure else {
+        return html! {};
+    };
+    let dismiss = props
+        .on_dismiss_failure
+        .reform(move |_: MouseEvent| session);
+    html! {
+        <div class="session-failure" role="alert">
+            <span class="session-failure-text">{ failure.message() }</span>
+            <button type="button" class="session-failure-dismiss" aria-label="Dismiss" onclick={dismiss}>
+                { "×" }
+            </button>
+        </div>
+    }
 }
 
 fn optimistic_user_message(
@@ -1642,6 +1668,7 @@ impl Component for SessionView {
                         </div>
 
                         { self.render_permission_handler(ctx) }
+                        { render_session_failure(ctx.props(), Self::session_key(ctx)) }
                         { self.render_agent_progress() }
                         { self.render_input_bar(ctx) }
                     </div>

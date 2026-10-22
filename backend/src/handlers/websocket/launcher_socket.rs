@@ -675,13 +675,14 @@ fn handle_launcher_message(
                     }
                 }
             }
-            // Forward to web clients as ServerToClient
+            // Forward to the owner's web clients. A failed launch may not
+            // name its session, but the request does: say which one failed.
             app_state.session_manager.broadcast_to_user(
                 &user_id,
                 ServerToClient::LaunchSessionResult {
                     request_id,
                     success,
-                    session_id,
+                    session_id: session_id.or(desired_session_id),
                     pid,
                     error: error.clone(),
                 },
@@ -759,6 +760,7 @@ fn handle_launcher_message(
                 ServerToClient::SessionExited {
                     session_id,
                     exit_code,
+                    reason,
                 },
             );
         }
@@ -1762,5 +1764,72 @@ mod tests {
                 .execute(&mut conn);
         let _ = diesel::delete(sessions::table.find(session_id)).execute(&mut conn);
         let _ = diesel::delete(crate::schema::users::table.find(owner.id)).execute(&mut conn);
+    }
+}
+
+#[cfg(test)]
+mod owner_relay_tests {
+    use super::*;
+    use crate::test_support::{insert_session, insert_user, shared_pool, test_app_state};
+
+    /// The owner's dashboard learns which session failed to launch even when
+    /// the launcher doesn't name it, and why a session's agent exited.
+    #[test]
+    fn launch_failure_and_exit_reach_the_owner_with_session_and_reason() {
+        let Some(pool) = shared_pool() else { return };
+        let state = test_app_state(pool);
+        let mut conn = state.conn().unwrap();
+        let owner = insert_user(&mut conn, "launch-relay-owner");
+        let session = insert_session(&mut conn, owner.id, "launch-relay");
+        let (tx, mut rx) = super::super::conn_channel(16);
+        state.session_manager.add_user_client(owner.id, tx);
+
+        let request_id = Uuid::new_v4();
+        state
+            .session_manager
+            .register_launch_session(request_id, session.id);
+        handle_launcher_message(
+            LauncherToServer::LaunchSessionResult {
+                request_id,
+                success: false,
+                session_id: None,
+                pid: None,
+                error: Some("claude: command not found".into()),
+            },
+            Uuid::new_v4(),
+            owner.id,
+            None,
+            &state,
+        );
+        match rx.try_recv().unwrap() {
+            ServerToClient::LaunchSessionResult {
+                success: false,
+                session_id,
+                error,
+                ..
+            } => {
+                assert_eq!(session_id, Some(session.id));
+                assert_eq!(error.as_deref(), Some("claude: command not found"));
+            }
+            other => panic!("expected a launch result, got {other:?}"),
+        }
+
+        handle_launcher_message(
+            LauncherToServer::SessionExited {
+                session_id: session.id,
+                exit_code: Some(1),
+                reason: shared::SessionExitReason::CrashedEarly,
+            },
+            Uuid::new_v4(),
+            owner.id,
+            None,
+            &state,
+        );
+        let exited = std::iter::from_fn(|| rx.try_recv().ok())
+            .find(|frame| matches!(frame, ServerToClient::SessionExited { .. }));
+        assert!(
+            matches!(exited, Some(ServerToClient::SessionExited {session_id, reason: shared::SessionExitReason::CrashedEarly, ..}) if session_id == session.id),
+            "{exited:?}"
+        );
     }
 }
