@@ -137,7 +137,7 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
                     // The disconnected status is committed now, so every
                     // member's refetch (the owner's included) reads it. The
                     // launcher's own exit report can arrive before this.
-                    if updated.is_ok() {
+                    if matches!(updated, Ok(1)) {
                         super::member_status::notify_members_not_running(
                             &session_manager,
                             &mut conn,
