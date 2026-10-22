@@ -141,7 +141,11 @@ pub fn load_config() -> LauncherConfig {
 pub fn load_config_checked() -> anyhow::Result<LauncherConfig> {
     let path = config_path();
     let config = load_config_for_write_at(&path)?;
-    tracing::info!("Loaded config from {}", path.display());
+    if path.exists() {
+        tracing::info!("Loaded config from {}", path.display());
+    } else {
+        tracing::info!("No config at {}; using defaults", path.display());
+    }
     Ok(config)
 }
 

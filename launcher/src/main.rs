@@ -777,6 +777,10 @@ async fn main() -> anyhow::Result<()> {
 
     // --- Daemon startup path ---
 
+    // First, so a config that doesn't parse stops the launcher before it
+    // touches the service unit, updates itself, or opens a connection.
+    let config = config::load_config_checked()?;
+
     if let Err(e) = service::sync_on_startup() {
         warn!("Service unit sync failed: {e}");
     }
@@ -813,8 +817,6 @@ async fn main() -> anyhow::Result<()> {
             );
         }
     }
-
-    let config = config::load_config_checked()?;
 
     // CLI args override config file, which overrides the compile-time default
     let backend_url = resolve_backend_url(args.backend_url, config.backend_url);
