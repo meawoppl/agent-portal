@@ -230,6 +230,12 @@ pub struct PluginSurfaceStatus {
     pub log_tail: Vec<String>,
     pub pid: Option<u32>,
     pub started_at: Option<String>,
+    /// The forward URL of a launcher-managed surface.
+    #[serde(default)]
+    pub url: Option<String>,
+    /// The session the surface is forwarded to.
+    #[serde(default)]
+    pub session_id: Option<uuid::Uuid>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -1129,6 +1129,75 @@
     text-overflow: ellipsis;
 }
 
+.plugin-surface-controls {
+    display: grid;
+    gap: 0.35rem;
+    padding-top: 0.35rem;
+    border-top: 1px solid rgba(86, 95, 137, 0.3);
+}
+
+.plugin-surface-status {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.72rem;
+}
+
+.plugin-surface-state {
+    padding: 0.08rem 0.4rem;
+    border: 1px solid rgba(86, 95, 137, 0.6);
+    border-radius: 999px;
+    color: var(--text-muted);
+}
+
+.plugin-surface-state.healthy {
+    border-color: rgba(158, 206, 106, 0.5);
+    color: var(--success, #9ece6a);
+}
+
+.plugin-surface-state.starting {
+    border-color: rgba(122, 162, 247, 0.5);
+    color: var(--accent);
+}
+
+.plugin-surface-state.unhealthy,
+.plugin-surface-state.exited {
+    border-color: rgba(247, 118, 142, 0.5);
+    color: var(--error, #f7768e);
+}
+
+.plugin-surface-note {
+    color: var(--text-muted);
+}
+
+.surface-control {
+    padding: 0.2rem 0.55rem;
+    border: 1px solid rgba(122, 162, 247, 0.4);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--accent);
+    font-size: 0.72rem;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.surface-control:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.plugin-surface-log pre {
+    max-height: 12rem;
+    overflow: auto;
+    margin: 0.3rem 0 0;
+    padding: 0.5rem;
+    border-radius: 6px;
+    background: var(--bg-darker);
+    font: 0.68rem var(--font-mono, monospace);
+    white-space: pre-wrap;
+}
+
 .plugin-card-warnings {
     margin: 0;
     padding-left: 1.1rem;

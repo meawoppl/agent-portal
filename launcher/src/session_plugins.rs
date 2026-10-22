@@ -458,7 +458,8 @@ fn inventory(
                     })
                     .collect();
                 if let Some(surface) = manifest.surface {
-                    plugin.surface_kind = surface.kind;
+                    // Every surface is an HTTP service; `kind` is optional.
+                    plugin.surface_kind = surface.kind.or_else(|| Some("http".into()));
                     plugin.surface_title = surface.default_title;
                     plugin.surface_width_percent = surface.default_width_percent;
                 }

@@ -22,7 +22,25 @@ const MAX_LOG_BYTES: u64 = 32 * 1024 * 1024;
 /// into its own time budget.
 static LIFECYCLE: Mutex<()> = Mutex::new(());
 
-pub(crate) fn handle(request: PluginRequest) -> Result<PluginResponse> {
+/// Run one action. Surface actions wait on health checks and run here; the
+/// rest block on files and child processes and run on a blocking thread.
+pub(crate) async fn handle(request: PluginRequest) -> Result<PluginResponse> {
+    if let PluginAction::Surface { name, action } = &request.action {
+        let session = request
+            .session_id
+            .zip(request.working_directory.as_deref())
+            .map(|(id, dir)| (id.to_string(), std::path::PathBuf::from(dir)));
+        let surface = crate::plugin::surface_action(name, *action, session).await?;
+        return Ok(PluginResponse {
+            success: true,
+            surface: Some(surface),
+            ..Default::default()
+        });
+    }
+    tokio::task::spawn_blocking(move || handle_blocking(request)).await?
+}
+
+fn handle_blocking(request: PluginRequest) -> Result<PluginResponse> {
     let directory = request.working_directory;
     let lifecycle = |args: Vec<String>| -> Result<PluginResponse> {
         let _guard = match LIFECYCLE.try_lock() {
@@ -68,7 +86,8 @@ pub(crate) fn handle(request: PluginRequest) -> Result<PluginResponse> {
         PluginAction::Update { name } => lifecycle(vec!["update".into(), name]),
         PluginAction::Remove { name } => lifecycle(vec!["remove".into(), name]),
         PluginAction::Doctor { name } => lifecycle(vec!["doctor".into(), name]),
-        PluginAction::Surface { .. } | PluginAction::RunCommand { .. } => {
+        PluginAction::Surface { .. } => unreachable!("surface actions run in `handle`"),
+        PluginAction::RunCommand { .. } => {
             anyhow::bail!("This launcher cannot run that plugin action yet")
         }
     }
@@ -288,7 +307,7 @@ mod tests {
     #[test]
     fn a_second_lifecycle_action_is_turned_away() {
         let _held = LIFECYCLE.lock().unwrap();
-        let error = handle(PluginRequest {
+        let error = handle_blocking(PluginRequest {
             working_directory: None,
             session_id: None,
             action: PluginAction::Remove {

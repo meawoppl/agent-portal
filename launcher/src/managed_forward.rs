@@ -96,6 +96,11 @@ pub(crate) fn remove_plugin(name: &str) -> Result<()> {
     }
     Ok(())
 }
+/// A managed service's last reported status, if it belongs to `generation`.
+pub(crate) fn status(session: &str, generation: Uuid) -> Option<Status> {
+    read_status(&root(), session.parse().ok()?).filter(|s| s.generation == generation)
+}
+
 pub(crate) fn log_path(session: &str) -> Option<PathBuf> {
     session
         .parse::<Uuid>()

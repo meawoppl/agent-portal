@@ -107,6 +107,12 @@ async fn session_inventory(
 fn action_timeout_secs(action: &PluginAction) -> u64 {
     match action {
         PluginAction::Inventory => 20,
+        PluginAction::Surface {
+            action: shared::api::PluginSurfaceAction::Status,
+            ..
+        } => 20,
+        // A start waits up to 30 s for the first health check.
+        PluginAction::Surface { .. } => 90,
         _ => 600,
     }
 }
@@ -118,9 +124,24 @@ pub async fn run_plugin_action(
     State(state): State<Arc<AppState>>,
     CurrentUserId(user_id): CurrentUserId,
     Path(launcher_id): Path<Uuid>,
-    Json(request): Json<PluginRequest>,
+    Json(mut request): Json<PluginRequest>,
 ) -> Result<Json<PluginResponse>, AppError> {
     super::launcher_rpc::require_launcher_owner(&state, launcher_id, user_id)?;
+    // An action for a session (a surface forwarded to it) must name one the
+    // caller owns on this computer, and runs from that session's directory,
+    // whatever the request said.
+    if let Some(session_id) = request.session_id {
+        let session = {
+            let mut conn = state.conn()?;
+            super::session_access::verify_session_owner(&mut conn, session_id, user_id)?
+        };
+        if session.launcher_id != Some(launcher_id) {
+            return Err(AppError::BadRequest(
+                "That session runs on another computer",
+            ));
+        }
+        request.working_directory = Some(session.working_directory);
+    }
     if !state
         .session_manager
         .launcher_supports_capability(launcher_id, shared::LAUNCHER_CAPABILITY_PLUGINS)

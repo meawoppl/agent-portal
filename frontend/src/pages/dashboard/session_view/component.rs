@@ -1673,6 +1673,14 @@ impl Component for SessionView {
                                 on_toggle_collapsed={ctx.link().callback(|_| SessionViewMsg::ToggleSurfaceCollapsed)}
                                 on_toggle_mode={ctx.link().callback(|_| SessionViewMsg::ToggleSurfaceMode)}
                                 on_close={ctx.link().callback(|_| SessionViewMsg::HidePluginsPanel)}
+                                surface_host={
+                                    (!ctx.props().portal.is_linked()
+                                        && ctx.props().session.my_role == shared::SessionRole::Owner)
+                                        .then_some(ctx.props().session.launcher_id)
+                                        .flatten()
+                                        .map(|launcher| (launcher, ctx.props().session.id))
+                                }
+                                on_open_forward={ctx.link().callback(SessionViewMsg::OpenForwardSurface)}
                             />
                         }
                     }

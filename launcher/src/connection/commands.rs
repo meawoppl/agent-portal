@@ -443,11 +443,9 @@ pub(super) async fn handle_message(
         } => {
             let sender = import_reply_tx.clone();
             tokio::spawn(async move {
-                let result =
-                    tokio::task::spawn_blocking(move || crate::plugin_rpc::handle(request))
-                        .await
-                        .map_err(|error| error.to_string())
-                        .and_then(|result| result.map_err(|error| format!("{error:#}")));
+                let result = crate::plugin_rpc::handle(request)
+                    .await
+                    .map_err(|error| format!("{error:#}"));
                 let _ = sender
                     .send(LauncherToServer::PluginResult { request_id, result })
                     .await;

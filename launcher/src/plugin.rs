@@ -746,16 +746,22 @@ pub fn doctor(name: &str) -> Result<()> {
 }
 
 pub async fn open(name: &str) -> Result<()> {
-    start_managed(name).await.map(|_| ())
-}
-
-async fn start_managed(name: &str) -> Result<SurfaceState> {
-    let runtime = load_runtime(name)?;
-    ensure_enabled(name, &runtime.installed)?;
     let (backend, token) = crate::message::api_base()?;
     let session_id =
         crate::message::current_session_id(&reqwest::Client::new(), &backend, &token).await?;
-    let cwd = std::env::current_dir()?;
+    let state = start_managed(name, session_id, std::env::current_dir()?).await?;
+    let url = crate::managed_forward::status(&state.session_id, state.managed.unwrap_or_default())
+        .and_then(|status| status.url);
+    println!("{}", url.unwrap_or_default());
+    Ok(())
+}
+
+/// Start `name`'s surface as a launcher-managed service forwarded to
+/// `session_id`, run from the session's directory `cwd`.
+async fn start_managed(name: &str, session_id: String, cwd: PathBuf) -> Result<SurfaceState> {
+    let runtime = load_runtime(name)?;
+    ensure_enabled(name, &runtime.installed)?;
+    let (backend, _) = crate::message::api_base()?;
     let surface = runtime
         .manifest
         .surface
@@ -816,15 +822,89 @@ async fn start_managed(name: &str) -> Result<SurfaceState> {
         started_at: chrono::Utc::now(),
     };
     write_surface_state(&runtime, &state)?;
-    println!("{}", status.url.unwrap_or_default());
     Ok(state)
+}
+
+/// Run one surface action for the Portal dock and report the surface (#2160).
+/// Start and restart forward to `session` (its id and working directory),
+/// as `plugin open` does from inside it; status and stop need no session.
+pub(crate) async fn surface_action(
+    name: &str,
+    action: shared::api::PluginSurfaceAction,
+    session: Option<(String, PathBuf)>,
+) -> Result<shared::api::PluginSurfaceStatus> {
+    use shared::api::PluginSurfaceAction as Action;
+    let runtime = load_runtime(name)?;
+    ensure_enabled(name, &runtime.installed)?;
+    match action {
+        Action::Status => {}
+        Action::Stop => {
+            if let Some(state) = surface_state(&runtime)? {
+                halt_surface(&runtime, &state)?;
+            }
+        }
+        Action::Start | Action::Restart => {
+            let (session_id, cwd) =
+                session.ok_or_else(|| anyhow!("a surface starts for a session"))?;
+            let running_here = |state: &SurfaceState| {
+                state.managed.is_some() && state.session_id == session_id && surface_alive(state)
+            };
+            match surface_state(&runtime)? {
+                Some(state) if action == Action::Start && running_here(&state) => {}
+                existing => {
+                    if let Some(state) = existing {
+                        halt_surface(&runtime, &state)?;
+                    }
+                    start_managed(name, session_id, cwd).await?;
+                }
+            }
+        }
+    }
+    surface_report(&runtime).await
+}
+
+/// The dock's view of a plugin's surface.
+async fn surface_report(runtime: &PluginRuntime) -> Result<shared::api::PluginSurfaceStatus> {
+    use shared::api::PluginSurfaceState as State;
+    let status = surface_status(runtime).await?;
+    let record = status.surface.as_ref();
+    let managed = record.and_then(|s| {
+        s.managed
+            .and_then(|generation| crate::managed_forward::status(&s.session_id, generation))
+    });
+    let state = match status.state {
+        SurfaceHealth::Stopped => State::Stopped,
+        SurfaceHealth::Exited => State::Exited,
+        SurfaceHealth::Healthy => State::Healthy,
+        // A managed service that hasn't passed its first health check and
+        // hasn't failed yet is still coming up.
+        SurfaceHealth::Unhealthy
+            if managed
+                .as_ref()
+                .is_some_and(|m| !m.ready && m.error.is_none()) =>
+        {
+            State::Starting
+        }
+        SurfaceHealth::Unhealthy => State::Unhealthy,
+    };
+    Ok(shared::api::PluginSurfaceStatus {
+        state,
+        port: record.map(|s| s.port),
+        health_path: record.and_then(|s| s.health_path.clone()),
+        last_error: managed.as_ref().and_then(|m| m.error.clone()),
+        log_tail: status.log_tail,
+        pid: record.and_then(|s| s.pid),
+        started_at: record.map(|s| s.started_at.to_rfc3339()),
+        url: managed.and_then(|m| m.url),
+        session_id: record.and_then(|s| s.session_id.parse().ok()),
+    })
 }
 
 pub async fn start(name: &str) -> Result<SurfaceState> {
     let runtime = load_runtime(name)?;
     ensure_enabled(name, &runtime.installed)?;
-    if surface_state(&runtime)?.is_some_and(|s| s.managed.is_some()) {
-        return start_managed(name).await;
+    if let Some(state) = surface_state(&runtime)?.filter(|s| s.managed.is_some()) {
+        return start_managed(name, state.session_id, PathBuf::from(state.cwd)).await;
     }
     let cwd = std::env::current_dir().context("could not determine current directory")?;
     let (state, reused) = start_surface(&runtime, &cwd, &current_session_id()).await?;
@@ -842,7 +922,7 @@ pub async fn restart(name: &str) -> Result<SurfaceState> {
     if let Some(state) = surface_state(&runtime)? {
         halt_surface(&runtime, &state)?;
         if state.managed.is_some() {
-            return start_managed(name).await;
+            return start_managed(name, state.session_id, PathBuf::from(state.cwd)).await;
         }
     }
     start(name).await
