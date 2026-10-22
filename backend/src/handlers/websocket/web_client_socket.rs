@@ -170,6 +170,16 @@ struct WebClientCtx<'a> {
     initial_replay_limit: i64,
 }
 
+/// Refuse a viewer's mutation with a reply the browser shows. A silent drop
+/// leaves its UI waiting on an answer that never comes (a prompt held for its
+/// uploads, a permission dialog that closed as if answered).
+fn reject_viewer(tx: &WebClientSender, user_id: Uuid, session_id: Uuid, action: &str) {
+    warn!("Viewer-role user {user_id} attempted to {action} on session {session_id}");
+    let _ = tx.send(ServerToClient::Error {
+        message: format!("You don't have permission to {action} in this session"),
+    });
+}
+
 /// Returns true if the connection should be closed
 fn handle_web_client_message(
     client_msg: ClientToServer,
@@ -298,10 +308,8 @@ fn handle_web_client_message(
             // mutations too, gate them on editor/owner role.
             if let Some(session_id) = *verified_session_id {
                 if !is_session_mutator(app_state, session_id, user_id) {
-                    warn!(
-                        "Viewer-role user {} attempted FileUploadStart on session {}",
-                        user_id, session_id
-                    );
+                    warn!("Viewer-role user {user_id} attempted FileUploadStart on session {session_id}");
+                    super::uploads::send_upload_failure(tx, upload_id, "permission denied");
                     return false;
                 }
             }
@@ -327,10 +335,12 @@ fn handle_web_client_message(
         }) => {
             if let Some(session_id) = *verified_session_id {
                 if !is_session_mutator(app_state, session_id, user_id) {
-                    warn!(
-                        "Viewer-role user {} attempted FileUploadChunk on session {}",
-                        user_id, session_id
-                    );
+                    warn!("Viewer-role user {user_id} attempted FileUploadChunk on session {session_id}");
+                    // Demoted mid-upload: drop what was received, and answer
+                    // once, so the browser stops waiting on it.
+                    if pending_uploads.remove(&upload_id).is_some() {
+                        super::uploads::send_upload_failure(tx, upload_id, "permission denied");
+                    }
                     return false;
                 }
             }
@@ -356,10 +366,7 @@ fn handle_web_client_message(
                 // Approving/denying tool permissions decides whether the
                 // proxy executes the tool — that's a mutation, gate it.
                 if !is_session_mutator(app_state, session_id, user_id) {
-                    warn!(
-                        "Viewer-role user {} attempted PermissionResponse on session {}",
-                        user_id, session_id
-                    );
+                    reject_viewer(tx, user_id, session_id, "answer permission requests");
                     return false;
                 }
                 handle_permission_response(
@@ -383,10 +390,7 @@ fn handle_web_client_message(
                 // Interrupt cancels the in-flight model turn — a mutation.
                 if let Some(session_id) = *verified_session_id {
                     if !is_session_mutator(app_state, session_id, user_id) {
-                        warn!(
-                            "Viewer-role user {} attempted Interrupt on session {}",
-                            user_id, session_id
-                        );
+                        reject_viewer(tx, user_id, session_id, "stop the agent");
                         return false;
                     }
                 }
@@ -400,10 +404,14 @@ fn handle_web_client_message(
         ClientToServer::ScheduleLimitContinuation { continuation_id } => {
             if let Some(session_id) = *verified_session_id {
                 if !is_session_mutator(app_state, session_id, user_id) {
-                    warn!(
-                        "Viewer-role user {} attempted ScheduleLimitContinuation on session {}",
-                        user_id, session_id
-                    );
+                    // Settles this tab's "Scheduling..." button; the
+                    // continuation itself is untouched for everyone else.
+                    let _ = tx.send(ServerToClient::ContinuationStatus {
+                        continuation_id,
+                        status: "failed".to_string(),
+                        message: Some("permission denied".to_string()),
+                    });
+                    reject_viewer(tx, user_id, session_id, "schedule a continuation");
                     return false;
                 }
                 super::continuations::schedule_limit_continuation(
@@ -646,5 +654,221 @@ mod outbound_authorization_tests {
         cache.check(now, false, || Ok::<_, ()>(())).unwrap();
         assert!(cache.check(now, true, || Err(())).is_err());
         assert!(cache.check(now, false, || Err(())).is_err());
+    }
+}
+
+#[cfg(test)]
+mod viewer_rejection_tests {
+    use super::*;
+    use crate::models::NewSessionMember;
+    use crate::schema::session_members;
+    use crate::test_support::{insert_session, insert_user, shared_pool, test_app_state};
+
+    fn send(
+        state: &AppState,
+        tx: &WebClientSender,
+        user_id: Uuid,
+        session: Uuid,
+        uploads: &mut HashMap<String, PendingUpload>,
+        message: ClientToServer,
+    ) {
+        let ctx = WebClientCtx {
+            app_state: state,
+            session_manager: &state.session_manager,
+            db_pool: &state.db_pool,
+            tx,
+            user_id,
+            initial_replay_limit: 0,
+        };
+        handle_web_client_message(
+            message,
+            ctx,
+            &mut Some(SessionId::from(session.to_string())),
+            &mut Some(session),
+            uploads,
+        );
+    }
+
+    fn start(upload_id: &str) -> ClientToServer {
+        ClientToServer::FileUploadStart(shared::FileUploadStartFields {
+            upload_id: upload_id.into(),
+            filename: "notes.txt".into(),
+            content_type: "text/plain".into(),
+            total_chunks: 2,
+            total_size: 10,
+            disposition: shared::FileUploadDisposition::Workspace,
+        })
+    }
+
+    fn chunk(upload_id: &str) -> ClientToServer {
+        ClientToServer::FileUploadChunk(shared::FileUploadChunkFields {
+            upload_id: upload_id.into(),
+            chunk_index: 0,
+            data: "aGVsbG8=".into(),
+        })
+    }
+
+    fn upload_failure(message: ServerToClient) -> (String, Option<String>) {
+        match message {
+            ServerToClient::FileUploadResult(result) => {
+                assert!(!result.success);
+                (result.upload_id, result.error)
+            }
+            other => panic!("expected an upload failure, got {other:?}"),
+        }
+    }
+
+    fn refusal(message: ServerToClient) -> String {
+        match message {
+            ServerToClient::Error { message } => message,
+            other => panic!("expected an error, got {other:?}"),
+        }
+    }
+
+    /// A member demoted to viewer gets an answer for every refused mutation,
+    /// on their own socket only, and a refused chunk drops only their own
+    /// upload.
+    #[test]
+    fn demoted_member_gets_a_reply_for_every_refused_mutation() {
+        let Some(pool) = shared_pool() else { return };
+        let state = test_app_state(pool);
+        let mut conn = state.conn().unwrap();
+        let owner = insert_user(&mut conn, "viewer-reject-owner");
+        let editor = insert_user(&mut conn, "viewer-reject-editor");
+        let session = insert_session(&mut conn, owner.id, "viewer-reject");
+        diesel::insert_into(session_members::table)
+            .values(NewSessionMember {
+                session_id: session.id,
+                user_id: editor.id,
+                role: "editor".into(),
+            })
+            .execute(&mut conn)
+            .unwrap();
+        let (proxy_tx, mut proxy_rx) = super::super::conn_channel(64);
+        state.session_manager.register_session(
+            SessionId::from(session.id.to_string()),
+            proxy_tx,
+            tokio_util::sync::CancellationToken::new(),
+        );
+        let (tx, mut rx) = super::super::conn_channel(64);
+        let (owner_tx, mut owner_rx) = super::super::conn_channel(64);
+        state
+            .session_manager
+            .add_web_client(SessionId::from(session.id.to_string()), owner_tx);
+        let mut uploads = HashMap::new();
+        // Another member's connection, holding an upload with the same id.
+        let mut owner_uploads = HashMap::new();
+        send(
+            &state,
+            &tx,
+            editor.id,
+            session.id,
+            &mut uploads,
+            start("u1"),
+        );
+        send(
+            &state,
+            &tx,
+            owner.id,
+            session.id,
+            &mut owner_uploads,
+            start("u1"),
+        );
+        assert!(uploads.contains_key("u1") && owner_uploads.contains_key("u1"));
+        while proxy_rx.try_recv().is_ok() {}
+
+        diesel::update(session_members::table)
+            .filter(session_members::session_id.eq(session.id))
+            .filter(session_members::user_id.eq(editor.id))
+            .set(session_members::role.eq("viewer"))
+            .execute(&mut conn)
+            .unwrap();
+
+        // Mid-upload: the partial upload is dropped and answered once.
+        send(
+            &state,
+            &tx,
+            editor.id,
+            session.id,
+            &mut uploads,
+            chunk("u1"),
+        );
+        assert_eq!(
+            upload_failure(rx.try_recv().unwrap()),
+            ("u1".into(), Some("permission denied".into()))
+        );
+        assert!(uploads.is_empty());
+        assert!(owner_uploads.contains_key("u1"));
+        send(
+            &state,
+            &tx,
+            editor.id,
+            session.id,
+            &mut uploads,
+            chunk("u1"),
+        );
+        // A guessed id names nothing on this connection: nothing to answer.
+        send(
+            &state,
+            &tx,
+            editor.id,
+            session.id,
+            &mut uploads,
+            chunk("someone-else"),
+        );
+        assert!(rx.try_recv().is_err());
+
+        send(
+            &state,
+            &tx,
+            editor.id,
+            session.id,
+            &mut uploads,
+            start("u2"),
+        );
+        assert_eq!(upload_failure(rx.try_recv().unwrap()).0, "u2");
+
+        let answer = ClientToServer::PermissionResponse(shared::PermissionResponseFields {
+            request_id: "r1".into(),
+            allow: true,
+            input: None,
+            permissions: Vec::new(),
+            reason: None,
+        });
+        send(&state, &tx, editor.id, session.id, &mut uploads, answer);
+        assert!(refusal(rx.try_recv().unwrap()).contains("answer permission requests"));
+
+        send(
+            &state,
+            &tx,
+            editor.id,
+            session.id,
+            &mut uploads,
+            ClientToServer::Interrupt,
+        );
+        assert!(refusal(rx.try_recv().unwrap()).contains("stop the agent"));
+
+        let continuation_id = Uuid::new_v4();
+        send(
+            &state,
+            &tx,
+            editor.id,
+            session.id,
+            &mut uploads,
+            ClientToServer::ScheduleLimitContinuation { continuation_id },
+        );
+        match rx.try_recv().unwrap() {
+            ServerToClient::ContinuationStatus {
+                continuation_id: id,
+                status,
+                ..
+            } => assert_eq!((id, status.as_str()), (continuation_id, "failed")),
+            other => panic!("expected a continuation status, got {other:?}"),
+        }
+        assert!(refusal(rx.try_recv().unwrap()).contains("schedule a continuation"));
+
+        // Nothing reached the agent, and no other member heard about it.
+        assert!(proxy_rx.try_recv().is_err());
+        assert!(owner_rx.try_recv().is_err());
     }
 }
