@@ -7,6 +7,9 @@ use uuid::Uuid;
 pub struct FollowEvent {
     pub cursor: String,
     pub message_id: Uuid,
+    /// Activity observed in this durable row; never historical connectivity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity: Option<SessionActivityState>,
     pub kind: String,
     pub text: String,
 }
@@ -36,6 +39,17 @@ pub fn parse_follow_cursor(value: &str, session: Uuid) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn older_follow_output_decodes_without_lifecycle_metadata() {
+        let record: FollowRecord = serde_json::from_value(serde_json::json!({
+            "kind":"batch", "cursor":"v1:old:1", "start_cursor":null,
+            "state":"idle", "connected":true,
+            "events":[{"cursor":"v1:old:1", "message_id":Uuid::nil(), "kind":"text", "text":"hello"}]
+        })).unwrap();
+        assert_eq!(record.source, None);
+        assert_eq!(record.events[0].activity, None);
+    }
+
     #[test]
     fn cursor_is_scoped_and_nonnegative() {
         let id = Uuid::new_v4();
@@ -67,8 +81,18 @@ impl FollowRecordKind {
     }
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum FollowRecordSource {
+    Durable,
+    Snapshot,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FollowRecord {
+    /// Events are journal rows; state/connected always describe the current peer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<FollowRecordSource>,
     pub kind: FollowRecordKind,
     pub cursor: String,
     pub start_cursor: Option<String>,
