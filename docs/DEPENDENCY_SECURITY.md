@@ -91,3 +91,22 @@ versions. Do not duplicate version numbers in process documentation.
    exception's call-path rationale changed. Roll back a bad update through a
    reviewed revert of its manifest/lock changes; do not replace the lockfile
    with an unreviewed broad regeneration.
+
+## Web Push arithmetic patch (2026-10-25)
+
+RUSTSEC-2026-0387 affects crypto-bigint before 0.7.6, including the 0.5.5
+selected through web-push 0.11 -> jwt-simple 0.12 -> p256 0.13. VAPID signing
+uses this path, so an exposure exception is inappropriate.
+
+The local crates.io patch at `vendor/web-push` retains the published 0.11 API,
+message encryption and Apache-2.0 license, but requires jwt-simple 0.15, whose
+curve dependencies resolve to crypto-bigint 0.7.8. Its provenance and complete
+local changes are recorded in `vendor/web-push/PORTAL-PATCH.md`. Remove the
+vendor patch once a published web-push release supports patched arithmetic.
+The backend verifies a generated VAPID ES256 JWT independently with
+jsonwebtoken/ring, including its audience and expiry. CI continues to audit
+the entire lockfile; no advisory is suppressed by this fix.
+
+The RSA exposure exception remains applicable: jwt-simple's RSA path is still
+unused; VAPID selects ES256 only and FCM uses jsonwebtoken/ring. Reviewed
+2026-10-25. Informational audit warnings remain visible.

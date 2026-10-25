@@ -17,7 +17,7 @@ members = [
     "portal-sysmon",
     "mobile/src-tauri",
 ]
-exclude = ["mobile/status-notification-plugin"]
+exclude = ["mobile/status-notification-plugin", "vendor/web-push"]
 resolver = "2"
 
 [workspace.package]
@@ -136,3 +136,7 @@ strip = true
 [workspace.lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"
+
+[patch.crates-io]
+# web-push 0.11 pins jwt-simple 0.12, which retains vulnerable crypto-bigint.
+web-push = { path = "vendor/web-push" }

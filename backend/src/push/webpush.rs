@@ -245,6 +245,31 @@ mod tests {
         assert_eq!(json["tag"], id.to_string());
     }
 
+    /// Verify the upgraded signer independently with jsonwebtoken/ring.
+    /// Successful construction alone cannot detect an incompatible ES256 JWT.
+    #[test]
+    fn vapid_signature_verifies_with_ring() {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+        use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
+
+        let transport = WebPushTransport::new(TEST_VAPID_PRIVATE_B64.to_string());
+        let subscription = SubscriptionInfo::new("https://push.example.invalid/abc", "", "");
+        let signature = transport.vapid_signature(&subscription).unwrap();
+        assert_eq!(signature.auth_k.len(), 65);
+        assert_eq!(signature.auth_k[0], 4);
+        let key = DecodingKey::from_ec_components(
+            &URL_SAFE_NO_PAD.encode(&signature.auth_k[1..33]),
+            &URL_SAFE_NO_PAD.encode(&signature.auth_k[33..65]),
+        )
+        .unwrap();
+        let mut validation = Validation::new(Algorithm::ES256);
+        validation.set_audience(&["https://push.example.invalid"]);
+        let claims = decode::<serde_json::Value>(&signature.auth_t, &key, &validation)
+            .expect("VAPID signature and expiry must verify with ring")
+            .claims;
+        assert_eq!(claims["aud"], "https://push.example.invalid");
+    }
+
     #[test]
     fn non_webpush_platform_is_rejected_cleanly() {
         let transport = WebPushTransport::new(TEST_VAPID_PRIVATE_B64.to_string());
