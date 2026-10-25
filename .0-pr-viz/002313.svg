@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="sans-serif" fill="#c0caf5">
+<text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2313 · Update Muse exec question behavior</text>
+<text x="55" y="105" font-size="34" fill="#e6e9f5">Muse now allows async questions under --yolo;</text>
+<text x="55" y="148" font-size="34" fill="#e6e9f5">explicitly disable them where the exec driver cannot return answers.</text>
+<path d="M55 175H1945" stroke="#565f89"/><path d="M1000 190V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="65" y="235" font-size="22" fill="#f7768e" letter-spacing="4">BEFORE</text>
+<text x="1065" y="235" font-size="22" fill="#9ece6a" letter-spacing="4">AFTER</text>
+<rect x="65" y="290" width="860" height="180" rx="12" fill="#1e202e" stroke="#565f89"/>
+<rect x="1065" y="290" width="860" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="95" y="340" font-size="26" fill="#7aa2f7">muse-codes 1.4.12</text>
+<text x="95" y="395" font-size="23">build_exec_builder: .yolo(config.muse_yolo)</text>
+<text x="1095" y="340" font-size="26" fill="#7aa2f7">muse-codes 1.4.13</text>
+<text x="1095" y="395" font-size="23" fill="#9ece6a">.disable_request_user_input(true)</text>
+<path d="M495 470V610M1495 470V610" stroke="#a9b1d6" stroke-width="3"/>
+<rect x="65" y="610" width="860" height="220" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<rect x="1065" y="610" width="860" height="220" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="95" y="665" font-size="26" fill="#f7768e">Relying on --yolo changes with Muse 1.4.13</text>
+<text x="95" y="720" font-size="23">request_user_input becomes available.</text>
+<text x="95" y="765" font-size="23">The exec driver has no answer channel.</text>
+<text x="1095" y="665" font-size="26" fill="#9ece6a">Questions withheld explicitly</text>
+<text x="1095" y="720" font-size="23">Launch argv includes --disable-request-user-input.</text>
+<text x="1095" y="765" font-size="23">Runtime-wrapper test checks the flag.</text>
+<text x="55" y="1172" font-size="22" fill="#a9b1d6">Scope: spawn-per-turn exec only; interactive Muse question support requires an answer transport.</text>
+</g></svg>
