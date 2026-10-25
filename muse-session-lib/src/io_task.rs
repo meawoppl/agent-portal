@@ -250,6 +250,9 @@ fn build_exec_builder(config: &SessionConfig, text: &str) -> MuseExecBuilder {
         // session id, so the var cannot go stale the way claude's /clear does.
         .env("PORTAL_SESSION_ID", config.session_id.to_string())
         .yolo(config.muse_yolo)
+        // Muse 1.4.13 enables async questions even under --yolo. The
+        // spawn-per-turn exec driver has no channel to return answers.
+        .disable_request_user_input(true)
         .extra_args(config.extra_args.clone());
     for (key, value) in config.portal_environment() {
         builder = builder.env(key, value);
@@ -519,5 +522,9 @@ mod runtime_command_tests {
             .get_args()
             .any(|arg| arg == "prompt with spaces"));
         assert!(command.as_std().get_args().any(|arg| arg == "example"));
+        assert!(command
+            .as_std()
+            .get_args()
+            .any(|arg| arg == "--disable-request-user-input"));
     }
 }

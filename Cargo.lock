@@ -4487,9 +4487,9 @@ dependencies = [
 
 [[package]]
 name = "muse-codes"
-version = "1.4.12"
+version = "1.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69cab7f572abbb2a60df9604181f603c0f7e07b677cb9df41c48263690b96d8d"
+checksum = "75339ec701380fda728c9926c1aa90f81a5a328e343f5cf821415b972c933c3d"
 dependencies = [
  "log",
  "serde",
@@ -7481,7 +7481,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.2",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
