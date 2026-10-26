@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use diesel::prelude::*;
-use diesel::sql_types::{Array, BigInt, Text, Uuid as SqlUuid};
+use diesel::sql_types::{Array, BigInt, Nullable, Text, Timestamp, Uuid as SqlUuid};
 use shared::api::SessionActivityState;
 use uuid::Uuid;
 
@@ -14,20 +14,28 @@ pub(crate) fn session_activity_states(
     conn: &mut DbConnection,
     session_ids: &[Uuid],
 ) -> Result<HashMap<Uuid, SessionActivityState>, AppError> {
-    let mut states = persisted_activity_states(conn, session_ids)?;
+    let connected: Vec<_> = session_ids
+        .iter()
+        .copied()
+        .filter(|id| {
+            app_state
+                .session_manager
+                .is_proxy_connected(&id.to_string())
+        })
+        .collect();
+    let mut states = persisted_activity_states(conn, &connected)?;
     for id in session_ids {
-        if !app_state
-            .session_manager
-            .is_proxy_connected(&id.to_string())
-        {
-            states.insert(*id, SessionActivityState::Idle);
-        }
+        states.entry(*id).or_insert(SessionActivityState::Idle);
     }
     Ok(states)
 }
 
 #[derive(QueryableByName)]
 struct SignalRow {
+    #[diesel(sql_type = SqlUuid)]
+    id: Uuid,
+    #[diesel(sql_type = Timestamp)]
+    created_at: chrono::NaiveDateTime,
     #[diesel(sql_type = SqlUuid)]
     session_id: Uuid,
     #[diesel(sql_type = Text)]
@@ -41,6 +49,8 @@ struct SignalRow {
 /// Read newest-to-oldest until each session has a meaningful event. LATERAL
 /// bounds each session's page independently, avoiding both N+1 queries and an
 /// arbitrary lookback cutoff that turns a long tail of notices into idle.
+/// Each unresolved session uses a timestamp/id cursor, so concurrent retention
+/// cannot shift an OFFSET past the signal we are looking for.
 /// Content is parsed in Rust: malformed historical text must not break SQL.
 pub(crate) fn persisted_activity_states(
     conn: &mut diesel::PgConnection,
@@ -48,25 +58,38 @@ pub(crate) fn persisted_activity_states(
 ) -> Result<HashMap<Uuid, SessionActivityState>, AppError> {
     const PAGE: i64 = 64;
     let mut unresolved = session_ids.to_vec();
+    unresolved.sort_unstable();
+    unresolved.dedup();
     let mut states = HashMap::new();
-    let mut offset = 0_i64;
+    let mut cursors = HashMap::<Uuid, (chrono::NaiveDateTime, Uuid)>::new();
     while !unresolved.is_empty() {
+        let before_at: Vec<_> = unresolved
+            .iter()
+            .map(|id| cursors.get(id).map(|c| c.0))
+            .collect();
+        let before_id: Vec<_> = unresolved
+            .iter()
+            .map(|id| cursors.get(id).map(|c| c.1))
+            .collect();
         let rows = diesel::sql_query(
-            "SELECT m.session_id, m.agent_type, m.role, m.content
-             FROM unnest($1::uuid[]) AS wanted(id)
+            "SELECT m.id, m.created_at, m.session_id, m.agent_type, m.role, m.content
+             FROM unnest($1::uuid[], $2::timestamp[], $3::uuid[]) AS wanted(id, before_at, before_id)
              CROSS JOIN LATERAL (
                  SELECT session_id, agent_type, role, content, created_at, id
                  FROM messages WHERE session_id = wanted.id
                  AND role IN ('user', 'assistant', 'result', 'unknown', 'error')
-                 ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3
+                 AND (wanted.before_at IS NULL OR (created_at, id) < (wanted.before_at, wanted.before_id))
+                 ORDER BY created_at DESC, id DESC LIMIT $4
              ) m ORDER BY m.session_id, m.created_at DESC, m.id DESC",
         )
         .bind::<Array<SqlUuid>, _>(&unresolved)
+        .bind::<Array<Nullable<Timestamp>>, _>(&before_at)
+        .bind::<Array<Nullable<SqlUuid>>, _>(&before_id)
         .bind::<BigInt, _>(PAGE)
-        .bind::<BigInt, _>(offset)
         .load::<SignalRow>(conn)?;
         let mut counts = HashMap::<Uuid, i64>::new();
         for row in rows {
+            cursors.insert(row.session_id, (row.created_at, row.id));
             *counts.entry(row.session_id).or_default() += 1;
             if let std::collections::hash_map::Entry::Vacant(entry) = states.entry(row.session_id) {
                 if let Some(state) = activity_signal(&row.agent_type, &row.role, &row.content) {
@@ -84,7 +107,6 @@ pub(crate) fn persisted_activity_states(
                 true
             }
         });
-        offset += PAGE;
     }
     Ok(states)
 }
@@ -116,7 +138,8 @@ fn activity_signal(agent: &str, role: &str, content: &str) -> Option<SessionActi
             .and_then(|v| v.as_str())
         {
             Some("allowed" | "allowed_warning") => None,
-            _ => Some(Throttled),
+            Some("rejected") => Some(Throttled),
+            _ => None,
         };
     }
     if kind == "rate_limit_error"
@@ -275,7 +298,7 @@ mod tests {
             }
             insert(done, 141, "portal", "notice");
             insert(busy, 141, "portal", "notice");
-            let states = persisted_activity_states(conn, &[done, busy, empty]).unwrap();
+            let states = persisted_activity_states(conn, &[done, busy, empty, done]).unwrap();
             assert_eq!(states[&done], Idle);
             assert_eq!(states[&busy], Busy);
             assert_eq!(states[&empty], Idle);
