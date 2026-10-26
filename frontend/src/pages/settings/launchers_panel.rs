@@ -445,7 +445,7 @@ fn launcher_row(props: &LauncherRowProps) -> Html {
                         <button
                             class={update_class}
                             onclick={update_onclick}
-                            title={if update_armed { "Confirm update and restart" } else { "Update to the latest release and restart" }}
+                            title={if in_progress { "Working…" } else if update_armed { "Confirm update and restart" } else { "Update to the latest release and restart" }}
                             aria-label={update_label}
                             disabled={update_disabled}
                         >
@@ -454,7 +454,7 @@ fn launcher_row(props: &LauncherRowProps) -> Html {
                         <button
                             class={restart_class}
                             onclick={restart_onclick}
-                            title={if restart_armed { "Confirm restart" } else { restart_title }}
+                            title={if in_progress { "Working…" } else if restart_armed { "Confirm restart" } else { restart_title }}
                             aria-label={restart_label}
                             disabled={restart_disabled}
                         >
@@ -539,6 +539,9 @@ fn phantom_launcher_row(props: &PhantomLauncherRowProps) -> Html {
             <tr class="token-row launcher-row--phantom">
                 <td class="token-name">
                     <span class="agents-host-name">{ &e.hostname }</span>
+                    if e.launcher_name != e.hostname {
+                        <span class="agents-host-alias">{ format!("({})", e.launcher_name) }</span>
+                    }
                     <span class="launcher-host-version">{ format!("v{}", e.prev_version) }</span>
                     <span class="launcher-phantom-badge">{ badge }</span>
                 </td>
