@@ -242,6 +242,18 @@ struct LauncherRowProps {
     probe: Option<ProbeState>,
     on_sign_in: Callback<LoginTarget>,
     on_install: Callback<InstallTarget>,
+    /// The server's version, to flag a launcher running an older one.
+    server_version: Option<String>,
+}
+
+/// Whether a launcher runs an older version than the server. Unknown or
+/// unparseable versions are not flagged.
+fn launcher_behind(launcher: &str, server: Option<&str>) -> bool {
+    server.is_some_and(|server| {
+        parse_version(launcher).is_some()
+            && parse_version(server).is_some()
+            && !version_at_least(launcher, server)
+    })
 }
 
 #[function_component(LauncherRow)]
@@ -415,7 +427,15 @@ fn launcher_row(props: &LauncherRowProps) -> Html {
                         <span class="agents-host-alias">{ format!("({})", l.launcher_name) }</span>
                     }
                 </td>
-                <td>{ format!("v{}", &l.version) }</td>
+                if launcher_behind(&l.version, props.server_version.as_deref()) {
+                    <td class="launcher-version-behind"
+                        title={format!("Older than the server (v{})", props.server_version.as_deref().unwrap_or_default())}>
+                        { format!("v{}", &l.version) }
+                        <span class="launcher-version-badge">{ "behind" }</span>
+                    </td>
+                } else {
+                    <td>{ format!("v{}", &l.version) }</td>
+                }
                 <td title="Running sessions, and how many are mid-turn (busy or rate-limited)">
                     { l.running_sessions }
                     <span class="launcher-active-count">{ format!(" · {} active", l.active_sessions) }</span>
@@ -806,6 +826,11 @@ pub fn launchers_panel() -> Html {
                     { "Connected launcher daemons. Authentication tokens do not expire and are \
                        managed automatically." }
                 </p>
+                if let Some(version) = &*server_version {
+                    <p class="launcher-server-version">
+                        { "Server version: " }<code>{ format!("v{version}") }</code>
+                    </p>
+                }
             </div>
 
             if let Some(message) = &*request_error {
@@ -856,6 +881,7 @@ pub fn launchers_panel() -> Html {
                                         probe={probes.get(&l.launcher_id).cloned()}
                                         on_sign_in={on_sign_in.clone()}
                                         on_install={on_install.clone()}
+                                        server_version={(*server_version).clone()}
                                     />
                                 }
                             }) }
@@ -910,6 +936,17 @@ pub fn launchers_panel() -> Html {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_launcher_older_than_the_server_is_behind() {
+        assert!(launcher_behind("2.15.1700", Some("2.15.1800")));
+        assert!(launcher_behind("2.14.2000", Some("2.15.1")));
+        assert!(!launcher_behind("2.15.1800", Some("2.15.1800")));
+        assert!(!launcher_behind("2.15.1900", Some("2.15.1800")));
+        // Unknown versions are not flagged.
+        assert!(!launcher_behind("2.15.1700", None));
+        assert!(!launcher_behind("dev", Some("2.15.1800")));
+    }
 
     fn entry(prev: &str, phase: UpdatePhase) -> UpdateEntry {
         entry_mode(LifecycleMode::Update, prev, phase)

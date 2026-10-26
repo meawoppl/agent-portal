@@ -631,6 +631,25 @@
 .launcher-row--phantom {
     opacity: 0.75;
 }
+.launcher-server-version {
+    margin: 0.25rem 0 0;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+.launcher-version-behind {
+    color: var(--warning, #e0af68);
+}
+
+.launcher-version-badge {
+    margin-left: 0.4rem;
+    padding: 0.05rem 0.4rem;
+    border: 1px solid currentcolor;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+}
+
 .launcher-phantom-badge {
     display: inline-block;
     padding: 0.1rem 0.5rem;
