@@ -204,6 +204,9 @@ pub async fn peek_agent_messages(
         .collect();
     let peek_messages = super::peek_summary::newest_entries(summarized, limit as usize);
 
+    let connected = app_state
+        .session_manager
+        .is_proxy_connected(&target_id.to_string());
     // Status header uses the same meaningful signals as Computers and list.
     let state =
         super::session_activity::session_activity_states(&app_state, &mut conn, &[target_id])?
