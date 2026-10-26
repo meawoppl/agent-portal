@@ -12,8 +12,9 @@ use crate::portal_client::SessionKey;
 
 /// Total, deterministic display-order key for a session.
 ///
-/// Sessions sort by folder and agent with the portal-qualified session key as
-/// the unique final tie-breaker.
+/// Sessions sort alphabetically by the name shown on their pill, then by folder
+/// and agent, with the portal-qualified session key as the unique final
+/// tie-breaker. A rename moves the pill, as the user would expect.
 ///
 /// Deliberately **does not** key on `git_branch`, full working directory,
 /// hostname, or timestamps. Those values may change while the user is reading
@@ -22,8 +23,9 @@ use crate::portal_client::SessionKey;
 /// Because the key ends in the unique session key, the order is *total*: the
 /// same set of sessions always sorts identically no matter what order the poll
 /// returned them in, and never depends on branch state.
-fn display_sort_key(s: &PortalSession) -> (String, String, SessionKey) {
+fn display_sort_key(s: &PortalSession) -> (String, String, String, SessionKey) {
     (
+        s.info.session_name.to_lowercase(),
         crate::utils::extract_folder(&s.info.working_directory).to_lowercase(),
         s.info.agent_type.as_str().to_string(),
         s.key,
@@ -287,6 +289,38 @@ mod tests {
             forked_from_session_id: None,
             fork_point_turn_id: None,
         }
+    }
+
+    /// The rail reads alphabetically by the name on each pill, whatever folder
+    /// the session runs in.
+    #[test]
+    fn sessions_sort_by_their_pill_name_not_their_folder() {
+        let named = |n: u128, name: &str, dir: &str| {
+            let mut s = session(Uuid::from_u128(n), dir, "bench", None);
+            s.info.session_name = name.into();
+            s
+        };
+        let mut list = vec![
+            named(1, "tiny-tracker", "/repos/tiny-tracker"),
+            named(2, "jlg-shared", "/repos/justletgo"),
+            named(3, "fsw-phasing", "/repos/aperture1-fsw"),
+            named(
+                4,
+                "Bp-test-breakup",
+                "/repos/bp-test/.worktrees/bp-test-breakup",
+            ),
+        ];
+        list.sort_by(session_display_cmp);
+        let names: Vec<_> = list.iter().map(|s| s.info.session_name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "Bp-test-breakup",
+                "fsw-phasing",
+                "jlg-shared",
+                "tiny-tracker"
+            ]
+        );
     }
 
     #[test]
