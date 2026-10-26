@@ -300,7 +300,7 @@ mod tests {
             s.info.session_name = name.into();
             s
         };
-        let mut list = vec![
+        let mut list = [
             named(1, "tiny-tracker", "/repos/tiny-tracker"),
             named(2, "jlg-shared", "/repos/justletgo"),
             named(3, "fsw-phasing", "/repos/aperture1-fsw"),
