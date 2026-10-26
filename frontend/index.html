@@ -30,8 +30,12 @@
     <meta name="apple-mobile-web-app-title" content="Portal" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 
-    <!-- Favicon -->
-    <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
+    <!-- Favicon. `copy-file` below emits it at the site root, not under
+         /assets/ — a path that misses falls through to the SPA's index.html,
+         so a wrong href silently serves HTML instead of an icon. The PNG is
+         the fallback for browsers without SVG favicon support. -->
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 
     <!-- Visual theme (Settings > Appearance): apply before first paint so a
          chosen theme never flashes the default. Mirrors src/ui_theme.rs. -->
