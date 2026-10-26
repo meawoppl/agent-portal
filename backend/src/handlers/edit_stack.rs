@@ -390,7 +390,7 @@ fn session_ready_for_edit_stack_send(
     session_manager: &crate::handlers::websocket::SessionManager,
     session_id: Uuid,
 ) -> Result<bool, AppError> {
-    use crate::schema::{messages, pending_inputs, pending_permission_requests};
+    use crate::schema::{pending_inputs, pending_permission_requests};
     use shared::api::SessionActivityState;
 
     if session_manager.is_turn_active(session_id) {
@@ -413,20 +413,10 @@ fn session_ready_for_edit_stack_send(
         return Ok(false);
     }
 
-    let latest_signal: Option<(String, String)> = messages::table
-        .filter(messages::session_id.eq(session_id))
-        .filter(messages::role.eq_any(["user", "assistant", "result", "unknown", "error"]))
-        .order(messages::created_at.desc())
-        .select((messages::agent_type, messages::content))
-        .first(conn)
-        .optional()?;
-
-    let state =
-        latest_signal
-            .as_ref()
-            .map_or(SessionActivityState::Idle, |(agent_type, content)| {
-                crate::handlers::agent_comms::turn_signal_activity_state(agent_type, content)
-            });
+    let state = super::session_activity::persisted_activity_states(conn, &[session_id])?
+        .get(&session_id)
+        .copied()
+        .unwrap_or(SessionActivityState::Idle);
     Ok(matches!(state, SessionActivityState::Idle))
 }
 

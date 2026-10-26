@@ -45,3 +45,5 @@ pub mod websocket;
 
 pub mod agent_follow;
 pub mod dashboard_rpc;
+
+pub(crate) mod session_activity;

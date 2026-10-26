@@ -844,7 +844,7 @@ pub(crate) async fn sweep(state: Arc<AppState>) -> Result<(), AppError> {
         .select(Session::as_select())
         .load::<Session>(&mut conn)?;
     let ids: Vec<_> = children.iter().map(|c| c.id).collect();
-    let activity = super::agent_comms::session_activity_states(&state, &mut conn, &ids)?;
+    let activity = super::session_activity::session_activity_states(&state, &mut conn, &ids)?;
     let now = chrono::Utc::now().naive_utc();
     for child in children {
         let parent_ended = if child.spawn_stop_on_parent_end {

@@ -41,8 +41,9 @@ pub async fn list_launchers(
     let all: Vec<Uuid> = running.iter().flatten().copied().collect();
     if !all.is_empty() {
         let mut conn = app_state.conn()?;
-        let states =
-            crate::handlers::agent_comms::session_activity_states(&app_state, &mut conn, &all)?;
+        let states = crate::handlers::session_activity::session_activity_states(
+            &app_state, &mut conn, &all,
+        )?;
         fill_active_counts(&mut launchers, &running, &states);
     }
     Ok(Json(launchers))
