@@ -207,7 +207,9 @@ pub async fn peek_agent_messages(
     // Status header uses the same meaningful signals as Computers and list.
     let state =
         super::session_activity::session_activity_states(&app_state, &mut conn, &[target_id])?
-            [&target_id];
+            .get(&target_id)
+            .copied()
+            .unwrap_or(SessionActivityState::Idle);
     let pending_tool_name = pending_permission_requests::table
         .filter(pending_permission_requests::session_id.eq(target_id))
         .order(pending_permission_requests::created_at.desc())

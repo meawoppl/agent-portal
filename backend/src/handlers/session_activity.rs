@@ -233,6 +233,8 @@ mod tests {
             r#"{"type":"thread.started"}"#,
             r#"{"type":"thread.tokenUsage.updated"}"#,
             r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}"#,
+            r#"{"type":"rate_limit_event","rate_limit_info":{"status":"future_status"}}"#,
+            r#"{"type":"rate_limit_event"}"#,
             "not-json",
         ] {
             for agent in ["claude", "codex", "muse", "antigravity"] {
