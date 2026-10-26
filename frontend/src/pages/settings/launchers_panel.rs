@@ -426,37 +426,39 @@ fn launcher_row(props: &LauncherRowProps) -> Html {
                     if l.launcher_name != l.hostname {
                         <span class="agents-host-alias">{ format!("({})", l.launcher_name) }</span>
                     }
-                </td>
                 if launcher_behind(&l.version, props.server_version.as_deref()) {
-                    <td class="launcher-version-behind"
+                    <span class="launcher-host-version launcher-version-behind"
                         title={format!("Older than the server (v{})", props.server_version.as_deref().unwrap_or_default())}>
                         { format!("v{}", &l.version) }
                         <span class="launcher-version-badge">{ "behind" }</span>
-                    </td>
+                    </span>
                 } else {
-                    <td>{ format!("v{}", &l.version) }</td>
+                    <span class="launcher-host-version">{ format!("v{}", &l.version) }</span>
                 }
-                <td title="Running sessions, and how many are mid-turn (busy or rate-limited)">
+                </td>
+                <td class="launcher-sessions" title="Running sessions, and how many are mid-turn (busy or rate-limited)">
                     { l.running_sessions }
-                    <span class="launcher-active-count">{ format!(" · {} active", l.active_sessions) }</span>
+                    <span class="launcher-active-count">{ format!("{} active", l.active_sessions) }</span>
                 </td>
                 <td class="token-actions">
                     <div class="launcher-update-actions">
                         <button
                             class={update_class}
                             onclick={update_onclick}
-                            title={"Pull the latest agent-portal release and restart this launcher"}
+                            title={if update_armed { "Confirm update and restart" } else { "Update to the latest release and restart" }}
+                            aria-label={update_label}
                             disabled={update_disabled}
                         >
-                            { update_label }
+                            <span aria-hidden="true">{ if update_armed { "✓" } else { "↑" } }</span>
                         </button>
                         <button
                             class={restart_class}
                             onclick={restart_onclick}
-                            title={restart_title}
+                            title={if restart_armed { "Confirm restart" } else { restart_title }}
+                            aria-label={restart_label}
                             disabled={restart_disabled}
                         >
-                            { restart_label }
+                            <span aria-hidden="true">{ if restart_armed { "✓" } else { "↻" } }</span>
                         </button>
                         <button
                             class={cancel_class}
@@ -535,11 +537,14 @@ fn phantom_launcher_row(props: &PhantomLauncherRowProps) -> Html {
     html! {
         <>
             <tr class="token-row launcher-row--phantom">
-                <td class="token-name">{ &e.launcher_name }</td>
-                <td>{ &e.hostname }</td>
-                <td><span class="launcher-phantom-badge">{ badge }</span></td>
+                <td class="token-name">
+                    <span class="agents-host-name">{ &e.hostname }</span>
+                    <span class="launcher-host-version">{ format!("v{}", e.prev_version) }</span>
+                    <span class="launcher-phantom-badge">{ badge }</span>
+                </td>
                 <td>{ "—" }</td>
                 <td class="token-actions">{ "—" }</td>
+                { for AGENTS.iter().map(|_| html! { <td class="agents-cell unreachable">{ "offline" }</td> }) }
             </tr>
             <tr class="launcher-update-status">
                 <td colspan="7">
@@ -850,11 +855,16 @@ pub fn launchers_panel() -> Html {
                 </div>
             } else {
                 <div class="table-container">
-                    <table class="tokens-table">
+                    <table class="tokens-table computers-table">
+                        <colgroup>
+                            <col class="computer-column" />
+                            <col class="sessions-column" />
+                            <col class="actions-column" />
+                            { for AGENTS.iter().map(|_| html! { <col /> }) }
+                        </colgroup>
                         <thead>
                             <tr>
                                 <th>{ "Computer" }</th>
-                                <th>{ "Version" }</th>
                                 <th>{ "Sessions" }</th>
                                 <th>{ "Actions" }</th>
                                 { for AGENTS.iter().map(|(_, name)| html! { <th>{ *name }</th> }) }
