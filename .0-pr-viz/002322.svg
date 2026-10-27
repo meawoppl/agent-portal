@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<defs>
+  <marker id="arr-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+  </marker>
+  <marker id="arr-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/>
+  </marker>
+  <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+  </marker>
+</defs>
+<g font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif" fill="#c0caf5">
+
+<text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2322 · Keep session views in place so switching pills keeps the scroll position</text>
+<text x="55" y="100" font-size="34" fill="#e6e9f5">Every render put the focused view first, so a pill switch moved its DOM node;</text>
+<text x="55" y="140" font-size="34" fill="#e6e9f5">mounted views now keep their position, so the transcript stays where it was.</text>
+<line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+<text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+<text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+<line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+<!-- BEFORE -->
+<rect x="65" y="250" width="870" height="190" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+<text x="89" y="292" font-size="26" fill="#7aa2f7">page.rs: session_view_order</text>
+<text x="89" y="334" font-size="23" fill="#a9b1d6">recomputed every render: focused_index first,</text>
+<text x="89" y="374" font-size="23" fill="#a9b1d6">then background by history_hydration_cmp</text>
+<text x="89" y="412" font-size="22" fill="#565f89">click pill B: order [A, B, C] becomes [B, A, C]</text>
+
+<line x1="500" y1="440" x2="500" y2="520" stroke="#f7768e" stroke-width="1.5" marker-end="url(#arr-red)"/>
+<text x="516" y="486" font-size="22" fill="#f7768e">keyed diff</text>
+
+<rect x="65" y="525" width="870" height="190" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+<text x="89" y="567" font-size="26" fill="#f7768e">Yew moves session-view-wrapper nodes</text>
+<text x="89" y="609" font-size="23" fill="#a9b1d6">a moved scroll container resets to scrollTop 0</text>
+<text x="89" y="649" font-size="23" fill="#a9b1d6">and fires no scroll event</text>
+<text x="89" y="687" font-size="22" fill="#565f89">reproduced in headless Chromium</text>
+
+<line x1="500" y1="715" x2="500" y2="795" stroke="#f7768e" stroke-width="1.5" marker-end="url(#arr-red)"/>
+
+<rect x="65" y="800" width="870" height="190" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+<text x="89" y="842" font-size="26" fill="#f7768e">Transcript jumps to the top</text>
+<text x="89" y="884" font-size="23" fill="#a9b1d6">scrolled-up sessions: every time it moves</text>
+<text x="89" y="924" font-size="23" fill="#a9b1d6">tailing sessions: unless rendered() re-snaps</text>
+<text x="89" y="962" font-size="22" fill="#565f89">"sometimes": depends on which nodes the diff moves</text>
+
+<!-- AFTER -->
+<rect x="1040" y="250" width="895" height="190" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+<text x="1064" y="292" font-size="26" fill="#7aa2f7">session_order::stable_view_order</text>
+<text x="1064" y="334" font-size="23" fill="#9ece6a">mounted keys keep their place (view_dom_order)</text>
+<text x="1064" y="374" font-size="23" fill="#9ece6a">new keys appended in the same priority order</text>
+<text x="1064" y="412" font-size="22" fill="#565f89">click pill B: order stays [A, B, C]</text>
+
+<line x1="1487" y1="440" x2="1487" y2="520" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+<text x="1503" y="486" font-size="22" fill="#9ece6a">keyed diff</text>
+
+<rect x="1040" y="525" width="895" height="190" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+<text x="1064" y="567" font-size="26" fill="#9ece6a">No wrapper moves on a focus change</text>
+<text x="1064" y="609" font-size="23" fill="#a9b1d6">only the hidden / focused classes toggle</text>
+<text x="1064" y="649" font-size="23" fill="#a9b1d6">display: none keeps the scroll offset</text>
+<text x="1064" y="687" font-size="22" fill="#565f89">also checked in headless Chromium</text>
+
+<line x1="1487" y1="715" x2="1487" y2="795" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+
+<rect x="1040" y="800" width="895" height="190" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+<text x="1064" y="842" font-size="26" fill="#9ece6a">Transcript stays where you left it</text>
+<text x="1064" y="884" font-size="23" fill="#a9b1d6">hydration priority still applies at creation:</text>
+<text x="1064" y="924" font-size="23" fill="#a9b1d6">focused first, then most recently messaged</text>
+<text x="1064" y="962" font-size="22" fill="#565f89">closed sessions drop out of the order</text>
+
+<text x="55" y="1172" font-size="22" fill="#565f89">Scope: desktop only (mobile renders just the focused view); not yet exercised in a running portal, only the DOM behavior and the order logic.</text>
+</g>
+</svg>
