@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<defs>
+  <marker id="arr-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+  </marker>
+  <marker id="arr-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/>
+  </marker>
+  <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+  </marker>
+</defs>
+<g font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif" fill="#c0caf5">
+
+<text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2320 · Point the favicon link at the file the build actually serves</text>
+<text x="55" y="100" font-size="34" fill="#e6e9f5">The icon link asked for /assets/favicon.svg, a path that serves the app's HTML page;</text>
+<text x="55" y="140" font-size="34" fill="#e6e9f5">now it asks for /favicon.svg, where copy-file puts the icon, so the tab shows it.</text>
+<line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+<text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+<text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+<line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+<!-- BEFORE -->
+<rect x="65" y="250" width="870" height="170" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+<text x="89" y="292" font-size="26" fill="#7aa2f7">frontend/index.html</text>
+<text x="89" y="334" font-size="23" fill="#f7768e">&lt;link rel="icon" href="/assets/favicon.svg"&gt;</text>
+<text x="89" y="374" font-size="22" fill="#565f89">only icon link; points under /assets/</text>
+
+<line x1="500" y1="420" x2="500" y2="500" stroke="#565f89" stroke-width="1.5" marker-end="url(#arr-dim)"/>
+<text x="516" y="466" font-size="22" fill="#565f89">browser GET</text>
+
+<rect x="65" y="505" width="870" height="170" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+<text x="89" y="547" font-size="26" fill="#7aa2f7">copy-file assets/favicon.svg</text>
+<text x="89" y="589" font-size="23" fill="#a9b1d6">Trunk emits the file at the site root: /favicon.svg</text>
+<text x="89" y="629" font-size="22" fill="#565f89">nothing exists at /assets/favicon.svg</text>
+
+<line x1="500" y1="675" x2="500" y2="755" stroke="#f7768e" stroke-width="1.5" marker-end="url(#arr-red)"/>
+<text x="516" y="721" font-size="22" fill="#f7768e">path misses</text>
+
+<rect x="65" y="760" width="870" height="170" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+<text x="89" y="802" font-size="26" fill="#f7768e">Falls through to index.html</text>
+<text x="89" y="844" font-size="23" fill="#a9b1d6">/assets/favicon.svg -> 200 text/html</text>
+<text x="89" y="884" font-size="22" fill="#565f89">observed on a live deployment</text>
+
+<line x1="500" y1="930" x2="500" y2="1010" stroke="#f7768e" stroke-width="1.5" marker-end="url(#arr-red)"/>
+
+<rect x="65" y="1015" width="870" height="110" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+<text x="89" y="1057" font-size="26" fill="#f7768e">HTML is not an icon: blank tab icon</text>
+<text x="89" y="1097" font-size="22" fill="#565f89">broken since the favicon was added</text>
+
+<!-- AFTER -->
+<rect x="1040" y="250" width="895" height="170" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+<text x="1064" y="292" font-size="26" fill="#7aa2f7">frontend/index.html</text>
+<text x="1064" y="334" font-size="23" fill="#9ece6a">&lt;link rel="icon" href="/favicon.svg"&gt;</text>
+<text x="1064" y="374" font-size="23" fill="#9ece6a">+ &lt;link rel="icon" href="/icon-192.png"&gt; fallback</text>
+
+<line x1="1487" y1="420" x2="1487" y2="500" stroke="#565f89" stroke-width="1.5" marker-end="url(#arr-dim)"/>
+<text x="1503" y="466" font-size="22" fill="#565f89">browser GET</text>
+
+<rect x="1040" y="505" width="895" height="170" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+<text x="1064" y="547" font-size="26" fill="#7aa2f7">copy-file assets/favicon.svg</text>
+<text x="1064" y="589" font-size="23" fill="#a9b1d6">unchanged: still emits /favicon.svg</text>
+<text x="1064" y="629" font-size="22" fill="#565f89">icon-192.png is already copied to the root too</text>
+
+<line x1="1487" y1="675" x2="1487" y2="755" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+<text x="1503" y="721" font-size="22" fill="#9ece6a">path hits</text>
+
+<rect x="1040" y="760" width="895" height="170" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+<text x="1064" y="802" font-size="26" fill="#9ece6a">Real image responses</text>
+<text x="1064" y="844" font-size="23" fill="#a9b1d6">/favicon.svg -> 200 image/svg+xml</text>
+<text x="1064" y="884" font-size="23" fill="#a9b1d6">/icon-192.png -> 200 image/png</text>
+
+<line x1="1487" y1="930" x2="1487" y2="1010" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+
+<rect x="1040" y="1015" width="895" height="110" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+<text x="1064" y="1057" font-size="26" fill="#9ece6a">Tab shows the existing portal icon</text>
+<text x="1064" y="1097" font-size="22" fill="#565f89">PNG covers browsers without SVG favicon support</text>
+
+<text x="55" y="1172" font-size="22" fill="#565f89">Scope: no new artwork, and /favicon.ico (requested by some clients regardless of the link tags) still falls through to HTML.</text>
+</g>
+</svg>
