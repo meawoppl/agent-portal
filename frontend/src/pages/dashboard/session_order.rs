@@ -99,6 +99,33 @@ pub(super) fn history_hydration_cmp(a: &PortalSession, b: &PortalSession) -> Ord
         .then_with(|| a.key.cmp(&b.key))
 }
 
+/// DOM order for the session-view wrappers: views already mounted keep their
+/// position, and newly seen sessions are appended in `priority` order.
+///
+/// `priority` (focused first, then [`history_hydration_cmp`]) only matters
+/// when a `SessionView` is created, because creation starts its history fetch.
+/// Re-applying it on every render made each pill switch move the newly
+/// focused wrapper to the front, and a moved scroll container loses its scroll
+/// position: the transcript jumped to the top of the conversation. Only one
+/// view is visible at a time, so the DOM order of existing views is otherwise
+/// invisible. Sessions no longer in `priority` drop out.
+pub(super) fn stable_view_order(
+    mounted: &[SessionKey],
+    priority: &[SessionKey],
+) -> Vec<SessionKey> {
+    let mut order: Vec<SessionKey> = mounted
+        .iter()
+        .filter(|key| priority.contains(key))
+        .copied()
+        .collect();
+    for key in priority {
+        if !order.contains(key) {
+            order.push(*key);
+        }
+    }
+    order
+}
+
 /// Pick the most recently messaged session to receive focus after the current
 /// session terminates.
 ///
@@ -251,6 +278,37 @@ mod tests {
 
     fn key(id: Uuid) -> SessionKey {
         SessionKey::home(id)
+    }
+
+    fn keys(n: u128) -> Vec<SessionKey> {
+        (1..=n).map(|i| key(Uuid::from_u128(i))).collect()
+    }
+
+    #[test]
+    fn first_view_order_follows_priority() {
+        let k = keys(3);
+        let priority = vec![k[2], k[0], k[1]];
+        assert_eq!(stable_view_order(&[], &priority), priority);
+    }
+
+    #[test]
+    fn focus_change_does_not_move_mounted_views() {
+        let k = keys(3);
+        let mounted = vec![k[0], k[1], k[2]];
+        // Focusing k[2] puts it first in priority; its wrapper must stay put.
+        let priority = vec![k[2], k[0], k[1]];
+        assert_eq!(stable_view_order(&mounted, &priority), mounted);
+    }
+
+    #[test]
+    fn new_sessions_append_in_priority_order_and_gone_ones_drop() {
+        let k = keys(4);
+        let mounted = vec![k[0], k[1]];
+        let priority = vec![k[3], k[1], k[2]];
+        assert_eq!(
+            stable_view_order(&mounted, &priority),
+            vec![k[1], k[3], k[2]]
+        );
     }
 
     fn session(id: Uuid, dir: &str, host: &str, branch: Option<&str>) -> PortalSession {

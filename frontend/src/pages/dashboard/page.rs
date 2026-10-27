@@ -119,6 +119,9 @@ pub fn dashboard_page() -> Html {
     let build_time = bootstrap.build_time;
     let archive_enabled = bootstrap.archive_enabled;
     let stt_enabled = bootstrap.stt_enabled;
+    // DOM order of the session-view wrappers from the previous render; see
+    // `session_order::stable_view_order`.
+    let view_dom_order = use_mut_ref(Vec::<SessionKey>::new);
 
     // Push-driven session refresh: the backend broadcasts
     // `ServerToClient::LaunchSessionResult` the moment the launcher's
@@ -730,8 +733,9 @@ pub fn dashboard_page() -> Html {
         .count();
     // SessionView creation starts its REST history query and then its websocket
     // subscription. This order is deliberately independent of the pill order:
-    // keep the focused session first, then hydrate the sessions the user most
-    // recently messaged before colder background sessions.
+    // new views are created focused session first, then the sessions the user
+    // most recently messaged before colder background sessions. Views already
+    // mounted keep their DOM position (see `session_order::stable_view_order`).
     let session_view_order: Vec<usize> = if active_sessions.is_empty() {
         Vec::new()
     } else if is_mobile_dashboard {
@@ -755,6 +759,17 @@ pub fn dashboard_page() -> Html {
             session_order::history_hydration_cmp(&active_sessions[*a], &active_sessions[*b])
         });
         indices.extend(background);
+        let priority: Vec<SessionKey> = indices
+            .iter()
+            .map(|&index| active_sessions[index].key)
+            .collect();
+        let order = session_order::stable_view_order(&view_dom_order.borrow(), &priority);
+        let index_of: HashMap<SessionKey, usize> = indices
+            .iter()
+            .map(|&index| (active_sessions[index].key, index))
+            .collect();
+        let indices = order.iter().map(|key| index_of[key]).collect();
+        *view_dom_order.borrow_mut() = order;
         indices
     };
 
