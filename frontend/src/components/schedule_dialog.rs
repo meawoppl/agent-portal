@@ -1,6 +1,7 @@
 use crate::components::model_select::{extract_model_arg, model_cli_args};
 use crate::components::skip_permissions::{
-    skip_permissions_args, skip_permissions_label, strip_skip_permissions_args,
+    auto_mode_args, skip_permissions_args, skip_permissions_label, strip_auto_mode_args,
+    strip_skip_permissions_args, AUTO_MODE_LABEL,
 };
 use crate::components::{FloatingPane, ModelSelect};
 use crate::utils::{self, On401};
@@ -76,6 +77,8 @@ struct TaskForm {
     model_arg: String,
     extra_args: String,
     skip_permissions: bool,
+    /// Claude auto mode; mutually exclusive with `skip_permissions`.
+    auto_mode: bool,
     /// Fresh session each run vs. continue the prior conversation.
     session_mode: shared::SessionMode,
 }
@@ -325,6 +328,8 @@ fn native_schedule_dialog(props: &ScheduleDialogProps) -> Html {
                     &task.fields.launch.claude_args,
                     task.fields.launch.agent_type,
                 );
+                let (has_auto, other_args) =
+                    strip_auto_mode_args(&other_args, task.fields.launch.agent_type);
                 // Pull a picker-selectable model out of the remaining args so it
                 // pre-selects in the picker instead of sitting in the extra-args
                 // field (where it would double-apply on save). An unrecognized
@@ -358,6 +363,7 @@ fn native_schedule_dialog(props: &ScheduleDialogProps) -> Html {
                     model_arg: model_arg.unwrap_or_default(),
                     extra_args: extra_args.join(" "),
                     skip_permissions: has_skip,
+                    auto_mode: has_auto && !has_skip,
                     session_mode: task.fields.session_mode,
                     working_directory: task.fields.launch.working_directory.clone(),
                     session_name: task.fields.launch.session_name.clone().unwrap_or_default(),
@@ -431,6 +437,8 @@ fn native_schedule_dialog(props: &ScheduleDialogProps) -> Html {
                             .iter()
                             .map(|arg| arg.to_string()),
                     );
+                } else if let Some(args) = auto_mode_args(agent_type).filter(|_| data.auto_mode) {
+                    claude_args.extend(args.iter().map(|arg| arg.to_string()));
                 }
 
                 let result = match mode {
@@ -609,6 +617,21 @@ fn native_schedule_dialog(props: &ScheduleDialogProps) -> Html {
         Callback::from(move |_: Event| {
             let mut f = (*form).clone();
             f.skip_permissions = !f.skip_permissions;
+            if f.skip_permissions {
+                f.auto_mode = false;
+            }
+            form.set(f);
+        })
+    };
+
+    let on_auto_mode = {
+        let form = form.clone();
+        Callback::from(move |_: Event| {
+            let mut f = (*form).clone();
+            f.auto_mode = !f.auto_mode;
+            if f.auto_mode {
+                f.skip_permissions = false;
+            }
             form.set(f);
         })
     };
@@ -642,6 +665,7 @@ fn native_schedule_dialog(props: &ScheduleDialogProps) -> Html {
                 f.agent_type,
                 shared::AgentType::Muse | shared::AgentType::Antigravity
             );
+            f.auto_mode = false;
             form.set(f);
         })
     };
@@ -930,6 +954,14 @@ fn native_schedule_dialog(props: &ScheduleDialogProps) -> Html {
                                 <label>{ "Extra CLI arguments (optional)" }</label>
                                 <input type="text" placeholder="--verbose" value={form.extra_args.clone()} oninput={set_field(|f, v| f.extra_args = v)} />
                             </div>
+                            if auto_mode_args(form.agent_type).is_some() {
+                                <div class="sched-field sched-checkbox">
+                                    <label>
+                                        <input type="checkbox" checked={form.auto_mode} onchange={on_auto_mode} />
+                                        { format!(" {AUTO_MODE_LABEL}") }
+                                    </label>
+                                </div>
+                            }
                             if !skip_permissions_args(form.agent_type).is_empty() {
                                 <div class="sched-field sched-checkbox">
                                     <label>

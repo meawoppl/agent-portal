@@ -2,7 +2,9 @@ use crate::components::model_select::model_cli_args;
 use crate::components::plugin_discovery::{
     fetch_launcher_plugins, plugin_overrides, PluginSuggestionStrip,
 };
-use crate::components::skip_permissions::{skip_permissions_args, skip_permissions_label};
+use crate::components::skip_permissions::{
+    auto_mode_args, skip_permissions_args, skip_permissions_label, AUTO_MODE_LABEL,
+};
 use crate::components::{DismissibleBackdrop, ModelSelect, ProxyTokenSetup};
 use crate::hooks::{use_escape_capture, use_focus_trap};
 use crate::utils::{self, FetchError};
@@ -319,6 +321,9 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
     // own default. Reset on agent switch since the catalogs don't overlap.
     let model_arg = use_state(String::new);
     let skip_permissions = use_state(|| false);
+    // Claude auto mode. Mutually exclusive with skip-permissions: checking
+    // one clears the other, since bypassing permissions would override it.
+    let auto_mode = use_state(|| false);
     // Opt-in git worktree: when checked, the launcher creates a worktree from
     // the repo containing the chosen directory and runs the session there.
     let create_worktree = use_state(|| false);
@@ -478,9 +483,26 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
 
     let on_skip_permissions = {
         let skip_permissions = skip_permissions.clone();
+        let auto_mode = auto_mode.clone();
         Callback::from(move |e: Event| {
             if let Some(input) = e.target_dyn_into::<HtmlInputElement>() {
                 skip_permissions.set(input.checked());
+                if input.checked() {
+                    auto_mode.set(false);
+                }
+            }
+        })
+    };
+
+    let on_auto_mode = {
+        let auto_mode = auto_mode.clone();
+        let skip_permissions = skip_permissions.clone();
+        Callback::from(move |e: Event| {
+            if let Some(input) = e.target_dyn_into::<HtmlInputElement>() {
+                auto_mode.set(input.checked());
+                if input.checked() {
+                    skip_permissions.set(false);
+                }
             }
         })
     };
@@ -576,6 +598,7 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
         let agent_type = agent_type.clone();
         let model_arg = model_arg.clone();
         let skip_permissions = skip_permissions.clone();
+        let auto_mode = auto_mode.clone();
         let create_worktree = create_worktree.clone();
         let selected_launcher = selected_launcher.clone();
         let launching = launching.clone();
@@ -605,6 +628,8 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                         .iter()
                         .map(|arg| arg.to_string()),
                 );
+            } else if let Some(args) = auto_mode_args(*agent_type).filter(|_| *auto_mode) {
+                claude_args.extend(args.iter().map(|arg| arg.to_string()));
             }
 
             let launcher_id = *selected_launcher;
@@ -851,6 +876,22 @@ pub fn launch_dialog(props: &LaunchDialogProps) -> Html {
                             oninput={on_args_input}
                         />
                     </div>
+
+                    // Auto mode (Claude only): the classifier approves routine
+                    // tool calls; the rest still surface as permission cards.
+                    if auto_mode_args(*agent_type).is_some() {
+                        <div class="launch-field launch-checkbox">
+                            <label>
+                                <input
+                                    type="checkbox"
+                                    checked={*auto_mode}
+                                    onchange={on_auto_mode.clone()}
+                                    onkeydown={on_checkbox_enter.clone()}
+                                />
+                                { format!(" {AUTO_MODE_LABEL}") }
+                            </label>
+                        </div>
+                    }
 
                     if !skip_permissions_args(*agent_type).is_empty() {
                         // Permission bypass checkbox (agent-specific)
