@@ -581,6 +581,10 @@ mod tests {
             process_wall_ms_between_turns: None,
             process_cpu_ms_turn: None,
             process_wall_ms_turn: None,
+            // Shell accounting is optional and absent from synthetic results.
+            shell_cpu_ms_turn: None,
+            shell_cpu_ms_since_last_result: None,
+            shell_wall_ms_since_last_result: None,
             // Streaming and startup telemetry are absent in this synthetic result.
             process_wall_ms_streaming: None,
             process_cpu_ms_streaming: None,
