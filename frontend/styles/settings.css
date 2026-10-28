@@ -1191,10 +1191,47 @@
     font-size: 0.85rem;
 }
 
-.agent-login-url {
+.agent-login-link-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.agent-login-link-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 2rem;
+    padding: 0.3rem 0.65rem;
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    background: transparent;
     color: var(--accent);
+    font: inherit;
     font-size: 0.85rem;
-    word-break: break-all;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.agent-login-link-button:hover {
+    background: var(--bg-darker);
+}
+
+.agent-login-copy-status {
+    display: block;
+    margin-top: 0.3rem;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+}
+
+.agent-login-copy-status:empty {
+    display: none;
+}
+
+@media (pointer: coarse) {
+    .agent-login-link-button {
+        min-height: 44px;
+    }
 }
 
 .agent-login-device-code,

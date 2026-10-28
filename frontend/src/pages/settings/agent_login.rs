@@ -25,6 +25,72 @@ use crate::components::DismissibleBackdrop;
 use crate::portal_client::{portal_from_context, PortalClient};
 use crate::utils;
 
+#[derive(Properties, PartialEq)]
+struct LoginLinkActionsProps {
+    url: AttrValue,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum CopyState {
+    Ready,
+    Copying,
+    Copied,
+    Failed,
+}
+
+/// Keep the full OAuth URL in the link/clipboard rather than making the modal
+/// lay out its long query string. Only report success after the clipboard write.
+#[function_component(LoginLinkActions)]
+fn login_link_actions(props: &LoginLinkActionsProps) -> Html {
+    let state = use_state(|| CopyState::Ready);
+    let on_copy = {
+        let url = props.url.clone();
+        let state = state.clone();
+        Callback::from(move |_| {
+            let state = state.clone();
+            let url = url.clone();
+            state.set(CopyState::Copying);
+            spawn_local(async move {
+                let copied = if let Some(window) = web_sys::window() {
+                    wasm_bindgen_futures::JsFuture::from(
+                        window.navigator().clipboard().write_text(&url),
+                    )
+                    .await
+                    .is_ok()
+                } else {
+                    false
+                };
+                state.set(if copied {
+                    CopyState::Copied
+                } else {
+                    CopyState::Failed
+                });
+            });
+        })
+    };
+    html! {
+        <div class="agent-login-link-group">
+            <div class="agent-login-link-actions">
+                <a class="agent-login-link-button" href={props.url.clone()} target="_blank" rel="noopener noreferrer"
+                    title="Open login page in a new tab">
+                    { "Open login" }
+                </a>
+                <button type="button" class="agent-login-link-button" onclick={on_copy}
+                    disabled={*state == CopyState::Copying}>
+                    { if *state == CopyState::Copied { "Copied!" } else { "Copy link" } }
+                </button>
+            </div>
+            <span class="agent-login-copy-status" role="status">
+                { match *state {
+                    CopyState::Failed => "Could not copy. Use the Open login link's context menu to copy its address.",
+                    CopyState::Copied => "Login link copied.",
+                    _ => "",
+                } }
+            </span>
+        </div>
+    }
+}
+
 /// How often to poll browser approval, in milliseconds.
 const POLL_INTERVAL_MS: u32 = 2000;
 
@@ -299,11 +365,9 @@ impl AgentLoginModal {
                 html! {
                     <>
                         <p class="agent-login-instr">
-                            { "Open this URL and approve the sign-in. This window will update automatically. If prompted, paste the code below:" }
+                            { "Open the login page and approve the sign-in. This window will update automatically. If prompted, paste the code below:" }
                         </p>
-                        <a class="agent-login-url" href={url.clone()} target="_blank" rel="noopener">
-                            { url }
-                        </a>
+                        <LoginLinkActions key={url.clone()} url={url.clone()} />
                         <div class="agent-login-code-row">
                             <input
                                 type="text"
@@ -337,16 +401,9 @@ impl AgentLoginModal {
             } => html! {
                 <>
                     <p class="agent-login-instr">
-                        { "Open this URL and enter the code to approve the sign-in:" }
+                        { "Open the login page and enter the code to approve the sign-in:" }
                     </p>
-                    <a
-                        class="agent-login-url"
-                        href={verification_url.clone()}
-                        target="_blank"
-                        rel="noopener"
-                    >
-                        { verification_url }
-                    </a>
+                    <LoginLinkActions key={verification_url.clone()} url={verification_url.clone()} />
                     <div class="agent-login-device-code">{ user_code }</div>
                     <p class="agent-login-status">{ "Waiting for approval in your browser…" }</p>
                 </>
