@@ -52,11 +52,18 @@ fn login_link_actions(props: &LoginLinkActionsProps) -> Html {
             state.set(CopyState::Copying);
             spawn_local(async move {
                 let copied = if let Some(window) = web_sys::window() {
-                    wasm_bindgen_futures::JsFuture::from(
-                        window.navigator().clipboard().write_text(&url),
-                    )
-                    .await
-                    .is_ok()
+                    let navigator = window.navigator();
+                    // The API is absent on insecure origins and some browsers;
+                    // calling the typed non-optional getter alone would throw.
+                    let available = js_sys::Reflect::get(navigator.as_ref(), &"clipboard".into())
+                        .is_ok_and(|value| !value.is_null() && !value.is_undefined());
+                    if available {
+                        wasm_bindgen_futures::JsFuture::from(navigator.clipboard().write_text(&url))
+                            .await
+                            .is_ok()
+                    } else {
+                        false
+                    }
                 } else {
                     false
                 };
