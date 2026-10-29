@@ -120,6 +120,7 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
     // binding is consumed by `.with_state` below.
     let app_state_for_forward_gate = app_state.clone();
     let app_state_for_linked_gate = app_state.clone();
+    let app_state_for_logging = app_state.clone();
 
     // Rate-limited device-code creation. Keep this strict: creating a code is
     // user-visible work and should not be spammed.
@@ -653,6 +654,10 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
         // sent typed to a client that asks for JSON.
         .layer(axum::middleware::from_fn(
             crate::errors::negotiate_error_body,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            app_state_for_logging,
+            crate::log_context::request_context,
         )))
 }
 

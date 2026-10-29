@@ -203,12 +203,7 @@ pub fn dashboard_page() -> Html {
         // visible top-to-bottom rail (grouped when the pref is on). The rail's
         // host headers are inserted purely visually and carry no display index.
         if ui_state.group_by_host {
-            sorted.sort_by(|a, b| {
-                a.key
-                    .conn
-                    .cmp(&b.key.conn)
-                    .then_with(|| session_order::session_display_cmp_grouped(a, b))
-            });
+            session_order::sort_by_host(&mut sorted);
         } else {
             sorted.sort_by(|a, b| {
                 a.key
@@ -857,6 +852,15 @@ pub fn dashboard_page() -> Html {
                             <span class="shutdown-banner-dot" aria-hidden="true"></span>
                             <span class="shutdown-banner-text">
                                 { format!("Server restarting ({reason}) — reconnecting…") }
+                            </span>
+                        </div>
+                    }
+                } else if sessions_hook.home_unreachable {
+                    html! {
+                        <div class="server-shutdown-banner" role="status">
+                            <span class="shutdown-banner-dot" aria-hidden="true"></span>
+                            <span class="shutdown-banner-text">
+                                { "Can't reach the server — reconnecting… Sending is paused until it's back." }
                             </span>
                         </div>
                     }

@@ -31,7 +31,14 @@ pub enum PermissionResponseKind {
     /// AskUserQuestion submission — typed per-question answers keyed by
     /// question index.
     AnswerQuestions(QuestionAnswers),
+    /// AskUserQuestion dismissed without answering: the agent is told the
+    /// user skipped it, so it carries on instead of waiting.
+    SkipQuestions,
 }
+
+/// What the agent is told when the user skips its questions.
+const SKIPPED_QUESTIONS_REASON: &str = "The user skipped these questions without answering. \
+Continue with your best judgment, or ask again in plain text if you need an answer.";
 
 /// Permission state updates from the session socket.
 #[derive(Clone)]
@@ -92,6 +99,8 @@ pub enum PermissionHandlerMsg {
     /// The handler assembles the answers from its own state and runs the
     /// empty-multi-select confirm gate before dispatching.
     RequestSubmit,
+    /// User dismissed the AskUserQuestion form without answering.
+    Skip,
 }
 
 pub struct PermissionHandler {
@@ -225,6 +234,10 @@ impl Component for PermissionHandler {
                 self.dispatch_response(ctx, PermissionResponseKind::Deny);
                 true
             }
+            PermissionHandlerMsg::Skip => {
+                self.dispatch_response(ctx, PermissionResponseKind::SkipQuestions);
+                true
+            }
             PermissionHandlerMsg::SetQuestionAnswer(question_idx, answer) => {
                 // Any selection change re-arms the submit gate — a warned-about
                 // empty question that the user just typed an "Other" answer for
@@ -277,6 +290,7 @@ impl Component for PermissionHandler {
         let on_confirm = link.callback(|_| PermissionHandlerMsg::Confirm);
         let on_select_and_confirm = link.callback(PermissionHandlerMsg::SelectAndConfirm);
         let on_submit = link.callback(|_| PermissionHandlerMsg::RequestSubmit);
+        let on_skip = link.callback(|_| PermissionHandlerMsg::Skip);
         let on_set_answer =
             link.callback(|(q_idx, answer)| PermissionHandlerMsg::SetQuestionAnswer(q_idx, answer));
         let on_toggle_option = link.callback(|(q_idx, opt_idx)| {
@@ -307,6 +321,7 @@ impl Component for PermissionHandler {
                 {on_confirm}
                 {on_select_and_confirm}
                 {on_submit}
+                {on_skip}
                 {on_set_answer}
                 {on_toggle_option}
             />
@@ -675,6 +690,13 @@ pub fn build_permission_response(
             permissions: vec![],
             reason: Some("User denied".to_string()),
         },
+        PermissionResponseKind::SkipQuestions => shared::PermissionResponseFields {
+            request_id,
+            allow: false,
+            input: None,
+            permissions: vec![],
+            reason: Some(SKIPPED_QUESTIONS_REASON.to_string()),
+        },
         PermissionResponseKind::AnswerQuestions(answers) => {
             // The Claude CLI echoes this `updatedInput` back into the
             // `tool_use_result` it emits; its frontend reads
@@ -917,6 +939,23 @@ mod tests {
         assert!(frame.input.is_none());
         assert_eq!(frame.reason.as_deref(), Some("User denied"));
         assert_eq!(frame.permissions.len(), 0);
+    }
+
+    /// Skipping settles the request (the agent stops waiting) and tells the
+    /// agent why, rather than reading as a refusal.
+    #[test]
+    fn build_response_skip_questions_declines_with_a_skip_reason() {
+        let perm = mk_perm("AskUserQuestion", 0);
+        let frame = build_permission_response(
+            "rid-1".to_string(),
+            PermissionResponseKind::SkipQuestions,
+            &perm,
+        );
+        assert_eq!(frame.request_id, "rid-1");
+        assert!(!frame.allow);
+        assert!(frame.input.is_none());
+        assert!(frame.permissions.is_empty());
+        assert!(frame.reason.as_deref().unwrap().contains("skipped"));
     }
 
     #[test]

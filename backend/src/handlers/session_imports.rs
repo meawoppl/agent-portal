@@ -348,6 +348,7 @@ mod tests {
             .try_register_launcher(
                 launcher,
                 LauncherConnection {
+                    log_span: tracing::Span::none(),
                     sender,
                     launcher_name: "import test".into(),
                     hostname: "import-host".into(),

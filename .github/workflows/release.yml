@@ -27,12 +27,12 @@ jobs:
             suffix: linux-aarch64
             target-dir: target/release
           - name: macOS ARM64
-            runner: macos-14
+            runner: macos-15
             cache-key: release-macos-arm64
             suffix: darwin-aarch64
             target-dir: target/release
           - name: macOS Intel
-            runner: macos-14
+            runner: macos-15
             cache-key: release-macos-intel
             suffix: darwin-x86_64
             rust-target: x86_64-apple-darwin

@@ -294,6 +294,54 @@ pub async fn renew_token_handler(
     Ok(Json(response))
 }
 
+/// Diagnostic lookup uses the exact stored hash, never unverified JWT claims.
+/// This only attributes the rejection: expired/revoked credentials stay rejected.
+fn log_rejected_token(conn: &mut diesel::PgConnection, token: &str, reason: &str) {
+    use crate::schema::{sessions, users};
+    let matched = proxy_auth_tokens::table
+        .inner_join(users::table)
+        .left_join(sessions::table)
+        .filter(proxy_auth_tokens::token_hash.eq(hash_token(token)))
+        .select((
+            users::id,
+            users::name,
+            users::email,
+            proxy_auth_tokens::id,
+            proxy_auth_tokens::name,
+            sessions::id.nullable(),
+            sessions::session_name.nullable(),
+            sessions::hostname.nullable(),
+        ))
+        .first::<(
+            Uuid,
+            Option<String>,
+            String,
+            Uuid,
+            String,
+            Option<Uuid>,
+            Option<String>,
+            Option<String>,
+        )>(conn)
+        .optional();
+    match matched {
+        Ok(Some((user_id, name, email, token_id, token_name, session_id, session_name, host))) => {
+            tracing::warn!(reason = %crate::log_context::label(reason),
+                token_owner = %crate::log_context::user_label(name.as_deref(), &email), token_owner_id = %user_id, %token_id,
+                token_name = %crate::log_context::label(&token_name),
+                session_id = %session_id.map(|id| id.to_string()).unwrap_or_default(),
+                session_name = %crate::log_context::label(session_name.as_deref().unwrap_or("unbound")),
+                computer = %crate::log_context::label(host.as_deref().unwrap_or("unknown")),
+                "Bearer token rejected");
+        }
+        Ok(None) => {
+            tracing::warn!(reason = %crate::log_context::label(reason), identity = "unknown", "Bearer token rejected")
+        }
+        Err(_) => {
+            tracing::warn!(reason = %crate::log_context::label(reason), identity = "lookup unavailable", "Bearer token rejected")
+        }
+    }
+}
+
 /// Verify a proxy token and return its user plus backing token row if valid.
 ///
 /// The row metadata lets long-lived websocket clients rotate credentials after
@@ -306,7 +354,13 @@ pub fn verify_and_get_user_with_token(
     // First verify JWT signature and expiration
     let claims =
         crate::jwt::verify_proxy_token(app_state.jwt_secret.as_bytes(), token).map_err(|e| {
-            error!("JWT verification failed: {}", e);
+            if matches!(e, crate::jwt::JwtError::Expired) {
+                // Expiry is reported only after signature validation. Arbitrary
+                // malformed/forged credentials must not trigger a DB lookup.
+                log_rejected_token(conn, token, &e.to_string());
+            } else {
+                tracing::warn!(reason = %crate::log_context::label(&e.to_string()), identity = "unknown", "Bearer token rejected");
+            }
             AppError::Unauthorized
         })?;
 
@@ -344,7 +398,7 @@ pub fn verify_and_get_user_with_token(
 
     // Check if revoked
     if db_token.revoked {
-        error!("Token has been revoked");
+        log_rejected_token(conn, token, "revoked");
         return Err(AppError::Unauthorized);
     }
 
@@ -355,7 +409,7 @@ pub fn verify_and_get_user_with_token(
     if let Some(expires_at) = db_token.expires_at {
         let now = chrono::Utc::now().naive_utc();
         if expires_at < now {
-            error!("Token has expired");
+            log_rejected_token(conn, token, "expired in database");
             return Err(AppError::Unauthorized);
         }
     }
@@ -377,6 +431,7 @@ pub fn verify_and_get_user_with_token(
                 }
             })?;
 
+    crate::log_context::record_user(&user);
     if user.disabled {
         error!("Token belongs to banned user: {}", user.email);
         return Err(AppError::Forbidden);
@@ -470,5 +525,82 @@ pub fn revoke_tokens_for_session(conn: &mut diesel::pg::PgConnection, session: U
             .execute(conn)
     {
         error!("Failed to revoke tokens for session {}: {}", session, e);
+    }
+}
+
+#[cfg(test)]
+mod log_tests {
+    use super::*;
+    #[tokio::test]
+    async fn rejected_token_logs_only_database_backed_identity_and_still_rejects() {
+        let Some(pool) = crate::test_support::shared_pool() else {
+            return;
+        };
+        let state = crate::test_support::test_app_state(pool.clone());
+        let mut conn = pool.get().unwrap();
+        conn.test_transaction::<_, diesel::result::Error, _>(|conn| {
+            let user = crate::test_support::insert_user(conn, "log-owner");
+            let session = crate::test_support::insert_session(conn, user.id, "readable-session");
+            let issued = issue_proxy_token(
+                conn,
+                state.jwt_secret.as_bytes(),
+                user.id,
+                TokenPersist::Create {
+                    name: "expired-test-computer",
+                },
+                Some(30),
+            )
+            .unwrap();
+            let mut claims =
+                crate::jwt::verify_proxy_token(state.jwt_secret.as_bytes(), &issued.token).unwrap();
+            claims.exp = Some(chrono::Utc::now().timestamp() - 3600);
+            let token = jsonwebtoken::encode(
+                &jsonwebtoken::Header::default(),
+                &claims,
+                &jsonwebtoken::EncodingKey::from_secret(state.jwt_secret.as_bytes()),
+            )
+            .unwrap();
+            diesel::update(proxy_auth_tokens::table.find(issued.row_id))
+                .set((
+                    proxy_auth_tokens::token_hash.eq(hash_token(&token)),
+                    proxy_auth_tokens::session_id.eq(Some(session.id)),
+                ))
+                .execute(conn)
+                .unwrap();
+            let logs = crate::log_context::tests::capture(|| {
+                assert!(matches!(
+                    verify_and_get_user_with_token(&state, conn, &token),
+                    Err(AppError::Unauthorized)
+                ));
+            });
+            for name in [
+                &user.email,
+                "readable-session",
+                "expired-test-computer",
+                "Token expired",
+            ] {
+                assert!(logs.contains(name), "{logs}");
+            }
+            assert!(!logs.contains(&token));
+            assert!(!logs.contains(&hash_token(&token)));
+            // A forged token may claim that same owner but is never attributed
+            // from its claims: only an exact stored hash establishes identity.
+            let forged = jsonwebtoken::encode(
+                &jsonwebtoken::Header::default(),
+                &claims,
+                &jsonwebtoken::EncodingKey::from_secret(b"wrong-secret"),
+            )
+            .unwrap();
+            let logs = crate::log_context::tests::capture(|| {
+                assert!(matches!(
+                    verify_and_get_user_with_token(&state, conn, &forged),
+                    Err(AppError::Unauthorized)
+                ));
+            });
+            assert!(logs.contains("unknown"));
+            assert!(!logs.contains(&user.email));
+            assert!(!logs.contains(&forged));
+            Ok(())
+        });
     }
 }

@@ -517,6 +517,7 @@ fn restore_launcher(
         .try_register_launcher(
             id,
             LauncherConnection {
+                log_span: tracing::Span::none(),
                 sender,
                 launcher_name: format!("restore test {id}"),
                 hostname: if capable {
