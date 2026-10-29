@@ -39,6 +39,8 @@ async fn registration_checks_server_version_even_on_success() {
         });
         let config = ProxySessionConfig {
             history_restore: None,
+            startup_notice: None,
+            context_updates: Default::default(),
             backend_url: url.clone(),
             session_id: Uuid::new_v4(),
             session_name: "compatibility".into(),

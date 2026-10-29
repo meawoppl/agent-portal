@@ -216,6 +216,9 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                                     {
                                         let _ = ws_sender
                                             .send(ServerToLauncher::LauncherRegisterAck {
+                                                protocol_version: Some(
+                                                    shared::protocol::PROTOCOL_VERSION,
+                                                ),
                                                 capabilities: Vec::new(),
                                                 success: false,
                                                 fatal: true,
