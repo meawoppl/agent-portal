@@ -5,10 +5,10 @@
 //! it must not move the session pills.
 
 use std::cmp::Ordering;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use super::types::PortalSession;
-use crate::portal_client::SessionKey;
+use crate::portal_client::{ConnId, SessionKey};
 
 /// Total, deterministic display-order key for a session.
 ///
@@ -174,32 +174,65 @@ pub(super) fn host_group_label(s: &PortalSession) -> String {
     }
 }
 
-/// Sort key that places a session into its host *section*. Named hosts sort
-/// alphabetically (case-insensitively); the empty/unknown-host bucket sorts
-/// last via the leading `is_unknown` flag. This is intentionally coarser than
-/// [`display_sort_key`] — it only decides which section a session lands in, not
-/// its order *within* the section.
-fn host_group_key(s: &PortalSession) -> (bool, String) {
-    let host = s.info.hostname.trim();
-    (host.is_empty(), host.to_lowercase())
+/// A launcher's persistent ID survives hostname changes. Scope it to the
+/// Portal; UUIDs from independent portals are not a shared identity namespace.
+/// Manual/legacy sessions without a launcher retain hostname grouping.
+pub(super) fn host_group_key(s: &PortalSession) -> (ConnId, Option<uuid::Uuid>, String) {
+    (
+        s.key.conn,
+        s.info.launcher_id,
+        if s.info.launcher_id.is_none() {
+            s.info.hostname.trim().to_lowercase()
+        } else {
+            String::new()
+        },
+    )
 }
 
-/// Grouped (by-host) display comparator used when the "group rail by host"
-/// preference is on. Keys the host *section* first, then falls back to the
-/// standard total order [`session_display_cmp`] within each section. This means:
-///
-/// - host sections are alphabetical, with the empty/unknown-host bucket last;
-/// - sessions **within** a section keep the exact relative order they'd have
-///   ungrouped;
-/// - the order stays *total* (the inner key ends in the unique `id`), so — like
-///   [`session_display_cmp`] — the displayed sequence is a pure function of the
-///   session set. That totality is what lets nav-mode numbering, `j`/`k`
-///   traversal, and [`resolve_focus_index`] all consume the same vector and
-///   agree with the visible top-to-bottom order.
-pub(super) fn session_display_cmp_grouped(a: &PortalSession, b: &PortalSession) -> Ordering {
-    host_group_key(a)
-        .cmp(&host_group_key(b))
-        .then_with(|| session_display_cmp(a, b))
+/// Pick one deterministic display label for an identity, independent of fetch
+/// order. Hostnames are labels only: two launchers with the same name remain
+/// separate, and a renamed launcher remains one group. Prefer a nonempty name.
+pub(super) fn host_section_label<'a>(sessions: impl Iterator<Item = &'a PortalSession>) -> String {
+    sessions
+        .map(host_group_label)
+        .min_by_key(|label| {
+            (
+                label == UNKNOWN_HOST_LABEL,
+                label.to_lowercase(),
+                label.clone(),
+            )
+        })
+        .unwrap_or_else(|| UNKNOWN_HOST_LABEL.to_string())
+}
+
+/// Sort whole computer groups alphabetically by their representative label,
+/// then sessions by the ordinary pill order. The rail and keyboard navigation
+/// consume this same vector; grouping cannot be a rail-only visual operation.
+pub(super) fn sort_by_host(sessions: &mut [PortalSession]) {
+    let mut members = HashMap::<_, Vec<&PortalSession>>::new();
+    for session in sessions.iter() {
+        members
+            .entry(host_group_key(session))
+            .or_default()
+            .push(session);
+    }
+    let labels: HashMap<_, _> = members
+        .into_iter()
+        .map(|(key, members)| {
+            let label = host_section_label(members.into_iter());
+            (key, (label == UNKNOWN_HOST_LABEL, label.to_lowercase()))
+        })
+        .collect();
+    sessions.sort_by(|a, b| {
+        let ak = host_group_key(a);
+        let bk = host_group_key(b);
+        a.key
+            .conn
+            .cmp(&b.key.conn)
+            .then_with(|| labels[&ak].cmp(&labels[&bk]))
+            .then_with(|| ak.cmp(&bk))
+            .then_with(|| session_display_cmp(a, b))
+    });
 }
 
 /// Resolve the focused session's index in the *currently displayed* order.
@@ -680,6 +713,44 @@ mod tests {
         );
     }
 
+    #[test]
+    fn renamed_computer_is_one_group_without_merging_other_computers_or_portals() {
+        let mut old = session(Uuid::from_u128(1), "/z", "Mac.localdomain", None);
+        old.info.launcher_id = Some(Uuid::from_u128(100));
+        let mut renamed = session(
+            Uuid::from_u128(2),
+            "/a",
+            "Matthews-MacBook-Pro-2.local",
+            None,
+        );
+        renamed.info.launcher_id = old.info.launcher_id;
+        renamed.info.spawned_by = Some(old.info.id);
+        let mut other = session(Uuid::from_u128(3), "/b", "Mac.localdomain", None);
+        other.info.launcher_id = Some(Uuid::from_u128(200));
+        let manual = session(Uuid::from_u128(4), "/c", "Mac.localdomain", None);
+        let mut linked = old.clone();
+        linked.key.conn = ConnId::linked(99);
+        assert_eq!(host_group_key(&old), host_group_key(&renamed));
+        for distinct in [&other, &manual, &linked] {
+            assert_ne!(host_group_key(&old), host_group_key(distinct));
+        }
+        let mut forward = vec![old.clone(), other, renamed.clone(), manual, linked];
+        let mut reversed = forward.clone();
+        reversed.reverse();
+        sort_by_host(&mut forward);
+        sort_by_host(&mut reversed);
+        assert_eq!(forward, reversed);
+        let position = forward.iter().position(|s| s.key == renamed.key).unwrap();
+        assert_eq!(forward[position + 1].key, old.key);
+        assert_eq!(
+            host_section_label(forward[position..position + 2].iter()),
+            "Mac.localdomain"
+        );
+        group_children(&mut forward, true);
+        let parent = forward.iter().position(|s| s.key == old.key).unwrap();
+        assert_eq!(forward[parent + 1].key, renamed.key);
+    }
+
     /// Grouped ordering sorts sessions into alphabetical host sections, and the
     /// section a session lands in is independent of the poll's input order.
     #[test]
@@ -696,10 +767,10 @@ mod tests {
         };
 
         let mut forward = mk();
-        forward.sort_by(session_display_cmp_grouped);
+        sort_by_host(&mut forward);
         let mut reversed = mk();
         reversed.reverse();
-        reversed.sort_by(session_display_cmp_grouped);
+        sort_by_host(&mut reversed);
 
         let hosts = |v: &[PortalSession]| {
             v.iter()
@@ -728,7 +799,7 @@ mod tests {
         };
 
         let mut grouped = mk();
-        grouped.sort_by(session_display_cmp_grouped);
+        sort_by_host(&mut grouped);
         let mut ungrouped = mk();
         ungrouped.sort_by(session_display_cmp);
 
@@ -750,7 +821,7 @@ mod tests {
             session(named, "/repo", "web-01", None),
             session(spaces, "/repo", "   ", None),
         ];
-        v.sort_by(session_display_cmp_grouped);
+        sort_by_host(&mut v);
 
         // Named host first; the two empty/whitespace hosts share the trailing
         // unknown bucket (ordered among themselves by the total inner key).
@@ -777,7 +848,7 @@ mod tests {
             session(b, "/repo", "alpha", None),
             session(c, "/repo", "mid", None),
         ];
-        sessions.sort_by(session_display_cmp_grouped);
+        sort_by_host(&mut sessions);
         // Grouped order is alpha(b), mid(c), zeta(a).
         assert_eq!(
             sessions.iter().map(|s| s.info.id).collect::<Vec<_>>(),

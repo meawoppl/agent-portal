@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2332 · Fit more sessions with shrinking tabs</text>
+<text x="55" y="110" font-family="sans-serif" font-size="34" fill="#e6e9f5">Fixed-width pills overflow early. Shrinking tabs fit more sessions in the same row.</text>
+<path d="M55 155H1945 M1000 190V1140" stroke="#565f89" stroke-dasharray="6 8"/>
+<text x="55" y="215" font-family="sans-serif" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1055" y="215" font-family="sans-serif" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="55" y="255" width="890" height="165" rx="14" fill="#1e202e" stroke="#3d4666"/>
+<rect x="1055" y="255" width="890" height="165" rx="14" fill="#1e202e" stroke="#3d4666"/>
+<text x="80" y="300" font-family="sans-serif" font-size="28" fill="#7aa2f7">Top / bottom session bar</text>
+<text x="80" y="350" font-family="sans-serif" font-size="26" fill="#c0caf5">Single row with horizontal scrolling</text>
+<text x="80" y="390" font-family="sans-serif" font-size="25" fill="#f7768e">Later sessions extend beyond the visible width</text>
+<text x="1080" y="300" font-family="sans-serif" font-size="28" fill="#9ece6a">Tabs share the available width</text>
+<text x="1080" y="350" font-family="sans-serif" font-size="26" fill="#c0caf5">Automatic layout for top and bottom bars</text>
+<text x="1080" y="390" font-family="sans-serif" font-size="25" fill="#c0caf5">Host groups shrink with their sessions</text>
+<rect x="55" y="455" width="890" height="300" rx="14" fill="#1e202e" stroke="#3d4666"/>
+<rect x="80" y="485" width="190" height="55" rx="20" fill="#1a1b26" stroke="#7aa2f7"/>
+<text x="100" y="521" font-family="sans-serif" font-size="23" fill="#c0caf5">Session 1</text>
+<rect x="290" y="485" width="190" height="55" rx="20" fill="#1a1b26" stroke="#7aa2f7"/>
+<text x="310" y="521" font-family="sans-serif" font-size="23" fill="#c0caf5">Session 2</text>
+<rect x="500" y="485" width="190" height="55" rx="20" fill="#1a1b26" stroke="#7aa2f7"/>
+<text x="520" y="521" font-family="sans-serif" font-size="23" fill="#c0caf5">Session 3</text>
+<rect x="710" y="485" width="190" height="55" rx="20" fill="#1a1b26" stroke="#7aa2f7"/>
+<text x="730" y="521" font-family="sans-serif" font-size="23" fill="#c0caf5">Session 4</text>
+<rect x="1055" y="455" width="890" height="300" rx="14" fill="#1e202e" stroke="#3d4666"/>
+<rect x="1080" y="485" width="95" height="55" rx="16" fill="#1a1b26" stroke="#9ece6a"/>
+<text x="1096" y="521" font-family="sans-serif" font-size="23" fill="#c0caf5">Tab 1</text>
+<rect x="1185" y="485" width="95" height="55" rx="16" fill="#1a1b26" stroke="#9ece6a"/>
+<text x="1201" y="521" font-family="sans-serif" font-size="23" fill="#c0caf5">Tab 2</text>
+<rect x="1290" y="485" width="95" height="55" rx="16" fill="#1a1b26" stroke="#9ece6a"/>
+<text x="1306" y="521" font-family="sans-serif" font-size="23" fill="#c0caf5">Tab 3</text>
+<rect x="1395" y="485" width="95" height="55" rx="16" fill="#1a1b26" stroke="#9ece6a"/>
+<text x="1411" y="521" font-family="sans-serif" font-size="23" fill="#c0caf5">Tab 4</text>
+<rect x="1500" y="485" width="95" height="55" rx="16" fill="#1a1b26" stroke="#9ece6a"/>
+<text x="1516" y="521" font-family="sans-serif" font-size="23" fill="#c0caf5">Tab 5</text>
+<rect x="1605" y="485" width="95" height="55" rx="16" fill="#1a1b26" stroke="#9ece6a"/>
+<text x="1621" y="521" font-family="sans-serif" font-size="23" fill="#c0caf5">Tab 6</text>
+<rect x="1710" y="485" width="95" height="55" rx="16" fill="#1a1b26" stroke="#9ece6a"/>
+<text x="1726" y="521" font-family="sans-serif" font-size="23" fill="#c0caf5">Tab 7</text>
+<rect x="1815" y="485" width="95" height="55" rx="16" fill="#1a1b26" stroke="#9ece6a"/>
+<text x="1831" y="521" font-family="sans-serif" font-size="23" fill="#c0caf5">Tab 8</text>
+<text x="80" y="715" font-family="sans-serif" font-size="25" fill="#f7768e">More sessions require a sideways scroll</text>
+<text x="1080" y="715" font-family="sans-serif" font-size="25" fill="#9ece6a">More tabs visible in the same row</text>
+<rect x="55" y="795" width="890" height="250" rx="14" fill="#1e202e" stroke="#3d4666"/>
+<rect x="1055" y="795" width="890" height="250" rx="14" fill="#1e202e" stroke="#3d4666"/>
+<text x="80" y="840" font-family="sans-serif" font-size="28" fill="#7aa2f7">Current controls</text>
+<text x="80" y="895" font-family="sans-serif" font-size="26" fill="#c0caf5">Session menus and host grouping</text>
+<text x="80" y="940" font-family="sans-serif" font-size="26" fill="#c0caf5">Left / right rails stack vertically</text>
+<text x="80" y="985" font-family="sans-serif" font-size="26" fill="#c0caf5">Mobile uses its session selector</text>
+<text x="1080" y="840" font-family="sans-serif" font-size="28" fill="#9ece6a">Readable at every size</text>
+<text x="1080" y="895" font-family="sans-serif" font-size="26" fill="#c0caf5">Tabs shrink from 180px to a 64px minimum</text>
+<text x="1080" y="940" font-family="sans-serif" font-size="26" fill="#c0caf5">Names truncate; hover reveals the full name</text>
+<text x="1080" y="985" font-family="sans-serif" font-size="26" fill="#c0caf5">Narrow tabs prioritize the name and menu</text>
+<text x="55" y="1172" font-family="sans-serif" font-size="22" fill="#a9b1d6">One row throughout. Horizontal scrolling remains at the minimum width; side bars and mobile keep their layout.</text>
+</svg>

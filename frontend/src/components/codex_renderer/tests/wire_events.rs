@@ -5,7 +5,7 @@ use super::super::events::CodexUsage;
 use super::super::{codex_event_item_id, CodexEvent, CodexItem};
 use crate::components::agent_frame::{AgentFrameKind, AgentFrameRegistry};
 use codex_codes::io::items::{PatchChangeKind, ThreadItem};
-use codex_codes::protocol::ThreadItem as AppServerThreadItem;
+use codex_codes::protocol::ThreadItemPayload as AppServerThreadItem;
 
 // --- CodexEvent ↔ ThreadItem composition ---
 
@@ -83,7 +83,9 @@ fn event_item_started_context_compaction_no_longer_renders_raw() {
         "_created_at": "2026-06-01T23:58:42.384Z",
         "item": {
             "id": "9edb35c0-6b6b-407f-84e3-d03a03050a2a",
-            "type": "contextCompaction"
+            "type": "contextCompaction",
+            "startedAtMs": 1000,
+            "completedAtMs": 1042
         },
         "type": "item.started"
     }"#;
@@ -95,7 +97,12 @@ fn event_item_started_context_compaction_no_longer_renders_raw() {
     else {
         panic!("expected ItemStarted{{ContextCompaction}}, got {:?}", event);
     };
-    let AppServerThreadItem::ContextCompaction { id } = item.as_ref() else {
+    assert_eq!(item.started_at_ms, Some(1000));
+    assert_eq!(item.completed_at_ms, Some(1042));
+    let roundtrip = serde_json::to_value(&item).unwrap();
+    assert_eq!(roundtrip["startedAtMs"], 1000);
+    assert_eq!(roundtrip["completedAtMs"], 1042);
+    let AppServerThreadItem::ContextCompaction { id } = &item.payload else {
         panic!("expected ContextCompaction item, got {:?}", item);
     };
     assert_eq!(id, "9edb35c0-6b6b-407f-84e3-d03a03050a2a");
@@ -148,7 +155,7 @@ fn event_item_completed_collab_agent_tool_call() {
         sender_thread_id,
         status,
         tool,
-    } = item.as_ref()
+    } = &item.payload
     else {
         panic!("expected CollabAgentToolCall item, got {:?}", item);
     };

@@ -148,6 +148,7 @@ pub(super) fn session_pill(props: &SessionPillProps) -> Html {
             class={classes!(view.pill_classes)}
             onclick={on_click}
             key={key.to_string()}
+            title={session.session_name.clone()}
             data-index={props.index.to_string()}
             data-session-key={key.to_string()}
         >

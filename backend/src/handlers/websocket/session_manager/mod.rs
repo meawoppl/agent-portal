@@ -177,6 +177,7 @@ pub const WEB_CLIENT_CHANNEL_CAPACITY: usize = 4096;
 /// is dead can be torn down server-side instead of lingering half-open
 /// (#1256: inbound-alive/outbound-dead sockets wedged delivery for 9h).
 pub struct ProxyConnection {
+    pub log_span: tracing::Span,
     pub sender: ProxySender,
     pub gen: u64,
     pub cancel: tokio_util::sync::CancellationToken,

@@ -26,6 +26,7 @@ fn fixture() -> Option<Fixture> {
         .try_register_launcher(
             host,
             crate::handlers::websocket::LauncherConnection {
+                log_span: tracing::Span::none(),
                 sender,
                 launcher_name: "test".into(),
                 hostname: host.to_string(),

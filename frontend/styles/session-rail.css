@@ -1559,3 +1559,54 @@ a.pill-menu-option.pr-link:hover {
 .pill-share:active {
     background: rgba(122, 162, 247, 0.3);
 }
+
+/* Browser-style tabs: share the available row before introducing horizontal
+   scrolling. Keep a usable minimum for selection and the menu; side rails
+   retain their fixed width. Host groups shrink in proportion to their pills. */
+.dashboard-body:is(.rail-top, .rail-bottom) .session-rail,
+.dashboard-body:is(.rail-top, .rail-bottom) .session-rail-host-group-pills {
+    gap: 0.25rem;
+}
+
+.dashboard-body:is(.rail-top, .rail-bottom) .session-pill {
+    flex: 0 1 180px;
+    min-width: 64px;
+    container: session-tab / inline-size;
+    padding-inline: 0.3rem;
+    gap: 0.15rem;
+}
+
+.dashboard-body:is(.rail-top, .rail-bottom) .session-rail-host-group {
+    flex: 0 1 calc(var(--session-count) * 184px + 12px);
+    min-width: calc(var(--session-count) * 68px + 12px);
+    box-sizing: border-box;
+}
+
+.dashboard-body:is(.rail-top, .rail-bottom) .pill-session-name {
+    display: block;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.dashboard-body:is(.rail-top, .rail-bottom) .pill-menu-toggle {
+    padding-inline: 0.15rem;
+}
+
+/* At narrow widths, use the space for the name and menu rather than metadata.
+   The complete session name remains available on hover. */
+@container session-tab (max-width: 110px) {
+    .pill-watermark {
+        opacity: 0.25;
+    }
+
+
+    .pill-repo,
+    .pill-branch,
+    .pill-portal,
+    .pill-agent-badge,
+    .pill-child-badge,
+    .pill-hidden-badge,
+    .pill-role-badge {
+        display: none;
+    }
+}

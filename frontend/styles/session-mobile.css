@@ -949,7 +949,8 @@
         min-height: 44px;
     }
 
-    .ask-user-question .submit-all-answers {
+    .ask-user-question .submit-all-answers,
+    .ask-user-question .skip-questions {
         min-height: 44px;
     }
 

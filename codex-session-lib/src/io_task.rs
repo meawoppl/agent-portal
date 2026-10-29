@@ -562,20 +562,20 @@ pub(crate) async fn codex_io_task(
                                 // DynamicToolCall / WebSearch) bump the tool
                                 // count instead.
                                 if let codex_codes::Notification::ItemStarted(p) = notif {
-                                    use codex_codes::ThreadItem;
-                                    match &p.item {
-                                        ThreadItem::AgentMessage { .. }
-                                        | ThreadItem::Reasoning { .. }
-                                        | ThreadItem::Plan { .. } => {
+                                    use codex_codes::ThreadItemPayload;
+                                    match &p.item.payload {
+                                        ThreadItemPayload::AgentMessage { .. }
+                                        | ThreadItemPayload::Reasoning { .. }
+                                        | ThreadItemPayload::Plan { .. } => {
                                             if turn_tracker.is_running() {
                                                 turn_tracker
                                                     .record_content_frame(Instant::now());
                                             }
                                         }
-                                        ThreadItem::CommandExecution { .. }
-                                        | ThreadItem::FileChange { .. }
-                                        | ThreadItem::McpToolCall { .. }
-                                        | ThreadItem::DynamicToolCall { .. } => {
+                                        ThreadItemPayload::CommandExecution { .. }
+                                        | ThreadItemPayload::FileChange { .. }
+                                        | ThreadItemPayload::McpToolCall { .. }
+                                        | ThreadItemPayload::DynamicToolCall { .. } => {
                                             turn_tracker.record_tool_call();
                                         }
                                         _ => {}

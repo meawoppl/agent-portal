@@ -226,8 +226,10 @@ pub fn register_or_update_session(
                     );
                 }
                 info!(
-                    "Session reactivated in DB: {} ({}) branch: {:?}",
-                    params.session_name, params.claude_session_id, params.git_branch
+                    "Session reactivated in DB: {} ({}) branch: {}",
+                    crate::log_context::label(params.session_name),
+                    params.claude_session_id,
+                    crate::log_context::label(params.git_branch.as_deref().unwrap_or("none"))
                 );
                 RegistrationResult {
                     success: true,
