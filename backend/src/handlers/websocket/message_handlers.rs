@@ -238,39 +238,36 @@ pub fn handle_agent_output(ctx: AgentOutputContext<'_>, frame: AgentOutputFrame)
 
     // Claude task accounting applies only to Claude protocol events.
     match parse_claude_event(agent_type, &content) {
-        Some(Ok(parsed)) => {
-            if let shared::ClaudeOutput::System(ref sys) = parsed {
-                if sys.is_task_started() && sys.as_task_started().is_none() {
-                    warn!(
-                        session_id = ?db_session_id,
-                        "task_started message matched subtype but failed struct parse"
-                    );
-                }
-                if sys.is_task_progress() && sys.as_task_progress().is_none() {
-                    warn!(
-                        session_id = ?db_session_id,
-                        "task_progress message matched subtype but failed struct parse"
-                    );
-                }
-                if sys.is_task_notification() {
-                    match sys.as_task_notification() {
-                        Some(notif) => {
-                            // A sub-agent (Task tool) just finished. Its tokens
-                            // aren't in the parent's `result.usage`, so fold the
-                            // completed task's cumulative `total_tokens` into the
-                            // session's running sub-agent total (see
-                            // `SessionManager::subagent_tokens`). `task_notification`
-                            // fires once per task, so summing is exact.
-                            if let (Some(sid), Some(usage)) = (db_session_id, notif.usage.as_ref())
-                            {
-                                session_manager.add_subagent_tokens(sid, usage.total_tokens as i64);
-                            }
+        Some(Ok(shared::ClaudeOutput::System(sys))) => {
+            if sys.is_task_started() && sys.as_task_started().is_none() {
+                warn!(
+                    session_id = ?db_session_id,
+                    "task_started message matched subtype but failed struct parse"
+                );
+            }
+            if sys.is_task_progress() && sys.as_task_progress().is_none() {
+                warn!(
+                    session_id = ?db_session_id,
+                    "task_progress message matched subtype but failed struct parse"
+                );
+            }
+            if sys.is_task_notification() {
+                match sys.as_task_notification() {
+                    Some(notif) => {
+                        // A sub-agent (Task tool) just finished. Its tokens
+                        // aren't in the parent's `result.usage`, so fold the
+                        // completed task's cumulative `total_tokens` into the
+                        // session's running sub-agent total (see
+                        // `SessionManager::subagent_tokens`). `task_notification`
+                        // fires once per task, so summing is exact.
+                        if let (Some(sid), Some(usage)) = (db_session_id, notif.usage.as_ref()) {
+                            session_manager.add_subagent_tokens(sid, usage.total_tokens as i64);
                         }
-                        None => warn!(
-                            session_id = ?db_session_id,
-                            "task_notification message matched subtype but failed struct parse"
-                        ),
                     }
+                    None => warn!(
+                        session_id = ?db_session_id,
+                        "task_notification message matched subtype but failed struct parse"
+                    ),
                 }
             }
         }
@@ -285,7 +282,7 @@ pub fn handle_agent_output(ctx: AgentOutputContext<'_>, frame: AgentOutputFrame)
                 .collect();
             warn!(session_id = ?db_session_id, error = %detail, "ClaudeOutput parse failed");
         }
-        None => {}
+        Some(Ok(_)) | None => {}
     }
 
     // Resolve the session owner ONCE for both consumers below: image
