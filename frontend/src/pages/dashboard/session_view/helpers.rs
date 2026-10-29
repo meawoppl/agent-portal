@@ -515,13 +515,13 @@ fn classify_muse_event(output: &str) -> Option<ActivityTag> {
 fn classify_codex_event(output: &str) -> Option<ActivityTag> {
     use crate::components::codex_renderer::{CodexEvent, CodexItem};
     use codex_codes::io::items::ThreadItem;
-    use codex_codes::protocol::ThreadItem as AppServerThreadItem;
+    use codex_codes::protocol::ThreadItemPayload as AppServerThreadItem;
     let event: CodexEvent = serde_json::from_str(output).ok()?;
     match event {
         CodexEvent::ItemStarted { item: Some(item) }
         | CodexEvent::ItemUpdated { item: Some(item) }
         | CodexEvent::ItemCompleted { item: Some(item) } => match item {
-            CodexItem::AppServer(item) => match item.as_ref() {
+            CodexItem::AppServer(item) => match &item.payload {
                 AppServerThreadItem::ContextCompaction { .. }
                 | AppServerThreadItem::CollabAgentToolCall { .. } => Some(ActivityTag::Assistant),
                 _ => None,

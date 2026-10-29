@@ -34,6 +34,10 @@ use web_sys::{
 };
 use yew::prelude::*;
 
+/// Shown when a send is tried while the session socket is down.
+const NOT_CONNECTED_NOTICE: &str =
+    "Not connected to the server. Your draft is kept; send once it reconnects.";
+
 /// Inputs to the bar.
 #[derive(Properties, PartialEq)]
 pub struct InputBarProps {
@@ -342,6 +346,14 @@ impl Component for InputBar {
         let now_connected = ctx.props().ws_connected;
         let became_connected = now_connected && !self.was_ws_connected;
         self.was_ws_connected = now_connected;
+        if became_connected
+            && self
+                .queue_notice
+                .as_ref()
+                .is_some_and(|(_, notice)| notice == NOT_CONNECTED_NOTICE)
+        {
+            self.queue_notice = None;
+        }
 
         if became_focused || (became_connected && now_focused) {
             self.focus_after_render = true;
@@ -836,11 +848,9 @@ impl Component for InputBar {
                             placeholder={self.pending_suggestion.clone().unwrap_or_else(|| if ctx.props().ws_connected {
                                 composer_placeholder().into()
                             } else {
-                                // The composer stays usable through a server
-                                // restart: sends queue in the outbox and flush on
-                                // reconnect (#1236), so say so instead of locking
-                                // the box.
-                                "Reconnecting — messages will send when the server is back".into()
+                                // Typing stays open so a draft survives a
+                                // server outage; sending waits for the socket.
+                                "Reconnecting — you can keep typing; send once the server is back".into()
                             })}
                             oninput={handle_input}
                             onkeydown={handle_keydown}
@@ -904,12 +914,10 @@ impl InputBar {
     /// typed `(text, mode)` event up to the parent — which packages it into
     /// `ClientToServer::ClaudeInput` and emits the optimistic local echo.
     fn dispatch_text_send(&mut self, ctx: &Context<Self>, mode: SendMode) -> bool {
-        if portal_from_context(ctx).is_linked() && !ctx.props().ws_connected {
-            self.queue_notice = Some((
-                true,
-                "Remote connection is offline. Your draft is preserved; reconnect before sending."
-                    .into(),
-            ));
+        // Sending waits for the connection rather than queueing behind it;
+        // the draft stays in the box.
+        if !ctx.props().ws_connected {
+            self.queue_notice = Some((true, NOT_CONNECTED_NOTICE.into()));
             return true;
         }
         let input = self.get_input_text().trim().to_string();
@@ -1307,7 +1315,8 @@ impl InputBar {
                 <button
                     type="submit"
                     class="send-button"
-                    disabled={is_uploading}
+                    disabled={is_uploading || !ws_connected}
+                    title={if ws_connected { "" } else { "Waiting for the server connection" }}
                     onclick={on_send}
                 >
                     { "Send" }
@@ -1315,7 +1324,7 @@ impl InputBar {
                 <button
                     type="button"
                     class="send-mode-toggle"
-                    disabled={is_uploading}
+                    disabled={is_uploading || !ws_connected}
                     onclick={on_toggle_dropdown}
                 >
                     { "\u{25bc}" }

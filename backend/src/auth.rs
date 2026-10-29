@@ -123,6 +123,7 @@ pub fn extract_user(
     cookies: &Cookies,
 ) -> Result<User, AppError> {
     let user = extract_user_unbound(app_state, headers, cookies)?;
+    crate::log_context::record_user(&user);
     if let Some(expected) = headers.and_then(|h| h.get("X-Portal-Account")) {
         let expected = expected.to_str().ok().and_then(|s| Uuid::parse_str(s).ok());
         if expected != Some(user.id) {

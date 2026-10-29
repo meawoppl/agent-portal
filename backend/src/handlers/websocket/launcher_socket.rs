@@ -158,6 +158,7 @@ fn grace_old_launcher_token(app_state: &AppState, token_id: Uuid) {
     }
 }
 
+#[tracing::instrument(skip_all, fields(user, user_id, computer, launcher, launcher_id))]
 pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>) {
     let conn = ws_bridge::server::into_connection::<LauncherEndpoint>(socket);
     let (mut ws_sender, mut ws_receiver) = conn.split();
@@ -344,6 +345,18 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
         }
     };
 
+    tracing::Span::current().record("computer", crate::log_context::label(&hostname));
+    tracing::Span::current().record("launcher", crate::log_context::label(&launcher_name));
+    tracing::Span::current().record("launcher_id", tracing::field::display(launcher_id));
+    if let Ok(mut conn) = app_state.db_pool.get() {
+        use crate::schema::users;
+        if let Ok(user) = users::table
+            .find(user_id)
+            .first::<crate::models::User>(&mut conn)
+        {
+            crate::log_context::record_user(&user);
+        }
+    }
     // Reject if user already has too many launchers
     const MAX_LAUNCHERS_PER_USER: usize = 10;
     let user_launcher_count = app_state.session_manager.launcher_count_for_user(user_id);
@@ -388,6 +401,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
     let register_result = app_state.session_manager.try_register_launcher(
         launcher_id,
         LauncherConnection {
+            log_span: tracing::Span::none(),
             system: None,
             sender: tx,
             launcher_name: launcher_name.clone(),

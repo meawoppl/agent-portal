@@ -1154,9 +1154,9 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "claude-codes"
-version = "2.1.310"
+version = "2.1.312"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d38e0c74a1adea8bd5fafa46adb89eec0fd07de6964069e4c38b5f2bd2d90d65"
+checksum = "802eb0b21d12bfe8cfc2cfc7142ea75ab0ddc456dc44690c69091f69e554fcd9"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1258,9 +1258,9 @@ dependencies = [
 
 [[package]]
 name = "codex-codes"
-version = "0.164.2"
+version = "0.165.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2970e2ea9283282052209ebb5bcdcbbba380a4f296d08bc67f6ff39d797c6b34"
+checksum = "afe93acad1d31fbf41b74a0cd32259cc28facf08a1d2f4f66f748fb21e2d748e"
 dependencies = [
  "log",
  "serde",
@@ -2492,7 +2492,7 @@ dependencies = [
  "js-sys",
  "log",
  "muse-codes",
- "pulldown-cmark 0.13.3",
+ "pulldown-cmark 0.13.5",
  "serde",
  "serde_json",
  "shared",
@@ -4478,9 +4478,9 @@ dependencies = [
 
 [[package]]
 name = "muse-codes"
-version = "1.4.13"
+version = "1.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75339ec701380fda728c9926c1aa90f81a5a328e343f5cf821415b972c933c3d"
+checksum = "e09d6d910ac792e9dac9bc01a619d125af3ec29ab946d492dce2edb3223f93eb"
 dependencies = [
  "log",
  "serde",
@@ -5670,9 +5670,9 @@ dependencies = [
 
 [[package]]
 name = "pulldown-cmark"
-version = "0.13.3"
+version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c3a14896dfa883796f1cb410461aef38810ea05f2b2c33c5aded3649095fdad"
+checksum = "278e9268c93b9e498a2da46c34d90ba93a3255eb99009646398f34bc73ab36eb"
 dependencies = [
  "bitflags 2.11.1",
  "memchr",

@@ -1,4 +1,4 @@
-use codex_codes::{io::items::ThreadItem, protocol::ThreadItem as AppServerThreadItem};
+use codex_codes::{io::items::ThreadItem, protocol::ThreadItemPayload as AppServerThreadItem};
 use uuid::Uuid;
 use yew::prelude::*;
 
@@ -160,7 +160,7 @@ fn render_item(item: Option<&CodexItem>, completed: bool, session_id: Uuid) -> O
             // here to avoid duplication.
             ThreadItem::UserMessage(_) => None,
         },
-        CodexItem::AppServer(item) => match item.as_ref() {
+        CodexItem::AppServer(item) => match &item.payload {
             AppServerThreadItem::ContextCompaction { .. } => {
                 Some(render_context_compaction_item(completed))
             }

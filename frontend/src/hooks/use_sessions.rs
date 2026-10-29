@@ -18,6 +18,9 @@ pub struct UseSessions {
     pub sessions: Vec<PortalSession>,
     pub loading: bool,
     pub loaded_connections: HashSet<ConnId>,
+    /// The home server's last session poll failed. Its sessions stay listed
+    /// as last seen until a poll succeeds.
+    pub home_unreachable: bool,
     pub refresh: Callback<()>,
     pub set_sessions: Callback<Vec<PortalSession>>,
 }
@@ -26,9 +29,12 @@ pub struct UseSessions {
 struct Lists {
     rows: HashMap<ConnId, Vec<PortalSession>>,
     loaded: HashSet<ConnId>,
+    unreachable: HashSet<ConnId>,
 }
 enum ListAction {
     Received(ConnId, Vec<PortalSession>),
+    /// A poll failed: keep the last rows rather than emptying the view.
+    Unreachable(ConnId),
     Set(Vec<PortalSession>),
 }
 impl Reducible for Lists {
@@ -37,11 +43,16 @@ impl Reducible for Lists {
         let mut next = Self {
             rows: self.rows.clone(),
             loaded: self.loaded.clone(),
+            unreachable: self.unreachable.clone(),
         };
         match action {
             ListAction::Received(conn, rows) => {
                 next.rows.insert(conn, rows);
                 next.loaded.insert(conn);
+                next.unreachable.remove(&conn);
+            }
+            ListAction::Unreachable(conn) => {
+                next.unreachable.insert(conn);
             }
             ListAction::Set(rows) => {
                 next.rows.clear();
@@ -91,15 +102,21 @@ pub fn use_sessions() -> UseSessions {
                             if cancelled.get() {
                                 return;
                             }
-                            let (rows, status) = match result {
+                            let (action, status) = match result {
                                 Ok(data) => (
-                                    data.sessions
-                                        .into_iter()
-                                        .map(|info| PortalSession::new(portal.clone(), info))
-                                        .collect(),
+                                    ListAction::Received(
+                                        portal.conn(),
+                                        data.sessions
+                                            .into_iter()
+                                            .map(|info| PortalSession::new(portal.clone(), info))
+                                            .collect(),
+                                    ),
                                     "Connected".to_string(),
                                 ),
-                                Err(error) => (vec![], format!("Unavailable: {error}")),
+                                Err(error) => (
+                                    ListAction::Unreachable(portal.conn()),
+                                    format!("Unavailable: {error}"),
+                                ),
                             };
                             if portal.is_linked() {
                                 if let Some(registry) = &federation {
@@ -107,7 +124,7 @@ pub fn use_sessions() -> UseSessions {
                                         .dispatch(FederationAction::Status(portal.conn(), status));
                                 }
                             }
-                            lists.dispatch(ListAction::Received(portal.conn(), rows));
+                            lists.dispatch(action);
                             busy.borrow_mut().remove(&portal.conn());
                         });
                     }
@@ -142,7 +159,36 @@ pub fn use_sessions() -> UseSessions {
             .collect(),
         loading: !lists.loaded.contains(&ConnId::HOME),
         loaded_connections: lists.loaded.intersection(&current).copied().collect(),
+        home_unreachable: lists.unreachable.contains(&ConnId::HOME),
         refresh,
         set_sessions,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A failed poll marks the connection unreachable but leaves its list as
+    /// last seen; the next successful poll replaces it and clears the mark.
+    #[test]
+    fn a_failed_poll_keeps_the_last_list() {
+        let home = ConnId::HOME;
+        let state = Rc::new(Lists::default()).reduce(ListAction::Received(home, Vec::new()));
+        let state = state.reduce(ListAction::Unreachable(home));
+        assert!(state.unreachable.contains(&home));
+        assert!(state.rows.contains_key(&home), "rows dropped on failure");
+        assert!(state.loaded.contains(&home));
+        let state = state.reduce(ListAction::Received(home, Vec::new()));
+        assert!(!state.unreachable.contains(&home));
+    }
+
+    /// Before the first successful poll a failure leaves the list unloaded,
+    /// so the page keeps waiting instead of showing the empty-state guide.
+    #[test]
+    fn a_failure_before_any_list_stays_unloaded() {
+        let state = Rc::new(Lists::default()).reduce(ListAction::Unreachable(ConnId::HOME));
+        assert!(!state.loaded.contains(&ConnId::HOME));
+        assert!(state.unreachable.contains(&ConnId::HOME));
     }
 }

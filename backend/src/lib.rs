@@ -13,6 +13,7 @@ pub mod db;
 pub mod errors;
 pub mod handlers;
 pub mod jwt;
+pub mod log_context;
 pub mod markers;
 pub mod models;
 pub mod push;
