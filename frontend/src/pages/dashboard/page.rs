@@ -855,6 +855,15 @@ pub fn dashboard_page() -> Html {
                             </span>
                         </div>
                     }
+                } else if sessions_hook.home_unreachable {
+                    html! {
+                        <div class="server-shutdown-banner" role="status">
+                            <span class="shutdown-banner-dot" aria-hidden="true"></span>
+                            <span class="shutdown-banner-text">
+                                { "Can't reach the server — reconnecting… Sending is paused until it's back." }
+                            </span>
+                        </div>
+                    }
                 } else {
                     html! {}
                 }
