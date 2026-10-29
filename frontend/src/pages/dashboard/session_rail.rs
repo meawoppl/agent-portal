@@ -213,7 +213,10 @@ fn render_pill_section(
             end += 1;
         }
         let label = super::session_order::host_section_label(
-            entries[start..end].iter().map(|(_, session)| *session),
+            props
+                .sessions
+                .iter()
+                .filter(|session| super::session_order::host_group_key(session) == identity),
         );
         let count = end - start;
         groups.push(html! {
