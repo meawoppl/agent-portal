@@ -156,7 +156,7 @@ fn parse_reasoning_effort(value: &str) -> Option<shared::ReasoningEffort> {
 }
 
 /// Stable dependencies for handling one proxy-originated output frame.
-pub struct ClaudeOutputContext<'a> {
+pub struct AgentOutputContext<'a> {
     pub session_manager: &'a SessionManager,
     pub session_key: &'a Option<SessionId>,
     pub db_session_id: Option<Uuid>,
@@ -167,17 +167,33 @@ pub struct ClaudeOutputContext<'a> {
 }
 
 /// Event-specific output payload from the proxy.
-pub struct ClaudeOutputFrame {
+pub struct AgentOutputFrame {
     pub content: serde_json::Value,
     pub seq: Option<u64>,
     pub agent_type: AgentType,
 }
 
-/// Handle Claude output (both legacy ClaudeOutput and new SequencedOutput).
+/// Portal-authored events share the transport with every provider but are not
+/// part of the Claude wire protocol. Never feed another provider's events into
+/// Claude's diagnostic parser or task-token accounting. Parse failure is not a
+/// delivery gate: raw content is still persisted and forwarded below.
+fn parse_claude_event(
+    agent_type: AgentType,
+    content: &serde_json::Value,
+) -> Option<Result<shared::ClaudeOutput, serde_json::Error>> {
+    if agent_type != AgentType::Claude
+        || content.get("type").and_then(|v| v.as_str()) == Some("portal")
+    {
+        return None;
+    }
+    Some(shared::ClaudeOutput::deserialize(content))
+}
+
+/// Handle agent output (both AgentOutput and SequencedOutput).
 /// Broadcasts to web clients, deduplicates sequenced messages, stores in DB,
 /// and sends acknowledgments.
-pub fn handle_claude_output(ctx: ClaudeOutputContext<'_>, frame: ClaudeOutputFrame) {
-    let ClaudeOutputContext {
+pub fn handle_agent_output(ctx: AgentOutputContext<'_>, frame: AgentOutputFrame) {
+    let AgentOutputContext {
         session_manager,
         session_key,
         db_session_id,
@@ -186,7 +202,7 @@ pub fn handle_claude_output(ctx: ClaudeOutputContext<'_>, frame: ClaudeOutputFra
         tx,
         image_store,
     } = ctx;
-    let ClaudeOutputFrame {
+    let AgentOutputFrame {
         content,
         seq,
         agent_type,
@@ -220,50 +236,53 @@ pub fn handle_claude_output(ctx: ClaudeOutputContext<'_>, frame: ClaudeOutputFra
         None
     };
 
-    // Validate that content roundtrips through ClaudeOutput parsing (frontend depends on this)
-    match shared::ClaudeOutput::deserialize(&content) {
-        Ok(parsed) => {
-            if let shared::ClaudeOutput::System(ref sys) = parsed {
-                if sys.is_task_started() && sys.as_task_started().is_none() {
-                    warn!(
-                        "task_started message matched subtype but failed struct parse: {}",
-                        content
-                    );
-                }
-                if sys.is_task_progress() && sys.as_task_progress().is_none() {
-                    warn!(
-                        "task_progress message matched subtype but failed struct parse: {}",
-                        content
-                    );
-                }
-                if sys.is_task_notification() {
-                    match sys.as_task_notification() {
-                        Some(notif) => {
-                            // A sub-agent (Task tool) just finished. Its tokens
-                            // aren't in the parent's `result.usage`, so fold the
-                            // completed task's cumulative `total_tokens` into the
-                            // session's running sub-agent total (see
-                            // `SessionManager::subagent_tokens`). `task_notification`
-                            // fires once per task, so summing is exact.
-                            if let (Some(sid), Some(usage)) = (db_session_id, notif.usage.as_ref())
-                            {
-                                session_manager.add_subagent_tokens(sid, usage.total_tokens as i64);
-                            }
+    // Claude task accounting applies only to Claude protocol events.
+    match parse_claude_event(agent_type, &content) {
+        Some(Ok(shared::ClaudeOutput::System(sys))) => {
+            if sys.is_task_started() && sys.as_task_started().is_none() {
+                warn!(
+                    session_id = ?db_session_id,
+                    "task_started message matched subtype but failed struct parse"
+                );
+            }
+            if sys.is_task_progress() && sys.as_task_progress().is_none() {
+                warn!(
+                    session_id = ?db_session_id,
+                    "task_progress message matched subtype but failed struct parse"
+                );
+            }
+            if sys.is_task_notification() {
+                match sys.as_task_notification() {
+                    Some(notif) => {
+                        // A sub-agent (Task tool) just finished. Its tokens
+                        // aren't in the parent's `result.usage`, so fold the
+                        // completed task's cumulative `total_tokens` into the
+                        // session's running sub-agent total (see
+                        // `SessionManager::subagent_tokens`). `task_notification`
+                        // fires once per task, so summing is exact.
+                        if let (Some(sid), Some(usage)) = (db_session_id, notif.usage.as_ref()) {
+                            session_manager.add_subagent_tokens(sid, usage.total_tokens as i64);
                         }
-                        None => warn!(
-                            "task_notification message matched subtype but failed struct parse: {}",
-                            content
-                        ),
                     }
+                    None => warn!(
+                        session_id = ?db_session_id,
+                        "task_notification message matched subtype but failed struct parse"
+                    ),
                 }
             }
         }
-        Err(e) => {
-            warn!(
-                "ClaudeOutput parse failed for message: {} — raw: {}",
-                e, content
-            );
+        Some(Err(e)) => {
+            // Full payloads include tool output, source code and user text.
+            // Keep diagnostics bounded; the original event remains in the transcript.
+            let detail: String = e
+                .to_string()
+                .chars()
+                .filter(|c| !c.is_control())
+                .take(200)
+                .collect();
+            warn!(session_id = ?db_session_id, error = %detail, "ClaudeOutput parse failed");
         }
+        Some(Ok(_)) | None => {}
     }
 
     // Resolve the session owner ONCE for both consumers below: image
@@ -788,6 +807,30 @@ mod tests {
         assert_eq!(parse_reasoning_effort("unknown"), None);
     }
 
+    #[test]
+    fn claude_validation_is_scoped_to_its_provider_not_the_shared_transport() {
+        for provider in [AgentType::Codex, AgentType::Muse, AgentType::Antigravity] {
+            for kind in [
+                "thread.started",
+                "item.started",
+                "item.completed",
+                "turn/diff/updated",
+                "turn.completed",
+                "user",
+            ] {
+                assert!(parse_claude_event(provider, &serde_json::json!({"type": kind})).is_none());
+            }
+        }
+        let portal = PortalMessage::text("Session started".to_string()).to_json();
+        assert!(parse_claude_event(AgentType::Claude, &portal).is_none());
+        // Real malformed Claude frames still produce a diagnostic.
+        assert!(
+            parse_claude_event(AgentType::Claude, &serde_json::json!({"type": "user"}))
+                .unwrap()
+                .is_err()
+        );
+    }
+
     /// Guards the wire contract the sub-agent token fold relies on: a
     /// `task_notification` system message must parse and expose
     /// `usage.total_tokens`. If the SDK reshapes this, the fold silently stops
@@ -803,7 +846,9 @@ mod tests {
             "summary": "done",
             "usage": { "duration_ms": 1000, "tool_uses": 3, "total_tokens": 68694 }
         });
-        let parsed = shared::ClaudeOutput::deserialize(&content).expect("parses as ClaudeOutput");
+        let parsed = parse_claude_event(AgentType::Claude, &content)
+            .expect("Claude event")
+            .expect("parses as ClaudeOutput");
         let shared::ClaudeOutput::System(sys) = parsed else {
             panic!("expected a system message");
         };

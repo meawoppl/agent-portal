@@ -1,16 +1,17 @@
 //! Session-local skill selection. Host installs remain shared; overrides live
 //! separately from launcher.json so editing one session cannot lose other config.
 use crate::config::{self, LauncherConfig};
+use crate::plugin_policy::DirectoryPolicy;
 use anyhow::{Context, Result};
 use shared::{
     api::{
-        PluginInventoryResponse, PluginOverride, PortalPluginCommandInfo, PortalPluginInfo,
-        PortalPluginSkillInfo,
+        PluginActivation, PluginContextEntry, PluginInventoryResponse, PluginOverride,
+        PluginPolicy, PortalPluginCommandInfo, PortalPluginInfo, PortalPluginSkillInfo,
     },
     plugin_manifest::InventoryManifest,
 };
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
     path::{Path, PathBuf},
     sync::Mutex,
@@ -59,40 +60,102 @@ fn detected_in(plugin_root: &Path, working_directory: &Path) -> bool {
     })
 }
 
-/// The session's effective plugins. An explicit per-session choice wins.
-/// Without one, a host-enabled plugin is on only where its detect rules match
-/// the session's working directory, so every installed plugin doesn't load its
-/// skills into every session.
+/// Why a plugin is, or isn't, loaded into a session.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct Resolution {
+    pub policy: PluginPolicy,
+    pub activation: Option<PluginActivation>,
+    /// Detected here, but the project's policy keeps it out.
+    pub disabled_by_policy: bool,
+}
+
+pub(crate) type Resolutions = BTreeMap<String, Resolution>;
+
+/// One plugin's effective state. An explicit per-session choice wins, then the
+/// project's policy; with neither, a host-enabled plugin is on only where its
+/// detect rules match.
+fn resolve(
+    host_enabled: bool,
+    choice: Option<bool>,
+    policy: PluginPolicy,
+    detected: impl FnOnce() -> bool,
+) -> (bool, Resolution) {
+    let mut resolution = Resolution {
+        policy,
+        ..Default::default()
+    };
+    let enabled = match (choice, policy) {
+        (Some(enabled), _) => {
+            resolution.activation = Some(PluginActivation::Explicit);
+            enabled
+        }
+        (None, PluginPolicy::Always) => {
+            resolution.activation = Some(PluginActivation::Policy);
+            true
+        }
+        (None, PluginPolicy::Never) => {
+            resolution.activation = Some(PluginActivation::Policy);
+            resolution.disabled_by_policy = host_enabled && detected();
+            false
+        }
+        (None, PluginPolicy::Ask) => {
+            let enabled = host_enabled && detected();
+            resolution.activation = enabled.then_some(PluginActivation::Detected);
+            enabled
+        }
+    };
+    (enabled, resolution)
+}
+
+/// The session's effective plugins; see [`resolve`] for the precedence, so
+/// every installed plugin doesn't load its skills into every session.
 ///
 /// This selects which plugin *skills* a session is launched with, and is what
 /// the inventory shows. It is not an authorization boundary: plugin commands
 /// and runtimes (`plugin open`/`start`/commands) still go by the host-level
 /// `enabled` flag. Detection runs at launch and on each inventory request, so
 /// a file added afterwards changes the next launch, not the running session.
-fn apply(config: &mut LauncherConfig, selection: &Selection, working_directory: &Path) {
+fn apply(
+    config: &mut LauncherConfig,
+    selection: &Selection,
+    policy: &DirectoryPolicy,
+    working_directory: &Path,
+) -> Resolutions {
+    let mut resolutions = Resolutions::new();
     for (name, plugin) in &mut config.plugins {
-        plugin.enabled = match selection.get(name) {
-            Some(enabled) => *enabled,
-            None => plugin.enabled && detected_in(Path::new(&plugin.path), working_directory),
-        };
+        let (enabled, resolution) = resolve(
+            plugin.enabled,
+            selection.get(name).copied(),
+            policy.get(name).copied().unwrap_or_default(),
+            || detected_in(Path::new(&plugin.path), working_directory),
+        );
+        plugin.enabled = enabled;
+        resolutions.insert(name.clone(), resolution);
     }
+    resolutions
 }
 
 pub(crate) fn apply_selection(
     config: &mut LauncherConfig,
     session: Uuid,
     working_directory: &Path,
-) -> Result<()> {
-    apply_selection_at(config, &selection_path(session), working_directory)
+) -> Result<Resolutions> {
+    let policy = crate::plugin_policy::for_directory(working_directory)?;
+    apply_selection_at(config, &selection_path(session), &policy, working_directory)
 }
 
 pub(crate) fn apply_selection_at(
     config: &mut LauncherConfig,
     path: &Path,
+    policy: &DirectoryPolicy,
     working_directory: &Path,
-) -> Result<()> {
-    apply(config, &read_selection(path)?, working_directory);
-    Ok(())
+) -> Result<Resolutions> {
+    Ok(apply(
+        config,
+        &read_selection(path)?,
+        policy,
+        working_directory,
+    ))
 }
 
 fn save_selection(path: &Path, config: &LauncherConfig, change: PluginOverride) -> Result<()> {
@@ -109,28 +172,155 @@ fn save_selection(path: &Path, config: &LauncherConfig, change: PluginOverride) 
     config::write_config_atomic(path, &serde_json::to_string_pretty(&selection)?)
 }
 
+/// Persist requested child plugins before constructing its first agent process.
+/// A later restart must preserve changes the owner made in the plugin panel.
+pub(crate) fn install_initial_selection(
+    session: Uuid,
+    selection: &BTreeMap<String, bool>,
+) -> Result<()> {
+    let config = config::load_config();
+    install_selection_at(&selection_path(session), &config, selection)
+}
+fn install_selection_at(path: &Path, config: &LauncherConfig, selection: &Selection) -> Result<()> {
+    // A subsequent resume must keep owner edits even if the original plugin
+    // was uninstalled since first launch.
+    let _guard = SELECTION_WRITE
+        .lock()
+        .map_err(|_| anyhow::anyhow!("Plugin selection lock poisoned"))?;
+    if path.exists() {
+        return Ok(());
+    }
+    for name in selection.keys() {
+        anyhow::ensure!(
+            config.plugins.contains_key(name),
+            "Plugin is not installed: {name}"
+        );
+    }
+    config::write_config_atomic(path, &serde_json::to_string_pretty(selection)?)
+}
+
+/// A running session's agent and the inbox its plugin changes go to.
+pub(crate) type LiveSession = (shared::AgentType, session_lib::ContextInbox);
+
+/// Selection changes run one at a time, so the context posted last is
+/// always built from the latest saved selection.
+static LIVE_CHANGES: Mutex<()> = Mutex::new(());
+/// Revisions for posted context changes; the inbox refuses an older one.
+static CONTEXT_REVISION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 pub(crate) fn request(
     session: Uuid,
     working_directory: String,
     selection: Option<PluginOverride>,
+    live: Option<LiveSession>,
 ) -> Result<PluginInventoryResponse> {
+    let _serial = LIVE_CHANGES
+        .lock()
+        .map_err(|_| anyhow::anyhow!("Plugin change lock poisoned"))?;
     let mut config = config::load_config();
+    let changed = selection.is_some();
     if let Some(change) = selection {
         save_selection(&selection_path(session), &config, change)?;
     }
-    apply_selection(&mut config, session, Path::new(&working_directory))?;
-    Ok(inventory(&config, Some(working_directory), true))
+    let directory = Path::new(&working_directory).to_path_buf();
+    let resolutions = apply_selection(&mut config, session, &directory)?;
+    let mut response = inventory(&config, Some(working_directory), true, &resolutions);
+    response.injected_context = current_record(session, &context_path(session));
+    if let Some((agent_type, inbox)) = live {
+        if changed {
+            let change = config::plugin_context_update(agent_type, session, &directory)?;
+            let revision = CONTEXT_REVISION.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            if inbox.post(revision, change.current, change.update) {
+                record_injected(session, &change.entries);
+                response.injected_context = current_record(session, &context_path(session));
+                response.applies_live = true;
+            }
+        }
+        response.context_pending = inbox.is_pending();
+    }
+    Ok(response)
+}
+
+/// What the session's current process was launched with, written at spawn.
+fn context_path(session: Uuid) -> PathBuf {
+    session_lib::paths::config_dir()
+        .join("session-plugins")
+        .join(format!("{session}.context.json"))
+}
+
+/// Record what a launch injected, replacing the previous launch's record.
+pub(crate) fn record_injected(session: Uuid, entries: &[PluginContextEntry]) {
+    if let Err(error) = record_injected_at(session, &context_path(session), entries) {
+        tracing::warn!("Could not record plugin context for {session}: {error:#}");
+    }
+}
+
+/// Sessions whose latest record couldn't be written. Their file on disk, if
+/// any, describes an earlier process and must not be read as current.
+/// Process-local: a restarted launcher relaunches its sessions, and each spawn
+/// writes (or marks stale) its record again.
+static STALE_RECORDS: Mutex<BTreeSet<Uuid>> = Mutex::new(BTreeSet::new());
+
+/// Replace `session`'s record at `path`. When that fails the session is
+/// marked stale before anything else, so even if the old file can't be
+/// removed either it is never shown as the current context.
+fn record_injected_at(session: Uuid, path: &Path, entries: &[PluginContextEntry]) -> Result<()> {
+    let written = serde_json::to_string(entries)
+        .map_err(anyhow::Error::from)
+        .and_then(|json| config::write_config_atomic(path, &json));
+    let mut stale = STALE_RECORDS
+        .lock()
+        .map_err(|_| anyhow::anyhow!("Plugin context lock poisoned"))?;
+    if written.is_ok() {
+        stale.remove(&session);
+        return Ok(());
+    }
+    stale.insert(session);
+    if let Err(error) = fs::remove_file(path) {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            tracing::warn!(
+                "Could not clear stale plugin context {}: {error}",
+                path.display()
+            );
+        }
+    }
+    written
+}
+
+/// The session's current record: empty when the latest write failed.
+fn current_record(session: Uuid, path: &Path) -> Vec<PluginContextEntry> {
+    let stale = STALE_RECORDS
+        .lock()
+        .map_or(true, |stale| stale.contains(&session));
+    if stale {
+        return Vec::new();
+    }
+    read_injected(path)
+}
+
+/// A session launched before recording existed, or whose record is damaged,
+/// shows no record rather than a guess from the current inventory.
+fn read_injected(path: &Path) -> Vec<PluginContextEntry> {
+    fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
 }
 
 /// Host inventory for the Plugins browser and launch suggestions. With a
 /// directory, `enabled` is what a new session there would load; without one it
 /// is the host-level install flag.
-pub(crate) fn host_inventory(working_directory: Option<String>) -> PluginInventoryResponse {
+pub(crate) fn host_inventory(working_directory: Option<String>) -> Result<PluginInventoryResponse> {
     let mut config = config::load_config();
-    if let Some(directory) = &working_directory {
-        apply(&mut config, &Selection::new(), Path::new(directory));
-    }
-    inventory(&config, working_directory, false)
+    let resolutions = match &working_directory {
+        Some(directory) => {
+            let directory = Path::new(directory);
+            let policy = crate::plugin_policy::for_directory(directory)?;
+            apply(&mut config, &Selection::new(), &policy, directory)
+        }
+        None => Resolutions::new(),
+    };
+    Ok(inventory(&config, working_directory, false, &resolutions))
 }
 
 /// The text a skill or prompt describes itself with: the frontmatter
@@ -177,6 +367,7 @@ fn inventory(
     config: &LauncherConfig,
     working_directory: Option<String>,
     session_selection_supported: bool,
+    resolutions: &Resolutions,
 ) -> PluginInventoryResponse {
     let root = working_directory.as_deref().map(Path::new);
     let mut response = PluginInventoryResponse {
@@ -202,6 +393,11 @@ fn inventory(
                 .or_else(|| installed.reference.clone()),
             ..Default::default()
         };
+        if let Some(resolution) = resolutions.get(name) {
+            plugin.policy = resolution.policy;
+            plugin.activation = resolution.activation;
+            plugin.disabled_by_policy = resolution.disabled_by_policy;
+        }
         match manifest {
             Err(error) => plugin.warnings.push(format!("{error:#}")),
             Ok(manifest) => {
@@ -224,9 +420,16 @@ fn inventory(
                 // The inventory view tolerates broken runtime fields so a bad
                 // one never hides the plugin; read them from the strict view
                 // and report a parse failure as a warning instead.
+                let mut takes_args = BTreeSet::new();
                 match crate::plugin::load_manifest(plugin_root) {
                     Ok(runtime) => {
                         plugin.homepage = runtime.homepage;
+                        takes_args = runtime
+                            .commands
+                            .into_iter()
+                            .filter(|c| c.accepts_args)
+                            .map(|c| c.name)
+                            .collect();
                         plugin.has_doctor = runtime.install.doctor.is_some();
                         for prompt in runtime.prompts {
                             plugin.prompts.push(context_file(
@@ -256,13 +459,15 @@ fn inventory(
                     .commands
                     .into_iter()
                     .map(|c| PortalPluginCommandInfo {
+                        accepts_args: takes_args.contains(&c.name),
                         name: c.name,
                         description: c.description,
                         ..Default::default()
                     })
                     .collect();
                 if let Some(surface) = manifest.surface {
-                    plugin.surface_kind = surface.kind;
+                    // Every surface is an HTTP service; `kind` is optional.
+                    plugin.surface_kind = surface.kind.or_else(|| Some("http".into()));
                     plugin.surface_title = surface.default_title;
                     plugin.surface_width_percent = surface.default_width_percent;
                 }
@@ -279,6 +484,23 @@ fn inventory(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn initial_selection_is_validated_and_never_overwrites_owner_changes() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("selection.json");
+        let config = LauncherConfig::default();
+        let missing = [("not-installed".into(), true)].into();
+        assert!(install_selection_at(&path, &config, &missing).is_err());
+        assert!(!path.exists());
+        install_selection_at(&path, &config, &Selection::new()).unwrap();
+        std::fs::write(&path, r#"{"owner-change":false}"#).unwrap();
+        install_selection_at(&path, &config, &missing).unwrap();
+        assert_eq!(
+            read_selection(&path).unwrap().get("owner-change"),
+            Some(&false)
+        );
+    }
+
     fn config() -> LauncherConfig {
         let mut config = LauncherConfig::default();
         for name in ["kicadmium", "slowbooks"] {
@@ -324,6 +546,7 @@ mod tests {
         apply(
             &mut selected,
             &read_selection(&path).unwrap(),
+            &DirectoryPolicy::new(),
             Path::new("/missing"),
         );
         assert!(selected.plugins.values().all(|p| !p.enabled));
@@ -374,7 +597,7 @@ mod tests {
     fn inventory_uses_installed_config_including_disabled_or_broken_plugins() {
         let mut config = config();
         config.plugins.get_mut("slowbooks").unwrap().enabled = false;
-        let report = inventory(&config, Some("/missing".into()), true);
+        let report = inventory(&config, Some("/missing".into()), true, &Resolutions::new());
         assert!(report.session_selection_supported);
         assert_eq!(report.plugins.len(), 2);
         assert!(report.plugins[0].enabled);
@@ -441,7 +664,12 @@ mod tests {
         // No choice: only the host-enabled, detected plugin. An unreadable
         // manifest is never detected, so `broken` stays off.
         let mut session = host();
-        apply(&mut session, &Selection::new(), project.path());
+        apply(
+            &mut session,
+            &Selection::new(),
+            &DirectoryPolicy::new(),
+            project.path(),
+        );
         assert_eq!(enabled(&session), vec!["kicadmium"]);
 
         // Explicit choices win in both directions, including turning on a
@@ -452,7 +680,12 @@ mod tests {
             ("kicadmium".into(), false),
             ("kicad-off".into(), true),
         ]);
-        apply(&mut session, &choices, project.path());
+        apply(
+            &mut session,
+            &choices,
+            &DirectoryPolicy::new(),
+            project.path(),
+        );
         assert_eq!(enabled(&session), vec!["kicad-off", "unlinked"]);
 
         // A session in a worktree under a hidden directory detects from that
@@ -461,8 +694,124 @@ mod tests {
         fs::create_dir_all(&worktree).unwrap();
         fs::write(worktree.join("other.kicad_pcb"), "").unwrap();
         let mut session = host();
-        apply(&mut session, &Selection::new(), &worktree);
+        apply(
+            &mut session,
+            &Selection::new(),
+            &DirectoryPolicy::new(),
+            &worktree,
+        );
         assert_eq!(enabled(&session), vec!["kicadmium"]);
+    }
+
+    /// A session's own choice beats the project policy, which beats detection.
+    #[test]
+    fn choice_then_policy_then_detection() {
+        use PluginActivation::*;
+        use PluginPolicy::*;
+        let on = |host, choice, policy, detected| resolve(host, choice, policy, || detected);
+
+        assert!(!on(true, Some(false), Always, true).0);
+        assert_eq!(
+            on(false, Some(true), Never, false).1.activation,
+            Some(Explicit)
+        );
+
+        let (enabled, r) = on(true, None, Always, false);
+        assert!(enabled && r.activation == Some(Policy) && !r.disabled_by_policy);
+        let (enabled, r) = on(true, None, Never, true);
+        assert!(!enabled && r.activation == Some(Policy) && r.disabled_by_policy);
+        let (_, r) = on(true, None, Never, false);
+        assert!(
+            !r.disabled_by_policy,
+            "only a detected plugin is disabled *by* policy"
+        );
+
+        let (enabled, r) = on(true, None, Ask, true);
+        assert!(enabled && r.activation == Some(Detected));
+        let (enabled, r) = on(false, None, Ask, true);
+        assert!(!enabled && r.activation.is_none());
+    }
+
+    /// A damaged or missing record reads as nothing recorded, never as a guess.
+    #[test]
+    fn injected_record_round_trips_and_damage_reads_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.context.json");
+        assert!(read_injected(&path).is_empty());
+        let entry = PluginContextEntry {
+            plugin: "kicadmium".into(),
+            name: "layout".into(),
+            path: "/p/skills/layout/SKILL.md".into(),
+            kind: shared::api::PluginContextKind::Skill,
+            activation: PluginActivation::Policy,
+            reason: "Always loaded in this project".into(),
+            context_bytes: 12,
+            estimated_tokens: 3,
+            text: "# Layout".into(),
+        };
+        fs::write(
+            &path,
+            serde_json::to_string(std::slice::from_ref(&entry)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(read_injected(&path), vec![entry]);
+        fs::write(&path, "broken").unwrap();
+        assert!(read_injected(&path).is_empty());
+    }
+
+    /// A failed replacement leaves no record rather than the previous
+    /// process's, which would read as current.
+    #[test]
+    fn failed_record_write_clears_the_stale_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let session = Uuid::new_v4();
+        let path = dir.path().join("s.context.json");
+        record_injected_at(session, &path, &[]).unwrap();
+        assert!(path.exists());
+        // The atomic write goes through `<path>.tmp`; a directory there fails it.
+        fs::create_dir(dir.path().join("s.context.json.tmp")).unwrap();
+        assert!(record_injected_at(session, &path, &[]).is_err());
+        assert!(!path.exists());
+        assert!(current_record(session, &path).is_empty());
+    }
+
+    /// When the old record can be neither replaced nor removed (a read-only
+    /// directory), it still must not read as the current context.
+    #[cfg(unix)]
+    #[test]
+    fn a_stale_record_that_cannot_be_removed_is_not_current() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let records = dir.path().join("records");
+        fs::create_dir(&records).unwrap();
+        let session = Uuid::new_v4();
+        let path = records.join("s.context.json");
+        let old = PluginContextEntry {
+            plugin: "kicadmium".into(),
+            name: "layout".into(),
+            path: "/p".into(),
+            kind: shared::api::PluginContextKind::Skill,
+            activation: PluginActivation::Detected,
+            reason: String::new(),
+            context_bytes: 1,
+            estimated_tokens: 1,
+            text: String::new(),
+        };
+        record_injected_at(session, &path, std::slice::from_ref(&old)).unwrap();
+        assert_eq!(current_record(session, &path), vec![old]);
+
+        fs::set_permissions(&records, fs::Permissions::from_mode(0o555)).unwrap();
+        let result = record_injected_at(session, &path, &[]);
+        let still_there = path.exists();
+        fs::set_permissions(&records, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(result.is_err());
+        assert!(still_there, "the read-only directory kept the old file");
+        assert!(current_record(session, &path).is_empty());
+
+        // A later successful write makes the session current again.
+        record_injected_at(session, &path, &[]).unwrap();
+        assert!(current_record(session, &path).is_empty());
+        assert!(!STALE_RECORDS.lock().unwrap().contains(&session));
     }
 
     #[test]
@@ -526,7 +875,7 @@ run = "true"
             },
         );
 
-        let report = inventory(&config, None, false);
+        let report = inventory(&config, None, false, &Resolutions::new());
         assert!(!report.scanned && !report.session_selection_supported);
         let info = &report.plugins[0];
         assert_eq!(

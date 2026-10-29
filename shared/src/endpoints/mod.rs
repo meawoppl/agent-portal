@@ -170,6 +170,7 @@ mod tests {
             client_msg_id: Uuid::nil(),
             stage,
             message: None,
+            queued: false,
         };
         assert!(d(None).pending()); // submitted, no ack yet
         assert!(d(Some(InputDeliveryStage::ServerReceived)).pending());
@@ -258,6 +259,7 @@ mod tests {
     #[test]
     fn server_to_launcher_launch_roundtrip() {
         let msg = ServerToLauncher::LaunchSession {
+            plugin_selection: None,
             history_restore: None,
             request_id: Uuid::nil(),
             user_id: Uuid::nil(),

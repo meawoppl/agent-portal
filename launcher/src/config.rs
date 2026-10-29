@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use shared::api::{PluginActivation, PluginContextEntry, PluginContextKind};
 use shared::plugin_manifest::{SkillSection as ManifestSkill, SkillsManifest as PluginManifest};
 use shared::AgentType;
 use std::path::{Path, PathBuf};
@@ -49,6 +50,50 @@ pub struct PluginSkillContext {
     pub claude_plugin_dirs: Vec<PathBuf>,
     pub reminder: Option<String>,
     pub cleanup_dir: Option<PathBuf>,
+    /// What this launch handed the agent, recorded so the session can show it.
+    pub injected: Vec<PluginContextEntry>,
+}
+
+/// Text kept per injected file for inspection; the agent reads the file.
+const INJECTED_TEXT_LIMIT: usize = 64 * 1024;
+
+/// The source file's size and a bounded preview of it, read without loading
+/// more than [`INJECTED_TEXT_LIMIT`].
+fn source_preview(path: &Path) -> (u64, String) {
+    use std::io::Read;
+    let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    let mut bytes = Vec::new();
+    let read = std::fs::File::open(path).and_then(|file| {
+        file.take(INJECTED_TEXT_LIMIT as u64)
+            .read_to_end(&mut bytes)
+    });
+    if read.is_err() {
+        return (size, String::new());
+    }
+    let mut preview = String::from_utf8_lossy(&bytes).into_owned();
+    if size > INJECTED_TEXT_LIMIT as u64 {
+        preview.push_str("\n…");
+    }
+    (size, preview)
+}
+
+/// A skill made available at launch. The agent reads its body on demand, so
+/// only `listed` (its catalog or reminder line) entered the context; the
+/// source is recorded as its size and a preview, not as injected text.
+fn available_skill(plugin: &str, name: &str, path: &Path, listed: &str) -> PluginContextEntry {
+    let (size, preview) = source_preview(path);
+    PluginContextEntry {
+        plugin: plugin.to_string(),
+        name: name.to_string(),
+        path: path.display().to_string(),
+        kind: PluginContextKind::Skill,
+        // Filled from the plugin's resolution by the caller.
+        activation: PluginActivation::Detected,
+        reason: String::new(),
+        context_bytes: size,
+        estimated_tokens: (listed.len() as u64).div_ceil(4),
+        text: preview,
+    }
 }
 
 fn default_true() -> bool {
@@ -82,8 +127,26 @@ pub fn config_path_display() -> String {
     config_path().display().to_string()
 }
 
+/// The config for a read that can't harm it: a file that doesn't parse reads
+/// as the defaults, with a warning. Startup and every write use
+/// [`load_config_checked`] instead.
 pub fn load_config() -> LauncherConfig {
     load_config_at(&config_path())
+}
+
+/// The config at startup: a missing file is a first run (the defaults), but
+/// one that exists and doesn't parse stops the launcher. Running on defaults
+/// would sign in to the default server, and the first save would erase every
+/// setting and plugin in the file.
+pub fn load_config_checked() -> anyhow::Result<LauncherConfig> {
+    let path = config_path();
+    let config = load_config_for_write_at(&path)?;
+    if path.exists() {
+        tracing::info!("Loaded config from {}", path.display());
+    } else {
+        tracing::info!("No config at {}; using defaults", path.display());
+    }
+    Ok(config)
 }
 
 /// Session limits must never disappear because a running daemon's config was
@@ -123,14 +186,6 @@ fn load_config_at(path: &Path) -> LauncherConfig {
     }
 }
 
-fn save_config(config: &LauncherConfig) -> anyhow::Result<()> {
-    let path = config_path();
-    let contents = serde_json::to_string_pretty(config)?;
-    write_config_atomic(&path, &contents)?;
-    tracing::debug!("Saved config to {}", path.display());
-    Ok(())
-}
-
 pub fn plugin_root() -> PathBuf {
     std::env::var_os("AGENT_PORTAL_PLUGIN_ROOT")
         .filter(|v| !v.is_empty())
@@ -142,28 +197,56 @@ pub fn plugin_root() -> PathBuf {
         })
 }
 
+/// Read the config in order to change it. Unlike [`load_config`], a file that
+/// exists but can't be read or parsed is an error: saving over it would erase
+/// every other install, the auth token, and the rest of its settings.
+fn load_config_for_write_at(path: &Path) -> anyhow::Result<LauncherConfig> {
+    use anyhow::Context;
+    match std::fs::read_to_string(path) {
+        Ok(contents) => serde_json::from_str(&contents)
+            .with_context(|| format!("{} is not valid; fix or move it aside", path.display())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(LauncherConfig::default()),
+        Err(error) => Err(error).with_context(|| format!("Could not read {}", path.display())),
+    }
+}
+
+/// Apply `change` to the config at `path`, saving only when it reports a
+/// change. Plugin installs, removals and toggles go through here.
+fn update_config_at<T>(
+    path: &Path,
+    change: impl FnOnce(&mut LauncherConfig) -> anyhow::Result<(T, bool)>,
+) -> anyhow::Result<T> {
+    let mut config = load_config_for_write_at(path)?;
+    let (result, changed) = change(&mut config)?;
+    if changed {
+        write_config_atomic(path, &serde_json::to_string_pretty(&config)?)?;
+    }
+    Ok(result)
+}
+
 pub fn save_installed_plugin(name: &str, plugin: InstalledPlugin) -> anyhow::Result<()> {
-    let mut config = load_config();
-    config.plugins.insert(name.to_string(), plugin);
-    save_config(&config)
+    update_config_at(&config_path(), |config| {
+        config.plugins.insert(name.to_string(), plugin);
+        Ok(((), true))
+    })
 }
 
 pub fn remove_installed_plugin(name: &str) -> anyhow::Result<Option<InstalledPlugin>> {
-    let mut config = load_config();
-    let removed = config.plugins.remove(name);
-    if removed.is_some() {
-        save_config(&config)?;
-    }
-    Ok(removed)
+    update_config_at(&config_path(), |config| {
+        let removed = config.plugins.remove(name);
+        let changed = removed.is_some();
+        Ok((removed, changed))
+    })
 }
 
 pub fn set_plugin_enabled(name: &str, enabled: bool) -> anyhow::Result<()> {
-    let mut config = load_config();
-    let Some(plugin) = config.plugins.get_mut(name) else {
-        anyhow::bail!("plugin `{name}` is not installed");
-    };
-    plugin.enabled = enabled;
-    save_config(&config)
+    update_config_at(&config_path(), |config| {
+        let Some(plugin) = config.plugins.get_mut(name) else {
+            anyhow::bail!("plugin `{name}` is not installed");
+        };
+        plugin.enabled = enabled;
+        Ok(((), true))
+    })
 }
 
 pub fn plugin_skill_context(
@@ -172,21 +255,26 @@ pub fn plugin_skill_context(
     working_directory: &Path,
 ) -> PluginSkillContext {
     let mut config = load_config();
-    match crate::session_plugins::apply_selection(&mut config, session_id, working_directory) {
-        Ok(()) => {}
-        Err(error) => {
-            // Never silently re-enable excluded skills if the selection cannot be read.
-            tracing::error!("Could not read session plugin selection: {error:#}");
-            return PluginSkillContext::default();
-        }
-    }
-    plugin_skill_context_from_config(
+    let resolutions =
+        match crate::session_plugins::apply_selection(&mut config, session_id, working_directory) {
+            Ok(resolutions) => resolutions,
+            Err(error) => {
+                // Never silently re-enable excluded skills if the selection cannot be read.
+                tracing::error!("Could not read session plugin selection: {error:#}");
+                crate::session_plugins::record_injected(session_id, &[]);
+                return PluginSkillContext::default();
+            }
+        };
+    let mut context = plugin_skill_context_from_config(
         &config,
         &config_dir()
             .join("plugin-skill-roots")
             .join(session_id.to_string()),
         agent_type,
-    )
+    );
+    annotate_activation(&mut context.injected, &resolutions);
+    crate::session_plugins::record_injected(session_id, &context.injected);
+    context
 }
 
 fn plugin_skill_context_from_config(
@@ -223,6 +311,11 @@ fn plugin_skill_context_from_config(
                 && materialize_claude_skill(&claude_root, &skill_name, &path).is_ok()
             {
                 has_claude_skill = true;
+                // Claude's skill catalog carries the name and description.
+                let listed = format!("{skill_name}: {}", description.as_deref().unwrap_or(""));
+                context
+                    .injected
+                    .push(available_skill(plugin_name, &skill_name, &path, &listed));
             }
             let reminder_agent = match agent_type {
                 AgentType::Codex => Some("codex"),
@@ -235,10 +328,14 @@ fn plugin_skill_context_from_config(
                     .as_deref()
                     .map(|description| format!(" - {description}"))
                     .unwrap_or_default();
-                lines.push(format!(
+                let line = format!(
                     "- `{plugin_name}:{skill_name}`{description}: {}",
                     path.display()
-                ));
+                );
+                context
+                    .injected
+                    .push(available_skill(plugin_name, &skill_name, &path, &line));
+                lines.push(line);
             }
         }
         if has_claude_skill {
@@ -248,14 +345,159 @@ fn plugin_skill_context_from_config(
     if !context.claude_plugin_dirs.is_empty() {
         context.cleanup_dir = Some(generated_root.to_path_buf());
     }
+    let mut sections = Vec::new();
     if !lines.is_empty() {
         lines.sort();
-        context.reminder = Some(format!(
+        sections.push(format!(
             "## Plugin Skills\n\nInstalled Agent Portal plugins provide these skills. When a user task matches one, read its `SKILL.md` completely before acting, then follow its instructions:\n\n{}",
             lines.join("\n")
         ));
     }
+    let (prompts, prompt_entries) = plugin_prompts(config);
+    context.injected.extend(prompt_entries);
+    sections.extend(prompts);
+    if !sections.is_empty() {
+        context.reminder = Some(sections.join("\n\n"));
+    }
     context
+}
+
+/// Enabled plugins' `[[prompts]]`, as one reminder section plus their record.
+/// Every agent gets them as text; there is no native loader for prompts.
+fn plugin_prompts(config: &LauncherConfig) -> (Option<String>, Vec<PluginContextEntry>) {
+    let mut parts = Vec::new();
+    let mut entries = Vec::new();
+    for (plugin_name, plugin) in config.plugins.iter().filter(|(_, p)| p.enabled) {
+        let root = PathBuf::from(&plugin.path);
+        let Ok(manifest) = crate::plugin::load_manifest(&root) else {
+            continue;
+        };
+        for prompt in manifest.prompts {
+            let path = root.join(&prompt.path);
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            if text.trim().is_empty() {
+                continue;
+            }
+            parts.push(format!(
+                "### {plugin_name}: {}\n\n{}",
+                prompt.name,
+                text.trim()
+            ));
+            let mut entry = available_skill(plugin_name, &prompt.name, &path, &text);
+            entry.kind = PluginContextKind::Prompt;
+            entries.push(entry);
+        }
+    }
+    let section = (!parts.is_empty()).then(|| {
+        format!(
+            "## Plugin Prompts\n\nInstalled Agent Portal plugins add this guidance:\n\n{}",
+            parts.join("\n\n")
+        )
+    });
+    (section, entries)
+}
+
+/// Say why each recorded plugin was loaded, from its resolution.
+fn annotate_activation(
+    entries: &mut [PluginContextEntry],
+    resolutions: &crate::session_plugins::Resolutions,
+) {
+    for entry in entries {
+        let activation = resolutions
+            .get(&entry.plugin)
+            .and_then(|resolution| resolution.activation)
+            .unwrap_or(PluginActivation::Detected);
+        entry.activation = activation;
+        entry.reason = match activation {
+            PluginActivation::Explicit => "Chosen for this session",
+            PluginActivation::Policy => "Always loaded in this project",
+            PluginActivation::Detected => "Detected in this directory",
+        }
+        .to_string();
+    }
+}
+
+/// What a running session should switch to after its plugin selection
+/// changed: the skills and prompts a fresh launch would now get, as text it
+/// can act on without a restart. Skills are listed by path even for Claude,
+/// whose native plugin directories were fixed at launch. Nothing is posted or
+/// recorded here; the caller does both, in order, under its lock.
+pub fn plugin_context_update(
+    agent_type: AgentType,
+    session_id: Uuid,
+    working_directory: &Path,
+) -> anyhow::Result<PluginContextChange> {
+    let mut config = load_config();
+    let resolutions =
+        crate::session_plugins::apply_selection(&mut config, session_id, working_directory)?;
+    let mut lines = Vec::new();
+    let mut entries = Vec::new();
+    for (plugin_name, plugin) in config.plugins.iter().filter(|(_, p)| p.enabled) {
+        let root = PathBuf::from(&plugin.path);
+        let Some(manifest) = read_plugin_manifest(&root) else {
+            continue;
+        };
+        for skill in manifest
+            .skills
+            .iter()
+            .filter(|skill| skill_applies_to(skill, agent_type.as_str()))
+        {
+            let path = root.join(&skill.path);
+            if !path.is_file() {
+                continue;
+            }
+            let metadata = read_skill_metadata(&path);
+            let skill_name = metadata.name.unwrap_or_else(|| skill.name.clone());
+            let description = metadata
+                .description
+                .map(|description| format!(" - {description}"))
+                .unwrap_or_default();
+            let line = format!(
+                "- `{plugin_name}:{skill_name}`{description}: {}",
+                path.display()
+            );
+            entries.push(available_skill(plugin_name, &skill_name, &path, &line));
+            lines.push(line);
+        }
+    }
+    let (prompts, prompt_entries) = plugin_prompts(&config);
+    entries.extend(prompt_entries);
+    annotate_activation(&mut entries, &resolutions);
+
+    lines.sort();
+    let skills = (!lines.is_empty()).then(|| {
+        format!(
+            "## Plugin Skills\n\nInstalled Agent Portal plugins provide these skills. When a user task matches one, read its `SKILL.md` completely before acting, then follow its instructions:\n\n{}",
+            lines.join("\n")
+        )
+    });
+    let current = [skills.clone(), prompts.clone()]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let update = format!(
+        "## Plugin context changed\n\nThe user changed which Agent Portal plugins this session uses. This replaces every plugin skill and plugin prompt you were given earlier: use only what follows and disregard the rest.\n\n{}\n\n{}",
+        skills.unwrap_or_else(|| "No plugin skills are enabled for this session now.".into()),
+        prompts.unwrap_or_else(|| "No plugin prompts apply now.".into()),
+    );
+    Ok(PluginContextChange {
+        current,
+        update,
+        entries,
+    })
+}
+
+/// What a running session switches to when its plugin selection changes.
+pub struct PluginContextChange {
+    /// The plugin context a fresh conversation starts with from now on.
+    pub current: String,
+    /// The notice folded into the session's next input.
+    pub update: String,
+    /// The record the session card shows once the change is posted.
+    pub entries: Vec<PluginContextEntry>,
 }
 
 fn read_plugin_manifest(root: &Path) -> Option<PluginManifest> {
@@ -368,9 +610,10 @@ pub(crate) fn write_config_atomic(path: &Path, contents: &str) -> anyhow::Result
 }
 
 pub fn save_auth_token(token: &str) -> anyhow::Result<()> {
-    let mut config = load_config();
-    config.auth_token = Some(token.to_string());
-    save_config(&config)?;
+    update_config_at(&config_path(), |config| {
+        config.auth_token = Some(token.to_string());
+        Ok(((), true))
+    })?;
     tracing::info!("Saved auth token to {}", config_path().display());
     Ok(())
 }
@@ -392,12 +635,11 @@ pub fn save_credentials(backend_url: &str, token: &str) -> anyhow::Result<()> {
 /// [`save_credentials`] against an explicit path, so the atomic round-trip can
 /// be unit-tested without touching the real config location.
 fn save_credentials_at(path: &Path, backend_url: &str, token: &str) -> anyhow::Result<()> {
-    let mut config = load_config_at(path);
-    config.backend_url = Some(backend_url.to_string());
-    config.auth_token = Some(token.to_string());
-    let contents = serde_json::to_string_pretty(&config)?;
-    write_config_atomic(path, &contents)?;
-    Ok(())
+    update_config_at(path, |config| {
+        config.backend_url = Some(backend_url.to_string());
+        config.auth_token = Some(token.to_string());
+        Ok(((), true))
+    })
 }
 
 fn launcher_id_path() -> PathBuf {
@@ -439,10 +681,12 @@ fn read_or_create_id(path: &Path) -> Uuid {
 }
 
 pub fn clear_sessions() -> anyhow::Result<()> {
-    let mut config = load_config();
-    if !config.sessions.is_empty() {
+    let cleared = update_config_at(&config_path(), |config| {
+        let cleared = !config.sessions.is_empty();
         config.sessions.clear();
-        save_config(&config)?;
+        Ok((cleared, cleared))
+    })?;
+    if cleared {
         tracing::info!("Cleared launcher-local expected sessions from config");
     }
     Ok(())
@@ -451,6 +695,89 @@ pub fn clear_sessions() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `[[prompts]]` reach every agent as text, and the record lists them.
+    #[test]
+    fn plugin_prompts_join_the_reminder_for_every_agent() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("board");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("agent-portal-plugin.toml"),
+            "name = \"board\"\n[[prompts]]\nname = \"conventions\"\npath = \"prompt.md\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("prompt.md"),
+            "Nets are named in SCREAMING_CASE.\n",
+        )
+        .unwrap();
+        let mut config = LauncherConfig::default();
+        config.plugins.insert(
+            "board".into(),
+            InstalledPlugin {
+                path: root.to_string_lossy().into_owned(),
+                source: "s".into(),
+                source_subdir: None,
+                reference: None,
+                enabled: true,
+                installed_at: chrono::Utc::now(),
+                revision: None,
+            },
+        );
+        let generated = dir.path().join("generated");
+        for agent in [AgentType::Claude, AgentType::Codex, AgentType::Muse] {
+            let context = plugin_skill_context_from_config(&config, &generated, agent);
+            let reminder = context.reminder.expect("prompts make a reminder");
+            assert!(reminder.contains("## Plugin Prompts"));
+            assert!(reminder.contains("### board: conventions"));
+            assert!(reminder.contains("SCREAMING_CASE"));
+            assert_eq!(context.injected.len(), 1);
+            assert_eq!(context.injected[0].kind, PluginContextKind::Prompt);
+        }
+
+        config.plugins.get_mut("board").unwrap().enabled = false;
+        let context = plugin_skill_context_from_config(&config, &generated, AgentType::Codex);
+        assert!(context.reminder.is_none() && context.injected.is_empty());
+    }
+
+    /// A plugin change never saves over a config it couldn't read: that would
+    /// silently drop every other install and the auth token.
+    #[test]
+    fn plugin_changes_leave_an_unreadable_config_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("launcher.json");
+        let insert = |config: &mut LauncherConfig| {
+            config.plugins.insert(
+                "kicadmium".into(),
+                InstalledPlugin {
+                    path: "/p".into(),
+                    source: "s".into(),
+                    source_subdir: None,
+                    reference: None,
+                    enabled: true,
+                    installed_at: chrono::Utc::now(),
+                    revision: None,
+                },
+            );
+            Ok(((), true))
+        };
+
+        std::fs::write(&path, "{ not json").unwrap();
+        assert!(update_config_at(&path, insert).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ not json");
+
+        std::fs::remove_file(&path).unwrap();
+        update_config_at(&path, insert).unwrap();
+        assert!(load_config_at(&path).plugins.contains_key("kicadmium"));
+        let removed = update_config_at(&path, |config| {
+            let removed = config.plugins.remove("missing");
+            let changed = removed.is_some();
+            Ok((removed, changed))
+        })
+        .unwrap();
+        assert!(removed.is_none());
+    }
 
     #[test]
     fn launcher_id_is_stable_across_calls() {
@@ -512,6 +839,25 @@ mod tests {
         assert_eq!(config.auth_token.as_deref(), Some("tok_new"));
         // The load/save cycle must not drop fields it doesn't touch.
         assert_eq!(config.name.as_deref(), Some("my-launcher"));
+    }
+
+    #[test]
+    fn credentials_never_save_over_a_config_that_does_not_parse() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("launcher.json");
+        let typo = r#"{"backend_url":"wss://mine","plugins":{"kicadmium":{}},}"#;
+        std::fs::write(&path, typo).unwrap();
+
+        let error = save_credentials_at(&path, "wss://default", "tok").unwrap_err();
+        assert!(format!("{error:#}").contains("fix or move it aside"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), typo);
+        // A missing file is a first run, not an error.
+        assert_eq!(
+            load_config_for_write_at(&dir.path().join("absent.json"))
+                .unwrap()
+                .auth_token,
+            None
+        );
     }
 
     #[test]
@@ -713,6 +1059,12 @@ description: Route KiCad PCB layouts.
             .join("SKILL.md")
             .is_file());
         assert!(context.reminder.is_none());
+        // The record lists what was handed over, with its text for inspection.
+        assert_eq!(context.injected.len(), 1);
+        assert_eq!(context.injected[0].plugin, "kicad-pcb");
+        assert_eq!(context.injected[0].name, "kicad-layout");
+        assert!(context.injected[0].context_bytes > 0);
+        assert!(!context.injected[0].text.is_empty());
 
         let context = plugin_skill_context_from_config(&config, &generated_root, AgentType::Codex);
         assert!(context.claude_plugin_dirs.is_empty());
@@ -724,6 +1076,10 @@ description: Route KiCad PCB layouts.
 
         let context = plugin_skill_context_from_config(&config, &generated_root, AgentType::Muse);
         assert!(context.reminder.is_none());
+        assert!(
+            context.injected.is_empty(),
+            "nothing handed over, nothing recorded"
+        );
 
         let context =
             plugin_skill_context_from_config(&config, &generated_root, AgentType::Antigravity);
@@ -734,12 +1090,18 @@ description: Route KiCad PCB layouts.
 
         let selection_path = dir.path().join("selection.json");
         std::fs::write(&selection_path, r#"{"kicad-pcb":false}"#).unwrap();
-        crate::session_plugins::apply_selection_at(&mut config, &selection_path, dir.path())
-            .unwrap();
+        crate::session_plugins::apply_selection_at(
+            &mut config,
+            &selection_path,
+            &Default::default(),
+            dir.path(),
+        )
+        .unwrap();
         for agent in [AgentType::Claude, AgentType::Codex, AgentType::Antigravity] {
             let context = plugin_skill_context_from_config(&config, &generated_root, agent);
             assert!(context.claude_plugin_dirs.is_empty());
             assert!(context.reminder.is_none());
+            assert!(context.injected.is_empty());
         }
         assert!(!generated_root.join("kicad-pcb").exists());
     }

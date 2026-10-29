@@ -25,22 +25,8 @@ pub enum FileDownloadEvent {
     Request(shared::FileDownloadRequestFields),
 }
 
-/// Tracks state for a file being received in chunks
-pub struct FileReceiveState {
-    pub filename: String,
-    pub total_chunks: u32,
-    pub total_size: u64,
-    pub received_chunks: u32,
-    pub received_bytes: u64,
-    pub file_handle: Option<tokio::fs::File>,
-    pub start_time: std::time::Instant,
-    pub last_log_percent: u32,
-    /// Bytes are written here and renamed to `filename` only on completion,
-    /// so a consumer (the agent) can never read a truncated file (#939).
-    pub temp_path: std::path::PathBuf,
-    pub final_path: std::path::PathBuf,
-    pub disposition: shared::FileUploadDisposition,
-}
+// Preserve the public import path while transfer ownership lives in its bridge.
+pub use super::file_transfer::FileReceiveState;
 
 /// A portal input classified by send mode: a plain user input or a
 /// wiggum-mode activation carrying the original prompt.

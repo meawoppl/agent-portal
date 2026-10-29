@@ -89,6 +89,8 @@ pub(super) struct SessionPillProps {
     pub index: usize,
     pub display_number: Option<usize>,
     pub session: PortalSession,
+    #[prop_or_default]
+    pub parent_name: Option<String>,
     pub is_focused: bool,
     pub is_awaiting: bool,
     pub is_hidden: bool,
@@ -195,6 +197,9 @@ pub(super) fn session_pill(props: &SessionPillProps) -> Html {
                 } else {
                     html! {}
                 }
+            }
+            if let Some(parent) = &props.parent_name {
+                <span class="pill-child-badge" title={format!("Started by {parent}")}>{"child"}</span>
             }
             {
                 if view.hidden_badge {

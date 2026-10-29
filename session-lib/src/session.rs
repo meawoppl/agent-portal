@@ -230,6 +230,11 @@ impl<A: Agent> Session<A> {
         self.config.recovery_context.take()
     }
 
+    /// Where the launcher posts this session's plugin context changes.
+    pub fn context_inbox(&self) -> &crate::ContextInbox {
+        &self.config.context_updates
+    }
+
     /// Poll for the next event.
     ///
     /// Returns `None` if the session has exited and no more events are
@@ -822,6 +827,12 @@ mod tests {
             Some("quoted past request")
         );
         assert_eq!(session.take_recovery_context(), None);
+
+        // The launcher's handle and the session's are the same inbox.
+        let launcher_side = session.config().context_updates.clone();
+        assert!(!session.context_inbox().is_pending());
+        launcher_side.post(1, "current".into(), "update".into());
+        assert_eq!(session.context_inbox().pending().unwrap().text, "update");
         session.stop().await.unwrap();
     }
 

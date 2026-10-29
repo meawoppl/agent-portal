@@ -1,7 +1,7 @@
 use super::continuations::handle_session_limit_reached;
 use super::message_handlers::{
-    handle_claude_output, replay_forward_opens_from_db, replay_pending_inputs_from_db,
-    ClaudeOutputContext, ClaudeOutputFrame,
+    handle_agent_output, replay_forward_opens_from_db, replay_pending_inputs_from_db,
+    AgentOutputContext, AgentOutputFrame,
 };
 use super::permissions::{handle_permission_cancelled, handle_permission_request};
 use super::registration::{register_or_update_session, RegistrationParams};
@@ -16,6 +16,10 @@ use std::sync::Arc;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
+#[tracing::instrument(
+    skip_all,
+    fields(user, user_id, session_name, session_id, computer, owner, owner_id)
+)]
 pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) {
     let session_manager = app_state.session_manager.clone();
     let db_pool = app_state.db_pool.clone();
@@ -50,8 +54,7 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
             },
             _ = cancel.cancelled() => {
                 warn!(
-                    "Proxy connection for session {:?} force-closed by server (evicted)",
-                    session_key
+                    "Proxy connection force-closed by server (evicted)"
                 );
                 break;
             }
@@ -131,9 +134,20 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
                         .select((sessions::status, sessions::session_name))
                         .first::<(String, String)>(&mut conn)
                         .ok();
-                    let _ = diesel::update(sessions::table.find(session_id))
+                    let updated = diesel::update(sessions::table.find(session_id))
                         .set(sessions::status.eq(SessionStatus::Disconnected.as_str()))
                         .execute(&mut conn);
+                    // The disconnected status is committed now, so every
+                    // member's refetch (the owner's included) reads it. The
+                    // launcher's own exit report can arrive before this.
+                    if matches!(updated, Ok(1)) {
+                        super::member_status::notify_members_not_running(
+                            &session_manager,
+                            &mut conn,
+                            session_id,
+                            None,
+                        );
+                    }
                     if let Some((status, session_name)) = prior {
                         if status == SessionStatus::Active.as_str() {
                             app_state.notifications.emit(
@@ -286,6 +300,9 @@ fn handle_proxy_message(
             let mut tunnel_sizing = None;
 
             if result.success {
+                if let (Some(id), Ok(mut conn)) = (result.session_id, db_pool.get()) {
+                    crate::log_context::record_session(&mut conn, id);
+                }
                 // Only now do we expose the socket via SessionManager and
                 // bind cleanup state. The send_task in handle_session_socket
                 // owns the WS sender — replies (including the RegisterAck
@@ -328,8 +345,11 @@ fn handle_proxy_message(
             });
 
             info!(
-                "Session registered: {} ({}) - success: {}, client_version: {:?}",
-                session_name, claude_session_id, result.success, client_version
+                "Session registered: {} ({}) - success: {}, client_version: {}",
+                crate::log_context::label(&session_name),
+                claude_session_id,
+                result.success,
+                client_version.as_deref().unwrap_or("unknown")
             );
 
             if result.success {
@@ -347,8 +367,8 @@ fn handle_proxy_message(
             content,
             agent_type,
         } => {
-            handle_claude_output(
-                ClaudeOutputContext {
+            handle_agent_output(
+                AgentOutputContext {
                     session_manager,
                     session_key,
                     db_session_id: *db_session_id,
@@ -357,7 +377,7 @@ fn handle_proxy_message(
                     tx,
                     image_store: &app_state.image_store,
                 },
-                ClaudeOutputFrame {
+                AgentOutputFrame {
                     content,
                     seq: None,
                     agent_type,
@@ -369,8 +389,8 @@ fn handle_proxy_message(
             content,
             agent_type,
         } => {
-            handle_claude_output(
-                ClaudeOutputContext {
+            handle_agent_output(
+                AgentOutputContext {
                     session_manager,
                     session_key,
                     db_session_id: *db_session_id,
@@ -379,7 +399,7 @@ fn handle_proxy_message(
                     tx,
                     image_store: &app_state.image_store,
                 },
-                ClaudeOutputFrame {
+                AgentOutputFrame {
                     content,
                     seq: Some(seq),
                     agent_type,
@@ -447,6 +467,7 @@ fn handle_proxy_message(
             session_id: ack_session_id,
             client_msg_id,
             stage,
+            message,
         } => {
             let Some(current_session_id) = *db_session_id else {
                 return ControlFlow::Continue(());
@@ -480,14 +501,19 @@ fn handle_proxy_message(
             }
             // Relay the proxy's per-stage delivery signal to the session's web
             // clients (#939); each frontend advances the matching optimistic
-            // row by client_msg_id. Failure detail isn't carried on this hop.
+            // row by client_msg_id. A failure carries its reason, bounded,
+            // since it comes from the peer.
             if let Some(key) = session_key {
+                let message = (stage == shared::InputDeliveryStage::Failed)
+                    .then(|| message.as_deref().and_then(failure_reason))
+                    .flatten();
                 session_manager.broadcast_to_web_clients(
                     key,
                     shared::ServerToClient::InputProgress {
                         client_msg_id,
                         stage,
-                        message: None,
+                        message,
+                        queued: false,
                     },
                 );
             }
@@ -643,9 +669,6 @@ fn handle_session_update(
     let Some(current_session_id) = db_session_id else {
         return;
     };
-    // Store as a JSON array; the column is `jsonb NOT NULL DEFAULT '[]'`.
-    let open_prs_json =
-        serde_json::to_value(&open_prs).unwrap_or_else(|_| serde_json::Value::Array(Vec::new()));
     let mut conn = match db_pool.get() {
         Ok(conn) => conn,
         Err(e) => {
@@ -671,19 +694,17 @@ fn handle_session_update(
             sessions::git_branch.eq(&git_branch),
             sessions::pr_url.eq(&pr_url),
             sessions::repo_url.eq(&repo_url),
-            sessions::open_prs.eq(&open_prs_json),
+            sessions::open_prs.eq(crate::models::JsonVec(open_prs.clone())),
         ))
         .execute(&mut conn)
     {
         error!("Failed to update session metadata: {}", e);
     } else {
         info!(
-            "Updated session {}: branch={:?} pr_url={:?} repo_url={:?} open_prs={}",
-            current_session_id,
-            git_branch,
-            pr_url,
-            repo_url,
-            open_prs.len()
+            session_id = %current_session_id,
+            branch = %crate::log_context::label(git_branch.as_deref().unwrap_or("none")),
+            has_pr = pr_url.is_some(), has_repo = repo_url.is_some(), open_prs = open_prs.len(),
+            "Session metadata updated"
         );
 
         if let Some(ref key) = session_key {
@@ -745,5 +766,43 @@ fn handle_input_ack(
         Err(e) => {
             error!("Failed to delete pending inputs: {}", e);
         }
+    }
+}
+
+/// Longest delivery-failure reason relayed to browsers, in characters.
+const MAX_FAILURE_REASON_CHARS: usize = 200;
+
+/// A peer's delivery-failure reason made safe to show: control characters
+/// dropped, at most [`MAX_FAILURE_REASON_CHARS`] characters (never splitting
+/// one), and nothing left means no reason.
+fn failure_reason(raw: &str) -> Option<String> {
+    let reason: String = raw
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(MAX_FAILURE_REASON_CHARS)
+        .collect();
+    let reason = reason.trim();
+    (!reason.is_empty()).then(|| reason.to_string())
+}
+
+#[cfg(test)]
+mod failure_reason_tests {
+    use super::*;
+
+    #[test]
+    fn reasons_are_bounded_cleaned_and_empty_is_none() {
+        assert_eq!(
+            failure_reason("The agent rejected this input").as_deref(),
+            Some("The agent rejected this input")
+        );
+        assert_eq!(failure_reason(" \n\t\u{7} "), None);
+        assert_eq!(
+            failure_reason("line\nbreak\u{1b}[31m").as_deref(),
+            Some("linebreak[31m")
+        );
+        let long = "é".repeat(500);
+        let bounded = failure_reason(&long).unwrap();
+        assert_eq!(bounded.chars().count(), MAX_FAILURE_REASON_CHARS);
+        assert!(bounded.chars().all(|c| c == 'é'));
     }
 }

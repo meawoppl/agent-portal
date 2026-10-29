@@ -418,6 +418,14 @@ Good command behavior:
 The manifest should expose common, discoverable verbs. The plugin binary can
 still support richer pass-through subcommands.
 
+The session's Plugins dock lists each command with a **Run** button. Portal
+resolves the command for the session (`{cwd}` and `{session_id}` filled in,
+arguments quoted), shows the session owner that exact line to approve, and only
+then runs it, in the plugin's environment from the plugin's directory. The
+output and exit status appear in the dock and as a plugin command card in the
+session transcript. One plugin action runs at a time per computer, and a
+command is stopped, with its process tree, after five minutes.
+
 Set `accepts_args = true` on a command to let the user pass extra arguments
 when Portal runs it. Each argument is shell-quoted and appended to `run`, so a
 thin pass-through entry can expose the whole plugin CLI. It defaults to

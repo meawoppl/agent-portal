@@ -87,6 +87,7 @@ pub async fn restore_history(
     Path((owner, source)): Path<(Uuid, Uuid)>,
     Json(request): Json<HistoryRestoreRequest>,
 ) -> Result<Json<HistoryRestoreResponse>, AppError> {
+    crate::auth::require_manual_launch_credential(&state, &headers)?;
     let caller = extract_user(&state, Some(&headers), &cookies)?;
     let m = manifest(&state, &caller, owner, source).await?;
     // Archive visibility (including admin and past membership) never grants

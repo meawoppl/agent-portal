@@ -76,10 +76,11 @@ impl<'a> PluginProcess<'a> {
         if let Ok(cwd) = std::env::current_dir() {
             values.push(("cwd", cwd.display().to_string()));
         }
-        if let Some(extra) = extra {
-            values.extend_from_slice(extra);
-        }
-        expand_command(command, &values)
+        // The caller's values come first and so win: the launcher daemon
+        // passes a session's directory as `cwd`, which is not its own.
+        let mut ordered = extra.map(<[_]>::to_vec).unwrap_or_default();
+        ordered.extend(values);
+        expand_command(command, &ordered)
     }
 
     pub(super) fn command(&self, command: &str) -> Result<Command> {
@@ -277,6 +278,26 @@ fn expand_command(command: &str, values: &[(&str, String)]) -> String {
     out
 }
 
-fn shell_quote(value: &str) -> String {
+pub(super) fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The first value for a placeholder wins, which is what lets a caller's
+    /// session directory override the launcher's own `cwd`.
+    #[test]
+    fn earlier_values_win_and_are_shell_quoted() {
+        let expanded = expand_command(
+            "serve --cwd {cwd} --name {name}",
+            &[
+                ("cwd", "/home/u/my repo".into()),
+                ("cwd", "/daemon".into()),
+                ("name", "it's".into()),
+            ],
+        );
+        assert_eq!(expanded, r"serve --cwd '/home/u/my repo' --name 'it'\''s'");
+    }
 }

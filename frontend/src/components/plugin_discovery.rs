@@ -1,6 +1,8 @@
 use shared::api::{
-    PluginAction, PluginInventoryResponse, PluginRequest, PluginResponse, PortalPluginInfo,
+    PluginAction, PluginInventoryResponse, PluginPolicy, PluginRequest, PluginResponse,
+    PortalPluginInfo,
 };
+use std::collections::BTreeMap;
 use uuid::Uuid;
 use yew::prelude::*;
 
@@ -62,48 +64,131 @@ pub fn plugin_context_label(bytes: u64, tokens: u64) -> String {
     }
 }
 
+/// The launch-dialog choices that differ from what the session would load
+/// anyway. `None` when there are none, so the launcher leaves every plugin to
+/// policy and detection.
+pub fn plugin_overrides(
+    plugins: &[PortalPluginInfo],
+    choices: &BTreeMap<String, bool>,
+) -> Option<BTreeMap<String, bool>> {
+    let changed: BTreeMap<String, bool> = plugins
+        .iter()
+        .filter_map(|plugin| {
+            let enabled = *choices.get(&plugin.name)?;
+            (enabled != plugin.enabled).then(|| (plugin.name.clone(), enabled))
+        })
+        .collect();
+    (!changed.is_empty()).then_some(changed)
+}
+
+/// Why a plugin is on or off for a directory, for its tooltip.
+pub fn plugin_state_reason(plugin: &PortalPluginInfo) -> String {
+    match (
+        plugin.policy,
+        plugin.disabled_by_policy,
+        plugin.reason.as_deref(),
+    ) {
+        (PluginPolicy::Always, _, _) => "Always on in this project".to_string(),
+        (PluginPolicy::Never, true, Some(reason)) => {
+            format!("{reason}, but never loaded in this project")
+        }
+        (PluginPolicy::Never, _, _) => "Never loaded in this project".to_string(),
+        (PluginPolicy::Ask, _, Some(reason)) => reason.to_string(),
+        (PluginPolicy::Ask, _, None) => "Not detected in this directory".to_string(),
+    }
+}
+
 #[derive(Properties, PartialEq)]
 pub struct PluginSuggestionStripProps {
     pub plugins: Vec<PortalPluginInfo>,
     #[prop_or_default]
     pub error: Option<String>,
+    /// Plugins switched on or off before launch.
+    pub choices: BTreeMap<String, bool>,
+    pub on_toggle: Callback<(String, bool)>,
 }
 
+/// The launch dialog's plugins: on where detected or required by the
+/// project's policy, and switchable for the session about to start.
 #[function_component(PluginSuggestionStrip)]
 pub fn plugin_suggestion_strip(props: &PluginSuggestionStripProps) -> Html {
-    let suggested = suggested_plugins(&props.plugins);
-    if suggested.is_empty() && props.error.is_none() {
+    let browse = html! {
+        <a class="plugin-browse-link" href={PLUGINS_BROWSER} target="_blank" rel="noopener noreferrer">{ "Browse plugins" }</a>
+    };
+    if let Some(error) = props.error.as_deref() {
         return html! {
-            <div class="plugin-suggestion-strip muted">
+            <div class="plugin-suggestion-strip">
                 <span class="plugin-suggestion-title">{ "Plugins" }</span>
-                <span>{ "No directory-specific suggestions yet" }</span>
-                <a class="plugin-browse-link" href={PLUGINS_BROWSER} target="_blank" rel="noopener noreferrer">{ "Browse plugins" }</a>
+                <span class="plugin-suggestion-error">{ error }</span>
+                { browse }
             </div>
         };
     }
-
+    if props.plugins.is_empty() {
+        return html! {
+            <div class="plugin-suggestion-strip muted">
+                <span class="plugin-suggestion-title">{ "Plugins" }</span>
+                <span>{ "None installed on this computer" }</span>
+                { browse }
+            </div>
+        };
+    }
+    let mut plugins: Vec<&PortalPluginInfo> = props.plugins.iter().collect();
+    let is_on = |plugin: &PortalPluginInfo| {
+        props
+            .choices
+            .get(&plugin.name)
+            .copied()
+            .unwrap_or(plugin.enabled)
+    };
+    plugins.sort_by_key(|plugin| (!plugin.enabled, !plugin.suggested));
     html! {
         <div class="plugin-suggestion-strip">
-            <span class="plugin-suggestion-title">{ "Suggested plugins" }</span>
-            if let Some(error) = props.error.as_deref() {
-                <span class="plugin-suggestion-error">{ error }</span>
-            } else {
-                <span class="plugin-suggestion-list">
-                    { for suggested.into_iter().map(|plugin| {
-                        let title = plugin
-                            .reason
-                            .clone()
-                            .unwrap_or_else(|| "Suggested for this directory".to_string());
-                        html! {
-                            <span class="plugin-suggestion-pill" title={title}>
-                                { &plugin.display_name }
-                            </span>
-                        }
-                    }) }
-                </span>
-            }
-            <a class="plugin-browse-link" href={PLUGINS_BROWSER} target="_blank" rel="noopener noreferrer">{ "Browse plugins" }</a>
+            <span class="plugin-suggestion-title">{ "Plugins" }</span>
+            <span class="plugin-suggestion-list">
+                { for plugins.into_iter().map(|plugin| {
+                    let on = is_on(plugin);
+                    let changed = on != plugin.enabled;
+                    let title = format!(
+                        "{}{}",
+                        plugin_state_reason(plugin),
+                        if changed { " · changed for this session" } else { "" }
+                    );
+                    let onclick = {
+                        let on_toggle = props.on_toggle.clone();
+                        let name = plugin.name.clone();
+                        Callback::from(move |_| on_toggle.emit((name.clone(), !on)))
+                    };
+                    html! {
+                        <button
+                            type="button"
+                            class={classes!(
+                                "plugin-suggestion-pill",
+                                on.then_some("on"),
+                                changed.then_some("changed"),
+                            )}
+                            aria-pressed={on.to_string()}
+                            {title}
+                            {onclick}
+                        >
+                            { &plugin.display_name }
+                            if plugin.policy != PluginPolicy::Ask {
+                                <span class="plugin-policy-mark">{ plugin_policy_label(plugin.policy) }</span>
+                            }
+                        </button>
+                    }
+                }) }
+            </span>
+            { browse }
         </div>
+    }
+}
+
+pub fn plugin_policy_label(policy: PluginPolicy) -> &'static str {
+    match policy {
+        PluginPolicy::Ask => "ask",
+        PluginPolicy::Always => "always",
+        PluginPolicy::Never => "never",
     }
 }
 
@@ -124,6 +209,9 @@ fn plugin_file_pills(files: &[shared::api::PortalPluginSkillInfo], class: &'stat
 #[derive(Properties, PartialEq)]
 pub struct PluginCardProps {
     pub plugin: PortalPluginInfo,
+    /// Controls rendered at the foot of the card.
+    #[prop_or_default]
+    pub children: Html,
 }
 
 /// One installed plugin: what it is, where it lives, and what it contributes.
@@ -144,11 +232,16 @@ pub fn plugin_card(props: &PluginCardProps) -> Html {
                     if is_suggested {
                         <span class="plugin-card-badge">{ "suggested" }</span>
                     }
-                    if !plugin.enabled {
+                    if plugin.disabled_by_policy {
+                        <span class="plugin-card-badge muted" title={plugin_state_reason(plugin)}>{ "off by policy" }</span>
+                    } else if !plugin.enabled {
                         <span class="plugin-card-badge muted">{ "off" }</span>
                     }
                     if let Some(version) = plugin.version.as_deref() {
                         <span class="plugin-card-version">{ version }</span>
+                    }
+                    if plugin.update_available == Some(true) {
+                        <span class="plugin-card-badge update">{ "update available" }</span>
                     }
                 </div>
                 <span class="plugin-card-context">
@@ -160,6 +253,9 @@ pub fn plugin_card(props: &PluginCardProps) -> Html {
             }
             if let Some(reason) = plugin.reason.as_deref() {
                 <div class="plugin-card-reason">{ reason }</div>
+            }
+            if plugin.policy != PluginPolicy::Ask {
+                <div class="plugin-card-policy">{ plugin_state_reason(plugin) }</div>
             }
             <dl class="plugin-card-facts">
                 <dt>{ "Agents" }</dt>
@@ -216,6 +312,50 @@ pub fn plugin_card(props: &PluginCardProps) -> Html {
                     { for plugin.warnings.iter().map(|warning| html! { <li>{ warning }</li> }) }
                 </ul>
             }
+            { props.children.clone() }
         </article>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn plugin(name: &str, enabled: bool) -> PortalPluginInfo {
+        PortalPluginInfo {
+            name: name.into(),
+            display_name: name.into(),
+            enabled,
+            ..Default::default()
+        }
+    }
+
+    fn choices(pairs: &[(&str, bool)]) -> BTreeMap<String, bool> {
+        pairs.iter().map(|(n, e)| (n.to_string(), *e)).collect()
+    }
+
+    /// Only real changes are sent; with none, the launcher leaves every plugin
+    /// to policy and detection.
+    #[test]
+    fn overrides_carry_only_real_changes() {
+        let plugins = [plugin("kicadmium", true), plugin("visilog", false)];
+        assert_eq!(plugin_overrides(&plugins, &BTreeMap::new()), None);
+        // Toggled away and back: the choice equals the effective state.
+        assert_eq!(
+            plugin_overrides(&plugins, &choices(&[("kicadmium", true)])),
+            None
+        );
+        assert_eq!(
+            plugin_overrides(
+                &plugins,
+                &choices(&[("kicadmium", false), ("visilog", true)])
+            ),
+            Some(choices(&[("kicadmium", false), ("visilog", true)]))
+        );
+        // A name no longer in the inventory is dropped, not sent.
+        assert_eq!(
+            plugin_overrides(&plugins, &choices(&[("removed", true)])),
+            None
+        );
     }
 }

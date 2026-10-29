@@ -92,9 +92,11 @@ pub async fn list_external_sessions(
 pub async fn import_session(
     State(state): State<Arc<AppState>>,
     CurrentUserId(user): CurrentUserId,
+    headers: axum::http::HeaderMap,
     Path((launcher, agent)): Path<(Uuid, String)>,
     Json(request): Json<ImportSessionRequest>,
 ) -> Result<Json<ImportSessionResponse>, AppError> {
+    crate::auth::require_manual_launch_credential(&state, &headers)?;
     let agent_type = require_import(&state, launcher, user, &agent)?;
     let source = Uuid::parse_str(&request.source_id)
         .map_err(|_| AppError::BadRequest("Invalid Codex thread ID"))?
@@ -346,6 +348,7 @@ mod tests {
             .try_register_launcher(
                 launcher,
                 LauncherConnection {
+                    log_span: tracing::Span::none(),
                     sender,
                     launcher_name: "import test".into(),
                     hostname: "import-host".into(),
@@ -406,6 +409,7 @@ mod tests {
                 import_session(
                     State(state),
                     CurrentUserId(owner),
+                    axum::http::HeaderMap::new(),
                     Path((launcher, "codex".into())),
                     Json(ImportSessionRequest {
                         source_id: source,
@@ -447,6 +451,7 @@ mod tests {
         let retry = import_session(
             State(state),
             CurrentUserId(owner),
+            axum::http::HeaderMap::new(),
             Path((launcher, "codex".into())),
             Json(ImportSessionRequest {
                 source_id: source,

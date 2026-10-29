@@ -231,9 +231,14 @@ fn classify_request(request_id: String, request: ServerRequest) -> Vec<AgentOutp
                 shared::PortalMessage::text(format!("**Codex tool call**: `{}`", tool)).to_json();
             vec![AgentOutput::Visible(event)]
         }
+        // Already answered with an error by the I/O task (Portal never
+        // supplies ChatGPT tokens); say what to do. The request's account id
+        // stays out of the transcript.
         ServerRequest::ChatgptAuthTokensRefresh(_p) => {
             let event = shared::PortalMessage::text(
-                "**Codex requested ChatGPT auth token refresh** (not handled — the agent may pause)."
+                "**Codex's ChatGPT sign-in needs renewing**, which Agent Portal cannot do. \
+                 Sign in to Codex on this session's computer with `codex login`, then restart \
+                 the session."
                     .to_string(),
             )
             .to_json();

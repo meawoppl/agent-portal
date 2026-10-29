@@ -23,17 +23,26 @@ use crate::markers::{INPUT_SEQ_BUMP_FAILED, PENDING_INPUT_PERSIST_FAILED};
 use crate::db::DbPool;
 use crate::models::NewPendingInput;
 
+use super::pending_queue::Sent;
 use super::SessionManager;
 
 /// Outcome of [`SessionManager::enqueue_input`].
 pub(crate) struct EnqueueOutcome {
     /// Sequence number assigned (0 if no DB connection was available).
     pub seq: i64,
-    /// Whether the message reached a live proxy (vs. queued for reconnect).
+    /// Whether the message was handed off: to the live proxy, or held in
+    /// memory for it to receive on reconnect.
     pub delivered: bool,
+    /// Whether it was handed to a connected proxy's channel now. Receipt is
+    /// only known from the proxy's `ProxyReceived` / `AgentAccepted` acks.
+    pub live: bool,
     /// Whether the pending-input row was persisted. `false` ⇒ it won't replay
     /// if the proxy reconnects; logged as `PENDING_INPUT_PERSIST_FAILED`.
     pub persisted: bool,
+    /// Whether the input is durably queued for replay: a real sequence was
+    /// allocated *and* its row persisted. A failed sequence bump falls back
+    /// to seq `1`, whose row may persist but can't be trusted to replay.
+    pub durable: bool,
 }
 
 pub(crate) struct EnqueueInput {
@@ -63,6 +72,7 @@ impl SessionManager {
         } = input;
 
         let mut persisted = false;
+        let mut allocated = false;
         let seq = match db_pool.get() {
             Ok(mut conn) => {
                 // The same accepted input owns both values: sequence assignment
@@ -75,7 +85,10 @@ impl SessionManager {
                     .returning(sessions::input_seq)
                     .get_result(&mut conn)
                 {
-                    Ok(s) => s,
+                    Ok(s) => {
+                        allocated = true;
+                        s
+                    }
                     Err(e) => {
                         error!("{INPUT_SEQ_BUMP_FAILED} session={}: {}", session_id, e);
                         1
@@ -116,8 +129,8 @@ impl SessionManager {
             }
         };
 
-        let delivered = if seq > 0 {
-            self.send_to_session(
+        let sent = if seq > 0 {
+            self.send_or_queue(
                 session_key,
                 ServerToProxy::SequencedInput {
                     session_id,
@@ -129,7 +142,7 @@ impl SessionManager {
                 },
             )
         } else {
-            self.send_to_session(
+            self.send_or_queue(
                 session_key,
                 ServerToProxy::AgentInput {
                     content,
@@ -138,14 +151,14 @@ impl SessionManager {
                 },
             )
         };
-        if delivered {
-            self.mark_turn_input_delivered(session_id);
-        }
+        self.mark_turn_input_delivered(session_id);
 
         EnqueueOutcome {
             seq,
-            delivered,
+            delivered: true,
+            live: sent == Sent::Live,
             persisted,
+            durable: allocated && persisted,
         }
     }
 }

@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+  </defs>
+
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2300 · Show the owner why a session's agent failed or exited</text>
+
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">A failed launch or an early crash reached the owner's dashboard and was</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">dropped; the session view now says what happened until a launch succeeds.</text>
+  <line x1="55" y1="166" x2="1945" y2="166" stroke="#3d4666" stroke-width="1"/>
+
+  <text x="55" y="215" font-size="22" font-weight="bold" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1045" y="215" font-size="22" font-weight="bold" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1040" stroke="#3d4666" stroke-width="2" stroke-dasharray="10 8"/>
+
+  <!-- BEFORE -->
+  <rect x="55" y="245" width="900" height="150" rx="10" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+  <text x="79" y="285" font-size="26" fill="#c0caf5">launcher_socket.rs relay</text>
+  <text x="79" y="325" font-size="23" fill="#f7768e">SessionExited without the launcher's reason</text>
+  <text x="79" y="360" font-size="23" fill="#f7768e">failed LaunchSessionResult: session_id None</text>
+
+  <rect x="55" y="445" width="900" height="150" rx="10" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+  <text x="79" y="485" font-size="26" fill="#c0caf5">handle_server_message</text>
+  <text x="79" y="525" font-size="23" fill="#a9b1d6">LaunchSessionResult failure: log::warn!</text>
+  <text x="79" y="560" font-size="23" fill="#f7768e">SessionExited: _ =&gt; {} (no refetch)</text>
+
+  <rect x="55" y="645" width="900" height="150" rx="10" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+  <text x="79" y="685" font-size="26" fill="#c0caf5">Session view</text>
+  <text x="79" y="725" font-size="23" fill="#f7768e">nothing shown</text>
+  <text x="79" y="760" font-size="23" fill="#a9b1d6">list may still say running</text>
+
+  <!-- AFTER -->
+  <rect x="1045" y="245" width="900" height="150" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1069" y="285" font-size="26" fill="#c0caf5">SessionExited { .., reason }</text>
+  <text x="1069" y="325" font-size="23" fill="#9ece6a">session_id.or(desired_session_id)</text>
+  <text x="1069" y="360" font-size="23" fill="#a9b1d6">additive; old frame decodes as Completed</text>
+  <line x1="1495" y1="395" x2="1495" y2="440" stroke="#9ece6a" stroke-width="2" marker-end="url(#arr-green)"/>
+
+  <rect x="1045" y="445" width="900" height="150" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1069" y="485" font-size="26" fill="#c0caf5">session_failures: SessionKey -&gt; SessionFailure</text>
+  <text x="1069" y="525" font-size="23" fill="#9ece6a">cleared only by a successful launch</text>
+  <text x="1069" y="560" font-size="23" fill="#a9b1d6">DismissFailure; ForgetConn on unlink / sign-out</text>
+  <line x1="1495" y1="595" x2="1495" y2="640" stroke="#9ece6a" stroke-width="2" marker-end="url(#arr-green)"/>
+
+  <rect x="1045" y="645" width="900" height="150" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1069" y="685" font-size="26" fill="#c0caf5">render_session_failure banner</text>
+  <text x="1069" y="725" font-size="23" fill="#9ece6a">"The agent failed to start: ..." (plain text)</text>
+  <text x="1069" y="760" font-size="23" fill="#a9b1d6">exit also refetches the session list</text>
+
+  <rect x="1045" y="845" width="900" height="150" rx="10" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+  <text x="1069" y="885" font-size="26" fill="#c0caf5">Owner only</text>
+  <text x="1069" y="925" font-size="23" fill="#a9b1d6">events reach the launcher owner's channel</text>
+  <text x="1069" y="960" font-size="23" fill="#a9b1d6">member invalidation left on #1209</text>
+</svg>

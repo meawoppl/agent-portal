@@ -115,7 +115,33 @@ pub fn fold_session_start_reminder(
     default_display: impl FnOnce(&str) -> serde_json::Value,
 ) -> (String, Option<serde_json::Value>) {
     let body = body_with_plugin_skills(plugin_skill_reminder);
-    let contents = reminder_contents(&body);
+    fold_reminder(
+        text,
+        display_event,
+        &reminder_contents(&body),
+        default_display,
+    )
+}
+
+/// Fold a mid-session context change (the session's plugins changed) into the
+/// next input, the same way as the session-start reminder but carrying only
+/// the change.
+pub fn fold_context_update(
+    text: String,
+    display_event: Option<serde_json::Value>,
+    update: &str,
+    default_display: impl FnOnce(&str) -> serde_json::Value,
+) -> (String, Option<serde_json::Value>) {
+    fold_reminder(text, display_event, update.trim(), default_display)
+}
+
+fn fold_reminder(
+    text: String,
+    display_event: Option<serde_json::Value>,
+    contents: &str,
+    default_display: impl FnOnce(&str) -> serde_json::Value,
+) -> (String, Option<serde_json::Value>) {
+    let contents = contents.to_string();
     let display_event = match display_event {
         Some(event) => Some(attach_base_notice_to_agent_message(event, &contents)),
         None => Some(default_display(&visible_text_with_base_session_notice(
@@ -286,5 +312,24 @@ mod tests {
         assert!(text.contains("## Plugin Skills"));
         assert!(text.contains("kicad-pcb:pcb-workflow"));
         assert!(text.ends_with("route this board"));
+    }
+
+    /// A mid-session plugin change carries only the change, not the whole
+    /// portal reminder again, and stays visible in the transcript copy.
+    #[test]
+    fn context_update_folds_only_the_change() {
+        let (text, display) = fold_context_update(
+            "next request".to_string(),
+            None,
+            "## Plugin context changed\n\nNo plugin skills are enabled.",
+            |t| serde_json::json!({"echo": t}),
+        );
+        assert!(text.starts_with("<system-reminder>\n## Plugin context changed"));
+        assert!(!text.contains("Agent Portal version"));
+        assert!(text.ends_with("next request"));
+        assert!(display.unwrap()["echo"]
+            .as_str()
+            .unwrap()
+            .contains("Plugin context changed"));
     }
 }

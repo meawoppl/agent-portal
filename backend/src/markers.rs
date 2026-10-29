@@ -157,6 +157,33 @@ pub const HISTORY_RESTORE_INVALID: &str = "HISTORY_RESTORE_INVALID";
 /// health and remove the named stale pending request if it is replayed.
 pub const PERMISSION_CANCEL_PERSIST_FAILED: &str = "PERMISSION_CANCEL_PERSIST_FAILED";
 
+/// Child lifecycle persistence/sweep failure. Repeated events mean database
+/// failure or schema drift; inspect migration state and database health. The
+/// periodic sweep retries automatically; do not manually delete request rows.
+pub const SPAWN_LIFECYCLE_FAILED: &str = "SPAWN_LIFECYCLE_FAILED";
+
+/// A session stopped running (a failed launch, or its proxy disconnected),
+/// but its members could not be looked up to tell their dashboards
+/// (`handlers/websocket/member_status.rs`). Nobody is told beyond the owner's
+/// own launch result: the fan-out fails closed rather than broadcast wider.
+///
+/// - **Recurring:** DB/pool failure or schema drift on `session_members`;
+///   members' session lists show stale "running" status until they refresh.
+/// - **One-off:** a transient DB blip; only that change is missed.
+/// - **Action:** check DB health and the `session_members` schema.
+pub const MEMBER_STATUS_FANOUT_FAILED: &str = "MEMBER_STATUS_FANOUT_FAILED";
+
+/// A plugin command the user approved ran on its launcher
+/// (`handlers/plugins.rs`), but its card could not be written to the session
+/// transcript. The run is not repeated: the result still goes back to the
+/// user, flagged as unrecorded, so the transcript is missing that provenance.
+///
+/// - **Recurring:** DB/pool failure or schema drift on `messages`.
+/// - **One-off:** a transient DB blip; only that run's card is missing.
+/// - **Action:** check DB health and the `messages` schema; the log line names
+///   the session, plugin command and line that ran.
+pub const PLUGIN_COMMAND_RECORD_FAILED: &str = "PLUGIN_COMMAND_RECORD_FAILED";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -165,6 +192,7 @@ mod tests {
     /// the tests below can enforce uniqueness, naming, and that each is wired to
     /// a real emit site.
     const ALL_MARKERS: &[&str] = &[
+        SPAWN_LIFECYCLE_FAILED,
         PENDING_INPUT_PERSIST_FAILED,
         INPUT_SEQ_BUMP_FAILED,
         PUSH_DISPATCH_FAILED,
@@ -175,6 +203,8 @@ mod tests {
         SESSION_LAUNCH_CRASHLOOP_PAUSED,
         HISTORY_RESTORE_INVALID,
         PERMISSION_CANCEL_PERSIST_FAILED,
+        PLUGIN_COMMAND_RECORD_FAILED,
+        MEMBER_STATUS_FANOUT_FAILED,
     ];
 
     #[test]
@@ -219,6 +249,8 @@ mod tests {
             include_str!("handlers/websocket/session_manager/input_queue.rs"),
             include_str!("handlers/media_archive.rs"),
             include_str!("handlers/websocket/launcher_socket.rs"),
+            include_str!("handlers/plugins.rs"),
+            include_str!("handlers/websocket/member_status.rs"),
         ];
         for m in ALL_MARKERS {
             let referenced = sources.iter().any(|s| s.contains(m));

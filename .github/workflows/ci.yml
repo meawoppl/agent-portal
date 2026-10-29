@@ -237,6 +237,7 @@ jobs:
         run: |
           cargo test -p backend --lib handlers::messages::db_tests
           cargo test -p backend --lib handlers::agent_follow::tests
+          cargo test -p backend --lib handlers::session_activity::tests
           cargo test -p backend --lib handlers::session_access::db_tests
           cargo test -p backend --lib handlers::websocket::replay::replay_tests
           cargo test -p backend --lib db::session_lifecycle::tests
@@ -266,7 +267,7 @@ jobs:
             runner: ubuntu-24.04-arm
             cache-key: binaries-linux-aarch64
           - job-name: Build Binaries (macOS ARM64)
-            runner: macos-14
+            runner: macos-15
             cache-key: binaries-macos-arm64
           - job-name: Build Binaries (Windows x86_64)
             runner: windows-latest

@@ -17,8 +17,8 @@ use crate::io_task::claude_user_echo_value;
 
 use super::git_metadata::{check_and_send_branch_update_if_branch_changed, GitMetadataState};
 use super::{
-    ack_portal_input, emit_input_progress, format_duration, truncate, ConnectionResult,
-    PortalInput, SharedWsWrite,
+    ack_portal_input, emit_input_failure, emit_input_progress, format_duration, truncate,
+    ConnectionResult, PortalInput, SharedWsWrite,
 };
 
 /// Maximum iterations for wiggum mode before auto-stopping
@@ -171,11 +171,11 @@ pub(super) async fn handle_wiggum_activation<A: Agent>(
         .await
     {
         error!("Failed to send wiggum prompt to Claude: {}", e);
-        emit_input_progress(
+        emit_input_failure(
             ws_write,
             session_id,
             wiggum_input.client_msg_id,
-            shared::InputDeliveryStage::Failed,
+            session_lib::proxy_session::input_delivery::AGENT_STOPPED,
         )
         .await;
         return Some(ConnectionResult::AgentExited);
@@ -581,6 +581,19 @@ mod tests {
             process_wall_ms_between_turns: None,
             process_cpu_ms_turn: None,
             process_wall_ms_turn: None,
+            // Shell accounting is optional and absent from synthetic results.
+            shell_cpu_ms_turn: None,
+            shell_cpu_ms_since_last_result: None,
+            shell_wall_ms_since_last_result: None,
+            // Streaming and startup telemetry are absent in this synthetic result.
+            process_wall_ms_streaming: None,
+            process_cpu_ms_streaming: None,
+            main_stream_count: None,
+            main_stream_event_count: None,
+            main_stream_chunk_count: None,
+            process_start_tuning: None,
+            process_start_purge_delay_ms: None,
+            process_garbage_collections: None,
             num_turns: 1,
             result: Some(result.to_string()),
             subagent_stats: None,
@@ -600,6 +613,7 @@ mod tests {
             terminal_reason: None,
             fast_mode_state: None,
             model_usage: None,
+            model_usage_since_last_result: None,
             // 2.1.160 additions — all absent in a minimal test result.
             time_to_request_from_spawn_ms: None,
             warm_spare_claimed: None,

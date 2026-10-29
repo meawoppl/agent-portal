@@ -1,0 +1,7 @@
+# Every cargo-audit ignore must have an owned, current exposure review here.
+[[exceptions]]
+id = "RUSTSEC-2023-0071"
+owner = "@meawoppl"
+reviewed_on = 2026-10-21
+review_by = 2026-11-21
+reason = "VAPID uses only ES256KeyPair; the transitive rsa private-key path is not called. See docs/DEPENDENCY_SECURITY.md."

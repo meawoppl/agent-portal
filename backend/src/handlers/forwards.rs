@@ -216,7 +216,11 @@ pub(crate) fn member_session(
         .filter(session_members::user_id.eq(user_id))
         .select(Session::as_select())
         .first(conn)
-        .map_err(|_| AppError::NotFound("session"))
+        // Only a missing row is "not found": a database error must not read
+        // as the session (and its forward) being gone, which makes a managed
+        // plugin service tear itself down (#2264).
+        .optional()?
+        .ok_or(AppError::NotFound("session"))
 }
 
 /// Authorize the *owner* of `session_id` (registering/moving/revoking a forward

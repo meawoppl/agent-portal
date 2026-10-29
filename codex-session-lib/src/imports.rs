@@ -175,8 +175,8 @@ fn append_turns(
             bail!("A turn is still in progress. Finish it and close the original client before importing.");
         }
         for item in turn.items {
-            let (role, content) = match item {
-                codex_codes::protocol::ThreadItem::UserMessage { content, .. } => {
+            let (role, content) = match item.payload {
+                codex_codes::protocol::ThreadItemPayload::UserMessage { content, .. } => {
                     let text = content
                         .into_iter()
                         .map(input_text)
@@ -184,9 +184,12 @@ fn append_turns(
                         .join("\n");
                     ("user", serde_json::to_value(UserEchoEvent::new(text))?)
                 }
-                item => (
+                // Keep the wrapper: imported history must retain lifecycle times.
+                payload => (
                     "assistant",
-                    serde_json::to_value(ItemEvent::completed(serde_json::to_value(item)?))?,
+                    serde_json::to_value(ItemEvent::completed(serde_json::to_value(
+                        codex_codes::protocol::ThreadItem { payload, ..item },
+                    )?))?,
                 ),
             };
             push_message(messages, bytes, role, content)?;
@@ -243,22 +246,26 @@ mod tests {
             id: "turn-1".into(),
             status,
             items: vec![
-                codex_codes::protocol::ThreadItem::UserMessage {
-                    id: "user-1".into(),
-                    client_id: None,
-                    content: vec![UserInput::Text {
-                        text: "Explain the design".into(),
-                        text_elements: None,
-                    }],
-                },
-                codex_codes::protocol::ThreadItem::AgentMessage {
-                    id: "answer-1".into(),
-                    text: "Saved answer".into(),
-                    delivery: None,
-                    memory_citation: None,
-                    phase: None,
-                    questions: None,
-                },
+                codex_codes::protocol::ThreadItem::untimed(
+                    codex_codes::protocol::ThreadItemPayload::UserMessage {
+                        id: "user-1".into(),
+                        client_id: None,
+                        content: vec![UserInput::Text {
+                            text: "Explain the design".into(),
+                            text_elements: None,
+                        }],
+                    },
+                ),
+                codex_codes::protocol::ThreadItem::untimed(
+                    codex_codes::protocol::ThreadItemPayload::AgentMessage {
+                        id: "answer-1".into(),
+                        text: "Saved answer".into(),
+                        delivery: None,
+                        memory_citation: None,
+                        phase: None,
+                        questions: None,
+                    },
+                ),
             ],
             started_at: None,
             completed_at: None,
@@ -271,16 +278,16 @@ mod tests {
     #[test]
     fn history_preserves_order_roles_and_terminal_status_without_usage() {
         let mut messages = vec![];
-        append_turns(
-            &mut messages,
-            &mut 0,
-            vec![turn(codex_codes::TurnStatus::Completed)],
-        )
-        .unwrap();
+        let mut completed = turn(codex_codes::TurnStatus::Completed);
+        completed.items[1].started_at_ms = Some(1_000);
+        completed.items[1].completed_at_ms = Some(1_042);
+        append_turns(&mut messages, &mut 0, vec![completed]).unwrap();
         assert_eq!(messages.len(), 3);
         assert_eq!(messages[0].role, "user");
         assert_eq!(messages[0].content["content"], "Explain the design");
         assert_eq!(messages[1].content["item"]["text"], "Saved answer");
+        assert_eq!(messages[1].content["item"]["startedAtMs"], 1_000);
+        assert_eq!(messages[1].content["item"]["completedAtMs"], 1_042);
         assert_eq!(messages[2].content["status"], "completed");
         assert!(messages[2].content.get("usage").is_none());
     }

@@ -21,6 +21,7 @@ mod scheduled_tasks;
 mod service_stats;
 mod sessions;
 mod settings;
+mod spawn;
 mod users;
 
 pub use auth::*;
@@ -44,6 +45,7 @@ pub use scheduled_tasks::*;
 pub use service_stats::*;
 pub use sessions::*;
 pub use settings::*;
+pub use spawn::*;
 pub use users::*;
 
 #[cfg(test)]

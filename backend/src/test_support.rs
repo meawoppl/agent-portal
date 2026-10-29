@@ -20,7 +20,7 @@ use diesel::r2d2::{ConnectionManager, Pool};
 use tower_cookies::Key;
 use uuid::Uuid;
 
-use crate::models::{NewSessionWithId, NewUser, Session, User};
+use crate::models::{JsonVec, NewSessionWithId, NewUser, Session, User};
 
 use crate::config::MobileAppLinksConfig;
 use crate::db::DbPool;
@@ -187,7 +187,7 @@ pub fn insert_session(conn: &mut PgConnection, user_id: Uuid, session_name: &str
             repo_url: None,
             scheduled_task_id: None,
             paused: false,
-            claude_args: serde_json::Value::Array(Vec::new()),
+            claude_args: JsonVec::default(),
             launcher_version: None,
         })
         .get_result::<Session>(conn)

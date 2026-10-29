@@ -113,6 +113,10 @@ pub enum ProxyToServer {
         session_id: Uuid,
         client_msg_id: Uuid,
         stage: crate::InputDeliveryStage,
+        /// Why delivery failed, with `Failed`: a fixed, user-facing reason,
+        /// never the prompt or an agent's raw error. Absent from older proxies.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
     },
 
     /// Session status update

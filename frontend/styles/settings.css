@@ -535,9 +535,9 @@
 /* Update-and-restart button */
 .launcher-update-actions {
     display: grid;
-    grid-template-columns: 11rem 7rem 5rem;
+    grid-template-columns: repeat(2, 2.25rem);
     gap: 0.5rem;
-    justify-content: end;
+    justify-content: start;
     align-items: center;
 }
 
@@ -585,11 +585,11 @@
     opacity: 0.85;
 }
 .launcher-update-secondary {
-    padding: 0.5rem 0.75rem;
+    grid-column: 1 / -1;
+    padding: 0.3rem;
 }
 .launcher-update-secondary.is-placeholder {
-    visibility: hidden;
-    pointer-events: none;
+    display: none;
 }
 
 /* Per-launcher update lifecycle feedback (#710 follow-up) */
@@ -631,6 +631,25 @@
 .launcher-row--phantom {
     opacity: 0.75;
 }
+.launcher-server-version {
+    margin: 0.25rem 0 0;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+.launcher-version-behind {
+    color: var(--warning, #e0af68);
+}
+
+.launcher-version-badge {
+    margin-left: 0.4rem;
+    padding: 0.05rem 0.4rem;
+    border: 1px solid currentcolor;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+}
+
 .launcher-phantom-badge {
     display: inline-block;
     padding: 0.1rem 0.5rem;
@@ -1064,14 +1083,15 @@
 }
 
 .agents-badge {
+    display: inline-block;
     width: fit-content;
-    padding: 0.05rem 0.4rem;
-    border-radius: 4px;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
     font-size: 0.75rem;
+    white-space: nowrap;
 }
 
 .agents-badge.installed,
-.agents-login.logged-in,
 .agent-login-status.success {
     color: var(--success, #9ece6a);
 }
@@ -1081,29 +1101,12 @@
 }
 
 .agents-badge.missing,
-.agents-login.logged-out,
 .agent-login-status.error {
     color: var(--error, #f7768e);
 }
 
 .agents-badge.missing {
     background: color-mix(in srgb, var(--error, #f7768e) 18%, transparent);
-}
-
-/* One line, ellipsized (full text in the title tooltip): a long login label
-   ("signed in — user@host (plan) [via]") must not wrap, both because wrapping
-   breaks the reserved-height row stability above and because it widens the
-   auto-layout column when the probe result lands. */
-.agents-login {
-    font-size: 0.8rem;
-    max-width: 14rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.agents-login.unknown {
-    color: var(--text-secondary);
 }
 
 .agents-signin,
@@ -1188,10 +1191,47 @@
     font-size: 0.85rem;
 }
 
-.agent-login-url {
+.agent-login-link-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.agent-login-link-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 2rem;
+    padding: 0.3rem 0.65rem;
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    background: transparent;
     color: var(--accent);
+    font: inherit;
     font-size: 0.85rem;
-    word-break: break-all;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.agent-login-link-button:hover {
+    background: var(--bg-darker);
+}
+
+.agent-login-copy-status {
+    display: block;
+    margin-top: 0.3rem;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+}
+
+.agent-login-copy-status:empty {
+    display: none;
+}
+
+@media (pointer: coarse) {
+    .agent-login-link-button {
+        min-height: 44px;
+    }
 }
 
 .agent-login-device-code,
@@ -1454,6 +1494,84 @@
 
 .plugins-browser a {
     color: var(--accent);
+}
+
+.plugin-policy-control {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+}
+
+.plugin-policy-control select {
+    padding: 0.25rem 0.4rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-dark);
+    color: var(--text-primary);
+    font-size: 0.75rem;
+}
+
+.plugin-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    padding-top: 0.3rem;
+    border-top: 1px solid rgba(86, 95, 137, 0.3);
+}
+
+.plugin-card-badge.update {
+    border-color: rgba(224, 175, 104, 0.5);
+    background: rgba(224, 175, 104, 0.12);
+    color: #e0af68;
+}
+
+.plugin-outcome,
+.plugin-confirm {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.7rem 0.9rem;
+    border: 1px solid rgba(158, 206, 106, 0.4);
+    border-radius: 8px;
+    background: rgba(158, 206, 106, 0.08);
+    font-size: 0.82rem;
+}
+
+.plugin-outcome.failed,
+.plugin-confirm {
+    border-color: rgba(247, 118, 142, 0.45);
+    background: rgba(247, 118, 142, 0.08);
+}
+
+.plugin-outcome.running {
+    border-color: rgba(122, 162, 247, 0.4);
+    background: rgba(122, 162, 247, 0.08);
+}
+
+.plugin-outcome p,
+.plugin-confirm p {
+    flex-basis: 100%;
+    margin: 0;
+    color: var(--text-secondary);
+}
+
+.plugin-outcome details {
+    flex-basis: 100%;
+}
+
+.plugin-outcome pre {
+    max-height: 22rem;
+    overflow: auto;
+    margin: 0.4rem 0 0;
+    padding: 0.6rem;
+    border-radius: 6px;
+    background: var(--bg-darker);
+    font: 0.72rem var(--font-mono);
+    white-space: pre-wrap;
 }
 
 .plugins-browser-grid {
@@ -1771,4 +1889,107 @@
     color: var(--accent);
     font-size: 13px;
     white-space: nowrap;
+}
+
+/* Keep machine metadata compact and give every agent an equal share. The
+   minimum width preserves usable columns on phones; only this table scrolls. */
+.computers-table {
+    table-layout: fixed;
+    min-width: 68rem;
+}
+
+.computers-table .computer-column {
+    width: 13rem;
+}
+
+.computers-table .sessions-column {
+    width: 6rem;
+}
+
+.computers-table .actions-column {
+    width: 6.5rem;
+}
+
+.computers-table th,
+.computers-table td {
+    padding: 0.85rem 0.75rem;
+    vertical-align: top;
+}
+
+.computers-table .agents-host-name {
+    overflow-wrap: anywhere;
+}
+
+.computers-table .agents-host-alias,
+.launcher-host-version,
+.launcher-sessions .launcher-active-count {
+    display: block;
+    margin: 0.3rem 0 0;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+}
+
+.computers-table .launcher-version-behind {
+    color: var(--warning);
+}
+
+.launcher-update-primary,
+.launcher-restart-button {
+    padding: 0;
+    font-size: 1.3rem;
+    line-height: 1;
+}
+
+.agents-cell > .agents-statuses {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+}
+
+.agents-badge.logged-in {
+    color: var(--success, #9ece6a);
+    background: color-mix(in srgb, var(--success, #9ece6a) 15%, transparent);
+}
+
+.agents-badge.logged-out {
+    color: var(--warning, #e0af68);
+    background: color-mix(in srgb, var(--warning, #e0af68) 15%, transparent);
+}
+
+.agents-badge.unknown {
+    color: var(--text-secondary);
+    background: var(--bg-darker);
+}
+
+.agents-details {
+    font-size: 0.8rem;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.agents-account,
+.agents-account-meta {
+    display: block;
+}
+
+.agents-account-meta {
+    color: var(--text-secondary);
+}
+
+@media (pointer: coarse) {
+    .launcher-update-actions {
+        grid-template-columns: repeat(2, 44px);
+        gap: 0.25rem;
+    }
+
+    .launcher-update-primary,
+    .launcher-restart-button,
+    .launcher-update-secondary,
+    .agents-signin {
+        min-height: 44px;
+    }
+
+    .computers-table .actions-column {
+        width: 7.5rem;
+    }
 }

@@ -13,6 +13,14 @@ pub struct PluginInventoryResponse {
     /// The session launcher supports saving per-session skill selection.
     #[serde(default)]
     pub session_selection_supported: bool,
+    /// The selection change was handed to the running session, which picks it
+    /// up on its next turn; otherwise it applies at the next launch.
+    #[serde(default)]
+    pub applies_live: bool,
+    /// A posted change has not reached the agent yet; it does on the
+    /// session's next input.
+    #[serde(default)]
+    pub context_pending: bool,
     #[serde(default)]
     pub injected_context: Vec<PluginContextEntry>,
     #[serde(default)]
@@ -143,8 +151,12 @@ pub struct PluginRequest {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PluginAction {
     Inventory,
+    /// Inventory with `update_available` checked against each plugin's source.
+    CheckUpdates,
+    /// `force` replaces an existing install of the same name (reinstall).
     Install {
         source: String,
+        force: bool,
     },
     Update {
         name: String,
@@ -163,11 +175,14 @@ pub enum PluginAction {
         name: String,
         action: PluginSurfaceAction,
     },
+    /// Without `approval`, resolve the command and return the exact line and
+    /// a `proposal` fingerprint, running nothing. With the fingerprint the
+    /// user approved, run it, unless what it resolves to has changed since.
     RunCommand {
         name: String,
         command: String,
         args: Vec<String>,
-        approved: bool,
+        approval: Option<String>,
     },
 }
 
@@ -194,6 +209,12 @@ pub struct PluginResponse {
     pub inventory: Option<PluginInventoryResponse>,
     #[serde(default)]
     pub surface: Option<PluginSurfaceStatus>,
+    /// A previewed command's fingerprint, to approve it with.
+    #[serde(default)]
+    pub proposal: Option<String>,
+    /// The command ran, but recording it in the session transcript failed.
+    #[serde(default)]
+    pub transcript_error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -218,6 +239,12 @@ pub struct PluginSurfaceStatus {
     pub log_tail: Vec<String>,
     pub pid: Option<u32>,
     pub started_at: Option<String>,
+    /// The forward URL of a launcher-managed surface.
+    #[serde(default)]
+    pub url: Option<String>,
+    /// The session the surface is forwarded to.
+    #[serde(default)]
+    pub session_id: Option<uuid::Uuid>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -244,8 +271,12 @@ pub struct PluginContextEntry {
     pub kind: PluginContextKind,
     pub activation: PluginActivation,
     pub reason: String,
+    /// Size of the source file.
     pub context_bytes: u64,
+    /// Tokens that entered the agent's context: a skill's catalog or reminder
+    /// line (its body is read on demand), or a prompt's whole text.
     pub estimated_tokens: u64,
+    /// The source, capped, for inspection.
     pub text: String,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -290,7 +321,7 @@ mod tests {
                 name: "tools".into(),
                 command: "inspect".into(),
                 args: vec!["a file; $(literal)".into()],
-                approved: false,
+                approval: Some("fingerprint".into()),
             },
         };
         let wire = serde_json::to_string(&request).unwrap();
@@ -298,8 +329,16 @@ mod tests {
             serde_json::from_str::<PluginRequest>(&wire).unwrap(),
             request
         );
-        let missing_approval = wire.replace(",\"approved\":false", "");
-        assert!(serde_json::from_str::<PluginRequest>(&missing_approval).is_err());
+        // Leaving the approval out asks for a preview: nothing runs.
+        let missing_approval = wire.replace(",\"approval\":\"fingerprint\"", "");
+        let PluginAction::RunCommand { approval, .. } =
+            serde_json::from_str::<PluginRequest>(&missing_approval)
+                .unwrap()
+                .action
+        else {
+            panic!("still a command request");
+        };
+        assert_eq!(approval, None);
     }
 
     #[test]

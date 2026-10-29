@@ -1348,6 +1348,12 @@
     background: color-mix(in srgb, var(--accent, #7aa2f7) 24%, transparent);
 }
 
+.error-recovery-hint {
+    margin-top: 0.75rem;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
 .error-type {
     font-family: var(--font-mono);
     font-size: 0.75rem;
@@ -1627,8 +1633,13 @@
     font-family: var(--font-mono, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace);
     font-size: 0.82rem;
     line-height: 1.45;
-    white-space: pre;
-    overflow: auto;
+
+    /* Wrap rather than scroll sideways: a one-line shell command runs far
+       past the card, and a horizontal scrollbar (hidden on macOS) leaves the
+       rest of it unseen. Long tokens break too, so nothing is clipped. */
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    overflow-y: auto;
     max-height: 260px;
 }
 

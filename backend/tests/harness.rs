@@ -186,7 +186,7 @@ async fn archive_sweep_persists_and_is_idempotent() {
             repo_url: None,
             scheduled_task_id: None,
             paused: false,
-            claude_args: serde_json::Value::Array(vec![]),
+            claude_args: backend::models::JsonVec::default(),
             launcher_version: None,
         })
         .execute(&mut conn)
@@ -351,7 +351,7 @@ async fn retention_holds_trim_when_archive_fails() {
             repo_url: None,
             scheduled_task_id: None,
             paused: false,
-            claude_args: serde_json::Value::Array(vec![]),
+            claude_args: backend::models::JsonVec::default(),
             launcher_version: None,
         })
         .execute(&mut conn)
@@ -474,7 +474,7 @@ async fn rearchive_after_trim_merges_transcript() {
             repo_url: None,
             scheduled_task_id: None,
             paused: false,
-            claude_args: serde_json::Value::Array(vec![]),
+            claude_args: backend::models::JsonVec::default(),
             launcher_version: None,
         })
         .execute(&mut conn)

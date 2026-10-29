@@ -276,6 +276,8 @@ the typed Rust parsers for the agent CLIs' JSON protocols.
 
 ## Documentation
 
+- [Agent child sessions](docs/AGENT_CHILD_SESSIONS.md): request children with owner approval, lineage, limits and idle cleanup.
+
 | Document | Description |
 |----------|-------------|
 | [Usage Guide](docs/USAGE.md) | Web interface, CLI options, voice input, sharing |

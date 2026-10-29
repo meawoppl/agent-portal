@@ -7,6 +7,21 @@ use uuid::Uuid;
 
 use crate::buffer::BufferedOutput;
 
+#[derive(Clone)]
+pub struct PortalCredentials {
+    pub backend_url: String,
+    pub token: String,
+}
+
+impl std::fmt::Debug for PortalCredentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PortalCredentials")
+            .field("backend_url", &self.backend_url)
+            .field("token", &"[redacted]")
+            .finish()
+    }
+}
+
 /// Configuration for creating a session
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SessionConfig {
@@ -20,6 +35,14 @@ pub struct SessionConfig {
     /// process start, never sent as a turn of its own or rearmed by /clear.
     #[serde(default)]
     pub recovery_context: Option<String>,
+    /// Runtime-only identity for agent-originated Portal operations. Never
+    /// persisted in snapshots or emitted by Debug.
+    #[serde(skip)]
+    pub portal_credentials: Option<PortalCredentials>,
+    /// A change to the session's context posted while it runs (its plugins
+    /// changed), folded into the next real input. Live state, never persisted.
+    #[serde(skip)]
+    pub context_updates: crate::ContextInbox,
     /// Unique session identifier
     pub session_id: Uuid,
     /// Working directory for the Claude session
@@ -115,10 +138,21 @@ pub struct PendingPermission {
     pub requested_at: DateTime<Utc>,
 }
 
-/// Serializable session state for persistence
-///
-/// This captures everything needed to restore a session after
-/// a service restart.
+impl SessionConfig {
+    pub fn portal_environment(&self) -> [(&'static str, String); 2] {
+        let (url, token) = self
+            .portal_credentials
+            .as_ref()
+            .map(|c| (c.backend_url.clone(), c.token.clone()))
+            .unwrap_or_default();
+        [
+            ("PORTAL_SESSION_BACKEND", url),
+            ("PORTAL_SESSION_TOKEN", token),
+        ]
+    }
+}
+
+/// Serializable session state for persistence, excluding runtime credentials.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionSnapshot {
     /// Session identifier
@@ -169,11 +203,38 @@ impl SessionSnapshot {
 mod tests {
     use super::*;
 
+    #[test]
+    fn portal_credentials_are_runtime_only_and_redacted() {
+        let mut config = sample_config();
+        config.portal_credentials = Some(PortalCredentials {
+            backend_url: "ws://localhost:3000".into(),
+            token: "sensitive-token".into(),
+        });
+        assert!(!format!("{config:?}").contains("sensitive-token"));
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(!json.contains("sensitive-token"));
+        assert!(serde_json::from_str::<SessionConfig>(&json)
+            .unwrap()
+            .portal_credentials
+            .is_none());
+        assert_eq!(
+            config.portal_environment()[1],
+            ("PORTAL_SESSION_TOKEN", "sensitive-token".into())
+        );
+        config.portal_credentials = None;
+        assert!(config
+            .portal_environment()
+            .iter()
+            .all(|(_, value)| value.is_empty()));
+    }
+
     fn sample_config() -> SessionConfig {
         SessionConfig {
             runtime_command: None,
             memory_events_path: None,
             recovery_context: None,
+            portal_credentials: None,
+            context_updates: Default::default(),
             session_id: Uuid::new_v4(),
             working_directory: PathBuf::from("/tmp/test"),
             session_name: "test-session".to_string(),

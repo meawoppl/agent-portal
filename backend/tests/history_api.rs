@@ -236,7 +236,7 @@ fn build_fixture(pool: backend::db::DbPool) -> Fixture {
             repo_url: None,
             scheduled_task_id: None,
             paused: false,
-            claude_args: serde_json::Value::Array(vec![]),
+            claude_args: backend::models::JsonVec::default(),
             launcher_version: None,
         })
         .execute(&mut conn)
@@ -451,7 +451,7 @@ async fn close_session_takes_final_archive_before_delete() {
             repo_url: None,
             scheduled_task_id: None,
             paused: false,
-            claude_args: serde_json::Value::Array(vec![]),
+            claude_args: backend::models::JsonVec::default(),
             launcher_version: None,
         })
         .execute(&mut conn)
@@ -517,6 +517,7 @@ fn restore_launcher(
         .try_register_launcher(
             id,
             LauncherConnection {
+                log_span: tracing::Span::none(),
                 sender,
                 launcher_name: format!("restore test {id}"),
                 hostname: if capable {
@@ -738,7 +739,7 @@ async fn restore_after_deletion_is_atomic_retry_safe_and_preserves_archive() {
     assert_eq!(row.input_seq, 0);
     assert_eq!(row.total_cost_usd, 0.0);
     assert_eq!(row.scheduled_task_id, None);
-    assert_eq!(row.claude_args, serde_json::Value::Array(vec![]));
+    assert!(row.claude_args.0.is_empty());
     assert!(row.history_restore.is_some());
     assert_eq!(
         backend::schema::messages::table

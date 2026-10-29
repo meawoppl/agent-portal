@@ -98,6 +98,10 @@ pub struct DeliveryMeta {
     /// Failure detail (only when `stage == Some(Failed)`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// At `ServerReceived`: durably queued while the agent is offline (see
+    /// `ServerToClient::InputProgress::queued`). Cleared by any later stage.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub queued: bool,
 }
 
 impl DeliveryMeta {
@@ -259,6 +263,11 @@ pub enum ServerToClient {
         /// Populated for `Failed` (the delivery error), absent otherwise.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         message: Option<String>,
+        /// With `ServerReceived`: the agent is offline and the input was
+        /// durably stored (sequence allocated and persisted), so it is sent
+        /// when the agent reconnects. A client that predates this ignores it.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        queued: bool,
     },
 
     /// The agent withdrew this request. Clear only the matching prompt.
@@ -336,10 +345,17 @@ pub enum ServerToClient {
         error: Option<String>,
     },
 
-    /// A proxy process exited (forwarded from launcher)
+    /// A session's agent is not running. To the launcher's owner: its proxy
+    /// exited, with the launcher's classification in `reason`. To the
+    /// session's other members, the bare form (no `exit_code`, no `reason`):
+    /// the session went disconnected, after an exit or a launch that never
+    /// ran, so refetch the session list. Members never learn why.
     SessionExited {
         session_id: Uuid,
         exit_code: Option<i32>,
+        /// Omitted, never null, in the bare form and from older backends.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<super::launcher::SessionExitReason>,
     },
 
     /// Per-turn performance metrics row saved by the backend (PR 1 of N).

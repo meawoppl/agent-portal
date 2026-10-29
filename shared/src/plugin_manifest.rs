@@ -70,6 +70,10 @@ pub struct CommandSection {
     #[serde(default)]
     pub description: Option<String>,
     pub run: String,
+    /// Arguments given when Portal runs the command are shell-quoted and
+    /// appended to `run`; without this, `run` runs exactly as written.
+    #[serde(default)]
+    pub accepts_args: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

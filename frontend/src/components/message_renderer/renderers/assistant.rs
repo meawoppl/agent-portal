@@ -387,13 +387,14 @@ mod tests {
     }
 
     #[test]
-    fn authentication_reply_offers_login_only_with_an_authorized_callback() {
+    fn authentication_reply_offers_a_recovery_and_nothing_otherwise() {
         let failed = assistant(r#", "error": "authentication_failed""#);
         assert!(
             render_assistant_message_content(&failed, Uuid::nil(), Some(Callback::noop()))
                 .is_some()
         );
-        assert!(render_assistant_message_content(&failed, Uuid::nil(), None).is_none());
+        // Without the owner's callback it still says where to sign in.
+        assert!(render_assistant_message_content(&failed, Uuid::nil(), None).is_some());
         assert!(render_assistant_message_content(
             &assistant(""),
             Uuid::nil(),

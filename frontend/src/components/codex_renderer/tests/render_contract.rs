@@ -62,14 +62,14 @@ fn content_bearing_events_render_some_in_group() {
 fn app_server_reasoning_keeps_its_trace_and_lifecycle_id() {
     use super::super::events::codex_item_id;
     use super::super::CodexItem;
-    use codex_codes::protocol::ThreadItem as AppServerThreadItem;
+    use codex_codes::protocol::ThreadItemPayload as AppServerThreadItem;
 
     let item: CodexItem = serde_json::from_str(
         r#"{"content":[],"id":"rs_9","summary":["first","second"],"type":"reasoning"}"#,
     )
     .unwrap();
     match &item {
-        CodexItem::AppServer(inner) => match inner.as_ref() {
+        CodexItem::AppServer(inner) => match &inner.payload {
             AppServerThreadItem::Reasoning { summary, .. } => {
                 assert_eq!(
                     summary.as_deref(),
