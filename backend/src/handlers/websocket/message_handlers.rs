@@ -824,7 +824,7 @@ mod tests {
                 assert!(parse_claude_event(provider, &serde_json::json!({"type": kind})).is_none());
             }
         }
-        let portal = PortalMessage::text("Session started").to_json();
+        let portal = PortalMessage::text("Session started".to_string()).to_json();
         assert!(parse_claude_event(AgentType::Claude, &portal).is_none());
         // Real malformed Claude frames still produce a diagnostic.
         assert!(
