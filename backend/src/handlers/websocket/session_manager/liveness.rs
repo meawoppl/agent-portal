@@ -81,7 +81,9 @@ impl SessionManager {
                     continue; // superseded since we looked
                 }
                 let cancel = conn.cancel.clone();
+                let log_span = conn.log_span.clone();
                 drop(conn);
+                let _context = log_span.enter();
                 if self.evict_dead_connection(key, *gen, &cancel) {
                     warn!(
                         "Liveness sweep: proxy connection for session {} silent > {}s; evicted",
@@ -109,7 +111,9 @@ impl SessionManager {
                     continue;
                 }
                 let cancel = conn.cancel.clone();
+                let log_span = conn.log_span.clone();
                 drop(conn);
+                let _context = log_span.enter();
                 if self.unregister_launcher(id, Some(*gen)) {
                     warn!(
                         "Liveness sweep: launcher {} silent > {}s; evicted",
@@ -135,6 +139,33 @@ mod tests {
     use super::*;
     use tokio_util::sync::CancellationToken;
 
+    #[test]
+    fn eviction_log_keeps_registered_identity_after_socket_context_has_ended() {
+        let manager = SessionManager::new();
+        let key = SessionId::new(uuid::Uuid::new_v4().to_string());
+        let (tx, _rx) = super::super::conn_channel(16);
+        let logs = crate::log_context::tests::capture(|| {
+            let span = tracing::info_span!(
+                "proxy",
+                user = "Matt",
+                session_name = "log-review",
+                computer = "test-mac"
+            );
+            span.in_scope(|| manager.register_session(key.clone(), tx, CancellationToken::new()));
+            manager
+                .sessions
+                .get(&key)
+                .unwrap()
+                .last_seen
+                .store(0, Ordering::Relaxed);
+            assert_eq!(manager.sweep_stale_connections(60, 90), (1, 0));
+        });
+        let evicted = logs.lines().find(|line| line.contains("silent >")).unwrap();
+        for label in ["Matt", "log-review", "test-mac"] {
+            assert!(evicted.contains(label), "{evicted}");
+        }
+    }
+
     fn launcher_conn(
         user_id: Uuid,
         hostname: &str,
@@ -145,6 +176,7 @@ mod tests {
         // not to a dead channel.
         std::mem::forget(rx);
         LauncherConnection {
+            log_span: tracing::Span::none(),
             system: None,
             sender,
             launcher_name: format!("launcher-{hostname}"),

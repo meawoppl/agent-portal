@@ -522,3 +522,30 @@ live only in the daemon process. They are not a durable delivery protocol:
 daemon crashes and application acknowledgments still need backend deduplication
 and explicit delivery identities. Successful WebSocket writes alone do not
 prove execution.
+
+### Reading server log context
+
+Request and connection logs carry readable labels **alongside** stable IDs:
+`user` is the database name and email, `session_name` is the registered session,
+`computer` is its hostname, and `owner` distinguishes the session owner from an
+editor viewing it. IDs remain useful when labels collide or change. Socket
+labels are a registration-time snapshot, refreshed on reconnect; heartbeat and
+output events do not query the database for names. Liveness evictions retain
+that socket context even though the sweep runs in a background task.
+
+HTTP context includes `method`, `route` (the route template, not raw paths or queries), `peer_ip` and
+`user_agent`. `peer_ip` is the actual TCP peer and may be the reverse proxy.
+`reported_forwarded_for` is the bounded, untrusted header value, not proof of
+client identity and never an authorization input. Missing addresses print
+`unknown`, not Rust's `Some(...)` / `None` representation.
+
+A `Bearer token rejected` warning includes its reason and, when the exact
+presented token hash still matches a database row, the token owner's name/email (not proof of who presented it),
+`token_name`, token row ID, and any bound session/computer. This lookup does not
+accept the token or trust an unsigned/expired JWT's claims. A deleted token or
+unavailable database yields an explicit unknown/unavailable identity instead.
+Forwarded application paths are redacted. Use the request route, user agent and reported address to locate a retrying
+client; an unbound token cannot by itself identify the physical computer.
+
+Credentials, token hashes, cookies, query strings and request bodies are not
+added to log context. Labels are bounded and control characters stripped.

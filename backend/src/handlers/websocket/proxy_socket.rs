@@ -16,6 +16,10 @@ use std::sync::Arc;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
+#[tracing::instrument(
+    skip_all,
+    fields(user, user_id, session_name, session_id, computer, owner, owner_id)
+)]
 pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) {
     let session_manager = app_state.session_manager.clone();
     let db_pool = app_state.db_pool.clone();
@@ -50,8 +54,7 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
             },
             _ = cancel.cancelled() => {
                 warn!(
-                    "Proxy connection for session {:?} force-closed by server (evicted)",
-                    session_key
+                    "Proxy connection force-closed by server (evicted)"
                 );
                 break;
             }
@@ -282,6 +285,9 @@ fn handle_proxy_message(
             let mut tunnel_sizing = None;
 
             if result.success {
+                if let (Some(id), Ok(mut conn)) = (result.session_id, db_pool.get()) {
+                    crate::log_context::record_session(&mut conn, id);
+                }
                 // Only now do we expose the socket via SessionManager and
                 // bind cleanup state. The send_task in handle_session_socket
                 // owns the WS sender — replies (including the RegisterAck
@@ -323,8 +329,11 @@ fn handle_proxy_message(
             });
 
             info!(
-                "Session registered: {} ({}) - success: {}, client_version: {:?}",
-                session_name, claude_session_id, result.success, client_version
+                "Session registered: {} ({}) - success: {}, client_version: {}",
+                crate::log_context::label(&session_name),
+                claude_session_id,
+                result.success,
+                client_version.as_deref().unwrap_or("unknown")
             );
 
             if result.success {
@@ -676,12 +685,10 @@ fn handle_session_update(
         error!("Failed to update session metadata: {}", e);
     } else {
         info!(
-            "Updated session {}: branch={:?} pr_url={:?} repo_url={:?} open_prs={}",
-            current_session_id,
-            git_branch,
-            pr_url,
-            repo_url,
-            open_prs.len()
+            session_id = %current_session_id,
+            branch = %crate::log_context::label(git_branch.as_deref().unwrap_or("none")),
+            has_pr = pr_url.is_some(), has_repo = repo_url.is_some(), open_prs = open_prs.len(),
+            "Session metadata updated"
         );
 
         if let Some(ref key) = session_key {

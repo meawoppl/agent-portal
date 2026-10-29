@@ -46,12 +46,22 @@ impl OutboundAuthorization {
     }
 }
 
+#[tracing::instrument(skip_all, fields(user, user_id = %user_id, session_name, session_id, computer, owner, owner_id))]
 pub async fn handle_web_client_socket(
     socket: WebSocket,
     app_state: Arc<AppState>,
     user_id: Uuid,
     linked: Option<crate::handlers::federation::LinkedAuth>,
 ) {
+    if let Ok(mut conn) = app_state.db_pool.get() {
+        use crate::schema::users;
+        if let Ok(user) = users::table
+            .find(user_id)
+            .first::<crate::models::User>(&mut conn)
+        {
+            crate::log_context::record_user(&user);
+        }
+    }
     let session_manager = app_state.session_manager.clone();
     let db_pool = app_state.db_pool.clone();
     let initial_replay_limit = app_state.message_retention_count;
@@ -455,6 +465,9 @@ fn handle_web_register(
     });
     match access {
         Ok(_session) => {
+            if let Ok(mut conn) = db_pool.get() {
+                crate::log_context::record_session(&mut conn, session_id);
+            }
             let key = SessionId::new(session_id.to_string());
             *session_key = Some(key.clone());
             *verified_session_id = Some(session_id);
