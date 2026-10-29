@@ -113,7 +113,7 @@ pub enum SessionEventType {
 }
 ```
 
-**Integration point:** In `handle_claude_output()` at `backend/src/handlers/websocket/message_handlers.rs`, after the existing `broadcast_to_web_clients` call, add:
+**Integration point:** In `handle_agent_output()` at `backend/src/handlers/websocket/message_handlers.rs`, after the existing `broadcast_to_web_clients` call, add:
 
 ```rust
 session_manager.global_tx.send(SessionEvent {
