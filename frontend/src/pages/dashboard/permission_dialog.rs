@@ -41,6 +41,9 @@ pub struct PermissionDialogProps {
     /// empty-multi-select confirm gate — this is a bare "submit requested"
     /// signal.
     pub on_submit: Callback<()>,
+    /// AskUserQuestion: dismiss the questions without answering them.
+    #[prop_or_default]
+    pub on_skip: Callback<()>,
     /// Callback when user selects an answer for a specific question
     /// (question_index, answer)
     pub on_set_answer: Callback<(usize, String)>,
@@ -543,15 +546,25 @@ fn render_ask_user_question(props: &PermissionDialogProps, parsed: &AskUserQuest
                         html! {}
                     }
                 }
-                <button
-                    class="submit-all-answers"
-                    onclick={submit_onclick}
-                    disabled={!props.submit_enabled}
-                >
-                    { &props.submit_button_label }
-                </button>
+                <div class="question-submit-actions">
+                    <button
+                        class="submit-all-answers"
+                        onclick={submit_onclick}
+                        disabled={!props.submit_enabled}
+                    >
+                        { &props.submit_button_label }
+                    </button>
+                    <button
+                        type="button"
+                        class="skip-questions"
+                        title="Dismiss without answering; the agent is told you skipped"
+                        onclick={props.on_skip.reform(|_: MouseEvent| ())}
+                    >
+                        { "Skip" }
+                    </button>
+                </div>
                 <div class="question-hint">
-                    { "Click options to answer each question, then submit" }
+                    { "Click options to answer each question, then submit, or skip to continue without answering" }
                 </div>
             </div>
         </CollapsiblePrompt>
