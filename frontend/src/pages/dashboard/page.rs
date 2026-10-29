@@ -203,12 +203,7 @@ pub fn dashboard_page() -> Html {
         // visible top-to-bottom rail (grouped when the pref is on). The rail's
         // host headers are inserted purely visually and carry no display index.
         if ui_state.group_by_host {
-            sorted.sort_by(|a, b| {
-                a.key
-                    .conn
-                    .cmp(&b.key.conn)
-                    .then_with(|| session_order::session_display_cmp_grouped(a, b))
-            });
+            session_order::sort_by_host(&mut sorted);
         } else {
             sorted.sort_by(|a, b| {
                 a.key
