@@ -549,3 +549,8 @@ client; an unbound token cannot by itself identify the physical computer.
 
 Credentials, token hashes, cookies, query strings and request bodies are not
 added to log context. Labels are bounded and control characters stripped.
+
+Expected credential rejections are now `WARN Bearer token rejected`, replacing
+`ERROR JWT verification failed` and the old revoked/expired-token messages.
+Database verification failures remain errors. Update alert rules that matched
+the old authentication severity or text; the rejection is still visible.
