@@ -114,7 +114,11 @@ pub(crate) fn persisted_activity_states(
 /// None means no turn-state information, rather than "busy" or "idle".
 /// Inspect only protocol discriminators; tool output quoting an error is not
 /// itself a rate limit. User input starts work even when stored as plain text.
-fn activity_signal(agent: &str, role: &str, content: &str) -> Option<SessionActivityState> {
+pub(crate) fn activity_signal(
+    agent: &str,
+    role: &str,
+    content: &str,
+) -> Option<SessionActivityState> {
     use SessionActivityState::{Busy, Idle, Throttled};
     if matches!(role, "portal" | "system") {
         return None;

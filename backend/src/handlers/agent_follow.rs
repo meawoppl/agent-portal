@@ -146,7 +146,12 @@ fn read_page(
         }
         let summary =
             super::peek_summary::summarize_message(message_id, &agent, &role, &content, time);
-        let lifecycle = lifecycle::classify(&agent, &content);
+        let mut lifecycle = lifecycle::classify(&agent, &content);
+        // Use the same meaningful-event signals as Computers and peek: Codex
+        // persists item events, not turn.started, and user input can be plain text.
+        lifecycle.activity = lifecycle
+            .activity
+            .or_else(|| super::session_activity::activity_signal(&agent, &role, &content));
         let kind = match summary.kind.as_str() {
             "text"
                 if role == "portal"
@@ -212,7 +217,12 @@ mod tests {
             ))
             .execute(&mut conn)
             .unwrap();
-        let first = insert(&mut conn, session.id, user.id, r#"{"type":"turn.started"}"#);
+        let first = insert(
+            &mut conn,
+            session.id,
+            user.id,
+            r#"{"type":"item.started","item":{"id":"i","type":"agent_message","text":""}}"#,
+        );
         let last = insert(
             &mut conn,
             session.id,
