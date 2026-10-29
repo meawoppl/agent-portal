@@ -1,7 +1,7 @@
 use super::continuations::handle_session_limit_reached;
 use super::message_handlers::{
-    handle_claude_output, replay_forward_opens_from_db, replay_pending_inputs_from_db,
-    ClaudeOutputContext, ClaudeOutputFrame,
+    handle_agent_output, replay_forward_opens_from_db, replay_pending_inputs_from_db,
+    AgentOutputContext, AgentOutputFrame,
 };
 use super::permissions::{handle_permission_cancelled, handle_permission_request};
 use super::registration::{register_or_update_session, RegistrationParams};
@@ -342,8 +342,8 @@ fn handle_proxy_message(
             content,
             agent_type,
         } => {
-            handle_claude_output(
-                ClaudeOutputContext {
+            handle_agent_output(
+                AgentOutputContext {
                     session_manager,
                     session_key,
                     db_session_id: *db_session_id,
@@ -352,7 +352,7 @@ fn handle_proxy_message(
                     tx,
                     image_store: &app_state.image_store,
                 },
-                ClaudeOutputFrame {
+                AgentOutputFrame {
                     content,
                     seq: None,
                     agent_type,
@@ -364,8 +364,8 @@ fn handle_proxy_message(
             content,
             agent_type,
         } => {
-            handle_claude_output(
-                ClaudeOutputContext {
+            handle_agent_output(
+                AgentOutputContext {
                     session_manager,
                     session_key,
                     db_session_id: *db_session_id,
@@ -374,7 +374,7 @@ fn handle_proxy_message(
                     tx,
                     image_store: &app_state.image_store,
                 },
-                ClaudeOutputFrame {
+                AgentOutputFrame {
                     content,
                     seq: Some(seq),
                     agent_type,

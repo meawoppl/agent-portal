@@ -563,7 +563,7 @@ fn handle_web_input(
                 .unwrap_or_default();
 
             // Insert first so the broadcast's `meta` carries the server-assigned
-            // `created_at` (closes #784 — same fix as handle_claude_output).
+            // `created_at` (closes #784 — same fix as handle_agent_output).
             // Typed portal sidecar for the broadcast (source = Portal), so the
             // meta-only frontend gets created_at + source (#portal-meta).
             let mut broadcast_meta: Option<shared::PortalMeta> = None;
