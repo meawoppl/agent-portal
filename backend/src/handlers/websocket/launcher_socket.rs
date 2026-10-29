@@ -158,6 +158,7 @@ fn grace_old_launcher_token(app_state: &AppState, token_id: Uuid) {
     }
 }
 
+#[tracing::instrument(skip_all, fields(user, user_id, computer, launcher, launcher_id))]
 pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>) {
     let conn = ws_bridge::server::into_connection::<LauncherEndpoint>(socket);
     let (mut ws_sender, mut ws_receiver) = conn.split();
@@ -191,6 +192,25 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                         Ok(mut conn) => {
                             match verify_and_get_user_with_token(&app_state, &mut conn, token) {
                                 Ok(verified) => {
+                                    if verified.token.session_id.is_some()
+                                        || verified.token.name
+                                            == crate::handlers::proxy_tokens::LAUNCH_TOKEN_NAME
+                                    {
+                                        let _ = ws_sender
+                                            .send(ServerToLauncher::LauncherRegisterAck {
+                                                capabilities: Vec::new(),
+                                                success: false,
+                                                fatal: true,
+                                                launcher_id,
+                                                error: Some(
+                                                    "Session credentials cannot register launchers"
+                                                        .into(),
+                                                ),
+                                                reject_reason: None,
+                                            })
+                                            .await;
+                                        return;
+                                    }
                                     info!(
                                         "Launcher authenticated as {} ({})",
                                         verified.email, verified.user_id
@@ -325,6 +345,18 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
         }
     };
 
+    tracing::Span::current().record("computer", crate::log_context::label(&hostname));
+    tracing::Span::current().record("launcher", crate::log_context::label(&launcher_name));
+    tracing::Span::current().record("launcher_id", tracing::field::display(launcher_id));
+    if let Ok(mut conn) = app_state.db_pool.get() {
+        use crate::schema::users;
+        if let Ok(user) = users::table
+            .find(user_id)
+            .first::<crate::models::User>(&mut conn)
+        {
+            crate::log_context::record_user(&user);
+        }
+    }
     // Reject if user already has too many launchers
     const MAX_LAUNCHERS_PER_USER: usize = 10;
     let user_launcher_count = app_state.session_manager.launcher_count_for_user(user_id);
@@ -369,6 +401,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
     let register_result = app_state.session_manager.try_register_launcher(
         launcher_id,
         LauncherConnection {
+            log_span: tracing::Span::none(),
             system: None,
             sender: tx,
             launcher_name: launcher_name.clone(),
@@ -602,6 +635,15 @@ fn handle_launcher_message(
                     if let Ok(mut conn) = app_state.db_pool.get() {
                         use crate::schema::sessions;
                         use diesel::prelude::*;
+                        if let Err(e) =
+                            crate::handlers::session_spawn::launch_failed(&mut conn, session_id)
+                        {
+                            warn!(
+                                "{}: launch failure: {}",
+                                crate::markers::SPAWN_LIFECYCLE_FAILED,
+                                e
+                            );
+                        }
                         // Read prior status + name so we only push on a genuine
                         // active → disconnected drop (mobile-apps plan §8.1); a
                         // launch failure on a not-yet-active session is not a
@@ -634,26 +676,35 @@ fn handle_launcher_message(
                             .execute(&mut conn)
                         {
                             warn!("Failed to record launch failure for {}: {}", session_id, e);
-                        } else if let Some((status, session_name)) = prior {
-                            if status == SessionStatus::Active.as_str() {
-                                app_state.notifications.emit(
-                                    crate::push::NotificationEvent::SessionDisconnected {
-                                        session_id,
-                                        session_name,
-                                    },
-                                );
+                        } else {
+                            super::member_status::notify_members_not_running(
+                                &app_state.session_manager,
+                                &mut conn,
+                                session_id,
+                                Some(user_id),
+                            );
+                            if let Some((status, session_name)) = prior {
+                                if status == SessionStatus::Active.as_str() {
+                                    app_state.notifications.emit(
+                                        crate::push::NotificationEvent::SessionDisconnected {
+                                            session_id,
+                                            session_name,
+                                        },
+                                    );
+                                }
                             }
                         }
                     }
                 }
             }
-            // Forward to web clients as ServerToClient
+            // Forward to the owner's web clients. A failed launch may not
+            // name its session, but the request does: say which one failed.
             app_state.session_manager.broadcast_to_user(
                 &user_id,
                 ServerToClient::LaunchSessionResult {
                     request_id,
                     success,
-                    session_id,
+                    session_id: session_id.or(desired_session_id),
                     pid,
                     error: error.clone(),
                 },
@@ -731,6 +782,7 @@ fn handle_launcher_message(
                 ServerToClient::SessionExited {
                     session_id,
                     exit_code,
+                    reason: Some(reason),
                 },
             );
         }
@@ -830,6 +882,7 @@ fn handle_launcher_message(
             match crate::handlers::launchers::mint_launch_token(app_state, user_id) {
                 Ok(auth_token) => {
                     let launch_msg = ServerToLauncher::LaunchSession {
+                        plugin_selection: None,
                         history_restore: None,
                         request_id,
                         user_id,
@@ -1201,12 +1254,30 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
             .session_manager
             .register_launch_session(request_id, session.id);
 
-        let claude_args = crate::models::jsonb_string_vec(&session.claude_args);
+        let claude_args = session.claude_args.0.clone();
         let agent_type = shared::AgentType::parse_or_default(&session.agent_type);
 
+        let child_recipe =
+            match crate::handlers::session_spawn::launch_recipe(&mut conn, session.id) {
+                Ok(recipe) => recipe,
+                Err(e) => {
+                    warn!(
+                        "{}: child recipe: {:?}",
+                        crate::markers::SPAWN_LIFECYCLE_FAILED,
+                        e
+                    );
+                    continue;
+                }
+            };
+        let initial_child = child_recipe.as_ref().is_some_and(|(_, initial)| *initial);
+        let child_worktree = child_recipe
+            .as_ref()
+            .filter(|(_, initial)| *initial)
+            .map(|(r, _)| &r.launch.worktree);
         let pending_fork = session.fork_launch_pending;
-        let create_worktree = pending_fork && session.fork_create_worktree;
-        let resume = reconcile_resume_flag(pending_fork, session.input_seq);
+        let create_worktree = (pending_fork && session.fork_create_worktree)
+            || child_worktree.is_some_and(|w| !w.is_none());
+        let resume = !initial_child && reconcile_resume_flag(pending_fork, session.input_seq);
 
         info!(
             "Reconcile relaunching session {} ({}) on launcher {}: {}, \
@@ -1226,7 +1297,8 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
         );
 
         let launch_msg = ServerToLauncher::LaunchSession {
-            history_restore,
+            plugin_selection: child_recipe.as_ref().and_then(|(r, _)| r.plugins.clone()),
+            history_restore: history_restore.map(Box::new),
             request_id,
             user_id,
             auth_token,
@@ -1238,8 +1310,11 @@ fn reconcile_desired_sessions(app_state: &AppState, launcher_id: Uuid, user_id: 
             resume_session_id: Some(session.id),
             resume: Some(resume),
             create_worktree,
-            worktree_branch: create_worktree.then(|| session.session_name.clone()),
-            scratch_worktree: false,
+            worktree_branch: child_worktree
+                .and_then(|w| w.branch().map(str::to_string))
+                .or_else(|| create_worktree.then(|| session.session_name.clone())),
+            scratch_worktree: child_worktree
+                .is_some_and(|w| matches!(w, shared::WorktreeMode::Scratch { .. })),
             fork_from_session_id: pending_fork
                 .then_some(session.forked_from_session_id)
                 .flatten(),
@@ -1711,5 +1786,131 @@ mod tests {
                 .execute(&mut conn);
         let _ = diesel::delete(sessions::table.find(session_id)).execute(&mut conn);
         let _ = diesel::delete(crate::schema::users::table.find(owner.id)).execute(&mut conn);
+    }
+}
+
+#[cfg(test)]
+mod owner_relay_tests {
+    use super::*;
+    use crate::test_support::{insert_session, insert_user, shared_pool, test_app_state};
+
+    fn frames(rx: &mut tokio::sync::mpsc::Receiver<ServerToClient>) -> Vec<ServerToClient> {
+        std::iter::from_fn(|| rx.try_recv().ok()).collect()
+    }
+
+    /// The owner's dashboard learns which session failed to launch even when
+    /// the launcher doesn't name it, and why a session's agent exited. After a
+    /// failed launch's status update its other current members learn only
+    /// that it stopped; a removed member learns nothing. An exit tells members
+    /// nothing here (the proxy disconnect does, once committed).
+    #[test]
+    fn owner_gets_why_members_get_a_bare_invalidation() {
+        use crate::models::NewSessionMember;
+        use crate::schema::session_members;
+        let Some(pool) = shared_pool() else { return };
+        let state = test_app_state(pool);
+        let mut conn = state.conn().unwrap();
+        let owner = insert_user(&mut conn, "launch-relay-owner");
+        let editor = insert_user(&mut conn, "launch-relay-editor");
+        let viewer = insert_user(&mut conn, "launch-relay-viewer");
+        let removed = insert_user(&mut conn, "launch-relay-removed");
+        let session = insert_session(&mut conn, owner.id, "launch-relay");
+        for (user, role) in [
+            (owner.id, "owner"),
+            (editor.id, "editor"),
+            (viewer.id, "viewer"),
+            (removed.id, "viewer"),
+        ] {
+            diesel::insert_into(session_members::table)
+                .values(NewSessionMember {
+                    session_id: session.id,
+                    user_id: user,
+                    role: role.into(),
+                })
+                .execute(&mut conn)
+                .unwrap();
+        }
+        diesel::delete(
+            session_members::table
+                .filter(session_members::session_id.eq(session.id))
+                .filter(session_members::user_id.eq(removed.id)),
+        )
+        .execute(&mut conn)
+        .unwrap();
+        let channel = |user: Uuid| {
+            let (tx, rx) = super::super::conn_channel(16);
+            state.session_manager.add_user_client(user, tx);
+            rx
+        };
+        let (mut rx, mut editor_rx, mut viewer_rx, mut removed_rx) = (
+            channel(owner.id),
+            channel(editor.id),
+            channel(viewer.id),
+            channel(removed.id),
+        );
+        let bare = ServerToClient::SessionExited {
+            session_id: session.id,
+            exit_code: None,
+            reason: None,
+        };
+        // A member's frames, as JSON, carry nothing about why.
+        let assert_bare = |member: &mut tokio::sync::mpsc::Receiver<ServerToClient>| {
+            let received = frames(member);
+            assert_eq!(received.len(), 1, "{received:?}");
+            let wire = serde_json::to_string(&received[0]).unwrap();
+            assert_eq!(wire, serde_json::to_string(&bare).unwrap());
+            assert!(
+                !wire.contains("secret") && !wire.contains("reason"),
+                "{wire}"
+            );
+        };
+
+        let request_id = Uuid::new_v4();
+        state
+            .session_manager
+            .register_launch_session(request_id, session.id);
+        handle_launcher_message(
+            LauncherToServer::LaunchSessionResult {
+                request_id,
+                success: false,
+                session_id: None,
+                pid: None,
+                error: Some("/home/alice/secret: does not exist".into()),
+            },
+            Uuid::new_v4(),
+            owner.id,
+            None,
+            &state,
+        );
+        let owner_frames = frames(&mut rx);
+        assert!(
+            matches!(owner_frames.as_slice(), [ServerToClient::LaunchSessionResult {success: false, session_id: Some(id), error: Some(e), ..}] if *id == session.id && e.contains("secret")),
+            "{owner_frames:?}"
+        );
+        assert_bare(&mut editor_rx);
+        assert_bare(&mut viewer_rx);
+        assert!(frames(&mut removed_rx).is_empty());
+
+        handle_launcher_message(
+            LauncherToServer::SessionExited {
+                session_id: session.id,
+                exit_code: Some(1),
+                reason: shared::SessionExitReason::CrashedEarly,
+            },
+            Uuid::new_v4(),
+            owner.id,
+            None,
+            &state,
+        );
+        let owner_frames = frames(&mut rx);
+        assert!(
+            matches!(owner_frames.as_slice(), [ServerToClient::SessionExited {session_id, exit_code: Some(1), reason: Some(shared::SessionExitReason::CrashedEarly)}] if *session_id == session.id),
+            "{owner_frames:?}"
+        );
+        // The launcher's exit report can beat the proxy's disconnect, so it
+        // tells members nothing: they hear once the status is committed.
+        assert!(frames(&mut editor_rx).is_empty());
+        assert!(frames(&mut viewer_rx).is_empty());
+        assert!(frames(&mut removed_rx).is_empty());
     }
 }

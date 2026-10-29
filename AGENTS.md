@@ -271,6 +271,7 @@ and a row here.**
 | Marker | Emitted by (when) | Recurring burst means | Action |
 |--------|-------------------|-----------------------|--------|
 | `PERMISSION_CANCEL_PERSIST_FAILED` | Permission cancellation when deleting the matching replay row fails | DB/pool trouble; withdrawn prompts can replay | Check DB health and remove the named stale request if replayed |
+| `SPAWN_LIFECYCLE_FAILED` | Child registration, failure or lifecycle sweep | Database failure or schema drift; cleanup may be delayed | Check database health and spawn migrations; sweep retries |
 | `PENDING_INPUT_PERSIST_FAILED` | Input enqueue (`input_queue.rs`) when the `pending_inputs` row can't be written — INSERT failed *or* no DB connection (web + agent paths) | Schema drift after a deploy (migration recorded-but-not-applied); every INSERT fails and inputs sent while a proxy bounces can be lost | Diff live schema vs. latest migration (`\d pending_inputs`); `ALTER TABLE … ADD COLUMN IF NOT EXISTS …` the missing column |
 | `INPUT_SEQ_BUMP_FAILED` | Input enqueue when bumping `sessions.input_seq` fails (falls back to seq `1`) | Same schema-drift / DB-degradation signal, scoped to `input_seq`; replay ordering unreliable for affected sessions | Same as above — reconcile schema drift / check DB health |
 | `PUSH_DISPATCH_FAILED` | Push dispatcher (`push/dispatcher.rs`) on any swallowed delivery-path failure | Systemic push fault — VAPID/APNs/FCM misconfig or credential expiry, or DB problem resolving recipients; users stop getting pushes | Verify push credentials (`PORTAL_VAPID_*`/`PORTAL_APNS_*`/`PORTAL_FCM_*`) + DB health; a low trickle of dead endpoints is normal |
@@ -280,6 +281,8 @@ and a row here.**
 | `MEDIA_ARCHIVE_FAILED` | Media write-through (`handlers/media_archive.rs`) when an `agent-portal show` blob can't be copied to the archive at upload time (best-effort; the upload itself still succeeds) | Archive backend unhealthy (same fault class as `SESSION_ARCHIVE_FAILED`, seen earlier — write-through runs at upload, well before the sweep); media uploaded during the outage won't survive in backups | Check archive-backend reachability, credentials/permissions, and `PORTAL_SESSION_ARCHIVE_*` (same triage as `SESSION_ARCHIVE_FAILED`) |
 | `HISTORY_RESTORE_INVALID` | Launcher reconcile cannot decode `sessions.history_restore`; holds launch rather than dropping recovered context | Incompatible backend version or damaged restoration metadata | Inspect the recipe and run compatible code; preserve the source archive and recipe during repair |
 | `SESSION_LAUNCH_CRASHLOOP_PAUSED` | Launcher reconcile (`launcher_socket.rs::record_exit_for_backoff`) auto-pausing a session after `LAUNCH_CRASHLOOP_GIVEUP` consecutive failed launches (it sets `paused = true` and stops relaunching) | Bad/expired agent credentials or config on a launcher host (`401 Invalid authentication credentials` from the `claude` binary) making every launch fail in seconds; many distinct sessions on one host parking points at a host-wide problem | Fix the credentials/config on that host, then resume the paused session(s); the auto-pause itself is the desired outcome — it is what stops the relaunch/log flood |
+| `PLUGIN_COMMAND_RECORD_FAILED` | Plugin command run (`handlers/plugins.rs`) when an approved command ran but its transcript card couldn't be written; the result still returns to the user, flagged unrecorded | DB/pool trouble or schema drift on `messages`; plugin command runs are missing from transcripts | Check DB health and the `messages` schema; the log line names the session and the line that ran |
+| `MEMBER_STATUS_FANOUT_FAILED` | Member fan-out (`websocket/member_status.rs`) when a session stopped running (failed launch, or its proxy disconnected) but its members couldn't be loaded; fails closed, telling no one beyond the owner's own launch result | DB/pool trouble or schema drift on `session_members`; members' lists show stale running status until refresh | Check DB health and the `session_members` schema |
 
 A recurring `PENDING_INPUT_PERSIST_FAILED` right after a deploy almost always
 means schema drift (a migration recorded-but-not-applied) — see above. A one-off
@@ -891,6 +894,19 @@ pub async fn handler(...) -> Json<T> {
     Json(data)
 }
 ```
+
+**Typed error bodies.** Handlers return `AppError`, whose response is the
+message as plain text, the body every client has always read. It also
+carries a `shared::api::ApiError { code, message, retryable }`, which the
+outermost `errors::negotiate_error_body` layer sends as JSON instead, but only
+to a request whose `Accept` names `application/json` with q > 0 (a bare `*/*`
+doesn't count). The status and other headers never change, and `Vary: Accept`
+is added. Only `AppError` responses are typed: axum extractor rejections and
+handlers with their own error bodies pass through as they are, so a client
+must still read text. `PortalClient` opts in; `utils::error_body` decodes
+either form.
+Keep `message` safe to show (DB/internal details go to the log), and treat
+`retryable` as a hint for the UI, never a reason to resend a mutation.
 
 **Use logging**:
 ```rust

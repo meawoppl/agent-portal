@@ -265,6 +265,26 @@ fn make_media_display_sink(session_id: Uuid) -> MediaDisplaySink {
     })
 }
 
+/// Native history is replaceable; Portal identity, token binding and child
+/// lineage are not. Never rotate the Portal UUID to recover missing CLI files.
+fn reset_missing_conversation(config: &mut ProxySessionConfig) -> anyhow::Result<()> {
+    reset_missing_conversation_at(config, &claude_conversations_path())
+}
+fn reset_missing_conversation_at(
+    config: &mut ProxySessionConfig,
+    path: &std::path::Path,
+) -> anyhow::Result<()> {
+    let native_id = Uuid::new_v4();
+    let mut map: HashMap<Uuid, Uuid> = load_sidecar_map(path);
+    map.insert(config.session_id, native_id);
+    save_sidecar_map(path, &map)?;
+    config.resume = false;
+    config.replaces_session_id = None;
+    config.startup_notice = Some("The local agent conversation was missing. Started a fresh conversation while preserving this Portal session and its parent/child policy. Earlier native context is unavailable.".into());
+    warn!(session=%config.session_id, conversation=%native_id, "Missing native conversation replaced; Portal identity preserved");
+    Ok(())
+}
+
 fn make_claude_conversation_id_sink(session_id: Uuid) -> ClaudeConversationIdSink {
     std::sync::Arc::new(move |conversation_id: Uuid| {
         let mut map = load_claude_conversations();
@@ -328,6 +348,9 @@ struct ManagedTask {
     /// conversation found"); the map key stays the id the spawn was asked for,
     /// so the heartbeat, stop and dedup paths consult this instead.
     live_id: LiveSessionId,
+    agent_type: shared::AgentType,
+    /// Where a plugin change reaches the running session (#2031).
+    context_updates: session_lib::ContextInbox,
 }
 
 /// Shared handle to a task's current session id, updated on rotation.
@@ -352,6 +375,7 @@ impl LiveSessionId {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
+    #[cfg(test)]
     fn set(&self, id: Uuid) {
         *self
             .0
@@ -361,6 +385,7 @@ impl LiveSessionId {
 }
 
 pub struct SpawnParams {
+    pub plugin_selection: Option<std::collections::BTreeMap<String, bool>>,
     pub history_restore: Option<shared::api::HistoryRestoreLaunch>,
     pub auth_token: String,
     pub working_directory: String,
@@ -423,6 +448,15 @@ impl ProcessManager {
     }
 
     /// Map a session id (original or rotated) to the key of the task running it.
+    /// A running session's agent and the inbox its context changes go to.
+    pub fn context_inbox(
+        &self,
+        session_id: &Uuid,
+    ) -> Option<(shared::AgentType, session_lib::ContextInbox)> {
+        let task = self.tasks.get(&self.task_key(session_id)?)?;
+        Some((task.agent_type, task.context_updates.clone()))
+    }
+
     fn task_key(&self, session_id: &Uuid) -> Option<Uuid> {
         if self.tasks.contains_key(session_id) {
             return Some(*session_id);
@@ -552,6 +586,10 @@ impl ProcessManager {
             return Ok(session_id);
         }
 
+        if let Some(selection) = &params.plugin_selection {
+            crate::session_plugins::install_initial_selection(session_id, selection)?;
+        }
+
         let name = params
             .session_name
             .clone()
@@ -578,7 +616,10 @@ impl ProcessManager {
                 }
             }
         }
+        let context_updates = session_lib::ContextInbox::default();
         let proxy_config = ProxySessionConfig {
+            startup_notice: None,
+            context_updates: context_updates.clone(),
             history_restore: params.history_restore,
             backend_url: self.backend_url.clone(),
             session_id,
@@ -638,6 +679,8 @@ impl ProcessManager {
                 handle,
                 cancel,
                 live_id,
+                agent_type: params.agent_type,
+                context_updates,
             },
         );
 
@@ -714,7 +757,7 @@ impl AnySession {
 async fn run_session_task(
     mut config: ProxySessionConfig,
     cancel: CancellationToken,
-    live_id: &LiveSessionId,
+    _live_id: &LiveSessionId,
 ) -> TaskOutcome {
     // A native-state probe can start a temporary app-server. Keep it inside
     // the per-session task so slow probes never stall launcher heartbeats or
@@ -773,34 +816,13 @@ async fn run_session_task(
                     reason: SessionExitReason::ResumeTargetMissing,
                 };
             }
-            let old_id = config.session_id;
-            if resolved_transcript_id(old_id) == old_id {
-                // Nothing to resume *and* no other transcript claims this id,
-                // so create the conversation under the id we already have
-                // (`--session-id`), exactly like a brand-new dialog launch.
-                // Keeping the id means the backend row, the dashboard focus
-                // and the launcher's running set all stay in agreement; the
-                // previous rotate-to-a-fresh-id here minted a new session row
-                // on every relaunch of a never-messaged session.
-                warn!(
-                    "Session {} resume target transcript missing; starting it fresh under the same id",
-                    old_id
-                );
-                config.resume = false;
-                continue;
+            if let Err(e) = reset_missing_conversation(&mut config) {
+                error!("Cannot persist fresh conversation identity: {e}");
+                return TaskOutcome {
+                    exit_code: Some(1),
+                    reason: SessionExitReason::Error,
+                };
             }
-            // The id maps to a post-`/clear` conversation whose file is gone;
-            // `--session-id old_id` could collide with the pre-clear transcript,
-            // so rotate to a fresh id as before.
-            let new_id = Uuid::new_v4();
-            warn!(
-                "Session {} resume target transcript missing; rotating to fresh session {} without spawning",
-                old_id, new_id
-            );
-            config.session_id = new_id;
-            live_id.set(new_id);
-            config.resume = false;
-            config.replaces_session_id = Some(old_id);
             continue;
         }
 
@@ -917,6 +939,13 @@ async fn run_session_task(
         let session_config = SessionConfig {
             runtime_command: session_group.as_ref().map(|group| group.command()),
             memory_events_path: session_group.as_ref().map(|group| group.events()),
+            portal_credentials: config.auth_token.as_ref().map(|token| {
+                session_lib::PortalCredentials {
+                    backend_url: config.backend_url.clone(),
+                    token: token.clone(),
+                }
+            }),
+            context_updates: config.context_updates.clone(),
             recovery_context: config
                 .history_restore
                 .as_ref()
@@ -1039,17 +1068,13 @@ async fn run_session_task(
                             resolved_transcript_id(config.session_id),
                         ) != TranscriptStatus::Present
                     {
-                        let old_id = config.session_id;
-                        let new_id = Uuid::new_v4();
-                        warn!(
-                            "Session {} exited after only {:.1?} on resume with no confirmed \
-                             transcript — rotating to fresh session {} instead of crash-looping",
-                            old_id, alive, new_id
-                        );
-                        config.session_id = new_id;
-                        live_id.set(new_id);
-                        config.resume = false;
-                        config.replaces_session_id = Some(old_id);
+                        if let Err(e) = reset_missing_conversation(&mut config) {
+                            error!("Cannot persist fresh conversation identity: {e}");
+                            return TaskOutcome {
+                                exit_code: Some(1),
+                                reason: SessionExitReason::Error,
+                            };
+                        }
                         continue;
                     }
                     warn!(
@@ -1101,17 +1126,13 @@ async fn run_session_task(
                         reason: SessionExitReason::ResumeTargetMissing,
                     };
                 }
-                // Retry with a fresh session
-                let old_id = config.session_id;
-                let new_id = Uuid::new_v4();
-                warn!(
-                    "Session {} not found after {:.1?} (resume target missing), retrying as fresh session {}",
-                    old_id, alive, new_id
-                );
-                config.session_id = new_id;
-                live_id.set(new_id);
-                config.resume = false;
-                config.replaces_session_id = Some(old_id);
+                if let Err(e) = reset_missing_conversation(&mut config) {
+                    error!("Cannot persist fresh conversation identity: {e}");
+                    return TaskOutcome {
+                        exit_code: Some(1),
+                        reason: SessionExitReason::Error,
+                    };
+                }
             }
             Err(e) => {
                 error!(
@@ -1143,6 +1164,8 @@ mod live_id_tests {
                 handle,
                 cancel,
                 live_id: live_id.clone(),
+                agent_type: shared::AgentType::Claude,
+                context_updates: Default::default(),
             },
         );
         (pm, live_id)
@@ -1250,6 +1273,47 @@ fn plugin_skill_launch_policy(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn missing_conversation_keeps_bound_identity_and_discloses_context_loss() {
+        let id = Uuid::new_v4();
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("conversations.json");
+        let mut config = ProxySessionConfig {
+            startup_notice: None,
+            context_updates: Default::default(),
+            history_restore: None,
+            backend_url: "ws://localhost".into(),
+            session_id: id,
+            session_name: "child".into(),
+            auth_token: Some("bound-token".into()),
+            working_directory: "/tmp".into(),
+            resume: true,
+            prime_portal_reminder_on_first_input: false,
+            git_branch: None,
+            claude_args: vec![],
+            replaces_session_id: None,
+            launcher_id: Some(Uuid::new_v4()),
+            agent_type: shared::AgentType::Claude,
+            scheduled_task_id: None,
+            codex_thread_id_sink: None,
+            claude_conversation_id_sink: None,
+            media_display_sink: None,
+            fork_from_session_id: None,
+            fork_point_turn_id: None,
+        };
+        reset_missing_conversation_at(&mut config, &path).unwrap();
+        assert_eq!(config.session_id, id);
+        assert_eq!(config.auth_token.as_deref(), Some("bound-token"));
+        assert!(!config.resume);
+        assert!(config.replaces_session_id.is_none());
+        assert!(config
+            .startup_notice
+            .as_deref()
+            .unwrap()
+            .contains("Earlier native context is unavailable"));
+        let map: HashMap<Uuid, Uuid> = load_sidecar_map(&path);
+        assert_ne!(map[&id], id);
+    }
 
     fn skill_roots() -> Vec<PathBuf> {
         vec![

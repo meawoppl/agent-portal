@@ -16,7 +16,7 @@ use crate::{
     auth::CurrentUserId,
     errors::AppError,
     handlers::responses::EmptyResponse,
-    models::{jsonb_string_vec, Message, NewSessionMember, Session, SessionMember},
+    models::{Message, NewSessionMember, Session, SessionMember},
     AppState,
 };
 
@@ -225,7 +225,9 @@ pub async fn delete_session(
     State(app_state): State<Arc<AppState>>,
     CurrentUserId(current_user_id): CurrentUserId,
     Path(session_id): Path<Uuid>,
+    headers: axum::http::HeaderMap,
 ) -> Result<EmptyResponse, AppError> {
+    crate::auth::require_session_lifecycle_scope(&app_state, &headers, session_id)?;
     let mut conn = app_state.conn()?;
 
     // Delete remains owner-only — editors can mutate session state but not
@@ -295,7 +297,9 @@ pub async fn stop_session(
     State(app_state): State<Arc<AppState>>,
     CurrentUserId(current_user_id): CurrentUserId,
     Path(session_id): Path<Uuid>,
+    headers: axum::http::HeaderMap,
 ) -> Result<EmptyResponse, AppError> {
+    crate::auth::require_session_lifecycle_scope(&app_state, &headers, session_id)?;
     let mut conn = app_state.conn()?;
 
     // Stopping a session is a mutation — viewer-role members must not be
@@ -333,7 +337,9 @@ pub async fn pause_session(
     State(app_state): State<Arc<AppState>>,
     CurrentUserId(current_user_id): CurrentUserId,
     Path(session_id): Path<Uuid>,
+    headers: axum::http::HeaderMap,
 ) -> Result<EmptyResponse, AppError> {
+    crate::auth::require_session_lifecycle_scope(&app_state, &headers, session_id)?;
     let mut conn = app_state.conn()?;
     crate::handlers::session_access::verify_session_mutator(
         &mut conn,
@@ -355,7 +361,9 @@ pub async fn resume_session(
     State(app_state): State<Arc<AppState>>,
     CurrentUserId(current_user_id): CurrentUserId,
     Path(session_id): Path<Uuid>,
+    headers: axum::http::HeaderMap,
 ) -> Result<EmptyResponse, AppError> {
+    crate::auth::require_manual_launch_credential(&app_state, &headers)?;
     let mut conn = app_state.conn()?;
     let session = crate::handlers::session_access::verify_session_mutator(
         &mut conn,
@@ -377,14 +385,15 @@ pub async fn resume_session(
     }
     let auth_token = crate::handlers::launchers::mint_launch_token(&app_state, session.user_id)?;
     let request_id = Uuid::new_v4();
-    let claude_args = jsonb_string_vec(&session.claude_args);
+    let claude_args = session.claude_args.0.clone();
     let agent_type = shared::AgentType::parse_or_default(&session.agent_type);
 
     let history_restore = crate::handlers::history_restore::launch_recipe(&session)?;
     crate::db::session_lifecycle::resume(&mut conn, session_id)?;
 
     let launch_msg = shared::ServerToLauncher::LaunchSession {
-        history_restore,
+        plugin_selection: None,
+        history_restore: history_restore.map(Box::new),
         request_id,
         user_id: session.user_id,
         auth_token,
@@ -705,6 +714,10 @@ mod tests {
             .unwrap();
         Session {
             history_restore: None,
+            spawned_by: None,
+            spawn_depth: 1,
+            spawn_idle_timeout_seconds: None,
+            spawn_stop_on_parent_end: false,
             id: Uuid::nil(),
             user_id: Uuid::nil(),
             session_name: "session".to_string(),
@@ -729,11 +742,11 @@ mod tests {
             repo_url: None,
             scheduled_task_id: None,
             paused: false,
-            claude_args: serde_json::Value::Array(vec![]),
+            claude_args: crate::models::JsonVec::default(),
             launch_failure_count: 0,
             last_launch_attempt_at: None,
             launch_lease_until: None,
-            open_prs: serde_json::Value::Array(vec![]),
+            open_prs: crate::models::JsonVec::default(),
             archived_at: None,
             last_model: None,
             launcher_version: launcher_version.map(str::to_string),

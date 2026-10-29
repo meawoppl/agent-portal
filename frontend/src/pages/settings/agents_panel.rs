@@ -97,20 +97,35 @@ fn render_install_cell(
         let onclick = Callback::from(move |_: MouseEvent| on_install.emit(target.clone()));
         return html! {
             <td class="agents-cell not-installed">
-                <span class="agents-badge missing">{ "not installed" }</span>
+                <span class="agents-badge missing">{ "Not installed" }</span>
                 <button class="agents-signin" {onclick}>{ "Install" }</button>
             </td>
         };
     }
     let (login_class, login_text) = login_summary(&install.login);
+    let login_label = match &install.login {
+        AgentLoginStatus::LoggedIn { .. } => "Signed in",
+        AgentLoginStatus::LoggedOut => "Signed out",
+        AgentLoginStatus::Unknown => "Sign-in unknown",
+    };
     html! {
         <td class="agents-cell installed">
-            <span class="agents-badge installed">{ "installed" }</span>
-            // The CSS ellipsizes long login labels; the tooltip carries the
-            // full text.
-            <span class={classes!("agents-login", login_class)} title={login_text.clone()}>
-                { login_text }
-            </span>
+            <div class="agents-statuses">
+                <span class="agents-badge installed">{ "Installed" }</span>
+                <span class={classes!("agents-badge", login_class)}>{ login_label }</span>
+            </div>
+            if let AgentLoginStatus::LoggedIn { label, plan, via } = &install.login {
+                <div class="agents-details" title={login_text}>
+                    if let Some(label) = label {
+                        <span class="agents-account">{ label }</span>
+                    }
+                    if plan.is_some() || via.is_some() {
+                        <span class="agents-account-meta">
+                            { [plan.as_deref(), via.as_deref()].into_iter().flatten().collect::<Vec<_>>().join(" · ") }
+                        </span>
+                    }
+                </div>
+            }
             { for sign_in_button(&install.login, agent, agent_name, launcher.launcher_id, on_sign_in) }
         </td>
     }

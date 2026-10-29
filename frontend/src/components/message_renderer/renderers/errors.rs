@@ -8,8 +8,18 @@ use yew::prelude::*;
 const EXPIRED_OAUTH_MESSAGE: &str =
     "Failed to authenticate: OAuth session expired and could not be refreshed";
 
-pub(super) fn is_expired_oauth_error(message: &str) -> bool {
-    message.contains(EXPIRED_OAUTH_MESSAGE)
+/// Anthropic's error type for rejected credentials (HTTP 401).
+const AUTHENTICATION_ERROR: &str = "authentication_error";
+
+/// Whether a failure's text says Claude's sign-in with Anthropic was rejected
+/// or expired: the CLI's expired-OAuth message, or an API error body typed
+/// `authentication_error`. Rate limits, overloads and other API errors are not.
+pub(super) fn is_provider_auth_error(text: &str) -> bool {
+    text.contains(EXPIRED_OAUTH_MESSAGE)
+        || parse_api_error(text)
+            .and_then(|e| e.error)
+            .and_then(|e| e.error_type)
+            .is_some_and(|t| t == AUTHENTICATION_ERROR)
 }
 
 pub fn render_error_message(
@@ -35,41 +45,98 @@ pub fn render_error_message(
             </div>
             <div class="message-body">
                 <div class="error-text">{ crate::components::markdown::linkify_urls(message) }</div>
-                { render_claude_login_action(is_expired_oauth_error(message), on_claude_login).unwrap_or_default() }
+                {
+                    render_claude_login_action(
+                        error_type == AUTHENTICATION_ERROR || is_provider_auth_error(message),
+                        on_claude_login,
+                    )
+                    .unwrap_or_default()
+                }
             </div>
         </div>
     }
 }
 
-/// Reuse the session-owner/launcher-gated login callback across Claude's error
-/// envelopes. Assistant authentication failures are not Anthropic error frames.
+/// Where to go when this view can't offer the sign-in itself: the callback is
+/// absent for anyone but the session's owner, on a linked Portal, or without
+/// a launcher.
+const SIGN_IN_ELSEWHERE: &str = "Sign in to Claude on the session computer using Settings > Computers on its home Portal (owner access required).";
+
+/// The recovery for a Claude sign-in failure, across Claude's error
+/// envelopes: the session-owner/launcher-gated login button when this view
+/// has it, otherwise where to sign in instead. Nothing for other failures.
 pub(super) fn render_claude_login_action(
     authentication_failed: bool,
     on_claude_login: Option<Callback<()>>,
 ) -> Option<Html> {
-    let on_login = on_claude_login.filter(|_| authentication_failed)?;
-    Some(html! {
-        <button type="button" class="error-recovery-button"
-            onclick={on_login.reform(|_: MouseEvent| ())}>
-            { "Sign in to Claude" }
-        </button>
+    if !authentication_failed {
+        return None;
+    }
+    Some(match on_claude_login {
+        Some(on_login) => html! {
+            <button type="button" class="error-recovery-button"
+                onclick={on_login.reform(|_: MouseEvent| ())}>
+                { "Sign in to Claude" }
+            </button>
+        },
+        None => html! { <div class="error-recovery-hint">{ SIGN_IN_ELSEWHERE }</div> },
     })
 }
 
 #[cfg(test)]
 mod auth_error_tests {
-    use super::is_expired_oauth_error;
+    use super::{is_provider_auth_error, render_claude_login_action};
+    use yew::prelude::*;
+    use yew::virtual_dom::VNode;
+
+    fn tag(html: Option<Html>) -> Option<String> {
+        match html? {
+            VNode::VTag(tag) => Some(tag.tag().to_string()),
+            other => panic!("expected an element, got {other:?}"),
+        }
+    }
+
+    /// The owner on the home Portal gets the button; anyone the view can't
+    /// offer it to is told where to sign in; other failures get neither.
+    #[test]
+    fn recovery_is_the_button_or_where_to_sign_in() {
+        let on_login = Some(Callback::from(|()| ()));
+        assert_eq!(
+            tag(render_claude_login_action(true, on_login.clone())).as_deref(),
+            Some("button")
+        );
+        assert_eq!(
+            tag(render_claude_login_action(true, None)).as_deref(),
+            Some("div")
+        );
+        assert_eq!(tag(render_claude_login_action(false, on_login)), None);
+        assert_eq!(tag(render_claude_login_action(false, None)), None);
+    }
 
     #[test]
     fn recognizes_expired_oauth_failure_with_surrounding_context() {
-        assert!(is_expired_oauth_error(
+        assert!(is_provider_auth_error(
             "Error: Failed to authenticate: OAuth session expired and could not be refreshed."
         ));
     }
 
     #[test]
-    fn does_not_offer_login_for_unrelated_errors() {
-        assert!(!is_expired_oauth_error("Claude API is overloaded"));
+    fn recognizes_a_typed_authentication_error() {
+        assert!(is_provider_auth_error(
+            r#"API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"Invalid authentication credentials"},"request_id":"req_1"}"#
+        ));
+    }
+
+    #[test]
+    fn does_not_offer_login_for_other_api_errors() {
+        for text in [
+            "Claude API is overloaded",
+            r#"API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"Rate limited"}}"#,
+            r#"API Error: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#,
+            r#"API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"authentication_error in prompt"}}"#,
+        ] {
+            assert!(!is_provider_auth_error(text), "{text}");
+        }
     }
 }
 
@@ -169,17 +236,17 @@ struct AnthropicErrorDetails {
     message: Option<String>,
 }
 
+/// The Anthropic API error body in a failure's text (`API Error: 401 {...}`),
+/// if it has one.
+fn parse_api_error(text: &str) -> Option<AnthropicApiError> {
+    let json_start = text.find('{')?;
+    let api_error: AnthropicApiError = serde_json::from_str(&text[json_start..]).ok()?;
+    (api_error.error_type.as_deref() == Some("error")).then_some(api_error)
+}
+
 pub(super) fn try_render_api_error(result_text: Option<&str>) -> Option<Html> {
     let text = result_text?;
-
-    let json_start = text.find('{')?;
-    let json_str = &text[json_start..];
-
-    let api_error: AnthropicApiError = serde_json::from_str(json_str).ok()?;
-
-    if api_error.error_type.as_deref() != Some("error") {
-        return None;
-    }
+    let api_error = parse_api_error(text)?;
 
     let error_details = api_error.error.as_ref();
     let error_type = error_details

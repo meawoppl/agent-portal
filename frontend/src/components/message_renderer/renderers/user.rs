@@ -223,8 +223,10 @@ fn render_delivery_progress(delivery: Option<&shared::DeliveryMeta>) -> Html {
         Some(shared::InputDeliveryStage::Failed) => 0,
     };
     let failed = stage == Some(shared::InputDeliveryStage::Failed);
+    let queued = delivery.queued && stage == Some(shared::InputDeliveryStage::ServerReceived);
     let title = match (stage, message) {
         (None, _) => "Sent from browser",
+        _ if queued => "Queued: the agent is offline; it will be sent when the agent reconnects",
         (Some(shared::InputDeliveryStage::ServerReceived), _) => "Received by server",
         (Some(shared::InputDeliveryStage::ProxyReceived), _) => "At local proxy",
         (Some(shared::InputDeliveryStage::AgentAccepted), _) => "In agent stream",
@@ -232,6 +234,7 @@ fn render_delivery_progress(delivery: Option<&shared::DeliveryMeta>) -> Html {
         (Some(shared::InputDeliveryStage::Failed), None) => "Delivery failed",
     };
     let label = match stage {
+        _ if queued => "queued",
         None => "sent",
         Some(shared::InputDeliveryStage::ServerReceived) => "server",
         Some(shared::InputDeliveryStage::ProxyReceived) => "proxy",

@@ -1,6 +1,6 @@
 use codex_codes::{
     io::items::{FileUpdateChange, ThreadItem},
-    protocol::ThreadItem as AppServerThreadItem,
+    protocol::ThreadItemPayload as AppServerThreadItem,
 };
 use serde::{Deserialize, Serialize};
 
@@ -101,7 +101,7 @@ pub enum CodexItem {
     /// App-server item wrapper for item variants that the exec-level helper
     /// model intentionally does not expose yet, such as `contextCompaction`,
     /// `collabAgentToolCall`, and reasoning carried as `summary`/`content`.
-    AppServer(Box<AppServerThreadItem>),
+    AppServer(Box<codex_codes::protocol::ThreadItem>),
 }
 
 impl<'de> Deserialize<'de> for CodexItem {
@@ -117,7 +117,7 @@ impl<'de> Deserialize<'de> for CodexItem {
                 return Ok(Self::Thread(item));
             }
         }
-        serde_json::from_value::<AppServerThreadItem>(value)
+        serde_json::from_value::<codex_codes::protocol::ThreadItem>(value)
             .map(|item| Self::AppServer(Box::new(item)))
             .map_err(serde::de::Error::custom)
     }
@@ -303,7 +303,7 @@ pub fn thread_item_id(item: &ThreadItem) -> &str {
 pub fn codex_item_id(item: &CodexItem) -> Option<&str> {
     match item {
         CodexItem::Thread(it) => Some(thread_item_id(it)),
-        CodexItem::AppServer(item) => match item.as_ref() {
+        CodexItem::AppServer(item) => match &item.payload {
             AppServerThreadItem::ContextCompaction { id } => Some(id),
             AppServerThreadItem::CollabAgentToolCall { id, .. } => Some(id),
             AppServerThreadItem::Reasoning { id, .. } => Some(id),

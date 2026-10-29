@@ -16,6 +16,7 @@ pub type LauncherSender = super::ConnSender<ServerToLauncher>;
 /// proxy half was fixed earlier with `ProxyConnection.gen`). `cancel`
 /// force-closes the socket task when the entry is evicted.
 pub struct LauncherConnection {
+    pub log_span: tracing::Span,
     pub sender: LauncherSender,
     pub launcher_name: String,
     pub hostname: String,
@@ -146,6 +147,7 @@ impl SessionManager {
         connection
             .last_seen
             .store(super::liveness::epoch_secs(), Ordering::Relaxed);
+        connection.log_span = tracing::Span::current();
         let dedup_key = (connection.user_id, connection.hostname.clone());
 
         // Use `entry().or_insert_with` so the duplicate check and the
@@ -193,6 +195,7 @@ impl SessionManager {
         };
         match removed {
             Some(connection) => {
+                let _context = connection.log_span.enter();
                 info!("Unregistering launcher: {}", launcher_id);
                 // Only release the dedup slot if it still points at us — a
                 // different launcher_id may have claimed (user_id, hostname)
@@ -331,6 +334,7 @@ mod tests {
     fn make_launcher_connection(user_id: Uuid, hostname: &str) -> LauncherConnection {
         let (sender, _rx) = crate::handlers::websocket::conn_channel(64);
         LauncherConnection {
+            log_span: tracing::Span::none(),
             system: None,
             sender,
             launcher_name: format!("launcher-{}", hostname),
@@ -465,6 +469,7 @@ mod tests {
         let (sender, rx) = crate::handlers::websocket::conn_channel(64);
         let cancel = CancellationToken::new();
         let conn = LauncherConnection {
+            log_span: tracing::Span::none(),
             system: None,
             sender,
             launcher_name: "l".to_string(),
@@ -538,6 +543,7 @@ mod tests {
                 let conn = {
                     let (sender, _rx) = crate::handlers::websocket::conn_channel(64);
                     LauncherConnection {
+                        log_span: tracing::Span::none(),
                         system: None,
                         sender,
                         launcher_name: format!("launcher-{}", launcher_id),

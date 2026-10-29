@@ -162,6 +162,9 @@ fn render_pill_section(
                 key={key.to_string()}
                 index={index}
                 display_number={Some(number_offset + display_idx)}
+                parent_name={session.info.spawned_by.map(|id| props.sessions.iter()
+                    .find(|parent| parent.key.conn == session.key.conn && parent.info.id == id)
+                    .map(|parent| parent.info.session_name.clone()).unwrap_or_else(|| id.to_string()))}
                 session={session.clone()}
                 is_focused={index == props.focused_index}
                 is_awaiting={props.awaiting_sessions.contains(&key)}
@@ -192,26 +195,33 @@ fn render_pill_section(
 
     // Grouped: wrap each contiguous same-host run in a tinted section with a
     // single centered/leading header (see `.session-rail-host-group` CSS). The
-    // rows are already grouped upstream (`page.rs`), so equal labels are
+    // rows are already grouped upstream (`page.rs`), so equal identities are
     // adjacent. One uniform dim tint per group — the header plus that faint
     // background delimit each section on their own; alternating shades just
     // read as noise (#1610).
     let mut groups: Vec<Html> = Vec::new();
     let mut start = 0;
     while start < entries.len() {
-        let label = super::session_order::host_group_label(entries[start].1);
+        let identity = super::session_order::host_group_key(entries[start].1);
         let mut end = start;
         let mut pills: Vec<Html> = Vec::with_capacity(4);
-        while end < entries.len() && super::session_order::host_group_label(entries[end].1) == label
+        while end < entries.len()
+            && super::session_order::host_group_key(entries[end].1) == identity
         {
             let (index, session) = entries[end];
             pills.push(render_pill(end, index, session));
             end += 1;
         }
+        let label = super::session_order::host_section_label(
+            props
+                .sessions
+                .iter()
+                .filter(|session| super::session_order::host_group_key(session) == identity),
+        );
         let count = end - start;
         groups.push(html! {
             <div
-                key={format!("{section_key}-host-{label}")}
+                key={format!("{section_key}-host-{identity:?}")}
                 class="session-rail-host-group"
             >
                 <div

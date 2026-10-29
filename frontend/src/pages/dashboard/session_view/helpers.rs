@@ -515,13 +515,13 @@ fn classify_muse_event(output: &str) -> Option<ActivityTag> {
 fn classify_codex_event(output: &str) -> Option<ActivityTag> {
     use crate::components::codex_renderer::{CodexEvent, CodexItem};
     use codex_codes::io::items::ThreadItem;
-    use codex_codes::protocol::ThreadItem as AppServerThreadItem;
+    use codex_codes::protocol::ThreadItemPayload as AppServerThreadItem;
     let event: CodexEvent = serde_json::from_str(output).ok()?;
     match event {
         CodexEvent::ItemStarted { item: Some(item) }
         | CodexEvent::ItemUpdated { item: Some(item) }
         | CodexEvent::ItemCompleted { item: Some(item) } => match item {
-            CodexItem::AppServer(item) => match item.as_ref() {
+            CodexItem::AppServer(item) => match &item.payload {
                 AppServerThreadItem::ContextCompaction { .. }
                 | AppServerThreadItem::CollabAgentToolCall { .. } => Some(ActivityTag::Assistant),
                 _ => None,
@@ -630,7 +630,9 @@ pub(super) fn update_pending_send_delivery(
     client_msg_id: uuid::Uuid,
     stage: shared::InputDeliveryStage,
     message: Option<&str>,
+    queued: bool,
 ) -> bool {
+    // A row that already completed (removed) or failed has nothing to update.
     let Some(pos) = pending_sends
         .iter()
         .position(|pending| pending_client_msg_id(pending) == Some(client_msg_id))
@@ -649,9 +651,16 @@ pub(super) fn update_pending_send_delivery(
     let Some(delivery) = meta.delivery.as_mut() else {
         return false;
     };
+    // A late `ServerReceived` (the queued notice can race a reconnect's
+    // acks) must not pull a row back from a later stage.
+    let server_received = stage == shared::InputDeliveryStage::ServerReceived;
+    if server_received && delivery.stage.is_some_and(|current| current != stage) {
+        return false;
+    }
 
     delivery.stage = Some(stage);
     delivery.message = message.map(ToOwned::to_owned);
+    delivery.queued = queued && server_received;
     true
 }
 
@@ -1041,6 +1050,7 @@ mod tests {
                     client_msg_id: id,
                     stage: None,
                     message: None,
+                    queued: false,
                 }),
             }),
         )
@@ -1451,6 +1461,7 @@ mod tests {
             id,
             shared::InputDeliveryStage::ServerReceived,
             None,
+            false,
         ));
         let delivery = pending[0].delivery().expect("delivery");
         assert_eq!(
@@ -1470,11 +1481,71 @@ mod tests {
             id,
             shared::InputDeliveryStage::Failed,
             Some("permission denied"),
+            false,
         ));
         let delivery = pending[0].delivery().expect("delivery");
         assert_eq!(delivery.stage, Some(shared::InputDeliveryStage::Failed));
         assert_eq!(delivery.message.as_deref(), Some("permission denied"));
         assert!(!delivery.pending());
+    }
+
+    #[test]
+    fn queued_notice_shows_never_regresses_and_clears_on_later_stages() {
+        use shared::InputDeliveryStage::{AgentAccepted, ProxyReceived, ServerReceived};
+        let id = uuid::Uuid::new_v4();
+        let mut pending = vec![tracked_pending("hello", id)];
+        assert!(update_pending_send_delivery(
+            &mut pending,
+            id,
+            ServerReceived,
+            None,
+            false
+        ));
+        assert!(update_pending_send_delivery(
+            &mut pending,
+            id,
+            ServerReceived,
+            None,
+            true
+        ));
+        assert!(pending[0].delivery().expect("delivery").queued);
+
+        // The agent reconnects: a later stage clears queued, and a late
+        // queued notice can't pull the row back.
+        assert!(update_pending_send_delivery(
+            &mut pending,
+            id,
+            ProxyReceived,
+            None,
+            false
+        ));
+        assert!(!update_pending_send_delivery(
+            &mut pending,
+            id,
+            ServerReceived,
+            None,
+            true
+        ));
+        let delivery = pending[0].delivery().expect("delivery");
+        assert_eq!(delivery.stage, Some(ProxyReceived));
+        assert!(!delivery.queued);
+
+        // Once accepted the row is gone; a late notice finds nothing.
+        assert!(update_pending_send_delivery(
+            &mut pending,
+            id,
+            AgentAccepted,
+            None,
+            false
+        ));
+        assert!(!update_pending_send_delivery(
+            &mut pending,
+            id,
+            ServerReceived,
+            None,
+            true
+        ));
+        assert!(pending.is_empty());
     }
 
     #[test]
@@ -1487,6 +1558,7 @@ mod tests {
             id,
             shared::InputDeliveryStage::AgentAccepted,
             None,
+            false,
         ));
         assert!(pending.is_empty());
     }

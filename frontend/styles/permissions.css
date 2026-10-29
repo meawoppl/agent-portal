@@ -421,6 +421,28 @@
     cursor: not-allowed;
 }
 
+.ask-user-question .question-submit-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.ask-user-question .skip-questions {
+    flex: none;
+    padding: 0.6rem 1rem;
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font: inherit;
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+
+.ask-user-question .skip-questions:hover {
+    color: var(--text-primary);
+    border-color: var(--text-secondary);
+}
+
 .ask-user-question .question-hint {
     margin-top: 0.5rem;
     font-size: 0.75rem;

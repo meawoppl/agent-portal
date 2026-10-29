@@ -25,6 +25,7 @@ mod permission_handler;
 mod plugin_selector;
 mod plugin_views;
 mod session_surface;
+mod spawn_controls;
 mod state;
 mod tasks_panel;
 mod types;

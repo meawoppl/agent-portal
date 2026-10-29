@@ -93,6 +93,7 @@ mod tests {
             .try_register_launcher(
                 host,
                 LauncherConnection {
+                    log_span: tracing::Span::none(),
                     system: None,
                     sender,
                     launcher_name: "rpc-test".into(),

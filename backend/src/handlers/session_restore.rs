@@ -36,6 +36,7 @@ pub async fn restore_session(
     cookies: Cookies,
     Path((owner, session)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<RestoreSessionResponse>, AppError> {
+    crate::auth::require_manual_launch_credential(&state, &headers)?;
     let caller = extract_user(&state, Some(&headers), &cookies)?;
     // Restoring rebinds the owner's native conversation on the owner's own
     // computer, so it is owner-only even for admins and share members.

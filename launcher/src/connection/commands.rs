@@ -183,6 +183,7 @@ pub(super) async fn handle_message(
 ) {
     match msg {
         ServerToLauncher::LaunchSession {
+            plugin_selection,
             history_restore,
             request_id,
             auth_token,
@@ -219,7 +220,8 @@ pub(super) async fn handle_message(
 
             let result = process_manager
                 .spawn(SpawnParams {
-                    history_restore,
+                    plugin_selection,
+                    history_restore: history_restore.map(|r| *r),
                     auth_token,
                     working_directory: working_directory.clone(),
                     session_name: session_name.clone(),
@@ -420,9 +422,12 @@ pub(super) async fn handle_message(
             selection,
         } => {
             let sender = import_reply_tx.clone();
+            // A session running here picks up a selection change on its next
+            // turn, instead of waiting for a restart.
+            let live = process_manager.context_inbox(&session_id);
             tokio::spawn(async move {
                 let result = tokio::task::spawn_blocking(move || {
-                    crate::session_plugins::request(session_id, working_directory, selection)
+                    crate::session_plugins::request(session_id, working_directory, selection, live)
                 })
                 .await
                 .map_err(|error| error.to_string())
@@ -438,13 +443,14 @@ pub(super) async fn handle_message(
         } => {
             let sender = import_reply_tx.clone();
             tokio::spawn(async move {
-                let result =
-                    tokio::task::spawn_blocking(move || crate::plugin_rpc::handle(request))
-                        .await
-                        .map_err(|error| error.to_string())
-                        .and_then(|result| result.map_err(|error| format!("{error:#}")));
+                let result = crate::plugin_rpc::handle(request)
+                    .await
+                    .map_err(|error| format!("{error:#}"));
                 let _ = sender
-                    .send(LauncherToServer::PluginResult { request_id, result })
+                    .send(LauncherToServer::PluginResult {
+                        request_id,
+                        result: Box::new(result),
+                    })
                     .await;
             });
         }

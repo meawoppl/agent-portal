@@ -49,7 +49,7 @@ pub enum LauncherToServer {
     },
     PluginResult {
         request_id: Uuid,
-        result: Result<crate::api::PluginResponse, String>,
+        result: Box<Result<crate::api::PluginResponse, String>>,
     },
     /// Register a launcher daemon
     LauncherRegister {
@@ -303,7 +303,9 @@ pub enum ServerToLauncher {
     /// Request to launch a new proxy instance
     LaunchSession {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        history_restore: Option<crate::api::HistoryRestoreLaunch>,
+        plugin_selection: Option<std::collections::BTreeMap<String, bool>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        history_restore: Option<Box<crate::api::HistoryRestoreLaunch>>,
         request_id: Uuid,
         user_id: Uuid,
         auth_token: String,

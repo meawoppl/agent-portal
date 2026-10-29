@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="sans-serif" fill="#c0caf5">
+<text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2314 · Use patched arithmetic for Web Push signing</text>
+<text x="55" y="105" font-size="34" fill="#e6e9f5">Web Push signing pulled vulnerable crypto-bigint 0.5.5;</text>
+<text x="55" y="148" font-size="34" fill="#e6e9f5">update the signing dependency chain to patched arithmetic.</text>
+<path d="M55 175H1945" stroke="#565f89"/><path d="M1000 190V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="65" y="235" font-size="22" fill="#f7768e" letter-spacing="4">BEFORE</text>
+<text x="1065" y="235" font-size="22" fill="#9ece6a" letter-spacing="4">AFTER</text>
+<rect x="65" y="290" width="860" height="180" rx="12" fill="#1e202e" stroke="#565f89"/>
+<rect x="1065" y="290" width="860" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="95" y="340" font-size="26" fill="#7aa2f7">web-push 0.11 (registry)</text>
+<text x="95" y="395" font-size="23">jwt-simple 0.12 -> p256 0.13</text>
+<text x="1095" y="340" font-size="26" fill="#7aa2f7">web-push 0.11 (local patch)</text>
+<text x="1095" y="395" font-size="23" fill="#9ece6a">jwt-simple 0.15 -> p256 0.14</text>
+<path d="M495 470V610M1495 470V610" stroke="#a9b1d6" stroke-width="3"/>
+<rect x="65" y="610" width="860" height="220" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<rect x="1065" y="610" width="860" height="220" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="95" y="665" font-size="26" fill="#f7768e">crypto-bigint 0.5.5</text>
+<text x="95" y="720" font-size="23">RUSTSEC-2026-0387: secret-dependent timing.</text>
+<text x="95" y="765" font-size="23">RustSec Audit blocks SDK update PRs.</text>
+<text x="1095" y="665" font-size="26" fill="#9ece6a">crypto-bigint 0.7.8</text>
+<text x="1095" y="720" font-size="23">VAPID ES256 token verified independently with ring.</text>
+<text x="1095" y="765" font-size="23">Audience and expiry validated; no new exceptions.</text>
+<text x="55" y="1172" font-size="22" fill="#a9b1d6">Scope: local patch until web-push publishes updated signing dependencies; existing RSA exception remains.</text>
+</g></svg>

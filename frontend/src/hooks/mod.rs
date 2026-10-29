@@ -8,7 +8,7 @@ mod use_focus_trap;
 mod use_keyboard_nav;
 mod use_sessions;
 
-pub use use_client_websocket::{use_client_websocket, ClientWebSocketProvider};
+pub use use_client_websocket::{use_client_websocket, ClientWebSocketProvider, SessionFailure};
 pub use use_escape::{escape_listener, use_escape_capture};
 pub use use_focus_trap::use_focus_trap;
 pub use use_keyboard_nav::{use_interrupt_hotkey, use_keyboard_nav, KeyboardNavConfig};

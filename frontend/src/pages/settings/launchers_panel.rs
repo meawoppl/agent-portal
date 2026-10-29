@@ -242,6 +242,18 @@ struct LauncherRowProps {
     probe: Option<ProbeState>,
     on_sign_in: Callback<LoginTarget>,
     on_install: Callback<InstallTarget>,
+    /// The server's version, to flag a launcher running an older one.
+    server_version: Option<String>,
+}
+
+/// Whether a launcher runs an older version than the server. Unknown or
+/// unparseable versions are not flagged.
+fn launcher_behind(launcher: &str, server: Option<&str>) -> bool {
+    server.is_some_and(|server| {
+        parse_version(launcher).is_some()
+            && parse_version(server).is_some()
+            && !version_at_least(launcher, server)
+    })
 }
 
 #[function_component(LauncherRow)]
@@ -414,29 +426,39 @@ fn launcher_row(props: &LauncherRowProps) -> Html {
                     if l.launcher_name != l.hostname {
                         <span class="agents-host-alias">{ format!("({})", l.launcher_name) }</span>
                     }
+                if launcher_behind(&l.version, props.server_version.as_deref()) {
+                    <span class="launcher-host-version launcher-version-behind"
+                        title={format!("Older than the server (v{})", props.server_version.as_deref().unwrap_or_default())}>
+                        { format!("v{}", &l.version) }
+                        <span class="launcher-version-badge">{ "behind" }</span>
+                    </span>
+                } else {
+                    <span class="launcher-host-version">{ format!("v{}", &l.version) }</span>
+                }
                 </td>
-                <td>{ format!("v{}", &l.version) }</td>
-                <td title="Running sessions, and how many are mid-turn (busy or rate-limited)">
+                <td class="launcher-sessions" title="Running sessions, and how many are mid-turn (busy or rate-limited)">
                     { l.running_sessions }
-                    <span class="launcher-active-count">{ format!(" · {} active", l.active_sessions) }</span>
+                    <span class="launcher-active-count">{ format!("{} active", l.active_sessions) }</span>
                 </td>
                 <td class="token-actions">
                     <div class="launcher-update-actions">
                         <button
                             class={update_class}
                             onclick={update_onclick}
-                            title={"Pull the latest agent-portal release and restart this launcher"}
+                            title={if in_progress { "Working…" } else if update_armed { "Confirm update and restart" } else { "Update to the latest release and restart" }}
+                            aria-label={update_label}
                             disabled={update_disabled}
                         >
-                            { update_label }
+                            <span aria-hidden="true">{ if update_armed { "✓" } else { "↑" } }</span>
                         </button>
                         <button
                             class={restart_class}
                             onclick={restart_onclick}
-                            title={restart_title}
+                            title={if in_progress { "Working…" } else if restart_armed { "Confirm restart" } else { restart_title }}
+                            aria-label={restart_label}
                             disabled={restart_disabled}
                         >
-                            { restart_label }
+                            <span aria-hidden="true">{ if restart_armed { "✓" } else { "↻" } }</span>
                         </button>
                         <button
                             class={cancel_class}
@@ -515,11 +537,17 @@ fn phantom_launcher_row(props: &PhantomLauncherRowProps) -> Html {
     html! {
         <>
             <tr class="token-row launcher-row--phantom">
-                <td class="token-name">{ &e.launcher_name }</td>
-                <td>{ &e.hostname }</td>
-                <td><span class="launcher-phantom-badge">{ badge }</span></td>
+                <td class="token-name">
+                    <span class="agents-host-name">{ &e.hostname }</span>
+                    if e.launcher_name != e.hostname {
+                        <span class="agents-host-alias">{ format!("({})", e.launcher_name) }</span>
+                    }
+                    <span class="launcher-host-version">{ format!("v{}", e.prev_version) }</span>
+                    <span class="launcher-phantom-badge">{ badge }</span>
+                </td>
                 <td>{ "—" }</td>
                 <td class="token-actions">{ "—" }</td>
+                { for AGENTS.iter().map(|_| html! { <td class="agents-cell unreachable">{ "offline" }</td> }) }
             </tr>
             <tr class="launcher-update-status">
                 <td colspan="7">
@@ -548,13 +576,23 @@ pub fn launchers_panel() -> Html {
     let request_error = use_state(|| None::<String>);
     // Per-launcher update lifecycle, keyed by launcher id (#710 follow-up).
     let update_states = use_state(HashMap::<Uuid, UpdateEntry>::new);
+    // Live LaunchersChanged ticks (#710): a launcher restarting while this
+    // panel is open shows its reconnect without a page refresh. Its agent
+    // sign-in revision ticks when a sign-in finishes elsewhere in the tab,
+    // such as from a session.
+    let ws_hook = crate::hooks::use_client_websocket();
     // Backend's published target version, for the same-version detection.
     {
         let probes = probes.clone();
         let launchers = launchers.clone();
         // Authentication can change without any LauncherInfo field changing.
         // Re-probe explicitly after login/install instead of relying on list equality.
-        use_effect_with(((*launchers).clone(), *probe_revision), move |(list, _)| {
+        let deps = (
+            (*launchers).clone(),
+            *probe_revision,
+            ws_hook.agent_auth_revision,
+        );
+        use_effect_with(deps, move |(list, _, _)| {
             let list = list.clone();
             // Flipped by the cleanup below so a superseded run (launcher list
             // changed mid-probe) stops writing stale results over fresh ones.
@@ -626,10 +664,6 @@ pub fn launchers_panel() -> Html {
     let server_version = use_state(|| None::<String>);
     // 1s heartbeat driving elapsed-time display and timeout/auto-clear checks.
     let tick = use_state(|| 0u32);
-
-    // Live LaunchersChanged ticks (#710): a launcher restarting while this
-    // panel is open shows its reconnect without a page refresh.
-    let ws_hook = crate::hooks::use_client_websocket();
 
     let fetch_launchers = {
         let launchers = launchers.clone();
@@ -800,6 +834,11 @@ pub fn launchers_panel() -> Html {
                     { "Connected launcher daemons. Authentication tokens do not expire and are \
                        managed automatically." }
                 </p>
+                if let Some(version) = &*server_version {
+                    <p class="launcher-server-version">
+                        { "Server version: " }<code>{ format!("v{version}") }</code>
+                    </p>
+                }
             </div>
 
             if let Some(message) = &*request_error {
@@ -819,11 +858,16 @@ pub fn launchers_panel() -> Html {
                 </div>
             } else {
                 <div class="table-container">
-                    <table class="tokens-table">
+                    <table class="tokens-table computers-table">
+                        <colgroup>
+                            <col class="computer-column" />
+                            <col class="sessions-column" />
+                            <col class="actions-column" />
+                            { for AGENTS.iter().map(|_| html! { <col /> }) }
+                        </colgroup>
                         <thead>
                             <tr>
                                 <th>{ "Computer" }</th>
-                                <th>{ "Version" }</th>
                                 <th>{ "Sessions" }</th>
                                 <th>{ "Actions" }</th>
                                 { for AGENTS.iter().map(|(_, name)| html! { <th>{ *name }</th> }) }
@@ -850,6 +894,7 @@ pub fn launchers_panel() -> Html {
                                         probe={probes.get(&l.launcher_id).cloned()}
                                         on_sign_in={on_sign_in.clone()}
                                         on_install={on_install.clone()}
+                                        server_version={(*server_version).clone()}
                                     />
                                 }
                             }) }
@@ -904,6 +949,17 @@ pub fn launchers_panel() -> Html {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_launcher_older_than_the_server_is_behind() {
+        assert!(launcher_behind("2.15.1700", Some("2.15.1800")));
+        assert!(launcher_behind("2.14.2000", Some("2.15.1")));
+        assert!(!launcher_behind("2.15.1800", Some("2.15.1800")));
+        assert!(!launcher_behind("2.15.1900", Some("2.15.1800")));
+        // Unknown versions are not flagged.
+        assert!(!launcher_behind("2.15.1700", None));
+        assert!(!launcher_behind("dev", Some("2.15.1800")));
+    }
 
     fn entry(prev: &str, phase: UpdatePhase) -> UpdateEntry {
         entry_mode(LifecycleMode::Update, prev, phase)

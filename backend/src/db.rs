@@ -1,3 +1,4 @@
+pub mod jsonb;
 pub(crate) mod session_lifecycle;
 
 use anyhow::Result;

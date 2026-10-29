@@ -291,7 +291,11 @@ impl PortalClient {
 
     fn request(&self, path: &str, make: fn(&str) -> RequestBuilder) -> RequestBuilder {
         let valid = self.available && valid_path(path);
-        let request = make(&self.url(path)).redirect(web_sys::RequestRedirect::Error);
+        // Asks for typed errors, which `utils::error_body` decodes; a portal
+        // that predates them answers in plain text, which it reads as well.
+        let request = make(&self.url(path))
+            .redirect(web_sys::RequestRedirect::Error)
+            .header("Accept", "application/json");
         if let Some(credentials) = &self.linked {
             let request = request.credentials(web_sys::RequestCredentials::Omit);
             if valid {

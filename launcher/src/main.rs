@@ -15,6 +15,7 @@ mod pastebin;
 mod path_policy;
 mod plugin;
 mod plugin_detect;
+mod plugin_policy;
 mod plugin_preview;
 mod plugin_rpc;
 mod plugin_validate;
@@ -25,6 +26,7 @@ mod seppuku;
 mod service;
 mod session_cgroups;
 mod session_plugins;
+mod session_spawn;
 mod work_queue;
 mod worktree;
 
@@ -103,6 +105,11 @@ struct Args {
 
 #[derive(Subcommand, Debug)]
 enum Command {
+    /// Create and manage policy-gated child sessions.
+    Session {
+        #[command(subcommand)]
+        action: session_spawn::Action,
+    },
     /// Authenticate with the backend server via browser
     Login,
     /// Update agent-portal to the latest version (restarts service if running)
@@ -493,6 +500,42 @@ mod path_tests {
     use std::os::unix::fs::PermissionsExt;
 
     #[test]
+    fn child_cli_requires_a_brief_and_accepts_explicit_retry() {
+        assert!(
+            Args::try_parse_from(["agent-portal", "session", "start", "--dir", "/tmp"]).is_err()
+        );
+        assert!(Args::try_parse_from([
+            "agent-portal",
+            "session",
+            "start",
+            "--dir",
+            "/tmp",
+            "--prompt",
+            "Review parser",
+            "--json",
+            "--worktree",
+            "scratch",
+            "--request-id",
+            "00000000-0000-0000-0000-000000000001"
+        ])
+        .is_ok());
+        assert!(Args::try_parse_from([
+            "agent-portal",
+            "session",
+            "start",
+            "--dir",
+            "/tmp",
+            "--prompt",
+            "x",
+            "--prompt-file",
+            "brief.txt"
+        ])
+        .is_err());
+        assert!(Args::try_parse_from(["agent-portal", "session", "list", "--json"]).is_ok());
+        assert!(Args::try_parse_from(["agent-portal", "session", "stop", "not-a-uuid"]).is_err());
+    }
+
+    #[test]
     fn managed_forward_cli_accepts_script_health_path_and_literal_arguments() {
         let parsed = Args::try_parse_from([
             "agent-portal",
@@ -586,6 +629,7 @@ async fn main() -> anyhow::Result<()> {
                 ServiceAction::Pastebin => pastebin::upload_diagnostics().await,
             };
         }
+        Some(Command::Session { action }) => return session_spawn::run(action).await,
         Some(Command::Message { action }) => {
             return match action {
                 MessageAction::List => message::list().await,
@@ -733,6 +777,10 @@ async fn main() -> anyhow::Result<()> {
 
     // --- Daemon startup path ---
 
+    // First, so a config that doesn't parse stops the launcher before it
+    // touches the service unit, updates itself, or opens a connection.
+    let config = config::load_config_checked()?;
+
     if let Err(e) = service::sync_on_startup() {
         warn!("Service unit sync failed: {e}");
     }
@@ -769,8 +817,6 @@ async fn main() -> anyhow::Result<()> {
             );
         }
     }
-
-    let config = config::load_config();
 
     // CLI args override config file, which overrides the compile-time default
     let backend_url = resolve_backend_url(args.backend_url, config.backend_url);
@@ -831,7 +877,7 @@ async fn main() -> anyhow::Result<()> {
 
 /// `agent-portal login` — authenticate via device flow and save the token
 async fn cmd_login(args: &Args) -> anyhow::Result<()> {
-    let config = config::load_config();
+    let config = config::load_config_checked()?;
     let backend_url = resolve_backend_url(args.backend_url.clone(), config.backend_url);
 
     println!("Authenticating with {}...", backend_url);

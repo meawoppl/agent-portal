@@ -120,6 +120,7 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
     // binding is consumed by `.with_state` below.
     let app_state_for_forward_gate = app_state.clone();
     let app_state_for_linked_gate = app_state.clone();
+    let app_state_for_logging = app_state.clone();
 
     // Rate-limited device-code creation. Keep this strict: creating a code is
     // user-visible work and should not be spammed.
@@ -508,6 +509,30 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
             shared::LauncherEndpoint::PATH,
             get(handlers::websocket::handle_launcher_websocket),
         )
+        .route(
+            "/api/agent/sessions/{parent}/children",
+            get(handlers::session_spawn::children).post(handlers::session_spawn::start),
+        )
+        .route(
+            "/api/agent/sessions/{parent}/children/{child}/stop",
+            post(handlers::session_spawn::stop_child),
+        )
+        .route(
+            "/api/sessions/{parent}/spawn-policy",
+            get(handlers::session_spawn::get_policy).patch(handlers::session_spawn::set_policy),
+        )
+        .route(
+            "/api/sessions/{parent}/spawn-requests",
+            get(handlers::session_spawn::list_requests),
+        )
+        .route(
+            "/api/sessions/{parent}/spawn-requests/{request}/approve",
+            post(handlers::session_spawn::approve),
+        )
+        .route(
+            "/api/sessions/{parent}/spawn-requests/{request}/deny",
+            post(handlers::session_spawn::deny),
+        )
         // Launcher API routes
         .route("/api/launchers", get(handlers::launchers::list_launchers))
         .route(
@@ -624,6 +649,15 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
         .layer(axum::middleware::from_fn_with_state(
             app_state_for_linked_gate,
             handlers::federation::linked_scope_gate,
+        ))
+        // Outside everything, so an error from any route or gate above is
+        // sent typed to a client that asks for JSON.
+        .layer(axum::middleware::from_fn(
+            crate::errors::negotiate_error_body,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            app_state_for_logging,
+            crate::log_context::request_context,
         )))
 }
 

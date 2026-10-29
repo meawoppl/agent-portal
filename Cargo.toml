@@ -17,7 +17,7 @@ members = [
     "portal-sysmon",
     "mobile/src-tauri",
 ]
-exclude = ["mobile/status-notification-plugin"]
+exclude = ["mobile/status-notification-plugin", "vendor/web-push"]
 resolver = "2"
 
 [workspace.package]
@@ -78,11 +78,11 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # Claude Code integration
-claude-codes = { version = "2.1.306", default-features = false, features = ["types"] }
+claude-codes = { version = "2.1.312", default-features = false, features = ["types"] }
 
 # Muse CLI integration
-muse-codes = { version = "1.4.11", default-features = false, features = ["types"] }
-codex-codes = { version = "0.163.3", default-features = false, features = ["types"] }
+muse-codes = { version = "1.4.14", default-features = false, features = ["types"] }
+codex-codes = { version = "0.165.1", default-features = false, features = ["types"] }
 antigravity-codes = { version = "0.1.20", default-features = false, features = ["types"] }
 
 # Web Push (VAPID + RFC8291 encryption). `default-features = false` drops the
@@ -136,3 +136,7 @@ strip = true
 [workspace.lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"
+
+[patch.crates-io]
+# web-push 0.11 pins jwt-simple 0.12, which retains vulnerable crypto-bigint.
+web-push = { path = "vendor/web-push" }

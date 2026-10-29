@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="arr-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565f89"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+  </defs>
+
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2291 · Control plugin surfaces from the session dock</text>
+
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">Plugin surfaces could only be run from a shell inside the session; the dock</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">now shows their state and starts, stops, restarts and opens them.</text>
+  <line x1="55" y1="166" x2="1945" y2="166" stroke="#3d4666" stroke-width="1"/>
+
+  <text x="55" y="215" font-size="22" font-weight="bold" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1045" y="215" font-size="22" font-weight="bold" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1140" stroke="#3d4666" stroke-width="2" stroke-dasharray="10 8"/>
+
+  <!-- BEFORE -->
+  <rect x="55" y="245" width="900" height="150" rx="10" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+  <text x="79" y="285" font-size="26" fill="#c0caf5">agent-portal plugin open | stop | status</text>
+  <text x="79" y="325" font-size="23" fill="#a9b1d6">from a shell inside the session only</text>
+  <text x="79" y="360" font-size="23" fill="#f7768e">PluginAction::Surface: "not yet"</text>
+
+  <rect x="55" y="445" width="900" height="150" rx="10" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+  <text x="79" y="485" font-size="26" fill="#c0caf5">Session plugin dock</text>
+  <text x="79" y="525" font-size="23" fill="#a9b1d6">cards list a surface title</text>
+  <text x="79" y="560" font-size="23" fill="#f7768e">no state, no controls, no errors or logs</text>
+
+  <rect x="55" y="645" width="900" height="150" rx="10" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+  <text x="79" y="685" font-size="26" fill="#c0caf5">[surface] without kind</text>
+  <text x="79" y="725" font-size="23" fill="#f7768e">surface_kind: None (read as no surface)</text>
+
+  <!-- AFTER -->
+  <rect x="1045" y="245" width="900" height="150" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1069" y="285" font-size="26" fill="#c0caf5">plugin::surface_action over plugins.manage.v1</text>
+  <text x="1069" y="325" font-size="23" fill="#9ece6a">start/restart as a managed forward on the session</text>
+  <text x="1069" y="360" font-size="23" fill="#a9b1d6">stop halts the recipe; status via surface_report</text>
+  <line x1="1495" y1="395" x2="1495" y2="440" stroke="#9ece6a" stroke-width="2" marker-end="url(#arr-green)"/>
+
+  <rect x="1045" y="445" width="900" height="150" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1069" y="485" font-size="26" fill="#c0caf5">SurfaceControls in the dock (owner, home)</text>
+  <text x="1069" y="525" font-size="23" fill="#9ece6a">state, health path, Start / Restart / Stop</text>
+  <text x="1069" y="560" font-size="23" fill="#a9b1d6">Open docked, Open in new tab; error + log tail</text>
+
+  <rect x="1045" y="645" width="900" height="150" rx="10" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+  <text x="1069" y="685" font-size="26" fill="#c0caf5">Backend guard</text>
+  <text x="1069" y="725" font-size="23" fill="#9ece6a">session must be the caller's, on that computer</text>
+  <text x="1069" y="760" font-size="23" fill="#a9b1d6">runs from the session's own working directory</text>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">Unchanged: surfaces still go through the session's forward, so forward privacy rules are the same.</text>
+</svg>

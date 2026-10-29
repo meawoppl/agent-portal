@@ -107,6 +107,12 @@ async fn session_inventory(
 fn action_timeout_secs(action: &PluginAction) -> u64 {
     match action {
         PluginAction::Inventory => 20,
+        PluginAction::Surface {
+            action: shared::api::PluginSurfaceAction::Status,
+            ..
+        } => 20,
+        // A start waits up to 30 s for the first health check.
+        PluginAction::Surface { .. } => 90,
         _ => 600,
     }
 }
@@ -118,9 +124,28 @@ pub async fn run_plugin_action(
     State(state): State<Arc<AppState>>,
     CurrentUserId(user_id): CurrentUserId,
     Path(launcher_id): Path<Uuid>,
-    Json(request): Json<PluginRequest>,
+    Json(mut request): Json<PluginRequest>,
 ) -> Result<Json<PluginResponse>, AppError> {
     super::launcher_rpc::require_launcher_owner(&state, launcher_id, user_id)?;
+    // An action for a session (a surface forwarded to it) must name one the
+    // caller owns on this computer, and runs from that session's directory,
+    // whatever the request said.
+    let session = match request.session_id {
+        Some(session_id) => {
+            let session = {
+                let mut conn = state.conn()?;
+                super::session_access::verify_session_owner(&mut conn, session_id, user_id)?
+            };
+            if session.launcher_id != Some(launcher_id) {
+                return Err(AppError::BadRequest(
+                    "That session runs on another computer",
+                ));
+            }
+            request.working_directory = Some(session.working_directory.clone());
+            Some(session)
+        }
+        None => None,
+    };
     if !state
         .session_manager
         .launcher_supports_capability(launcher_id, shared::LAUNCHER_CAPABILITY_PLUGINS)
@@ -130,6 +155,15 @@ pub async fn run_plugin_action(
         ));
     }
     let timeout = action_timeout_secs(&request.action);
+    let ran_command = match &request.action {
+        PluginAction::RunCommand {
+            name,
+            command,
+            args,
+            approval: Some(_),
+        } => Some((name.clone(), command.clone(), args.clone())),
+        _ => None,
+    };
     let request_id = Uuid::new_v4();
     let response = super::launcher_rpc::launcher_rpc(
         &state,
@@ -142,12 +176,153 @@ pub async fn run_plugin_action(
         timeout,
     )
     .await?;
-    match response {
+    let mut response = match response {
         shared::LauncherToServer::PluginResult { result, .. } => {
-            result.map(Json).map_err(AppError::BadGatewayMessage)
+            (*result).map_err(AppError::BadGatewayMessage)?
         }
-        _ => Err(AppError::Internal(
-            "Unexpected launcher plugin response".into(),
-        )),
+        _ => {
+            return Err(AppError::Internal(
+                "Unexpected launcher plugin response".into(),
+            ))
+        }
+    };
+    // The command has run by now, so a failure to record it must not read as
+    // a failed run, which the user might repeat.
+    if let (Some(session), Some((name, command, args))) = (&session, ran_command) {
+        let invocation = invocation(&name, &command, &args);
+        if let Err(error) = record_command(&state, session, &invocation, &response) {
+            tracing::error!(
+                "{} session={} command={invocation:?}: {error:?}",
+                crate::markers::PLUGIN_COMMAND_RECORD_FAILED,
+                session.id,
+            );
+            response.transcript_error =
+                Some("The command ran, but it could not be added to the session transcript".into());
+        }
+    }
+    Ok(Json(response))
+}
+
+/// A plugin command as the user asked for it, each argument shell-quoted
+/// unless it is plainly one word, so the card shows exactly what was passed.
+fn invocation(plugin: &str, command: &str, args: &[String]) -> String {
+    let plain = |arg: &str| {
+        !arg.is_empty()
+            && arg
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "-_./=:,@%+".contains(c))
+    };
+    std::iter::once(format!("{plugin}:{command}"))
+        .chain(args.iter().map(|arg| {
+            if plain(arg) {
+                arg.clone()
+            } else {
+                format!("'{}'", arg.replace('\'', r"'\''"))
+            }
+        }))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The longest run of backticks in `text`, which a code span or fence around
+/// it must outrun.
+fn longest_backtick_run(text: &str) -> usize {
+    text.split(|c| c != '`').map(str::len).max().unwrap_or(0)
+}
+
+/// `text` as a markdown code span, whatever backticks it holds.
+fn code_span(text: &str) -> String {
+    let ticks = "`".repeat(longest_backtick_run(text) + 1);
+    let pad = if text.starts_with('`') || text.ends_with('`') {
+        " "
+    } else {
+        ""
+    };
+    format!("{ticks}{pad}{text}{pad}{ticks}")
+}
+
+/// Output kept in a plugin command's transcript card; the tail carries the
+/// result.
+const COMMAND_CARD_OUTPUT: usize = 8 * 1024;
+
+/// Put a plugin command's run in the session's transcript as a portal card:
+/// which plugin command, on which computer and directory, how it ended, and
+/// its output. A portal card, not an agent tool call, so it reads as a named
+/// plugin command rather than arbitrary shell.
+fn record_command(
+    state: &AppState,
+    session: &crate::models::Session,
+    invocation: &str,
+    response: &PluginResponse,
+) -> Result<(), AppError> {
+    use diesel::prelude::*;
+    let ended = match (response.success, response.exit_code, &response.error) {
+        (true, _, _) => "succeeded".to_string(),
+        (false, Some(code), _) => format!("failed (exit {code})"),
+        (false, None, Some(error)) => format!("failed: {error}"),
+        (false, None, None) => "failed".to_string(),
+    };
+    let output = response.output.trim_end();
+    let tail = match output.len().checked_sub(COMMAND_CARD_OUTPUT) {
+        Some(start) => {
+            let start = (start..output.len())
+                .find(|i| output.is_char_boundary(*i))
+                .unwrap_or(output.len());
+            format!("…{}", &output[start..])
+        }
+        None => output.to_string(),
+    };
+    let mut text = format!(
+        "**Plugin command** {} {ended}\n\nOn {} in {}",
+        code_span(invocation),
+        session.hostname,
+        code_span(&session.working_directory)
+    );
+    if !tail.is_empty() {
+        let fence = "`".repeat(longest_backtick_run(&tail).max(2) + 1);
+        text.push_str(&format!("\n\n{fence}\n{tail}\n{fence}"));
+    }
+    let content = shared::PortalMessage::text(text).to_json();
+    let inserted: crate::models::Message = diesel::insert_into(crate::schema::messages::table)
+        .values(crate::models::NewMessage {
+            session_id: session.id,
+            role: shared::MessageRole::Portal.to_string(),
+            content: content.to_string(),
+            user_id: session.user_id,
+            agent_type: session.agent_type.clone(),
+            provenance_kind: None,
+            provenance_session_id: None,
+            provenance_agent_type: None,
+        })
+        .get_result(&mut state.conn()?)?;
+    state.session_manager.broadcast_to_web_clients(
+        &session.session_key,
+        shared::ServerToClient::AgentOutput {
+            content,
+            agent_type: shared::AgentType::parse_or_default(&session.agent_type),
+            meta: Some(inserted.portal_meta(None)),
+        },
+    );
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn card_quotes_arguments_and_outruns_backticks() {
+        let args = [
+            "plain".into(),
+            "two words".into(),
+            "it's".into(),
+            "a`b".into(),
+            String::new(),
+        ];
+        let shown = invocation("tiny", "echo", &args);
+        assert_eq!(shown, r"tiny:echo plain 'two words' 'it'\''s' 'a`b' ''");
+        assert_eq!(code_span(&shown), format!("``{shown}``"));
+        assert_eq!(code_span("`edge`"), "`` `edge` ``");
+        assert_eq!(code_span("/home/me"), "`/home/me`");
     }
 }

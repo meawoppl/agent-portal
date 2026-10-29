@@ -337,3 +337,87 @@
 .session-rename-label {
     display: none;
 }
+
+.spawn-dialog {
+    width: min(720px, calc(100vw - 24px));
+    max-height: calc(100dvh - 40px);
+    overflow-y: auto;
+    padding: 1.25rem;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg-dark);
+    color: var(--text-primary);
+    white-space: normal;
+}
+
+.spawn-dialog-header,
+.spawn-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.spawn-dialog button,
+.spawn-dialog select,
+.spawn-dialog input {
+    min-height: 44px;
+    font-size: 16px;
+}
+
+.spawn-policy,
+.spawn-request {
+    margin-top: 1rem;
+    padding: 1rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+.spawn-policy label {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    margin-block: 0.75rem;
+}
+
+.spawn-policy select {
+    max-width: 100%;
+}
+
+.spawn-request dl {
+    display: grid;
+    grid-template-columns: 6rem minmax(0, 1fr);
+    gap: 0.5rem;
+}
+
+.spawn-request dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.spawn-request pre {
+    max-height: 18rem;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.spawn-actions {
+    justify-content: flex-start;
+    margin-top: 0.75rem;
+}
+
+.pill-child-badge {
+    color: var(--text-secondary);
+    font-size: 0.7rem;
+}
+
+.spawn-dialog select,
+.spawn-dialog input[type="number"] {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-darker);
+    color: var(--text-primary);
+    padding: 0.5rem;
+}

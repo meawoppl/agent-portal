@@ -4,13 +4,16 @@ mod git_metadata;
 mod media_display;
 mod output_forwarder;
 mod session_event;
+mod supervisor;
+use session_lib::proxy_session::file_transfer::FileTransferBridge;
+pub use supervisor::{run_connection_loop, Backoff, LoopResult, SessionState};
 mod wiggum;
 
 // Hoisted to session-lib (#1657): these serve every agent under the proxy.
 // Re-exported here so internal call sites keep their `super::` paths.
 use session_lib::proxy_session::heartbeat_watchdog;
 pub(crate) use session_lib::proxy_session::portal_reminder;
-pub use session_lib::proxy_session::{ack_portal_input, emit_input_progress};
+pub use session_lib::proxy_session::{ack_portal_input, emit_input_failure, emit_input_progress};
 
 pub use session_lib::proxy_session::ws_reader::{classify_portal_input, RoutedPortalInput};
 pub use wiggum::wiggum_prompt;
@@ -26,16 +29,16 @@ use session_lib::output_buffer::PendingOutputBuffer;
 use session_lib::session::Session;
 use shared::{ProxyToServer, ServerToProxy, SessionEndpoint};
 use tokio::sync::{mpsc, Mutex};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 pub use git_metadata::{get_git_branch, get_repo_url};
 pub use media_display::MediaDisplaySink;
 
-use git_metadata::{get_open_prs, get_pr_url, GitMetadataState, GitRefreshTrigger};
+use git_metadata::{GitMetadataState, GitRefreshTrigger};
 use output_forwarder::spawn_output_forwarder;
 use session_lib::proxy_session::ws_reader::{
-    spawn_ws_reader, FileDownloadEvent, FileReceiveState, FileUploadEvent, WsReaderChannels,
+    spawn_ws_reader, FileDownloadEvent, FileUploadEvent, WsReaderChannels,
 };
 use wiggum::WiggumState;
 
@@ -59,6 +62,10 @@ pub type ClaudeConversationIdSink = Arc<dyn Fn(uuid::Uuid) + Send + Sync>;
 /// Configuration for a proxy session
 #[derive(Clone)]
 pub struct ProxySessionConfig {
+    /// One-time transcript disclosure when missing native history was replaced.
+    pub startup_notice: Option<String>,
+    /// Context changes the launcher posts while this session runs.
+    pub context_updates: session_lib::ContextInbox,
     pub history_restore: Option<shared::api::HistoryRestoreLaunch>,
     pub backend_url: String,
     pub session_id: Uuid,
@@ -132,76 +139,6 @@ pub fn default_session_name() -> String {
     )
 }
 
-/// Exponential backoff helper
-pub struct Backoff {
-    current: u64,
-    initial: u64,
-    max: u64,
-    multiplier: u64,
-    stable_threshold: u64,
-}
-
-impl Backoff {
-    pub fn new() -> Self {
-        Self {
-            current: 1,
-            initial: 1,
-            max: shared::protocol::MAX_RECONNECT_BACKOFF_SECS,
-            multiplier: 2,
-            stable_threshold: 30,
-        }
-    }
-
-    /// Get the current backoff duration
-    pub fn current_secs(&self) -> u64 {
-        self.current
-    }
-
-    /// Advance to the next backoff interval
-    pub fn advance(&mut self) {
-        self.current = (self.current * self.multiplier).min(self.max);
-    }
-
-    /// Reset backoff if connection was stable
-    pub fn reset_if_stable(&mut self, connection_duration: Duration) {
-        if connection_duration.as_secs() >= self.stable_threshold {
-            info!(
-                "Connection was stable for {}s, resetting backoff",
-                connection_duration.as_secs()
-            );
-            self.current = self.initial;
-        }
-    }
-
-    /// Reset backoff to initial value unconditionally
-    pub fn reset(&mut self) {
-        self.current = self.initial;
-    }
-
-    /// Get a sleep duration
-    pub fn sleep_duration(&self) -> Duration {
-        Duration::from_secs(self.current)
-    }
-}
-
-impl Default for Backoff {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Result from the connection loop
-pub enum LoopResult {
-    /// Normal exit (agent process ended)
-    NormalExit,
-    /// Session not found - caller should restart with fresh session
-    SessionNotFound,
-    /// Registration was rejected by the backend. The launcher should let the
-    /// process exit; reconcile will relaunch it with a freshly minted token
-    /// (#1045).
-    RegistrationRejected,
-}
-
 /// Why a [`register_session`] attempt did not yield a usable connection.
 pub enum RegisterError {
     /// The backend explicitly rejected registration (`RegisterAck` with
@@ -212,89 +149,6 @@ pub enum RegisterError {
     /// A transient failure (connection dropped, send failed). The caller
     /// should reconnect after backing off for the given duration.
     Transient(Duration),
-}
-
-/// State that persists across WebSocket reconnections for a session.
-/// This includes the input channel, output buffer, and session config.
-pub struct SessionState<'a, A: Agent> {
-    /// Session configuration
-    pub config: &'a ProxySessionConfig,
-    /// The agent-backed session (Claude or Codex).
-    pub claude_session: &'a mut Session<A>,
-    /// Sender for input messages (cloned per connection)
-    pub input_tx: mpsc::UnboundedSender<PortalInput>,
-    /// Receiver for input messages (persists across connections)
-    pub input_rx: &'a mut mpsc::UnboundedReceiver<PortalInput>,
-    /// Output buffer with persistence
-    pub output_buffer: Arc<Mutex<PendingOutputBuffer>>,
-    /// Backoff state for reconnection
-    pub backoff: Backoff,
-    /// Whether this is the first connection attempt
-    pub first_connection: bool,
-    /// Whether the portal-features reminder still needs to ride along with the
-    /// next user input. Lives here, not on `ConnectionState`, because it is
-    /// scoped to the agent PROCESS: a WS reconnect must not re-send it, but a
-    /// respawned agent must get it again. Shared with the per-connection state
-    /// so the input arms can clear it without a write-back.
-    pub reminder_pending: Arc<AtomicBool>,
-    /// When the last disconnect occurred (for reporting reconnect duration)
-    pub disconnected_at: Option<Instant>,
-    /// Whether the last disconnect was a graceful server shutdown
-    pub last_disconnect_graceful: bool,
-    /// Consecutive replay failures on the same pending messages
-    pub replay_failures: u32,
-}
-
-impl<'a, A: Agent> SessionState<'a, A> {
-    /// Create a new session state
-    pub fn new(
-        config: &'a ProxySessionConfig,
-        claude_session: &'a mut Session<A>,
-        input_tx: mpsc::UnboundedSender<PortalInput>,
-        input_rx: &'a mut mpsc::UnboundedReceiver<PortalInput>,
-    ) -> Result<Self> {
-        let output_buffer = Arc::new(Mutex::new(PendingOutputBuffer::new(config.session_id)?));
-
-        Ok(Self {
-            config,
-            claude_session,
-            input_tx,
-            input_rx,
-            output_buffer,
-            backoff: Backoff::new(),
-            first_connection: true,
-            reminder_pending: Arc::new(AtomicBool::new(
-                config.prime_portal_reminder_on_first_input,
-            )),
-            disconnected_at: None,
-            last_disconnect_graceful: false,
-            replay_failures: 0,
-        })
-    }
-
-    /// Log pending messages from previous session
-    pub async fn log_pending_messages(&self) {
-        let buf = self.output_buffer.lock().await;
-        let pending = buf.pending_count();
-        if pending > 0 {
-            info!(
-                "Loaded {} pending messages from previous session, will replay on connect",
-                pending
-            );
-        }
-    }
-
-    /// Persist the output buffer
-    pub async fn persist_buffer(&self) {
-        if let Err(e) = self.output_buffer.lock().await.persist() {
-            warn!("Failed to persist output buffer: {}", e);
-        }
-    }
-
-    /// Get pending message count
-    pub async fn pending_count(&self) -> usize {
-        self.output_buffer.lock().await.pending_count()
-    }
 }
 
 /// State for the main message loop, reducing parameter count.
@@ -336,7 +190,7 @@ struct ConnectionState {
     /// Working directory for file uploads
     working_directory: String,
     /// Active file uploads being received in chunks
-    active_uploads: std::collections::HashMap<String, FileReceiveState>,
+    file_transfer: FileTransferBridge,
     /// Shared with `SessionState` — see the field there.
     reminder_pending: Arc<AtomicBool>,
     /// Agent type for tagging per-message wire output (proxy emission side)
@@ -352,242 +206,6 @@ struct ConnectionState {
     /// Displays images the agent reads; see [`MediaDisplaySink`]. Used by the
     /// non-Claude arm — Claude's detection runs in the output forwarder.
     media_display_sink: Option<MediaDisplaySink>,
-}
-
-/// Record the start of an outage, classifying it **once**.
-///
-/// Both the "connection dropped" and "reconnect attempt failed" paths report
-/// `ConnectionResult::Disconnected`, and every retry during a backend restart
-/// takes the latter. Classifying on each call let those retries overwrite a
-/// graceful classification, so any restart outlasting the first backoff — i.e.
-/// every real redeploy — was reported to the user as an "unexpected
-/// disconnect". Only the first call after a live connection is lost decides
-/// what kind of outage this is; later calls just keep waiting.
-fn note_disconnect(
-    disconnected_at: &mut Option<Instant>,
-    last_disconnect_graceful: &mut bool,
-    graceful: bool,
-) {
-    if disconnected_at.is_none() {
-        *disconnected_at = Some(Instant::now());
-        *last_disconnect_graceful = graceful;
-    }
-}
-
-/// Run the WebSocket connection loop with auto-reconnect
-pub async fn run_connection_loop<A: Agent>(
-    config: &ProxySessionConfig,
-    claude_session: &mut Session<A>,
-    input_tx: mpsc::UnboundedSender<PortalInput>,
-    input_rx: &mut mpsc::UnboundedReceiver<PortalInput>,
-) -> Result<LoopResult> {
-    let mut session = SessionState::new(config, claude_session, input_tx, input_rx)?;
-    session.log_pending_messages().await;
-
-    loop {
-        if session.first_connection {
-            info!("Proxy ready");
-        }
-
-        let result = run_single_connection(&mut session).await;
-        session.first_connection = false;
-
-        match result {
-            ConnectionResult::AgentExited => {
-                info!("Agent process exited, shutting down");
-                session.persist_buffer().await;
-                return Ok(LoopResult::NormalExit);
-            }
-            ConnectionResult::SessionNotFound => {
-                warn!("Session not found, need to restart with fresh session");
-                session.persist_buffer().await;
-                return Ok(LoopResult::SessionNotFound);
-            }
-            ConnectionResult::Disconnected(duration) => {
-                note_disconnect(
-                    &mut session.disconnected_at,
-                    &mut session.last_disconnect_graceful,
-                    false,
-                );
-                session.backoff.reset_if_stable(duration);
-                session.persist_buffer().await;
-
-                let pending = session.pending_count().await;
-                warn!(
-                    "WebSocket disconnected, {} pending messages, reconnecting in {}s",
-                    pending,
-                    session.backoff.current_secs()
-                );
-
-                tokio::time::sleep(session.backoff.sleep_duration()).await;
-                session.backoff.advance();
-            }
-            ConnectionResult::ServerShutdown(delay) => {
-                note_disconnect(
-                    &mut session.disconnected_at,
-                    &mut session.last_disconnect_graceful,
-                    true,
-                );
-                // Graceful shutdown - reset backoff and use server's suggested delay
-                session.backoff.reset();
-                session.persist_buffer().await;
-
-                let pending = session.pending_count().await;
-                let delay_secs = delay.as_secs().max(1);
-                info!(
-                    "Server shutting down, {} pending messages, reconnecting in {}s",
-                    pending, delay_secs
-                );
-
-                tokio::time::sleep(delay).await;
-            }
-            ConnectionResult::SessionTerminated => {
-                info!("Session terminated by server, not reconnecting");
-                session.persist_buffer().await;
-                return Ok(LoopResult::NormalExit);
-            }
-            ConnectionResult::RegistrationRejected => {
-                error!(
-                    "Registration rejected by server (token revoked/expired or unauthorized); \
-                     not reconnecting"
-                );
-                session.persist_buffer().await;
-                return Ok(LoopResult::RegistrationRejected);
-            }
-        }
-    }
-}
-
-/// Run a single WebSocket connection until it disconnects or Claude exits
-async fn run_single_connection<A: Agent>(session: &mut SessionState<'_, A>) -> ConnectionResult {
-    // Connect to WebSocket
-    let mut conn =
-        match connect_to_backend(&session.config.backend_url, session.first_connection).await {
-            Ok(conn) => conn,
-            Err(duration) => return ConnectionResult::Disconnected(duration),
-        };
-
-    // Re-detect git branch on reconnect (it may have changed)
-    let current_branch = get_git_branch(&session.config.working_directory);
-    let config_with_branch = ProxySessionConfig {
-        git_branch: current_branch,
-        ..session.config.clone()
-    };
-
-    // Register with backend and wait for acknowledgment. A ticket in the ack
-    // means we may open the binary port-forward data plane (#1506).
-    let tunnel_data_grant = match register_session(&mut conn, &config_with_branch).await {
-        Ok(grant) => grant,
-        Err(RegisterError::Transient(duration)) => return ConnectionResult::Disconnected(duration),
-        Err(RegisterError::Rejected) => return ConnectionResult::RegistrationRejected,
-    };
-
-    // Look up PR URL, repo URL, and the repo's open PRs for the current branch
-    // and send as the initial SessionUpdate (so the pill populates immediately).
-    let repo_url = get_repo_url(&session.config.working_directory);
-    let pr_url = config_with_branch
-        .git_branch
-        .as_deref()
-        .and_then(|b| get_pr_url(&session.config.working_directory, b));
-    let open_prs = get_open_prs(&session.config.working_directory);
-    let update_msg = ProxyToServer::SessionUpdate {
-        session_id: config_with_branch.session_id,
-        git_branch: config_with_branch.git_branch.clone(),
-        pr_url,
-        repo_url,
-        open_prs,
-    };
-    if conn.send(update_msg).await.is_err() {
-        error!("Failed to send initial session update");
-    }
-
-    // Replay pending messages after successful registration.
-    // If replay fails repeatedly (e.g., backend reset and rejects stale seqs),
-    // drop the pending messages after MAX_REPLAY_FAILURES to avoid an infinite loop.
-    const MAX_REPLAY_FAILURES: u32 = 5;
-    {
-        let mut buf = session.output_buffer.lock().await;
-        let pending_count = buf.pending_count();
-        if pending_count > 0 {
-            if session.replay_failures >= MAX_REPLAY_FAILURES {
-                error!(
-                    "Dropping {} pending messages after {} consecutive replay failures",
-                    pending_count, session.replay_failures
-                );
-                buf.clear();
-                session.replay_failures = 0;
-            } else {
-                debug!(
-                    "Replaying {} pending messages after reconnect (attempt {})",
-                    pending_count,
-                    session.replay_failures + 1
-                );
-                let mut replay_failed = false;
-                for pending in buf.get_pending() {
-                    let msg = ProxyToServer::SequencedOutput {
-                        seq: pending.seq,
-                        content: pending.content.clone(),
-                        agent_type: config_with_branch.agent_type,
-                    };
-                    if conn.send(msg).await.is_err() {
-                        error!("Failed to replay pending message seq={}", pending.seq);
-                        session.replay_failures += 1;
-                        replay_failed = true;
-                        break;
-                    }
-                }
-                if replay_failed {
-                    return ConnectionResult::Disconnected(Duration::ZERO);
-                }
-                debug!("Finished replaying pending messages");
-                session.replay_failures = 0;
-            }
-        }
-    }
-
-    // Announce the session once. Reconnects are routine transport churn and
-    // only go to the log — posting them filled idle transcripts with walls of
-    // "reconnected" lines.
-    if session.first_connection {
-        let short_id = shared::short_uuid(&session.config.session_id);
-        let text = format!(
-            "**Session started** — `{}` on `{}` in `{}` ({} `{}…`)",
-            session.config.session_name,
-            hostname_or_unknown(),
-            session.config.working_directory,
-            config_with_branch.agent_type,
-            short_id,
-        );
-        let portal_content = shared::PortalMessage::text(text).to_json();
-        let seq = {
-            let mut buf = session.output_buffer.lock().await;
-            buf.push(portal_content.clone())
-        };
-        let msg = ProxyToServer::SequencedOutput {
-            seq,
-            content: portal_content,
-            agent_type: config_with_branch.agent_type,
-        };
-        if conn.send(msg).await.is_err() {
-            error!("Failed to send connection portal message");
-            return ConnectionResult::Disconnected(Duration::ZERO);
-        }
-    } else {
-        let after = session
-            .disconnected_at
-            .map(|t| format!(" after {}s", t.elapsed().as_secs()))
-            .unwrap_or_default();
-        let reason = if session.last_disconnect_graceful {
-            "server restart"
-        } else {
-            "unexpected disconnect"
-        };
-        info!("Connection restored{after} ({reason})");
-        session.disconnected_at = None;
-    }
-
-    // Run the message loop - split connection for concurrent read/write
-    run_message_loop(session, &config_with_branch, conn, tunnel_data_grant).await
 }
 
 /// Connect to the backend WebSocket
@@ -859,7 +477,7 @@ async fn run_message_loop<A: Agent>(
         file_upload_rx,
         file_download_rx,
         working_directory: config.working_directory.clone(),
-        active_uploads: std::collections::HashMap::new(),
+        file_transfer: FileTransferBridge::new(config.working_directory.clone(), ws_write.clone()),
         reminder_pending: session.reminder_pending.clone(),
         agent_type: config.agent_type,
         git_metadata,
@@ -875,6 +493,9 @@ async fn run_message_loop<A: Agent>(
 
     // Main loop
     let result = run_main_loop(session.claude_session, session.input_rx, &mut conn_state).await;
+
+    // Remove uncommitted uploads before discarding connection state.
+    conn_state.file_transfer.shutdown().await;
 
     // Clean up
     output_task.abort();
@@ -986,11 +607,11 @@ async fn run_main_loop<A: Agent>(
             }
 
             Some(upload_event) = state.file_upload_rx.recv() => {
-                handle_file_upload(upload_event, state).await;
+                state.file_transfer.handle_upload(upload_event).await;
             }
 
             Some(download_event) = state.file_download_rx.recv() => {
-                handle_file_download(download_event, state).await;
+                state.file_transfer.handle_download(download_event).await;
             }
 
             Some(perm_response) = state.perm_rx.recv() => {
@@ -1048,358 +669,6 @@ fn is_codex_compaction_event(value: &serde_json::Value) -> bool {
         .is_some_and(|t| t == "thread/compacted")
 }
 
-/// Report an upload's terminal outcome to the backend (relayed to the web
-/// client, which gates the prompt referencing the file on it — #939).
-async fn send_upload_result(
-    state: &ConnectionState,
-    upload_id: String,
-    success: bool,
-    error: Option<String>,
-    path: Option<String>,
-) {
-    let mut ws = state.ws_write.lock().await;
-    if let Err(e) = ws
-        .send(ProxyToServer::FileUploadResult(
-            shared::FileUploadResultFields {
-                upload_id,
-                success,
-                error,
-                path,
-            },
-        ))
-        .await
-    {
-        error!("Failed to send file upload result: {}", e);
-    }
-}
-
-/// Abort an in-flight upload: drop its state, best-effort delete the
-/// partial temp file, and report the failure.
-async fn fail_upload(state: &mut ConnectionState, upload_id: String, reason: String) {
-    if let Some(recv_state) = state.active_uploads.remove(&upload_id) {
-        drop(recv_state.file_handle);
-        let _ = tokio::fs::remove_file(&recv_state.temp_path).await;
-    }
-    error!("[upload {}] Failed: {}", upload_id_log(&upload_id), reason);
-    send_upload_result(state, upload_id, false, Some(reason), None).await;
-}
-
-/// Average upload receive rate in KB/s for the progress and completion logs.
-///
-/// Zero elapsed (a same-instant completion, reachable in tests) reports 0
-/// instead of dividing by zero. Single home for the rate math so the
-/// milestone and completion logs cannot drift.
-fn upload_rate_kbps(received_bytes: u64, elapsed_s: f64) -> f64 {
-    if elapsed_s > 0.0 {
-        received_bytes as f64 / elapsed_s / 1024.0
-    } else {
-        0.0
-    }
-}
-
-/// Short upload id for the `[upload ...]` log lines. Single home for the
-/// width so the failure, duplicate-start, milestone, and completion logs
-/// cannot drift.
-fn upload_id_log(upload_id: &str) -> &str {
-    truncate(upload_id, 8)
-}
-
-/// 10%-bucketed upload progress for the milestone log. An unknown total
-/// size (nothing to measure against) reports 100. Single home for the
-/// bucket math so it stays testable next to `upload_rate_kbps`.
-fn upload_milestone_percent(received_bytes: u64, total_size: u64) -> u32 {
-    if total_size == 0 {
-        return 100;
-    }
-    let percent = ((received_bytes as f64 / total_size as f64) * 100.0) as u32;
-    (percent / 10) * 10
-}
-
-/// Handle a file upload event (start or chunk)
-async fn handle_file_upload(upload_event: FileUploadEvent, state: &mut ConnectionState) {
-    match upload_event {
-        FileUploadEvent::Start {
-            upload_id,
-            filename,
-            total_chunks,
-            total_size,
-            disposition,
-        } => {
-            // Sanitize filename
-            let safe_name: String = filename
-                .rsplit('/')
-                .next()
-                .or_else(|| filename.rsplit('\\').next())
-                .unwrap_or(&filename)
-                .chars()
-                .filter(|c| *c != '/' && *c != '\\' && *c != '\0')
-                .collect();
-            let safe_name = if safe_name.is_empty() || safe_name == "." || safe_name == ".." {
-                "uploaded_file".to_string()
-            } else {
-                safe_name
-            };
-
-            // A duplicate Start for an in-flight upload_id (client bug or
-            // retry) must not leak the old entry's temp file: drop the old
-            // state and delete its partial before starting over.
-            if let Some(old) = state.active_uploads.remove(&upload_id) {
-                warn!(
-                    "[upload {}] Duplicate start; discarding previous partial",
-                    upload_id_log(&upload_id)
-                );
-                drop(old.file_handle);
-                let _ = tokio::fs::remove_file(&old.temp_path).await;
-            }
-
-            // Write to a hidden temp path; renamed to the real name only on
-            // completion so the agent can never read a truncated file.
-            let id = uuid::Uuid::new_v4();
-            let (temp_path, final_path) = match disposition {
-                shared::FileUploadDisposition::Workspace => {
-                    let final_path =
-                        std::path::Path::new(&state.working_directory).join(&safe_name);
-                    let temp_name = format!(".{safe_name}.{id}.upload");
-                    (
-                        std::path::Path::new(&state.working_directory).join(temp_name),
-                        final_path,
-                    )
-                }
-                shared::FileUploadDisposition::SecretDrop => {
-                    let root = std::env::var_os("XDG_RUNTIME_DIR")
-                        .map(std::path::PathBuf::from)
-                        .unwrap_or_else(std::env::temp_dir);
-                    (
-                        root.join(format!(".portal-drop-{id}.upload")),
-                        root.join(format!("portal-drop-{id}")),
-                    )
-                }
-            };
-            let mut options = tokio::fs::OpenOptions::new();
-            options.write(true).create_new(true);
-            #[cfg(unix)]
-            {
-                options.mode(0o600);
-            }
-            match options.open(&temp_path).await {
-                Ok(fh) => {
-                    state.active_uploads.insert(
-                        upload_id,
-                        FileReceiveState {
-                            filename: safe_name,
-                            total_chunks,
-                            total_size,
-                            received_chunks: 0,
-                            received_bytes: 0,
-                            file_handle: Some(fh),
-                            start_time: Instant::now(),
-                            last_log_percent: 0,
-                            temp_path,
-                            final_path,
-                            disposition,
-                        },
-                    );
-                }
-                Err(e) => {
-                    let reason = format!("failed to create {}: {}", temp_path.display(), e);
-                    fail_upload(state, upload_id, reason).await;
-                }
-            }
-        }
-        FileUploadEvent::Chunk { upload_id, data } => {
-            use base64::Engine;
-            use tokio::io::AsyncWriteExt;
-
-            let upload_id_short = upload_id_log(&upload_id);
-            let Some(recv_state) = state.active_uploads.get_mut(&upload_id) else {
-                // Post-abort stragglers land here; the failure was already
-                // reported when the upload state was dropped.
-                warn!("[upload {}] Chunk for unknown upload", upload_id_short);
-                return;
-            };
-
-            let decoded = match base64::engine::general_purpose::STANDARD.decode(&data) {
-                Ok(b) => b,
-                Err(e) => {
-                    let reason = format!("base64 decode error: {e}");
-                    fail_upload(state, upload_id, reason).await;
-                    return;
-                }
-            };
-
-            if let Some(ref mut fh) = recv_state.file_handle {
-                if let Err(e) = fh.write_all(&decoded).await {
-                    let reason = format!("write error: {e}");
-                    fail_upload(state, upload_id, reason).await;
-                    return;
-                }
-            }
-
-            recv_state.received_chunks += 1;
-            recv_state.received_bytes += decoded.len() as u64;
-
-            // Log every 10% milestone
-            let log_threshold =
-                upload_milestone_percent(recv_state.received_bytes, recv_state.total_size);
-            if log_threshold > recv_state.last_log_percent {
-                let elapsed = recv_state.start_time.elapsed().as_secs_f64();
-                let rate_kb = upload_rate_kbps(recv_state.received_bytes, elapsed);
-                info!(
-                    "[upload {}] {} - {}% ({}/{} bytes) - {:.1} KB/s",
-                    upload_id_short,
-                    recv_state.filename,
-                    log_threshold.min(100),
-                    recv_state.received_bytes,
-                    recv_state.total_size,
-                    rate_kb
-                );
-                recv_state.last_log_percent = log_threshold;
-            }
-
-            // Check if complete
-            if recv_state.received_chunks >= recv_state.total_chunks {
-                use tokio::io::AsyncWriteExt;
-
-                let elapsed = recv_state.start_time.elapsed().as_secs_f64();
-                let rate_kb = upload_rate_kbps(recv_state.received_bytes, elapsed);
-
-                // Flush + close, then commit: rename the temp file to its
-                // real name. Only a successful rename counts as delivered.
-                if let Some(mut fh) = recv_state.file_handle.take() {
-                    if let Err(e) = fh.flush().await {
-                        let reason = format!("flush error: {e}");
-                        fail_upload(state, upload_id, reason).await;
-                        return;
-                    }
-                }
-
-                let filename = recv_state.filename.clone();
-                let received_bytes = recv_state.received_bytes;
-                // Every chunk arrived, but an empty or short file must not be
-                // committed and reported as delivered.
-                if received_bytes == 0 || received_bytes != recv_state.total_size {
-                    let reason = format!(
-                        "received {received_bytes} of {} declared bytes",
-                        recv_state.total_size
-                    );
-                    fail_upload(state, upload_id, reason).await;
-                    return;
-                }
-                let final_path = recv_state.final_path.clone();
-                let temp_path = recv_state.temp_path.clone();
-                if let Err(e) = tokio::fs::rename(&temp_path, &final_path).await {
-                    let reason = format!("rename to {} failed: {e}", final_path.display());
-                    fail_upload(state, upload_id, reason).await;
-                    return;
-                }
-
-                info!(
-                    "[upload {}] Complete: {} ({} bytes in {:.1}s, avg {:.1} KB/s)",
-                    upload_id_short, filename, received_bytes, elapsed, rate_kb
-                );
-                let is_secret_drop =
-                    recv_state.disposition == shared::FileUploadDisposition::SecretDrop;
-                let secret_path = is_secret_drop.then(|| final_path.display().to_string());
-                state.active_uploads.remove(&upload_id);
-                send_upload_result(state, upload_id, true, None, secret_path).await;
-                if is_secret_drop {
-                    tokio::spawn(async move {
-                        tokio::time::sleep(std::time::Duration::from_secs(15 * 60)).await;
-                        let _ = tokio::fs::remove_file(final_path).await;
-                    });
-                }
-            }
-        }
-    }
-}
-
-async fn handle_file_download(download_event: FileDownloadEvent, state: &mut ConnectionState) {
-    let FileDownloadEvent::Request(request) = download_event;
-    let response = read_download_file(&state.working_directory, &request).await;
-    let mut ws = state.ws_write.lock().await;
-    if let Err(e) = ws.send(ProxyToServer::FileDownloadResponse(response)).await {
-        error!("Failed to send file download response: {}", e);
-    }
-}
-
-async fn read_download_file(
-    working_directory: &str,
-    request: &shared::FileDownloadRequestFields,
-) -> shared::FileDownloadResponseFields {
-    use base64::Engine;
-    use std::path::{Component, Path};
-
-    let fail = |error: &str| shared::FileDownloadResponseFields {
-        request_id: request.request_id,
-        success: false,
-        filename: None,
-        media_type: None,
-        size: None,
-        data_base64: None,
-        error: Some(error.to_string()),
-    };
-
-    let requested = Path::new(&request.path);
-    if requested.is_absolute()
-        || requested.components().any(|c| {
-            matches!(
-                c,
-                Component::ParentDir | Component::RootDir | Component::Prefix(_)
-            )
-        })
-    {
-        return fail("invalid relative path");
-    }
-
-    let root = match tokio::fs::canonicalize(working_directory).await {
-        Ok(path) => path,
-        Err(_) => return fail("working directory is unavailable"),
-    };
-    let target = root.join(requested);
-    let canonical = match tokio::fs::canonicalize(&target).await {
-        Ok(path) => path,
-        Err(_) => return fail("file not found"),
-    };
-    if !canonical.starts_with(&root) {
-        return fail("path escapes working directory");
-    }
-
-    let metadata = match tokio::fs::metadata(&canonical).await {
-        Ok(metadata) => metadata,
-        Err(_) => return fail("file not found"),
-    };
-    if !metadata.is_file() {
-        return fail("path is not a file");
-    }
-    if metadata.len() > request.max_bytes {
-        return fail("file exceeds size limit");
-    }
-
-    let bytes = match tokio::fs::read(&canonical).await {
-        Ok(bytes) => bytes,
-        Err(_) => return fail("failed to read file"),
-    };
-    if bytes.len() as u64 > request.max_bytes {
-        return fail("file exceeds size limit");
-    }
-
-    let filename = canonical
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("download")
-        .to_string();
-
-    shared::FileDownloadResponseFields {
-        request_id: request.request_id,
-        success: true,
-        filename: Some(filename),
-        media_type: Some("application/octet-stream".to_string()),
-        size: Some(bytes.len() as u64),
-        data_base64: Some(base64::engine::general_purpose::STANDARD.encode(bytes)),
-        error: None,
-    }
-}
-
 // String helpers shared with the frontend (see `shared::fmt`). Note the
 // minute format is `"{}m {}s"` (with a space), matching the frontend
 // transcript — the old local copy here used `"{}m{}s"`.
@@ -1407,37 +676,6 @@ pub(crate) use shared::fmt::{format_duration, truncate_str as truncate};
 
 #[cfg(test)]
 mod tests {
-    /// The redeploy bug: the backend announces a restart (graceful), then every
-    /// reconnect attempt fails while it is coming back up. Those retries must
-    /// not relabel the outage — a planned redeploy that takes longer than one
-    /// backoff was being reported to the user as an "unexpected disconnect".
-    #[test]
-    fn retries_during_a_restart_do_not_relabel_a_graceful_outage() {
-        let (mut at, mut graceful) = (None, false);
-
-        note_disconnect(&mut at, &mut graceful, true);
-        assert!(graceful, "the server told us it was restarting");
-        let first_seen = at;
-
-        // 35 seconds of failed reconnect attempts, each reporting Disconnected.
-        for _ in 0..8 {
-            note_disconnect(&mut at, &mut graceful, false);
-        }
-
-        assert!(graceful, "retries must not turn a restart into a surprise");
-        assert_eq!(at, first_seen, "the outage clock starts at the first drop");
-    }
-
-    /// The converse still has to work: a genuinely unexpected drop stays
-    /// unexpected.
-    #[test]
-    fn an_unannounced_drop_stays_unexpected() {
-        let (mut at, mut graceful) = (None, false);
-        note_disconnect(&mut at, &mut graceful, false);
-        assert!(!graceful);
-        assert!(at.is_some());
-    }
-
     #[test]
     fn portal_reminder_primes_fresh_contexts_only() {
         assert!(should_prime_portal_reminder_on_first_input(
@@ -1483,7 +721,6 @@ mod tests {
     }
 
     use super::*;
-    use uuid::Uuid;
 
     /// The Claude proxy-edge re-parse gate (#1165 item 2, slice 1). Valid Claude
     /// frames parse to `Some`, so the typed side-effects (wiggum DONE,
@@ -1509,180 +746,5 @@ mod tests {
         let garbage = json!({"totally": "unknown", "shape": [1, 2, 3]});
         assert!(parse_visible_claude_output(&garbage).is_none());
         assert!(parse_visible_claude_output(&json!(42)).is_none());
-    }
-
-    #[test]
-    fn backoff_doubles_then_saturates_at_max() {
-        let mut b = Backoff::new();
-        assert_eq!(b.current_secs(), 1);
-        b.advance();
-        assert_eq!(b.current_secs(), 2);
-        b.advance();
-        assert_eq!(b.current_secs(), 4);
-        // Many advances must clamp at the protocol cap, never overflow past it.
-        for _ in 0..40 {
-            b.advance();
-        }
-        assert_eq!(
-            b.current_secs(),
-            shared::protocol::MAX_RECONNECT_BACKOFF_SECS
-        );
-    }
-
-    #[test]
-    fn backoff_reset_if_stable_only_resets_past_threshold() {
-        let mut b = Backoff::new();
-        b.advance();
-        b.advance();
-        // Below the 30s stability threshold: keep backing off.
-        b.reset_if_stable(Duration::from_secs(29));
-        assert_eq!(b.current_secs(), 4);
-        // At/over the threshold: a stable connection earns a reset to initial.
-        b.reset_if_stable(Duration::from_secs(30));
-        assert_eq!(b.current_secs(), 1);
-    }
-
-    #[test]
-    fn backoff_reset_is_unconditional() {
-        let mut b = Backoff::new();
-        b.advance();
-        b.advance();
-        b.reset();
-        assert_eq!(b.current_secs(), 1);
-    }
-
-    fn download_request(path: &str, max_bytes: u64) -> shared::FileDownloadRequestFields {
-        shared::FileDownloadRequestFields {
-            request_id: Uuid::nil(),
-            path: path.to_string(),
-            max_bytes,
-        }
-    }
-
-    #[tokio::test]
-    async fn read_download_file_returns_valid_file() {
-        use base64::Engine;
-        let dir = tempfile::tempdir().unwrap();
-        tokio::fs::write(dir.path().join("hello.txt"), b"hi there")
-            .await
-            .unwrap();
-
-        let resp = read_download_file(
-            dir.path().to_str().unwrap(),
-            &download_request("hello.txt", 1024),
-        )
-        .await;
-
-        assert!(resp.success);
-        assert_eq!(resp.filename.as_deref(), Some("hello.txt"));
-        assert_eq!(resp.size, Some(8));
-        let decoded = base64::engine::general_purpose::STANDARD
-            .decode(resp.data_base64.unwrap())
-            .unwrap();
-        assert_eq!(decoded, b"hi there");
-    }
-
-    #[tokio::test]
-    async fn read_download_file_rejects_absolute_path() {
-        let dir = tempfile::tempdir().unwrap();
-        let resp = read_download_file(
-            dir.path().to_str().unwrap(),
-            &download_request("/etc/passwd", 1024),
-        )
-        .await;
-        assert!(!resp.success);
-        assert_eq!(resp.error.as_deref(), Some("invalid relative path"));
-    }
-
-    #[tokio::test]
-    async fn read_download_file_rejects_parent_traversal() {
-        let dir = tempfile::tempdir().unwrap();
-        let resp = read_download_file(
-            dir.path().to_str().unwrap(),
-            &download_request("../secrets.txt", 1024),
-        )
-        .await;
-        assert!(!resp.success);
-        assert_eq!(resp.error.as_deref(), Some("invalid relative path"));
-    }
-
-    #[tokio::test]
-    async fn read_download_file_reports_missing_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let resp = read_download_file(
-            dir.path().to_str().unwrap(),
-            &download_request("nope.txt", 1024),
-        )
-        .await;
-        assert!(!resp.success);
-        assert_eq!(resp.error.as_deref(), Some("file not found"));
-    }
-
-    #[tokio::test]
-    async fn read_download_file_enforces_size_limit() {
-        let dir = tempfile::tempdir().unwrap();
-        tokio::fs::write(dir.path().join("big.bin"), vec![0u8; 100])
-            .await
-            .unwrap();
-        let resp = read_download_file(
-            dir.path().to_str().unwrap(),
-            &download_request("big.bin", 10),
-        )
-        .await;
-        assert!(!resp.success);
-        assert_eq!(resp.error.as_deref(), Some("file exceeds size limit"));
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn read_download_file_rejects_symlink_escape() {
-        // A symlink whose name is a clean relative path but whose target
-        // canonicalizes outside the working directory must be refused.
-        let root = tempfile::tempdir().unwrap();
-        let outside = tempfile::tempdir().unwrap();
-        tokio::fs::write(outside.path().join("secret.txt"), b"top secret")
-            .await
-            .unwrap();
-        std::os::unix::fs::symlink(
-            outside.path().join("secret.txt"),
-            root.path().join("link.txt"),
-        )
-        .unwrap();
-
-        let resp = read_download_file(
-            root.path().to_str().unwrap(),
-            &download_request("link.txt", 1024),
-        )
-        .await;
-        assert!(!resp.success);
-        assert_eq!(
-            resp.error.as_deref(),
-            Some("path escapes working directory")
-        );
-    }
-
-    #[test]
-    fn upload_rate_kbps_matches_milestone_math_and_guards_zero_elapsed() {
-        assert_eq!(upload_rate_kbps(0, 1.0), 0.0);
-        assert_eq!(upload_rate_kbps(1024, 0.0), 0.0);
-        assert_eq!(upload_rate_kbps(1024, 1.0), 1.0);
-        assert_eq!(upload_rate_kbps(2048, 0.5), 4.0);
-    }
-
-    #[test]
-    fn upload_id_log_keeps_short_ids_and_truncates_long_ones() {
-        assert_eq!(upload_id_log("abc"), "abc");
-        assert_eq!(upload_id_log("12345678"), "12345678");
-        assert_eq!(upload_id_log("123456789"), "12345678");
-    }
-
-    #[test]
-    fn upload_milestone_percent_buckets_by_ten() {
-        assert_eq!(upload_milestone_percent(0, 0), 100);
-        assert_eq!(upload_milestone_percent(0, 1000), 0);
-        assert_eq!(upload_milestone_percent(50, 1000), 0);
-        assert_eq!(upload_milestone_percent(149, 1000), 10);
-        assert_eq!(upload_milestone_percent(999, 1000), 90);
-        assert_eq!(upload_milestone_percent(1000, 1000), 100);
     }
 }

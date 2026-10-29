@@ -47,6 +47,7 @@ pub enum WsEvent {
         client_msg_id: Uuid,
         stage: InputDeliveryStage,
         message: Option<String>,
+        queued: bool,
     },
     /// The session's port-forward set changed; the view refetches
     /// `GET /api/sessions/{id}/forwards` (docs/PORT_FORWARDING.md).
@@ -279,11 +280,13 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
             client_msg_id,
             stage,
             message,
+            queued,
         } => {
             on_event.emit(WsEvent::InputProgress {
                 client_msg_id,
                 stage,
                 message,
+                queued,
             });
         }
         ServerToClient::ContinuationStatus {

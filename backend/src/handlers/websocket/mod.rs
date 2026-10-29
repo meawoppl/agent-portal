@@ -1,5 +1,7 @@
+use tracing::Instrument;
 mod continuations;
 pub mod launcher_socket;
+mod member_status;
 mod message_handlers;
 mod permissions;
 mod proxy_socket;
@@ -71,9 +73,12 @@ pub async fn handle_session_websocket(
     ws: WebSocketUpgrade,
     State(app_state): State<Arc<AppState>>,
 ) -> Response {
+    let request_span = tracing::Span::current();
     ws.max_frame_size(SESSION_WS_MAX_MESSAGE_BYTES)
         .max_message_size(SESSION_WS_MAX_MESSAGE_BYTES)
-        .on_upgrade(|socket| proxy_socket::handle_session_socket(socket, app_state))
+        .on_upgrade(move |socket| {
+            proxy_socket::handle_session_socket(socket, app_state).instrument(request_span)
+        })
 }
 
 /// Upgrade for the dedicated binary port-forward data plane (#1506).
@@ -86,14 +91,20 @@ pub async fn handle_tunnel_data_websocket(
     ws: WebSocketUpgrade,
     State(app_state): State<Arc<AppState>>,
 ) -> Response {
-    ws.on_upgrade(|socket| tunnel_socket::handle_tunnel_data_socket(socket, app_state))
+    let request_span = tracing::Span::current();
+    ws.on_upgrade(move |socket| {
+        tunnel_socket::handle_tunnel_data_socket(socket, app_state).instrument(request_span)
+    })
 }
 
 pub async fn handle_launcher_websocket(
     ws: WebSocketUpgrade,
     State(app_state): State<Arc<AppState>>,
 ) -> Response {
-    ws.on_upgrade(|socket| launcher_socket::handle_launcher_socket(socket, app_state))
+    let request_span = tracing::Span::current();
+    ws.on_upgrade(move |socket| {
+        launcher_socket::handle_launcher_socket(socket, app_state).instrument(request_span)
+    })
 }
 
 // Deliberately no Debug: a query ticket is a credential.
@@ -118,6 +129,7 @@ pub async fn handle_web_client_websocket(
         return match crate::handlers::federation::tickets::consume(&app_state, &ticket, &headers) {
             Ok(auth) => {
                 let user_id = auth.user_id;
+                let request_span = tracing::Span::current();
                 ws.on_upgrade(move |socket| {
                     web_client_socket::handle_web_client_socket(
                         socket,
@@ -125,10 +137,16 @@ pub async fn handle_web_client_websocket(
                         user_id,
                         Some(auth),
                     )
+                    .instrument(request_span)
                 })
             }
             Err(error) => error.into_response(),
         };
+    }
+    // Dashboard frames act with owner authority (including launch RPCs).
+    // A session token must stay on /ws/session and its scoped agent APIs.
+    if let Err(error) = crate::auth::require_manual_launch_credential(&app_state, &headers) {
+        return error.into_response();
     }
     let user_id = match crate::auth::extract_user_id(&app_state, Some(&headers), &cookies).ok() {
         Some(id) => id,
@@ -150,7 +168,9 @@ pub async fn handle_web_client_websocket(
     }
 
     info!("Authenticated WebSocket upgrade for user: {}", user_id);
+    let request_span = tracing::Span::current();
     ws.on_upgrade(move |socket| {
         web_client_socket::handle_web_client_socket(socket, app_state, user_id, None)
+            .instrument(request_span)
     })
 }

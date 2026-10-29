@@ -41,6 +41,7 @@ impl SessionManager {
         self.sessions.insert(
             session_key,
             ProxyConnection {
+                log_span: tracing::Span::current(),
                 sender,
                 gen,
                 cancel,
@@ -61,10 +62,11 @@ impl SessionManager {
             Some(expected) => self
                 .sessions
                 .remove_if(session_key, |_, conn| conn.gen == expected)
-                .is_some(),
-            None => self.sessions.remove(session_key).is_some(),
+                .map(|(_, conn)| conn),
+            None => self.sessions.remove(session_key).map(|(_, conn)| conn),
         };
-        if removed {
+        if let Some(connection) = removed {
+            let _context = connection.log_span.enter();
             info!("Unregistering session: {}", session_key);
         } else if gen.is_some() {
             info!(
@@ -89,6 +91,13 @@ impl SessionManager {
         gen: u64,
         cancel: &CancellationToken,
     ) -> bool {
+        let log_span = self
+            .sessions
+            .get(session_key)
+            .filter(|c| c.gen == gen)
+            .map(|c| c.log_span.clone())
+            .unwrap_or_else(tracing::Span::none);
+        let _context = log_span.enter();
         let removed = self
             .sessions
             .remove_if(session_key, |_, conn| conn.gen == gen)

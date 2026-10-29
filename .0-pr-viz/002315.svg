@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="sans-serif" fill="#c0caf5">
+<text x="55" y="55" font-size="24" fill="#a9b1d6">PR #2315 · Meaningful session activity</text>
+<text x="55" y="110" font-size="34" fill="#e6e9f5">Portal chatter used to override completed turns.</text>
+<text x="55" y="155" font-size="34" fill="#e6e9f5">Now activity follows the latest meaningful agent signal.</text>
+<path d="M55 180 H1945 M1000 210 V1120" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="80" y="240" font-size="26" fill="#f7768e">BEFORE</text>
+<text x="1055" y="240" font-size="26" fill="#9ece6a">AFTER</text>
+<rect x="65" y="290" width="860" height="190" rx="16" fill="#1e202e" stroke="#565f89"/>
+<text x="95" y="335" font-size="28" fill="#7aa2f7">Latest candidate row</text>
+<text x="95" y="385" font-size="25">turn.completed followed by type: portal</text>
+<text x="95" y="430" font-size="25">The payload can have role: unknown.</text>
+<path d="M495 480 V570" stroke="#f7768e" stroke-width="3"/>
+<rect x="65" y="570" width="860" height="190" rx="16" fill="#1e202e" stroke="#f7768e"/>
+<text x="95" y="620" font-size="28" fill="#f7768e">Nonterminal meant Busy</text>
+<text x="95" y="670" font-size="25">Bookkeeping replaced the completed state.</text>
+<text x="95" y="715" font-size="25">Computers counted the session as active.</text>
+<rect x="1045" y="290" width="890" height="190" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1075" y="335" font-size="28" fill="#7aa2f7">session_activity::activity_signal</text>
+<text x="1075" y="385" font-size="25">Portal and metadata return None.</text>
+<text x="1075" y="430" font-size="25">Terminal events return Idle; work returns Busy.</text>
+<path d="M1490 480 V570" stroke="#9ece6a" stroke-width="3"/>
+<rect x="1045" y="570" width="890" height="190" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1075" y="620" font-size="28" fill="#9ece6a">Look back to a meaningful event</text>
+<text x="1075" y="670" font-size="25">Batched pages use per-session timestamp/id cursors.</text>
+<text x="1075" y="715" font-size="25">140 notices preserve either Idle or Busy.</text>
+<rect x="1045" y="850" width="890" height="190" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1075" y="900" font-size="28" fill="#9ece6a">One shared activity interpretation</text>
+<text x="1075" y="950" font-size="25">Computers, lists, peek, follow and idle checks</text>
+<text x="1075" y="995" font-size="25">Disconnected sessions remain Idle.</text>
+<text x="55" y="1170" font-size="22" fill="#a9b1d6">Activity is inferred from persisted protocol signals; this does not change input delivery or agent execution.</text>
+</g></svg>

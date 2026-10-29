@@ -173,7 +173,7 @@ fn read_page(
         });
         cursor = sequence;
     }
-    let state = super::agent_comms::session_activity_states(app, &mut conn, &[id])?
+    let state = super::session_activity::session_activity_states(app, &mut conn, &[id])?
         .get(&id)
         .copied()
         .unwrap_or(SessionActivityState::Idle);

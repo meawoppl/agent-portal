@@ -47,8 +47,7 @@ pub(crate) fn create_desired_session(
             repo_url: None,
             scheduled_task_id: None,
             paused: false,
-            claude_args: serde_json::to_value(&draft.claude_args)
-                .unwrap_or_else(|_| serde_json::Value::Array(Vec::new())),
+            claude_args: draft.claude_args.clone().into(),
             // Stamp the launcher's live version now — the registry entry that
             // holds it is gone by archive time (see
             // `NewSessionWithId::launcher_version`).
@@ -186,7 +185,7 @@ mod tests {
                 assert_eq!(row.client_version.as_deref(), Some("client-test"));
                 assert_eq!(row.launcher_version.as_deref(), Some("launcher-test"));
                 assert_eq!(row.agent_type, "codex");
-                assert_eq!(row.claude_args, serde_json::json!(["-c", "model=test"]));
+                assert_eq!(row.claude_args.0, ["-c", "model=test"]);
                 assert_eq!(row.status, SessionStatus::Disconnected.as_str());
                 assert!(!row.paused);
                 assert_eq!(row.forked_from_session_id, fork.then_some(source.id));

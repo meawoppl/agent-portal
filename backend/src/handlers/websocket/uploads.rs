@@ -33,7 +33,7 @@ pub(super) struct PendingUpload {
 
 /// Tell the uploading web client its upload definitively failed (#939
 /// phase 4) — it is holding back the prompt that references the file.
-fn send_upload_failure(tx: &super::WebClientSender, upload_id: String, error: &str) {
+pub(super) fn send_upload_failure(tx: &super::WebClientSender, upload_id: String, error: &str) {
     let _ = tx.send(shared::ServerToClient::FileUploadResult(
         shared::FileUploadResultFields {
             upload_id,

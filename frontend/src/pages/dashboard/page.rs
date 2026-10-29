@@ -203,12 +203,7 @@ pub fn dashboard_page() -> Html {
         // visible top-to-bottom rail (grouped when the pref is on). The rail's
         // host headers are inserted purely visually and carry no display index.
         if ui_state.group_by_host {
-            sorted.sort_by(|a, b| {
-                a.key
-                    .conn
-                    .cmp(&b.key.conn)
-                    .then_with(|| session_order::session_display_cmp_grouped(a, b))
-            });
+            session_order::sort_by_host(&mut sorted);
         } else {
             sorted.sort_by(|a, b| {
                 a.key
@@ -217,6 +212,7 @@ pub fn dashboard_page() -> Html {
                     .then_with(|| session_order::session_display_cmp(a, b))
             });
         }
+        session_order::group_children(&mut sorted, ui_state.group_by_host);
         sorted
     };
 
@@ -859,6 +855,15 @@ pub fn dashboard_page() -> Html {
                             </span>
                         </div>
                     }
+                } else if sessions_hook.home_unreachable {
+                    html! {
+                        <div class="server-shutdown-banner" role="status">
+                            <span class="shutdown-banner-dot" aria-hidden="true"></span>
+                            <span class="shutdown-banner-text">
+                                { "Can't reach the server — reconnecting… Sending is paused until it's back." }
+                            </span>
+                        </div>
+                    }
                 } else {
                     html! {}
                 }
@@ -1074,6 +1079,10 @@ pub fn dashboard_page() -> Html {
                                                 interrupt_signal={focus.interrupt_signal}
                                                 jump_to_latest_signal={focus.jump_to_latest_signal}
                                                 stt_enabled={stt_enabled}
+                                                failure={ws_hook.session_failures.get(&session.key).cloned()}
+                                                on_dismiss_failure={ws_hook.dismiss_failure.clone()}
+                                                on_agent_auth_changed={ws_hook.on_agent_auth_changed.clone()}
+                                                launch_count={ws_hook.session_launches.get(&session.key).copied().unwrap_or_default()}
                                             />
                                         </div>
                                     }

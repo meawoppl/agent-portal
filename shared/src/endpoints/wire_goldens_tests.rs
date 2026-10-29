@@ -257,6 +257,7 @@ fn server_to_client_input_progress_golden_for_every_stage() {
             client_msg_id: id,
             stage,
             message: None,
+            queued: false,
         };
         let v = serde_json::to_value(&msg).unwrap();
         assert_eq!(v["type"], "InputProgress");
@@ -273,6 +274,33 @@ fn server_to_client_input_progress_golden_for_every_stage() {
             _ => panic!("wrong variant"),
         }
     }
+}
+
+#[test]
+fn server_to_client_input_progress_queued_is_additive() {
+    let id = Uuid::from_u128(0x22222222222222222222222222222222);
+    let queued = ServerToClient::InputProgress {
+        client_msg_id: id,
+        stage: InputDeliveryStage::ServerReceived,
+        message: None,
+        queued: true,
+    };
+    assert_golden(
+        &queued,
+        json!({"type": "InputProgress", "client_msg_id": id, "stage": "server_received", "queued": true}),
+    );
+    // Omitted when false, so the ordinary frames are byte-identical, and a
+    // frame without it decodes as not queued.
+    let plain = json!({"type": "InputProgress", "client_msg_id": id, "stage": "server_received"});
+    assert_golden(
+        &ServerToClient::InputProgress {
+            client_msg_id: id,
+            stage: InputDeliveryStage::ServerReceived,
+            message: None,
+            queued: false,
+        },
+        plain,
+    );
 }
 
 #[test]
@@ -441,6 +469,34 @@ fn server_to_client_tool_progress_golden() {
 }
 
 // ── ProxyToServer ──────────────────────────────────────────────────────
+
+#[test]
+fn proxy_to_server_input_progress_ack_reason_is_additive() {
+    let session_id = Uuid::from_u128(1);
+    let client_msg_id = Uuid::from_u128(2);
+    // An older proxy's ack has no reason.
+    let old = json!({"type": "InputProgressAck", "session_id": session_id, "client_msg_id": client_msg_id, "stage": "failed"});
+    assert_golden(
+        &ProxyToServer::InputProgressAck {
+            session_id,
+            client_msg_id,
+            stage: InputDeliveryStage::Failed,
+            message: None,
+        },
+        old,
+    );
+    let mut with_reason = json!({"type": "InputProgressAck", "session_id": session_id, "client_msg_id": client_msg_id, "stage": "failed"});
+    with_reason["message"] = json!("The agent rejected this input");
+    assert_golden(
+        &ProxyToServer::InputProgressAck {
+            session_id,
+            client_msg_id,
+            stage: InputDeliveryStage::Failed,
+            message: Some("The agent rejected this input".into()),
+        },
+        with_reason,
+    );
+}
 
 #[test]
 fn proxy_to_server_register_golden() {
@@ -639,6 +695,68 @@ fn server_to_proxy_tunnel_data_golden() {
     let _: ServerToProxy = serde_json::from_value(v).unwrap();
 }
 
+#[test]
+fn server_to_client_session_exited_reason_is_additive() {
+    let session_id = Uuid::nil();
+    // An older backend sends no reason.
+    let old: ServerToClient = serde_json::from_value(
+        json!({"type": "SessionExited", "session_id": session_id, "exit_code": 0}),
+    )
+    .unwrap();
+    assert!(matches!(
+        old,
+        ServerToClient::SessionExited { reason: None, .. }
+    ));
+    let owner = ServerToClient::SessionExited {
+        session_id,
+        exit_code: Some(1),
+        reason: Some(SessionExitReason::CrashedEarly),
+    };
+    assert_golden(
+        &owner,
+        json!({"type": "SessionExited", "session_id": session_id, "exit_code": 1, "reason": "crashed_early"}),
+    );
+    // The members' bare form omits the reason (never null).
+    let bare = ServerToClient::SessionExited {
+        session_id,
+        exit_code: None,
+        reason: None,
+    };
+    assert_golden(
+        &bare,
+        json!({"type": "SessionExited", "session_id": session_id, "exit_code": null}),
+    );
+
+    // Deployed clients decode both forms: the shape shipped before reasons,
+    // and the one with a non-optional reason defaulting to Completed, which
+    // reads the bare form as an ordinary completion (no failure recorded).
+    #[derive(serde::Deserialize)]
+    #[serde(tag = "type")]
+    enum BeforeReasons {
+        SessionExited { session_id: Uuid },
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(tag = "type")]
+    enum DefaultedReason {
+        SessionExited {
+            #[serde(default)]
+            reason: SessionExitReason,
+        },
+    }
+    for frame in [&owner, &bare] {
+        let wire = serde_json::to_value(frame).unwrap();
+        let BeforeReasons::SessionExited { session_id: id } =
+            serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(id, session_id);
+        let DefaultedReason::SessionExited { reason } = serde_json::from_value(wire).unwrap();
+        let expected = match frame {
+            ServerToClient::SessionExited { reason, .. } => reason.unwrap_or_default(),
+            _ => unreachable!(),
+        };
+        assert_eq!(reason, expected);
+    }
+}
+
 // ── Launcher ───────────────────────────────────────────────────────────
 
 #[test]
@@ -661,6 +779,7 @@ fn launcher_to_server_exit_reason_defaults() {
 #[test]
 fn launcher_server_to_launcher_launch_roundtrip_golden() {
     let msg = ServerToLauncher::LaunchSession {
+        plugin_selection: None,
         history_restore: None,
         request_id: nil(),
         user_id: nil(),
@@ -794,6 +913,7 @@ fn portal_meta_default_omits_empty_fields_and_roundtrips() {
             client_msg_id: nil(),
             stage: Some(InputDeliveryStage::ProxyReceived),
             message: None,
+            queued: false,
         }),
     };
     assert_eq!(roundtrip_json(&m), m);

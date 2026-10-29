@@ -1,5 +1,6 @@
 use axum::{
     extract::{Path, Query, State},
+    http::HeaderMap,
     Json,
 };
 use diesel::prelude::*;
@@ -20,7 +21,6 @@ use crate::errors::AppError;
 use crate::handlers::launcher_rpc::{launcher_rpc, require_launcher_owner};
 use crate::handlers::responses::EmptyResponse;
 use crate::handlers::websocket::{LauncherRpcError, LauncherRpcKind, SessionManager};
-use crate::models::jsonb_string_vec;
 use crate::AppState;
 
 /// GET /api/launchers - List connected launchers for the current user, each
@@ -41,8 +41,9 @@ pub async fn list_launchers(
     let all: Vec<Uuid> = running.iter().flatten().copied().collect();
     if !all.is_empty() {
         let mut conn = app_state.conn()?;
-        let states =
-            crate::handlers::agent_comms::session_activity_states(&app_state, &mut conn, &all)?;
+        let states = crate::handlers::session_activity::session_activity_states(
+            &app_state, &mut conn, &all,
+        )?;
         fill_active_counts(&mut launchers, &running, &states);
     }
     Ok(Json(launchers))
@@ -75,8 +76,19 @@ use shared::api::LaunchResponse;
 pub async fn launch_session(
     State(app_state): State<Arc<AppState>>,
     CurrentUserId(user_id): CurrentUserId,
+    headers: HeaderMap,
     Json(req): Json<LaunchRequest>,
 ) -> Result<Json<LaunchResponse>, AppError> {
+    crate::auth::require_manual_launch_credential(&app_state, &headers)?;
+    launch_owned_session(&app_state, user_id, req, None).map(Json)
+}
+
+pub(crate) fn launch_owned_session(
+    app_state: &AppState,
+    user_id: Uuid,
+    req: LaunchRequest,
+    child: Option<super::session_spawn::ChildLaunch>,
+) -> Result<LaunchResponse, AppError> {
     let launcher_id = resolve_launch_target(&app_state.session_manager, req.launcher_id, user_id)?;
     let (hostname, version) = app_state
         .session_manager
@@ -99,7 +111,7 @@ pub async fn launch_session(
     }
 
     // Create a fresh short-lived proxy token for the child process
-    let auth_token = mint_launch_token(&app_state, user_id)?;
+    let auth_token = mint_launch_token(app_state, user_id)?;
 
     // A human-chosen name (when supplied) drives both the display name and,
     // for worktree launches, the worktree branch. With no name we fall back to
@@ -120,33 +132,54 @@ pub async fn launch_session(
         (None, false) => (default_session_name(&req.launch.working_directory), None),
     };
 
-    let request_id = Uuid::new_v4();
-    let session_id = Uuid::new_v4();
-    create_desired_session(
-        &mut *app_state.conn()?,
-        DesiredSessionDraft {
-            session_id,
-            user_id,
-            working_directory: req.launch.working_directory.clone(),
-            session_name: session_name.clone(),
-            hostname,
-            launcher_id: Some(launcher_id),
-            client_version: Some(version),
-            launcher_version: app_state
-                .session_manager
-                .launcher_version(Some(launcher_id)),
-            agent_type: req.launch.agent_type,
-            claude_args: req.launch.claude_args.clone(),
-            forked_from_session_id: None,
-            fork_point_turn_id: None,
-            fork_create_worktree: false,
-        },
-    )?;
+    let request_id = child.as_ref().map_or_else(Uuid::new_v4, |c| c.request_id);
+    let session_id = child.as_ref().map_or_else(Uuid::new_v4, |c| c.session_id);
+    let mut conn = app_state.conn()?;
+    let child_notice = conn.transaction::<_, AppError, _>(|conn| {
+        create_desired_session(
+            conn,
+            DesiredSessionDraft {
+                session_id,
+                user_id,
+                working_directory: req.launch.working_directory.clone(),
+                session_name: session_name.clone(),
+                hostname,
+                launcher_id: Some(launcher_id),
+                client_version: Some(version),
+                launcher_version: app_state
+                    .session_manager
+                    .launcher_version(Some(launcher_id)),
+                agent_type: req.launch.agent_type,
+                claude_args: req.launch.claude_args.clone(),
+                forked_from_session_id: None,
+                fork_point_turn_id: None,
+                fork_create_worktree: false,
+            },
+        )?;
+        child
+            .as_ref()
+            .map(|child| super::session_spawn::persist_child(conn, child))
+            .transpose()
+    })?;
+    drop(conn);
+    if let (Some(child), Some(note)) = (&child, child_notice) {
+        if let Err(e) = super::session_spawn::broadcast_notice(app_state, &child.parent, note) {
+            tracing::warn!(
+                "{}: child notice: {:?}",
+                crate::markers::SPAWN_LIFECYCLE_FAILED,
+                e
+            );
+        }
+    }
     app_state
         .session_manager
         .register_launch_session(request_id, session_id);
 
     let launch_msg = ServerToLauncher::LaunchSession {
+        plugin_selection: child
+            .as_ref()
+            .and_then(|c| c.plugins.clone())
+            .or(req.plugin_selection),
         history_restore: None,
         request_id,
         user_id,
@@ -186,10 +219,10 @@ pub async fn launch_session(
         request_id, launcher_id, req.launch.working_directory
     );
 
-    Ok(Json(LaunchResponse {
+    Ok(LaunchResponse {
         request_id,
         session_id,
-    }))
+    })
 }
 
 /// Trim a caller-supplied session name, returning `None` when it is absent or
@@ -226,8 +259,10 @@ pub async fn fork_session(
     State(app_state): State<Arc<AppState>>,
     CurrentUserId(user_id): CurrentUserId,
     Path(source_id): Path<Uuid>,
+    headers: HeaderMap,
     Json(req): Json<ForkSessionRequest>,
 ) -> Result<Json<ForkSessionResponse>, AppError> {
+    crate::auth::require_manual_launch_credential(&app_state, &headers)?;
     use crate::schema::sessions;
 
     let mut conn = app_state.conn()?;
@@ -282,7 +317,7 @@ pub async fn fork_session(
     };
     let name = normalize_custom_name(Some(&req.name))
         .unwrap_or_else(|| format!("{} (fork)", source.session_name));
-    let mut claude_args: Vec<String> = jsonb_string_vec(&source.claude_args);
+    let mut claude_args: Vec<String> = source.claude_args.0.clone();
     if let Some(model) = req
         .model
         .filter(|model| shared::strings::is_non_blank(model))
@@ -342,6 +377,7 @@ pub async fn fork_session(
         .session_manager
         .register_launch_session(request_id, session_id);
     let launch = ServerToLauncher::LaunchSession {
+        plugin_selection: None,
         history_restore: None,
         request_id,
         user_id,
@@ -817,6 +853,7 @@ mod tests {
     fn launcher_for(user_id: Uuid, hostname: &str) -> LauncherConnection {
         let (sender, _rx) = crate::handlers::websocket::conn_channel(64);
         LauncherConnection {
+            log_span: tracing::Span::none(),
             system: None,
             sender,
             launcher_name: format!("launcher-{}", hostname),

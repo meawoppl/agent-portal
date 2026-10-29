@@ -40,7 +40,7 @@ pub fn render_result_message(
                 .result
                 .iter()
                 .chain(msg.errors.iter())
-                .any(|text| super::errors::is_expired_oauth_error(text)),
+                .any(|text| super::errors::is_provider_auth_error(text)),
         on_claude_login,
     )
     .unwrap_or_default();
