@@ -1570,7 +1570,7 @@ a.pill-menu-option.pr-link:hover {
 
 .dashboard-body:is(.rail-top, .rail-bottom) .session-pill {
     flex: 0 1 180px;
-    min-width: 64px;
+    min-width: var(--session-pill-min-width, 64px);
     container: session-tab / inline-size;
     padding-inline: 0.3rem;
     gap: 0.15rem;
@@ -1578,7 +1578,7 @@ a.pill-menu-option.pr-link:hover {
 
 .dashboard-body:is(.rail-top, .rail-bottom) .session-rail-host-group {
     flex: 0 1 calc(var(--session-count) * 184px + 12px);
-    min-width: calc(var(--session-count) * 68px + 12px);
+    min-width: calc(var(--session-count) * (var(--session-pill-min-width, 64px) + 4px) + 12px);
     box-sizing: border-box;
 }
 

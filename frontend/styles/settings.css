@@ -1993,3 +1993,36 @@
         width: 7.5rem;
     }
 }
+
+/* Keep the size slider and its live preview usable on narrow screens. */
+.pill-size-control {
+    max-width: 26rem;
+}
+
+.pill-size-control input[type="range"] {
+    width: 100%;
+    min-height: 44px;
+    margin: 0;
+    accent-color: var(--accent);
+}
+
+.pill-size-labels {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.pill-size-preview {
+    margin-top: 1rem;
+}
+
+.pill-size-preview span {
+    display: block;
+    box-sizing: border-box;
+    overflow: hidden;
+    padding: 0.5rem;
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}

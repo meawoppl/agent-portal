@@ -240,6 +240,29 @@ pub fn save_group_by_host(enabled: bool) {
     save_bool_pref(SESSION_RAIL_GROUP_BY_HOST_STORAGE_KEY, enabled);
 }
 
+/// Minimum horizontal pill width. Compact preserves automatic shrinking;
+/// the original 180px floor restores fixed-width tabs. Host groups must use
+/// the same floor so their children cannot spill into the next group.
+pub const COMPACT_PILL_WIDTH: u16 = 64;
+pub const ORIGINAL_PILL_WIDTH: u16 = 180;
+const PILL_WIDTH_STORAGE_KEY: &str = "claude-portal-pill-min-width";
+
+pub fn load_pill_width() -> u16 {
+    storage_get(PILL_WIDTH_STORAGE_KEY)
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(COMPACT_PILL_WIDTH)
+        .clamp(COMPACT_PILL_WIDTH, ORIGINAL_PILL_WIDTH)
+}
+
+pub fn save_pill_width(width: u16) {
+    storage_set(
+        PILL_WIDTH_STORAGE_KEY,
+        &width
+            .clamp(COMPACT_PILL_WIDTH, ORIGINAL_PILL_WIDTH)
+            .to_string(),
+    );
+}
+
 /// Load rail position preference from localStorage (default: top).
 pub fn load_rail_position() -> RailPosition {
     storage_get(RAIL_ORIENTATION_STORAGE_KEY)

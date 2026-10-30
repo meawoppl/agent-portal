@@ -11,8 +11,8 @@ use super::session_rail::{ActivityRef, AgentMessageBroadcast, BroadcastRef, Sess
 use super::session_view::SessionView;
 use super::types::{
     load_group_by_host, load_header_collapsed, load_hidden_sessions, load_inactive_hidden,
-    load_rail_position, save_header_collapsed, save_hidden_sessions, save_inactive_hidden,
-    PortalSession,
+    load_pill_width, load_rail_position, save_header_collapsed, save_hidden_sessions,
+    save_inactive_hidden, PortalSession,
 };
 use crate::components::{
     ConfirmModal, ConfirmModalStyle, HelpOverlay, LaunchDialog, OnboardingTutorial, ServiceMonitor,
@@ -122,6 +122,7 @@ pub fn dashboard_page() -> Html {
     // DOM order of the session-view wrappers from the previous render; see
     // `session_order::stable_view_order`.
     let view_dom_order = use_mut_ref(Vec::<SessionKey>::new);
+    let pill_width = use_state(load_pill_width);
 
     // Push-driven session refresh: the backend broadcasts
     // `ServerToClient::LaunchSessionResult` the moment the launcher's
@@ -450,12 +451,14 @@ pub fn dashboard_page() -> Html {
 
     let close_settings = {
         let ui_state = ui_state.clone();
+        let pill_width = pill_width.clone();
         Callback::from(move |_: ()| {
             // The Appearance panel may have changed this; re-sync from
             // localStorage so the dashboard picks up the new value when
             // the user navigates back.
             ui_state.dispatch(DashboardUiAction::SetRailPosition(load_rail_position()));
             ui_state.dispatch(DashboardUiAction::SetGroupByHost(load_group_by_host()));
+            pill_width.set(load_pill_width());
             ui_state.dispatch(DashboardUiAction::CloseSettings);
         })
     };
@@ -983,7 +986,7 @@ pub fn dashboard_page() -> Html {
                         "dashboard-body",
                         ui_state.rail_position.body_class(),
                         if is_mobile_dashboard { Some("mobile-session-mode") } else { None },
-                    )}>
+                    )} style={format!("--session-pill-min-width: {}px", *pill_width)}>
                     // Session Rail
                     if is_mobile_dashboard {
                         <div class={classes!(
