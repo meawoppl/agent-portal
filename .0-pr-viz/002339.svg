@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="sans-serif" fill="#c0caf5">
+<text x="55" y="52" font-size="24" fill="#565f89">PR #2339 · Choose session pill size in Appearance settings</text>
+<text x="55" y="100" font-size="34" fill="#e6e9f5">Tabs could only shrink to the compact size; now a saved slider sets their minimum width,</text>
+<text x="55" y="140" font-size="34" fill="#e6e9f5">so you can fit more sessions or keep the original full-width tabs.</text>
+<path d="M55 165H1945 M1000 190V1140" stroke="#3d4666"/>
+<text x="55" y="212" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1040" y="212" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="55" y="270" width="890" height="210" rx="8" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="318" font-size="26" fill="#f7768e">Fixed compact behavior</text>
+<text x="79" y="370" font-size="23" fill="#c0caf5">Horizontal pills shrink from 180px to 64px.</text>
+<text x="79" y="412" font-size="23" fill="#c0caf5">No preference for keeping larger tabs.</text>
+<rect x="55" y="540" width="890" height="210" rx="8" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="588" font-size="26" fill="#f7768e">Group sizing hard-coded</text>
+<text x="79" y="640" font-size="23" fill="#c0caf5">Host groups assume the same 64px minimum.</text>
+<text x="79" y="682" font-size="23" fill="#c0caf5">Side rails stay 180px wide.</text>
+<rect x="55" y="810" width="890" height="210" rx="8" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="858" font-size="26" fill="#f7768e">No size control in Appearance</text>
+<text x="79" y="910" font-size="23" fill="#c0caf5">Changing rail position is available.</text>
+<text x="79" y="952" font-size="23" fill="#c0caf5">Changing tab width is not.</text>
+<rect x="1040" y="270" width="890" height="210" rx="8" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1064" y="318" font-size="26" fill="#9ece6a">Session pill size slider</text>
+<text x="1064" y="370" font-size="23" fill="#c0caf5">Compact 64px &lt;-&gt; Original 180px</text>
+<text x="1064" y="412" font-size="23" fill="#c0caf5">Intermediate minimum widths; live preview.</text>
+<rect x="1040" y="540" width="890" height="210" rx="8" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1064" y="588" font-size="26" fill="#9ece6a">One minimum for pills and groups</text>
+<text x="1064" y="640" font-size="23" fill="#c0caf5">--session-pill-min-width sets both floors.</text>
+<text x="1064" y="682" font-size="23" fill="#c0caf5">Original keeps tabs wide and allows scrolling.</text>
+<rect x="1040" y="810" width="890" height="210" rx="8" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1064" y="858" font-size="26" fill="#9ece6a">Saved in this browser</text>
+<text x="1064" y="910" font-size="23" fill="#c0caf5">load_pill_width / save_pill_width</text>
+<text x="1064" y="952" font-size="23" fill="#c0caf5">Dashboard reloads the setting on Settings close.</text>
+<text x="55" y="1172" font-size="22" fill="#565f89">Scope: top and bottom rails only. Side rails and the mobile session selector keep their existing layout.</text>
+</g>
+</svg>
