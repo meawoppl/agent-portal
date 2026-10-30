@@ -1,6 +1,6 @@
 //! Hook for two-mode keyboard navigation (edit mode / nav mode).
 
-use crate::pages::dashboard::PortalSession;
+use crate::pages::dashboard::{load_nav_mode_shortcut, PortalSession};
 use crate::portal_client::SessionKey;
 use gloo::events::{EventListener, EventListenerOptions, EventListenerPhase};
 use std::collections::HashSet;
@@ -250,6 +250,10 @@ pub struct UseKeyboardNav {
 /// Escape no longer enters Nav mode (it kept ejecting people from the composer
 /// mid-type). Session management then uses single-letter nav-mode keys, which
 /// never collide with browser shortcuts.
+///
+/// The mode toggle is Ctrl/Cmd+K by default and configurable in Settings >
+/// Appearance ([`crate::pages::dashboard::NavModeShortcut`]); "Ctrl/Cmd+K"
+/// below means whichever chord is configured.
 ///
 /// Edit Mode (default):
 /// - Typing works normally
@@ -595,7 +599,18 @@ pub fn use_keyboard_nav(config: KeyboardNavConfig) -> UseKeyboardNav {
                     let Some(ke) = event.dyn_ref::<KeyboardEvent>() else {
                         return;
                     };
-                    if !((ke.ctrl_key() || ke.meta_key()) && ke.key().eq_ignore_ascii_case("k")) {
+                    if !(ke.ctrl_key() || ke.meta_key() || ke.alt_key()) {
+                        return;
+                    }
+                    // Read the preference per chord so a change in Settings
+                    // applies without a reload.
+                    if !load_nav_mode_shortcut().matches(
+                        ke.ctrl_key(),
+                        ke.meta_key(),
+                        ke.alt_key(),
+                        &ke.key(),
+                        &ke.code(),
+                    ) {
                         return;
                     }
                     // Stand down while an app-modal overlay owns the keyboard, so

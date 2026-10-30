@@ -1,8 +1,8 @@
 use crate::components::{load_voice_hold_open, save_voice_hold_open};
 use crate::pages::dashboard::{
-    load_group_by_host, load_pill_width, load_rail_position, load_vim_mode, save_group_by_host,
-    save_pill_width, save_rail_position, save_vim_mode, RailPosition, COMPACT_PILL_WIDTH,
-    ORIGINAL_PILL_WIDTH,
+    load_group_by_host, load_nav_mode_shortcut, load_pill_width, load_rail_position, load_vim_mode,
+    save_group_by_host, save_nav_mode_shortcut, save_pill_width, save_rail_position, save_vim_mode,
+    NavModeShortcut, RailPosition, COMPACT_PILL_WIDTH, ORIGINAL_PILL_WIDTH,
 };
 use crate::ui_theme::{load_ui_theme, set_ui_theme, UiTheme};
 use yew::prelude::*;
@@ -30,6 +30,17 @@ pub fn appearance_panel() -> Html {
         })
     };
     let vim_enabled = use_state(load_vim_mode);
+    let nav_mode_shortcut = use_state(load_nav_mode_shortcut);
+    let on_nav_mode_shortcut = {
+        let nav_mode_shortcut = nav_mode_shortcut.clone();
+        Callback::from(move |e: Event| {
+            let select: web_sys::HtmlSelectElement = e.target_unchecked_into();
+            if let Some(shortcut) = NavModeShortcut::from_str(&select.value()) {
+                save_nav_mode_shortcut(shortcut);
+                nav_mode_shortcut.set(shortcut);
+            }
+        })
+    };
     let group_by_host = use_state(load_group_by_host);
     let voice_hold_open = use_state(load_voice_hold_open);
     let ui_theme = use_state(load_ui_theme);
@@ -172,6 +183,30 @@ pub fn appearance_panel() -> Html {
                     />
                     <span>{ if *group_by_host { "Enabled" } else { "Disabled" } }</span>
                 </label>
+            </div>
+
+            <div class="appearance-setting">
+                <h3><label for="nav-mode-shortcut">{ "Nav mode shortcut" }</label></h3>
+                <p class="setting-description" id="nav-mode-shortcut-help">
+                    { "The key combination that enters and leaves nav mode. \
+                       Ctrl+K is also delete-to-end-of-line in macOS and \
+                       emacs-style text fields; choose Cmd+K or Alt/Option+K \
+                       to keep it for editing. Takes effect immediately." }
+                </p>
+                <select
+                    id="nav-mode-shortcut"
+                    aria-describedby="nav-mode-shortcut-help"
+                    onchange={on_nav_mode_shortcut}
+                >
+                    { for NavModeShortcut::ALL.into_iter().map(|shortcut| html! {
+                        <option
+                            value={shortcut.as_str()}
+                            selected={*nav_mode_shortcut == shortcut}
+                        >
+                            { shortcut.label() }
+                        </option>
+                    }) }
+                </select>
             </div>
 
             <div class="appearance-setting">
