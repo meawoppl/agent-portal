@@ -553,6 +553,10 @@ mod tests {
             first_text_post_queue_wait_ms: None,
             first_text_post_queued_behind: None,
             turn_start_resume_kind: None,
+            // Remote text-upload pacing is absent from synthetic local results.
+            text_post_count: None,
+            text_post_gap_over_500ms_count: None,
+            text_post_flush_timer_max_late_ms: None,
             first_text_post_ms: None,
             first_text_post_wall_ms: None,
             time_to_request_ms: None,
