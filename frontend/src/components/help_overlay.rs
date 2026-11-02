@@ -6,6 +6,7 @@
 //! backdrop click.
 
 use crate::components::FloatingPane;
+use crate::pages::dashboard::load_nav_mode_shortcut;
 use web_sys::MouseEvent;
 use yew::prelude::*;
 
@@ -16,8 +17,14 @@ pub struct HelpOverlayProps {
 
 /// A single shortcut row: one or more key labels and what they do.
 struct Shortcut {
-    keys: &'static [&'static str],
+    keys: Keys,
     description: &'static str,
+}
+
+/// Key labels for a row: fixed, or the user's configured Nav mode chord.
+enum Keys {
+    Fixed(&'static [&'static str]),
+    NavModeToggle,
 }
 
 /// A named group of shortcuts (a "context" such as edit mode or nav mode).
@@ -31,19 +38,19 @@ const GROUPS: &[ShortcutGroup] = &[
         title: "Global",
         shortcuts: &[
             Shortcut {
-                keys: &["?"],
+                keys: Keys::Fixed(&["?"]),
                 description: "Show this shortcuts overlay",
             },
             Shortcut {
-                keys: &["Shift", "Tab"],
+                keys: Keys::Fixed(&["Shift", "Tab"]),
                 description: "Jump to the next active session",
             },
             Shortcut {
-                keys: &["Ctrl/Cmd", "K"],
+                keys: Keys::NavModeToggle,
                 description: "Toggle nav mode (enter / leave)",
             },
             Shortcut {
-                keys: &["Ctrl", "Z"],
+                keys: Keys::Fixed(&["Ctrl", "Z"]),
                 description: "Interrupt the running agent",
             },
         ],
@@ -52,23 +59,23 @@ const GROUPS: &[ShortcutGroup] = &[
         title: "Edit mode (typing)",
         shortcuts: &[
             Shortcut {
-                keys: &["Enter"],
+                keys: Keys::Fixed(&["Enter"]),
                 description: "Send message",
             },
             Shortcut {
-                keys: &["Shift", "Enter"],
+                keys: Keys::Fixed(&["Shift", "Enter"]),
                 description: "Insert a new line",
             },
             Shortcut {
-                keys: &["↑"],
+                keys: Keys::Fixed(&["↑"]),
                 description: "Previous message in input history",
             },
             Shortcut {
-                keys: &["↓"],
+                keys: Keys::Fixed(&["↓"]),
                 description: "Next message in input history",
             },
             Shortcut {
-                keys: &["Ctrl", "M"],
+                keys: Keys::Fixed(&["Ctrl", "M"]),
                 description: "Toggle voice input",
             },
         ],
@@ -77,55 +84,55 @@ const GROUPS: &[ShortcutGroup] = &[
         title: "Nav mode",
         shortcuts: &[
             Shortcut {
-                keys: &["↑", "↓", "←", "→"],
+                keys: Keys::Fixed(&["↑", "↓", "←", "→"]),
                 description: "Move between sessions",
             },
             Shortcut {
-                keys: &["h", "l"],
+                keys: Keys::Fixed(&["h", "l"]),
                 description: "Move between sessions (vim keys)",
             },
             Shortcut {
-                keys: &["j", "k"],
+                keys: Keys::Fixed(&["j", "k"]),
                 description: "Scroll the focused transcript down / up",
             },
             Shortcut {
-                keys: &["g", "g"],
+                keys: Keys::Fixed(&["g", "g"]),
                 description: "Jump to the top of the transcript",
             },
             Shortcut {
-                keys: &["1", "–", "9"],
+                keys: Keys::Fixed(&["1", "–", "9"]),
                 description: "Jump directly to a session by number",
             },
             Shortcut {
-                keys: &["w"],
+                keys: Keys::Fixed(&["w"]),
                 description: "Jump to the next waiting session",
             },
             Shortcut {
-                keys: &["G"],
+                keys: Keys::Fixed(&["G"]),
                 description: "Jump to the latest message (resume live tailing)",
             },
             Shortcut {
-                keys: &["n"],
+                keys: Keys::Fixed(&["n"]),
                 description: "New session (open the launch dialog)",
             },
             Shortcut {
-                keys: &["d"],
+                keys: Keys::Fixed(&["d"]),
                 description: "Delete the focused session (with confirmation)",
             },
             Shortcut {
-                keys: &["x"],
+                keys: Keys::Fixed(&["x"]),
                 description: "Interrupt the focused session's agent",
             },
             Shortcut {
-                keys: &["c"],
+                keys: Keys::Fixed(&["c"]),
                 description: "Collapse (hide) / expand the focused session",
             },
             Shortcut {
-                keys: &["Enter"],
+                keys: Keys::Fixed(&["Enter"]),
                 description: "Accept the current pane and return to edit mode",
             },
             Shortcut {
-                keys: &["Ctrl/Cmd", "K"],
+                keys: Keys::NavModeToggle,
                 description: "Return to edit mode",
             },
         ],
@@ -140,6 +147,7 @@ pub fn help_overlay(props: &HelpOverlayProps) -> Html {
         let on_close = props.on_close.clone();
         Callback::from(move |_: MouseEvent| on_close.emit(()))
     };
+    let nav_mode_keys = load_nav_mode_shortcut().keys();
 
     html! {
         <FloatingPane
@@ -168,7 +176,10 @@ pub fn help_overlay(props: &HelpOverlayProps) -> Html {
                                             <li class="help-shortcut">
                                                 <span class="help-keys">
                                                     {
-                                                        shortcut.keys.iter().map(|key| html! {
+                                                        match shortcut.keys {
+                                                            Keys::Fixed(keys) => keys,
+                                                            Keys::NavModeToggle => nav_mode_keys,
+                                                        }.iter().map(|key| html! {
                                                             <kbd>{ *key }</kbd>
                                                         }).collect::<Html>()
                                                     }

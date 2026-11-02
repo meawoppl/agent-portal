@@ -18,7 +18,7 @@ mod types;
 
 pub use page::DashboardPage;
 pub use types::{
-    load_group_by_host, load_pill_width, load_rail_position, load_vim_mode, save_group_by_host,
-    save_pill_width, save_rail_position, save_vim_mode, PortalSession, RailPosition,
-    COMPACT_PILL_WIDTH, ORIGINAL_PILL_WIDTH,
+    load_group_by_host, load_nav_mode_shortcut, load_pill_width, load_rail_position, load_vim_mode,
+    save_group_by_host, save_nav_mode_shortcut, save_pill_width, save_rail_position, save_vim_mode,
+    NavModeShortcut, PortalSession, RailPosition, COMPACT_PILL_WIDTH, ORIGINAL_PILL_WIDTH,
 };

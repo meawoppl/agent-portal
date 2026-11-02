@@ -11,8 +11,8 @@ use super::session_rail::{ActivityRef, AgentMessageBroadcast, BroadcastRef, Sess
 use super::session_view::SessionView;
 use super::types::{
     load_group_by_host, load_header_collapsed, load_hidden_sessions, load_inactive_hidden,
-    load_pill_width, load_rail_position, save_header_collapsed, save_hidden_sessions,
-    save_inactive_hidden, PortalSession,
+    load_nav_mode_shortcut, load_pill_width, load_rail_position, save_header_collapsed,
+    save_hidden_sessions, save_inactive_hidden, PortalSession,
 };
 use crate::components::{
     ConfirmModal, ConfirmModalStyle, HelpOverlay, LaunchDialog, OnboardingTutorial, ServiceMonitor,
@@ -734,6 +734,8 @@ pub fn dashboard_page() -> Html {
     // new views are created focused session first, then the sessions the user
     // most recently messaged before colder background sessions. Views already
     // mounted keep their DOM position (see `session_order::stable_view_order`).
+    // Read per render so the hint bar follows a change made in Settings.
+    let nav_mode_shortcut = load_nav_mode_shortcut();
     let session_view_order: Vec<usize> = if active_sessions.is_empty() {
         Vec::new()
     } else if is_mobile_dashboard {
@@ -1133,14 +1135,14 @@ pub fn dashboard_page() -> Html {
                                             <span>{ "n = new" }</span>
                                             <span>{ "x = interrupt" }</span>
                                             <span>{ "Ctrl+Z = interrupt" }</span>
-                                            <span>{ "Enter or Ctrl/Cmd+K = edit mode" }</span>
+                                            <span>{ format!("Enter or {} = edit mode", nav_mode_shortcut.label()) }</span>
                                             <span>{ "? = shortcuts" }</span>
                                         </>
                                     }
                                 } else {
                                     html! {
                                         <>
-                                            <span>{ "Ctrl/Cmd+K = nav mode" }</span>
+                                            <span>{ format!("{} = nav mode", nav_mode_shortcut.label()) }</span>
                                             <span>{ "Shift+Tab = next active" }</span>
                                             <span>{ "Ctrl+M = voice" }</span>
                                             <span>{ "Ctrl+Z = interrupt" }</span>
