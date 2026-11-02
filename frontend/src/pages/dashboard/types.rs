@@ -186,6 +186,73 @@ pub fn save_vim_mode(enabled: bool) {
     save_bool_pref(VIM_MODE_STORAGE_KEY, enabled);
 }
 
+/// Storage key for the chord that toggles Nav mode.
+const NAV_MODE_SHORTCUT_STORAGE_KEY: &str = "claude-portal-nav-mode-shortcut";
+
+/// The chord that toggles Nav mode. Ctrl/Cmd+K is the default, but Ctrl+K is
+/// also kill-to-end-of-line in macOS text fields and emacs-style key themes,
+/// so users who rely on that pick a chord that leaves it alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NavModeShortcut {
+    CtrlOrCmdK,
+    CmdK,
+    AltK,
+}
+
+impl NavModeShortcut {
+    pub const ALL: [Self; 3] = [Self::CtrlOrCmdK, Self::CmdK, Self::AltK];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::CtrlOrCmdK => "ctrl-or-cmd-k",
+            Self::CmdK => "cmd-k",
+            Self::AltK => "alt-k",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|shortcut| shortcut.as_str() == s)
+    }
+
+    /// Key labels, as shown in the help overlay and the keyboard hints.
+    pub fn keys(self) -> &'static [&'static str] {
+        match self {
+            Self::CtrlOrCmdK => &["Ctrl/Cmd", "K"],
+            Self::CmdK => &["Cmd", "K"],
+            Self::AltK => &["Alt/Option", "K"],
+        }
+    }
+
+    pub fn label(self) -> String {
+        self.keys().join("+")
+    }
+
+    /// Whether a keydown is this chord. `code` is the physical key: Option+K
+    /// on macOS reports `key` as "˚", so Alt+K matches on `code` instead.
+    pub fn matches(self, ctrl: bool, meta: bool, alt: bool, key: &str, code: &str) -> bool {
+        let is_k = key.eq_ignore_ascii_case("k");
+        match self {
+            Self::CtrlOrCmdK => (ctrl || meta) && is_k,
+            Self::CmdK => meta && !ctrl && is_k,
+            Self::AltK => alt && !ctrl && !meta && code == "KeyK",
+        }
+    }
+}
+
+/// Load the Nav mode chord from localStorage (default: Ctrl/Cmd+K).
+pub fn load_nav_mode_shortcut() -> NavModeShortcut {
+    storage_get(NAV_MODE_SHORTCUT_STORAGE_KEY)
+        .and_then(|v| NavModeShortcut::from_str(&v))
+        .unwrap_or(NavModeShortcut::CtrlOrCmdK)
+}
+
+/// Save the Nav mode chord to localStorage.
+pub fn save_nav_mode_shortcut(shortcut: NavModeShortcut) {
+    storage_set(NAV_MODE_SHORTCUT_STORAGE_KEY, shortcut.as_str());
+}
+
 /// Where the session pill rail sits on the dashboard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RailPosition {
@@ -432,7 +499,41 @@ fn format_codex_permission_input(input: &shared::CodexPermissionInput) -> String
 
 #[cfg(test)]
 mod tests {
-    use super::format_permission_input;
+    use super::{format_permission_input, NavModeShortcut};
+
+    #[test]
+    fn nav_mode_shortcut_round_trips_through_storage_form() {
+        for shortcut in NavModeShortcut::ALL {
+            assert_eq!(NavModeShortcut::from_str(shortcut.as_str()), Some(shortcut));
+        }
+        assert_eq!(NavModeShortcut::from_str("bogus"), None);
+    }
+
+    #[test]
+    fn ctrl_or_cmd_k_matches_either_modifier() {
+        let s = NavModeShortcut::CtrlOrCmdK;
+        assert!(s.matches(true, false, false, "k", "KeyK"));
+        assert!(s.matches(false, true, false, "K", "KeyK"));
+        assert!(!s.matches(false, false, false, "k", "KeyK"));
+    }
+
+    #[test]
+    fn cmd_k_leaves_ctrl_k_for_kill_line() {
+        let s = NavModeShortcut::CmdK;
+        assert!(s.matches(false, true, false, "k", "KeyK"));
+        assert!(!s.matches(true, false, false, "k", "KeyK"));
+        assert!(!s.matches(true, true, false, "k", "KeyK"));
+    }
+
+    #[test]
+    fn alt_k_matches_physical_key_even_when_option_changes_the_character() {
+        let s = NavModeShortcut::AltK;
+        assert!(s.matches(false, false, true, "k", "KeyK"));
+        // macOS Option+K types a ring above, so `key` is not "k".
+        assert!(s.matches(false, false, true, "\u{2da}", "KeyK"));
+        assert!(!s.matches(true, false, false, "k", "KeyK"));
+        assert!(!s.matches(true, false, true, "k", "KeyK"));
+    }
 
     #[test]
     fn format_claude_bash_permission_uses_typed_tool_input() {

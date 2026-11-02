@@ -1458,7 +1458,7 @@ a.pill-menu-option.pr-link:hover {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
-.pill-menu-submenu:hover .pill-submenu-panel,
+.pill-menu-submenu.hover-open .pill-submenu-panel,
 .pill-menu-submenu:focus-within .pill-submenu-panel {
     display: flex;
 }

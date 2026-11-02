@@ -1258,9 +1258,9 @@ dependencies = [
 
 [[package]]
 name = "codex-codes"
-version = "0.166.1"
+version = "0.166.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7a60f9f6304e576146a15de1453a13d508c2c93571f0c319b53297fbb2867de"
+checksum = "233b2d1653031c359fa5f8b134f6ba0585f6597f92a0612144e0c65104da2af4"
 dependencies = [
  "log",
  "serde",
@@ -2492,7 +2492,7 @@ dependencies = [
  "js-sys",
  "log",
  "muse-codes",
- "pulldown-cmark 0.13.5",
+ "pulldown-cmark 0.13.6",
  "serde",
  "serde_json",
  "shared",
@@ -5670,9 +5670,9 @@ dependencies = [
 
 [[package]]
 name = "pulldown-cmark"
-version = "0.13.5"
+version = "0.13.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "278e9268c93b9e498a2da46c34d90ba93a3255eb99009646398f34bc73ab36eb"
+checksum = "3db2be46835f013dd3f4fa7f5f7402c537787b54ebb6fe2b94bbdd7e2669bb7b"
 dependencies = [
  "bitflags 2.11.1",
  "memchr",

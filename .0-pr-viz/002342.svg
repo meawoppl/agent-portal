@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<defs>
+  <marker id="arr-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/>
+  </marker>
+  <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+  </marker>
+</defs>
+<g font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif" fill="#c0caf5">
+
+<text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2342 · Let users choose the nav mode shortcut</text>
+<text x="55" y="100" font-size="34" fill="#e6e9f5">Nav mode always swallowed Ctrl+K, so it never reached the text box as kill-line;</text>
+<text x="55" y="140" font-size="34" fill="#e6e9f5">a per-browser setting picks the chord, and Cmd+K or Alt+K leave Ctrl+K alone.</text>
+<line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+<text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+<text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+<line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+<!-- BEFORE -->
+<rect x="65" y="250" width="870" height="190" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+<text x="89" y="292" font-size="26" fill="#7aa2f7">use_keyboard_nav: document capture listener</text>
+<text x="89" y="334" font-size="23" fill="#a9b1d6">(ctrl_key() || meta_key()) &amp;&amp; key == "k"</text>
+<text x="89" y="374" font-size="23" fill="#a9b1d6">then prevent_default + stop_propagation</text>
+<text x="89" y="412" font-size="22" fill="#565f89">hard-coded; no way to change it</text>
+
+<line x1="500" y1="440" x2="500" y2="520" stroke="#f7768e" stroke-width="1.5" marker-end="url(#arr-red)"/>
+<text x="516" y="486" font-size="22" fill="#f7768e">Ctrl+K in the composer</text>
+
+<rect x="65" y="525" width="870" height="190" fill="#1e202e" stroke="#f7768e" stroke-width="1.5"/>
+<text x="89" y="567" font-size="26" fill="#f7768e">Toggles nav mode instead of editing</text>
+<text x="89" y="609" font-size="23" fill="#a9b1d6">macOS / emacs-style kill-to-end-of-line lost</text>
+<text x="89" y="649" font-size="23" fill="#a9b1d6">Ctrl+A, Ctrl+K habit jumps out of the box</text>
+<text x="89" y="687" font-size="22" fill="#565f89">captured before the textarea ever sees it</text>
+
+<rect x="65" y="770" width="870" height="190" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+<text x="89" y="812" font-size="26" fill="#7aa2f7">Hint bar and ? overlay</text>
+<text x="89" y="854" font-size="23" fill="#a9b1d6">"Ctrl/Cmd+K = nav mode" as fixed text</text>
+<text x="89" y="894" font-size="23" fill="#a9b1d6">help_overlay keys: &amp;["Ctrl/Cmd", "K"]</text>
+<text x="89" y="932" font-size="22" fill="#565f89">correct only for the single built-in chord</text>
+
+<!-- AFTER -->
+<rect x="1040" y="250" width="895" height="190" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+<text x="1064" y="292" font-size="26" fill="#7aa2f7">NavModeShortcut (localStorage)</text>
+<text x="1064" y="334" font-size="23" fill="#9ece6a">CtrlOrCmdK (default) · CmdK · AltK</text>
+<text x="1064" y="374" font-size="23" fill="#9ece6a">listener checks load_nav_mode_shortcut().matches</text>
+<text x="1064" y="412" font-size="22" fill="#565f89">Settings &gt; Appearance select; applies without reload</text>
+
+<line x1="1487" y1="440" x2="1487" y2="520" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+<text x="1503" y="486" font-size="22" fill="#9ece6a">Ctrl+K with CmdK / AltK</text>
+
+<rect x="1040" y="525" width="895" height="190" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+<text x="1064" y="567" font-size="26" fill="#9ece6a">Ctrl+K reaches the text box</text>
+<text x="1064" y="609" font-size="23" fill="#a9b1d6">CmdK requires meta and not ctrl</text>
+<text x="1064" y="649" font-size="23" fill="#a9b1d6">AltK matches code "KeyK" (Option+K types a ring)</text>
+<text x="1064" y="687" font-size="22" fill="#565f89">vim INSERT/NORMAL already pass Ctrl+K through</text>
+
+<rect x="1040" y="770" width="895" height="190" fill="#1e202e" stroke="#9ece6a" stroke-width="1.5"/>
+<text x="1064" y="812" font-size="26" fill="#9ece6a">Hints follow the chosen chord</text>
+<text x="1064" y="854" font-size="23" fill="#a9b1d6">page.rs: nav_mode_shortcut.label() in the hint bar</text>
+<text x="1064" y="894" font-size="23" fill="#a9b1d6">help_overlay: Keys::NavModeToggle rows</text>
+<text x="1064" y="932" font-size="22" fill="#565f89">4 unit tests cover the matching rules</text>
+
+<text x="55" y="1172" font-size="22" fill="#565f89">Scope: three preset chords, not a free-form recorder; whether Ctrl+K then kills the line is the browser's / OS key theme's behavior.</text>
+</g>
+</svg>
