@@ -91,7 +91,7 @@ pub fn handle_permission_request(
 
     // Emit a push notification (mobile-apps plan §8.1 — the highest-value
     // interrupt). The dispatcher resolves the owning user and suppresses the
-    // push if a live web client is already present, so this is a cheap fire.
+    // push only while that conversation is actively being viewed.
     // `session_name` is left empty; the dispatcher backfills it from the row.
     if let Some(session_id) = db_session_id {
         notifications.emit(crate::push::NotificationEvent::PermissionRequest {

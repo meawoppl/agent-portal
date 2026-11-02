@@ -343,19 +343,28 @@ Backend delta: ~2 focused PRs (bearer path + refresh; token-login exchange).
 
 ### 8.2 Delivery policy
 
-- **Suppress when present**: if the user has a live web client
-  (`SessionManager.user_clients`, a per-user `DashMap`
-  at `session_manager/mod.rs:127`), deliver in-app only. Push is for the
-  pocketed phone.
-- **Presence caveat (verified)**: `user_clients` is pruned **lazily** — dead
-  senders are only removed when a send to them fails
-  (`client_fanout.rs:13`); there is no disconnect-time removal. A phone that
-  backgrounded 20 minutes ago can still look "present" and wrongly suppress a
-  push. Prerequisite work item (C5 in §15): remove the sender eagerly on
-  socket close in `web_client_socket.rs` so suppression is trustworthy. Small,
-  independent, and load-bearing for the whole delivery policy.
+- **Suppress only while viewing the conversation**: a visible, focused browser
+  at the bottom of that transcript renews a 15-second viewing lease every three
+  seconds. Hidden, unfocused and crashed clients do not keep silencing pushes.
+  A connected desktop tab alone never suppresses phone notifications.
+- **User controls**: per-session mute and the notification preference “Notify
+  even while viewing the conversation” apply to Web Push, APNs and FCM.
+- **Ready queue**: `/api/session-attention` supplies lightweight state for every
+  accessible session. Completed output and per-user read receipts are durable;
+  background transcripts do not need to be open. Acknowledgments name the exact
+  response rendered, so delayed acknowledgments cannot clear a newer reply.
+  Pending approvals stay visible until resolved. The mobile bottom bar exposes
+  Ready, Next and a searchable session sheet with previews and status labels.
+  Next cycles through all ready sessions. Mark read acknowledges the displayed
+  reply even after its transcript is pruned, without resolving pending approvals.
+  Notification settings opens over the dashboard to preserve unsent drafts.
+- **Device setup**: Android browsers can subscribe directly; installing to the
+  Home Screen is optional. Android must also permit browser notifications.
+  iPhone/iPad Web Push requires a Home Screen app. Settings includes a test
+  notification sent through the real configured transport; provider acceptance
+  is reported separately from actual receipt on the device.
 - **Collapse keys**: one visible notification per session, newest wins
-  (`apns-collapse-id` / FCM `collapse_key` / Web Push `tag`).
+  (`apns-collapse-id` / FCM `notification.tag` plus `collapse_key` / Web Push `tag`).
 - **Payload discipline**: session id + event kind + short preview only. The tap
   deep-links to the session; content stays server-side.
 - Per-user, per-event-kind toggles in Settings (new `notification_prefs` on
@@ -582,8 +591,8 @@ surface end to end, refresh included, with no cookie in play.
 | C7 | Native transports: APNs via `a2` (HTTP/2, p8 key) + FCM v1 (HTTP, service account) behind the same `PushTransport` trait | `backend/src/push/{apns,fcm}.rs`, `Cargo.toml` | M | C2 |
 
 *Exit test* (C1–C6): locked Android phone with the installed PWA receives a
-permission-request push that deep-links into the session; an open dashboard
-tab suppresses the same push.
+permission-request push that deep-links into the session; actively viewing that
+conversation suppresses its push; an unrelated open tab does not.
 
 ### Track D — Frontend push UX
 

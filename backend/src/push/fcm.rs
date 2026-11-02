@@ -65,6 +65,12 @@ struct FcmNotification {
 #[derive(Debug, Serialize)]
 struct FcmAndroid {
     collapse_key: String,
+    notification: FcmAndroidNotification,
+}
+#[derive(Debug, Serialize)]
+struct FcmAndroidNotification {
+    // collapse_key collapses pending delivery; tag replaces an already shown alert.
+    tag: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -160,6 +166,9 @@ impl FcmTransport {
                 },
                 android: FcmAndroid {
                     collapse_key: payload.collapse_key.clone(),
+                    notification: FcmAndroidNotification {
+                        tag: payload.collapse_key.clone(),
+                    },
                 },
             },
         })
@@ -312,6 +321,10 @@ mod tests {
             payload.session_id.to_string()
         );
         assert_eq!(json["message"]["data"]["event_kind"], payload.event_kind);
+        assert_eq!(
+            json["message"]["android"]["notification"]["tag"],
+            payload.collapse_key
+        );
         assert_eq!(
             json["message"]["android"]["collapse_key"],
             payload.collapse_key

@@ -58,6 +58,7 @@ pub fn notifications_panel() -> Html {
     let device_state = use_state(|| DeviceState::Unknown);
     let prefs = use_state(NotificationPrefs::default);
     let busy = use_state(|| false);
+    let sound = use_state(crate::notification_sound::enabled);
     let status = use_state(|| None::<String>);
 
     // On mount: feature-detect, fetch the VAPID key, read the current
@@ -68,6 +69,9 @@ pub fn notifications_panel() -> Html {
         let prefs = prefs.clone();
         use_effect_with((), move |_| {
             spawn_local(async move {
+                if let Some(loaded) = fetch_prefs().await {
+                    prefs.set(loaded);
+                }
                 if !push_apis_present() {
                     availability.set(Availability::Unsupported);
                     return;
@@ -84,9 +88,6 @@ pub fn notifications_panel() -> Html {
                 } else {
                     DeviceState::Unsubscribed
                 });
-                if let Some(loaded) = fetch_prefs().await {
-                    prefs.set(loaded);
-                }
             });
             || ()
         });
@@ -104,10 +105,17 @@ pub fn notifications_panel() -> Html {
             let device_state = device_state.clone();
             let busy = busy.clone();
             let status = status.clone();
+            let permission = match web_sys::Notification::request_permission() {
+                Ok(permission) => permission,
+                Err(e) => {
+                    status.set(Some(format!("Could not request permission: {}", js_err(e))));
+                    return;
+                }
+            };
             busy.set(true);
             status.set(None);
             spawn_local(async move {
-                match enable_push(&key).await {
+                match enable_push(&key, permission).await {
                     Ok(()) => {
                         device_state.set(DeviceState::Subscribed);
                         status.set(Some("Push enabled on this device.".to_string()));
@@ -137,6 +145,24 @@ pub fn notifications_panel() -> Html {
                     }
                     Err(e) => status.set(Some(format!("Could not disable push: {e}"))),
                 }
+                busy.set(false);
+            });
+        })
+    };
+
+    let on_test = {
+        let status = status.clone();
+        let busy = busy.clone();
+        Callback::from(move |_: MouseEvent| {
+            let status = status.clone();
+            let busy = busy.clone();
+            busy.set(true);
+            spawn_local(async move {
+                let result = test_push().await;
+                status.set(Some(match result {
+                    Ok(()) => "Test accepted by the push service. Check this device's notifications. If nothing arrives, check this site's permission and your device's notification settings.".into(),
+                    Err(e) => format!("Notification test failed: {e}"),
+                }));
                 busy.set(false);
             });
         })
@@ -173,6 +199,18 @@ pub fn notifications_panel() -> Html {
                 </p>
             </div>
 
+            <label class="toggle-label">
+                <span>{"Play a soft sound for new responses while Portal is open on this device"}</span>
+                <input type="checkbox" checked={*sound} onchange={{let sound=sound.clone();Callback::from(move |event:Event| {
+                    let enabled=event.target_unchecked_into::<web_sys::HtmlInputElement>().checked();
+                    crate::notification_sound::set_enabled(enabled);sound.set(enabled);
+                })}} />
+            </label>
+            <p class="section-description">{ platform_help() }</p>
+            if push_apis_present() && web_sys::Notification::permission() == web_sys::NotificationPermission::Denied {
+                <p role="status">{ "Notifications are blocked. Allow notifications for this site in your browser settings, and check your device's notification permission for the browser or installed Portal app." }</p>
+            }
+            <p class="section-description">{ "Leaving Portal open on another device does not silence alerts. Only actively viewing the same conversation suppresses them." }</p>
             { render_device_control(
                 &availability,
                 *device_state,
@@ -182,6 +220,9 @@ pub fn notifications_panel() -> Html {
                 &on_disable,
             ) }
 
+            if *device_state == DeviceState::Subscribed {
+                <button class="create-button" disabled={*busy} onclick={on_test}>{"Send test notification"}</button>
+            }
             <div class="notification-prefs">
                 <h3>{ "Notify me about" }</h3>
                 <p class="section-description">
@@ -346,6 +387,7 @@ enum PrefField {
     TurnComplete,
     SessionDisconnected,
     AgentMessage,
+    AlwaysNotify,
 }
 
 impl PrefField {
@@ -355,6 +397,7 @@ impl PrefField {
             PrefField::TurnComplete => p.turn_complete,
             PrefField::SessionDisconnected => p.session_disconnected,
             PrefField::AgentMessage => p.agent_message,
+            PrefField::AlwaysNotify => p.always_notify,
         }
     }
     fn set(&self, p: &mut NotificationPrefs, v: bool) {
@@ -363,15 +406,20 @@ impl PrefField {
             PrefField::TurnComplete => p.turn_complete = v,
             PrefField::SessionDisconnected => p.session_disconnected = v,
             PrefField::AgentMessage => p.agent_message = v,
+            PrefField::AlwaysNotify => p.always_notify = v,
         }
     }
 }
 
-const PREF_FIELDS: [(PrefField, &str); 4] = [
+const PREF_FIELDS: [(PrefField, &str); 5] = [
     (PrefField::PermissionRequest, "Permission requests"),
     (PrefField::TurnComplete, "Turn complete"),
     (PrefField::SessionDisconnected, "Session disconnected"),
     (PrefField::AgentMessage, "Agent messages"),
+    (
+        PrefField::AlwaysNotify,
+        "Notify even while viewing the conversation",
+    ),
 ];
 
 // --- Prefs HTTP ------------------------------------------------------------
@@ -432,10 +480,8 @@ async fn current_subscription_present() -> bool {
 }
 
 /// Request permission, subscribe, and register the subscription server-side.
-async fn enable_push(vapid_b64url: &str) -> Result<(), String> {
-    let permission = JsFuture::from(web_sys::Notification::request_permission().map_err(js_err)?)
-        .await
-        .map_err(js_err)?;
+async fn enable_push(vapid_b64url: &str, permission: js_sys::Promise) -> Result<(), String> {
+    let permission = JsFuture::from(permission).await.map_err(js_err)?;
     if permission.as_string().as_deref() != Some("granted") {
         return Err("notification permission was not granted".to_string());
     }
@@ -553,4 +599,45 @@ fn js_err(v: JsValue) -> String {
         return msg.into();
     }
     format!("{v:?}")
+}
+
+fn platform_help() -> &'static str {
+    let ua = web_sys::window()
+        .and_then(|w| w.navigator().user_agent().ok())
+        .unwrap_or_default();
+    if ua.contains("Android") {
+        "Android: enable notifications here, then allow them in the browser prompt. Home Screen installation is optional. Also allow notifications for your browser in Android settings."
+    } else if ua.contains("iPhone")
+        || ua.contains("iPad")
+        || ua.contains("Macintosh")
+            && web_sys::window().is_some_and(|w| w.navigator().max_touch_points() > 1)
+    {
+        "iPhone/iPad: add Portal to your Home Screen, open it from that icon, then enable notifications here."
+    } else {
+        "Enable notifications on each device where you want alerts."
+    }
+}
+async fn test_push() -> Result<(), String> {
+    // Re-register the existing subscription to repair a stale/missing server id.
+    let pm = push_manager().await.map_err(js_err)?;
+    let value = JsFuture::from(pm.get_subscription().map_err(js_err)?)
+        .await
+        .map_err(js_err)?;
+    let sub = value
+        .dyn_into::<web_sys::PushSubscription>()
+        .map_err(js_err)?;
+    register_subscription(&sub_to_request(&sub)?).await?;
+    let id = utils::storage_get(SUB_ID_STORAGE_KEY)
+        .ok_or("Enable notifications on this device first")?;
+    let response = Request::post(&utils::api_url(&format!(
+        "/api/push/subscriptions/{id}/test"
+    )))
+    .send()
+    .await
+    .map_err(|e| e.to_string())?;
+    if response.ok() {
+        Ok(())
+    } else {
+        Err(utils::error_body(response).await)
+    }
 }

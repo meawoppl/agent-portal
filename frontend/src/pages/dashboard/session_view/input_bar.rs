@@ -215,11 +215,19 @@ pub enum InputBarMsg {
     Noop,
 }
 
+thread_local! {
+    // Mobile switches unmount the previous conversation. Keep unsent text in
+    // this tab's memory, scoped to portal/account/session; never persist drafts
+    // to localStorage or send them to the server.
+    static SESSION_DRAFTS: RefCell<std::collections::HashMap<String,String>> = RefCell::default();
+}
+
 pub struct InputBar {
     input_ref: NodeRef,
     /// Mirror of the textarea value, kept so a re-render (reconnect, focus
     /// flip) can restore the text without losing what the user typed.
     input_text: String,
+    draft_key: Option<String>,
     command_history: CommandHistory,
     send_mode_dropdown_open: bool,
     queue_pending: Option<SessionKey>,
@@ -295,9 +303,16 @@ impl Component for InputBar {
         let dispatcher = ctx.link().callback(InputBarMsg::Inbound);
         ctx.props().on_register.emit(dispatcher);
 
+        let draft_key =
+            portal_from_context(ctx).storage_key(&format!("draft:{}", ctx.props().session_id));
+        let input_text = draft_key
+            .as_ref()
+            .and_then(|key| SESSION_DRAFTS.with(|drafts| drafts.borrow_mut().remove(key)))
+            .unwrap_or_default();
         Self {
             input_ref: NodeRef::default(),
-            input_text: String::new(),
+            input_text,
+            draft_key,
             command_history: CommandHistory::for_session(
                 ctx.props().session_id,
                 &portal_from_context(ctx),
@@ -325,6 +340,25 @@ impl Component for InputBar {
             focus_after_render: ctx.props().focused,
             vim_enabled: load_vim_mode(),
             vim: Rc::new(RefCell::new(VimState::default())),
+        }
+    }
+
+    fn destroy(&mut self, _ctx: &Context<Self>) {
+        if let Some(key) = self.draft_key.clone() {
+            // Yew may detach the textarea before destroy; use the last input event then.
+            let text = self
+                .input_ref
+                .cast::<HtmlTextAreaElement>()
+                .map(|el| el.value())
+                .unwrap_or_else(|| self.input_text.clone());
+            SESSION_DRAFTS.with(|drafts| {
+                let mut drafts = drafts.borrow_mut();
+                if text.is_empty() {
+                    drafts.remove(&key);
+                } else {
+                    drafts.insert(key, text);
+                }
+            });
         }
     }
 

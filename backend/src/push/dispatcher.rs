@@ -4,9 +4,7 @@
 //! [`NotificationEvent`]:
 //!
 //! 1. resolves the recipient (the session's owning user) and a display name;
-//! 2. suppresses the push when that user has a live web client — in-app
-//!    WS delivery already covers them (§8.2). Presence is trustworthy thanks to
-//!    the eager-prune work in #1291;
+//! 2. respects session muting and recent visible-conversation heartbeats;
 //! 3. filters on the user's notification preferences;
 //! 4. loads the user's non-disabled subscriptions and delivers to each via the
 //!    [`PushTransport`], updating `last_success_at` / `disabled_at` and logging
@@ -32,12 +30,12 @@ use crate::AppState;
 pub fn spawn_dispatcher(
     app_state: Arc<AppState>,
     mut rx: UnboundedReceiver<NotificationEvent>,
-    transport: ConfiguredTransport,
+    transport: Arc<ConfiguredTransport>,
 ) {
     tokio::spawn(async move {
         tracing::info!("push dispatcher started");
         while let Some(event) = rx.recv().await {
-            dispatch_one(&app_state, &transport, event).await;
+            dispatch_one(&app_state, transport.as_ref(), event).await;
         }
         tracing::warn!("push notification channel closed; dispatcher exiting");
     });
@@ -75,13 +73,17 @@ async fn dispatch_one<T: PushTransport>(
     };
     let (user_id, db_name, prefs) = resolved;
 
-    // (b) Suppress when the user has a live web client — in-app WS delivery
-    // already covers them. Presence is trustworthy post-#1291 (eager prune).
-    if app_state.session_manager.has_user_client(user_id) {
-        debug!(
-            "push suppressed for user {user_id} (session {session_id}): live web client present"
-        );
-        return;
+    // A connected socket is not evidence of attention. Only a short-lived
+    // heartbeat from a visible conversation can suppress a push.
+    match crate::handlers::attention::push_suppressed(
+        &mut conn,
+        user_id,
+        session_id,
+        prefs.always_notify,
+    ) {
+        Ok(true) => return,
+        Ok(false) => {}
+        Err(e) => error!("{PUSH_DISPATCH_FAILED}: attention lookup failed: {e}"),
     }
 
     // (c) Prefs filter, on the user's stored prefs (C6 storage, loaded in the
@@ -295,5 +297,56 @@ mod db_tests {
             resolve_recipient(&mut conn, Uuid::new_v4()).expect("resolve missing"),
             None
         );
+    }
+    #[tokio::test]
+    async fn connected_desktop_does_not_suppress_phone_but_viewing_and_mute_do() {
+        struct Delivery(std::sync::atomic::AtomicUsize);
+        impl crate::push::PushTransport for Delivery {
+            async fn send(
+                &self,
+                _: &PushSubscription,
+                _: &crate::push::PushPayload,
+            ) -> Result<SendOutcome, crate::push::PushError> {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(SendOutcome::Delivered)
+            }
+        }
+        let Some(pool) = crate::test_support::shared_pool() else {
+            return;
+        };
+        let mut conn = pool.get().unwrap();
+        let user = crate::test_support::insert_user(&mut conn, "push-attention");
+        let session = crate::test_support::insert_session(&mut conn, user.id, "attention");
+        make_sub(&mut conn, user.id);
+        let state = crate::test_support::test_app_state(pool);
+        let (tx, _rx) = crate::handlers::websocket::conn_channel(16);
+        state.session_manager.add_user_client(user.id, tx);
+        let event = crate::push::NotificationEvent::TurnComplete {
+            session_id: session.id,
+            session_name: String::new(),
+        };
+        let transport = Delivery(std::sync::atomic::AtomicUsize::new(0));
+        dispatch_one(&state, &transport, event.clone()).await;
+        assert_eq!(
+            transport.0.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "an unattended connected desktop must not silence the phone"
+        );
+        let mut request = shared::api::UpdateSessionAttention {
+            client_id: Uuid::new_v4(),
+            viewing: true,
+            seen_reply_id: None,
+            muted: None,
+        };
+        crate::handlers::attention::update_receipt(&mut conn, user.id, session.id, &request)
+            .unwrap();
+        dispatch_one(&state, &transport, event.clone()).await;
+        assert_eq!(transport.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+        request.viewing = false;
+        request.muted = Some(true);
+        crate::handlers::attention::update_receipt(&mut conn, user.id, session.id, &request)
+            .unwrap();
+        dispatch_one(&state, &transport, event).await;
+        assert_eq!(transport.0.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 }

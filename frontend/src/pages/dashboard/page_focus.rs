@@ -16,7 +16,6 @@ const HYDRATION_DRIP_MS: u32 = 400;
 pub(super) struct DashboardFocus {
     pub focused_index: usize,
     pub on_select_session: Callback<usize>,
-    pub on_clear_selection: Callback<()>,
     pub on_activate: Callback<SessionKey>,
     pub on_interrupt: Callback<()>,
     pub interrupt_signal: u32,
@@ -296,13 +295,6 @@ pub(super) fn use_dashboard_focus(
         })
     };
 
-    let on_clear_selection = {
-        let session_state = session_state.clone();
-        Callback::from(move |()| {
-            session_state.dispatch(DashboardSessionAction::ClearFocusAndActivation);
-        })
-    };
-
     let on_activate = {
         let session_state = session_state.clone();
         Callback::from(move |session_id: SessionKey| {
@@ -338,7 +330,6 @@ pub(super) fn use_dashboard_focus(
     DashboardFocus {
         focused_index,
         on_select_session,
-        on_clear_selection,
         on_activate,
         on_interrupt,
         interrupt_signal: *interrupt_signal,

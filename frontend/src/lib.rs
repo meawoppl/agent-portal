@@ -6,6 +6,7 @@ mod health_timer;
 mod hooks;
 mod linked_credentials;
 mod linked_media;
+mod notification_sound;
 mod pages;
 mod portal_client;
 #[cfg(test)]

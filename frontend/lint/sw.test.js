@@ -69,3 +69,10 @@ test("the session id stays on the notification for click routing", async () => {
   assert.strictEqual(worker.shown[0].options.data.session_id, "s-9");
   assert.strictEqual(worker.shown[0].options.body, "x");
 });
+
+
+test("test notifications have no fake session destination", async () => {
+  const worker = loadWorker();
+  await worker.push({ ...wire("00000000-0000-0000-0000-000000000000", "test"), event_kind: "test" });
+  assert.equal(worker.shown[0].options.data.session_id, null);
+});

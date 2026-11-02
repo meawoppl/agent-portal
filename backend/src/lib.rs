@@ -101,6 +101,7 @@ pub struct AppState {
     /// (mobile-apps plan §8). Drained by the dispatcher task spawned in
     /// [`run`]; hooks call `notifications.emit(..)`.
     pub notifications: push::NotificationSender,
+    pub push_transport: Arc<push::ConfiguredTransport>,
     /// VAPID application-server public key served to Web Push clients
     /// (`GET /api/push/vapid-key`). `None` = push unconfigured (endpoint 404s).
     pub vapid_public_key: Option<String>,
@@ -185,8 +186,10 @@ pub async fn run() -> anyhow::Result<()> {
 
     // Parse remaining configuration from environment variables
     let config = config::ServerConfig::from_env(args.dev_mode)?;
-    let push_transport =
-        push::ConfiguredTransport::from_config(config.vapid_private_key, config.native_push)?;
+    let push_transport = Arc::new(push::ConfiguredTransport::from_config(
+        config.vapid_private_key,
+        config.native_push,
+    )?);
 
     // Create app state
     let forward_http_client =
@@ -230,6 +233,7 @@ pub async fn run() -> anyhow::Result<()> {
             None => None,
         },
         notifications,
+        push_transport: push_transport.clone(),
         vapid_public_key: config.vapid_public_key,
         mobile_app_links: config.mobile_app_links,
     });

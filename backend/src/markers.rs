@@ -20,6 +20,11 @@
 //!   `CLAUDE.md` ("Operational log markers"). The `markers` unit test enforces
 //!   uniqueness and naming.
 
+/// A completed response could not be recorded in the Ready queue. Repeated
+/// failures indicate database or migration trouble; check session_attention.
+/// A single occurrence can be a transient connection failure.
+pub const ATTENTION_PERSIST_FAILED: &str = "ATTENTION_PERSIST_FAILED";
+
 /// Emitted when a browser/agent input could **not be persisted** to the
 /// `pending_inputs` table — either the INSERT failed or no DB connection was
 /// available to attempt it. The message may still reach a live proxy, but the
@@ -192,6 +197,7 @@ mod tests {
     /// the tests below can enforce uniqueness, naming, and that each is wired to
     /// a real emit site.
     const ALL_MARKERS: &[&str] = &[
+        ATTENTION_PERSIST_FAILED,
         SPAWN_LIFECYCLE_FAILED,
         PENDING_INPUT_PERSIST_FAILED,
         INPUT_SEQ_BUMP_FAILED,
@@ -244,6 +250,7 @@ mod tests {
     fn every_marker_is_referenced_by_an_emit_site() {
         let sources: &[&str] = &[
             include_str!("background.rs"),
+            include_str!("handlers/websocket/message_handlers.rs"),
             include_str!("handlers/websocket/permissions.rs"),
             include_str!("push/dispatcher.rs"),
             include_str!("handlers/websocket/session_manager/input_queue.rs"),

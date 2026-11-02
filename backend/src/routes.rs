@@ -451,6 +451,15 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
             get(handlers::scheduled_tasks::list_runs_handler),
         )
         // Push notification subscriptions (mobile-apps plan C1)
+        .route("/api/session-attention", get(handlers::attention::list))
+        .route(
+            "/api/sessions/{id}/attention",
+            axum::routing::post(handlers::attention::update),
+        )
+        .route(
+            "/api/push/subscriptions/{id}/test",
+            axum::routing::post(handlers::push::test_subscription),
+        )
         .route("/api/push/vapid-key", get(handlers::push::get_vapid_key))
         .route(
             "/api/push/subscriptions",

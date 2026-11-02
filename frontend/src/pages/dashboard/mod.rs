@@ -6,6 +6,8 @@
 //! - `SessionView`: Terminal view for a single session
 //! - `PermissionDialog`: Permission prompt and AskUserQuestion dialogs
 
+mod attention;
+mod mobile_ready;
 mod page;
 mod page_bootstrap;
 mod page_focus;

@@ -1,6 +1,7 @@
 pub mod admin;
 pub mod admin_subdomains;
 pub mod agent_comms;
+pub mod attention;
 pub mod auth;
 pub mod config;
 pub mod device_flow;

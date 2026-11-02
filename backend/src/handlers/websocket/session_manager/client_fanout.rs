@@ -67,11 +67,9 @@ impl SessionManager {
     /// registry when its socket task ends, dropping the map entry once the
     /// last client leaves.
     ///
-    /// WHY: presence must not contain dead senders. Push-notification
-    /// suppression ("don't push if the user has a live web client") reads
-    /// these registries; without eager removal, a disconnected tab/phone
-    /// would keep suppressing pushes until the next failed send lazily
-    /// pruned it (see docs/MOBILE_APPS_PLAN.md §8.2). The lazy prune in
+    /// WHY: presence must not contain dead senders. Connection counts and
+    /// fanout read these registries; without eager removal, disconnected
+    /// clients linger until the next failed send prunes them. The lazy prune in
     /// `fanout_to_clients` stays as a backstop.
     pub fn remove_web_client(&self, session_key: &str, sender: &WebClientSender) {
         if let Some(mut clients) = self.web_clients.get_mut(session_key) {
@@ -98,12 +96,9 @@ impl SessionManager {
     /// when its socket task ends, dropping the map entry once the user's
     /// last client leaves.
     ///
-    /// WHY: presence must not contain dead senders. Push-notification
-    /// suppression ("don't push if the user has a live web client") reads
-    /// `user_clients` (and treats a present key as "user is watching");
-    /// without eager removal, a disconnected tab/phone would keep
-    /// suppressing pushes until the next failed send lazily pruned it (see
-    /// docs/MOBILE_APPS_PLAN.md §8.2). The lazy prune in `fanout_to_clients`
+    /// WHY: presence must not contain dead senders. Connection counts and fanout read
+    /// `user_clients`; without eager removal, a disconnected client remains
+    /// registered until a failed send prunes it. The lazy prune in `fanout_to_clients`
     /// stays as a backstop.
     pub fn remove_user_client(&self, user_id: &Uuid, sender: &WebClientSender) {
         if let Some(mut clients) = self.user_clients.get_mut(user_id) {
@@ -119,11 +114,8 @@ impl SessionManager {
         self.user_clients.iter().map(|r| *r.key()).collect()
     }
 
-    /// Whether `user_id` currently has at least one live web client. Used by the
-    /// push dispatcher to suppress a push when in-app WS delivery already covers
-    /// the user (mobile-apps plan §8.2). Presence is trustworthy because dead
-    /// senders are pruned eagerly on socket close (#1291): an empty (or absent)
-    /// vector means genuinely no live client.
+    /// Whether `user_id` has a live client connection. Connection presence
+    /// alone does not establish that a person is viewing a conversation.
     pub fn has_user_client(&self, user_id: Uuid) -> bool {
         self.user_clients
             .get(&user_id)

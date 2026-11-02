@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+  <rect width="2000" height="1200" fill="#1a1b26"/>
+  <g font-family="sans-serif">
+    <text x="55" y="52" font-size="24" fill="#a9b1d6" letter-spacing="1">PR #2345 · Mobile Ready queue and reliable phone alerts</text>
+    <text x="55" y="103" font-size="34" fill="#e6e9f5">Mobile hid completed sessions; Ready now keeps unread replies within reach.</text>
+    <text x="55" y="148" font-size="34" fill="#e6e9f5">Receipts sync across devices; an open desktop no longer silences the phone.</text>
+    <path d="M55 176 H1945" stroke="#3d4666"/>
+    <path d="M1000 190 V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+    <text x="70" y="225" font-size="22" font-weight="bold" letter-spacing="4" fill="#f7768e">BEFORE</text>
+    <text x="1040" y="225" font-size="22" font-weight="bold" letter-spacing="4" fill="#9ece6a">AFTER</text>
+
+    <rect x="70" y="265" width="870" height="205" rx="15" fill="#1e202e" stroke="#3d4666"/>
+    <text x="100" y="310" font-size="26" fill="#7aa2f7">mobile-session-select</text>
+    <text x="100" y="355" font-size="23" fill="#c0caf5">Session names and connection labels.</text>
+    <text x="100" y="394" font-size="23" fill="#c0caf5">Only the selected mobile transcript is mounted.</text>
+    <text x="100" y="437" font-size="23" fill="#f7768e">No persistent cross-session unread queue.</text>
+    <path d="M505 477 V515 M495 502 L505 515 L515 502" fill="none" stroke="#565f89" stroke-width="3"/>
+
+    <rect x="1040" y="265" width="890" height="205" rx="15" fill="#1e202e" stroke="#9ece6a"/>
+    <text x="1070" y="310" font-size="26" fill="#7aa2f7">session_attention + per-user receipts</text>
+    <text x="1070" y="355" font-size="23" fill="#c0caf5">Persist completed output for Claude and Codex.</text>
+    <text x="1070" y="394" font-size="23" fill="#c0caf5">Automatic or explicit receipts name a specific reply.</text>
+    <text x="1070" y="437" font-size="23" fill="#9ece6a">Refresh and delayed receipts cannot lose a new reply.</text>
+    <path d="M1485 477 V515 M1475 502 L1485 515 L1495 502" fill="none" stroke="#9ece6a" stroke-width="3"/>
+
+    <rect x="70" y="525" width="870" height="205" rx="15" fill="#1e202e" stroke="#3d4666"/>
+    <text x="100" y="570" font-size="26" fill="#7aa2f7">has_user_client(user_id)</text>
+    <text x="100" y="615" font-size="23" fill="#c0caf5">Any live web client suppresses push delivery.</text>
+    <text x="100" y="654" font-size="23" fill="#c0caf5">The desktop can remain connected all day.</text>
+    <text x="100" y="697" font-size="23" fill="#f7768e">The phone receives no alert, even for another session.</text>
+    <path d="M505 737 V775 M495 762 L505 775 L515 762" fill="none" stroke="#565f89" stroke-width="3"/>
+
+    <rect x="1040" y="525" width="890" height="205" rx="15" fill="#1e202e" stroke="#9ece6a"/>
+    <text x="1070" y="570" font-size="26" fill="#7aa2f7">MobileReady + use_attention</text>
+    <text x="1070" y="615" font-size="23" fill="#c0caf5">Ready count, cycling Next, previews, mute and Mark read.</text>
+    <text x="1070" y="654" font-size="23" fill="#c0caf5">Approvals stay ready; switches and settings keep drafts.</text>
+    <text x="1070" y="697" font-size="23" fill="#9ece6a">Background transcripts stay unloaded.</text>
+    <path d="M1485 737 V775 M1475 762 L1485 775 L1495 762" fill="none" stroke="#9ece6a" stroke-width="3"/>
+
+    <rect x="70" y="785" width="870" height="225" rx="15" fill="#1e202e" stroke="#f7768e"/>
+    <text x="100" y="833" font-size="26" fill="#f7768e">Completed work is easy to miss</text>
+    <text x="100" y="880" font-size="23" fill="#c0caf5">Manually inspect sessions on the phone.</text>
+    <text x="100" y="922" font-size="23" fill="#c0caf5">A connected desktop makes silence ambiguous.</text>
+    <text x="100" y="964" font-size="23" fill="#c0caf5">No test notification control in Settings.</text>
+
+    <rect x="1040" y="785" width="890" height="225" rx="15" fill="#1e202e" stroke="#9ece6a"/>
+    <text x="1070" y="833" font-size="26" fill="#7aa2f7">push_suppressed + device setup</text>
+    <text x="1070" y="880" font-size="23" fill="#c0caf5">15-second same-conversation viewing lease.</text>
+    <text x="1070" y="922" font-size="23" fill="#c0caf5">Always-notify override and real transport test.</text>
+    <text x="1070" y="964" font-size="23" fill="#9ece6a">Android FCM tag replaces a session's previous alert.</text>
+
+    <text x="70" y="1085" font-size="23" fill="#f7768e">Desktop presence was mistaken for user attention.</text>
+    <text x="1040" y="1085" font-size="23" fill="#9ece6a">Android and iPhone share the same Ready interface.</text>
+    <text x="55" y="1172" font-size="22" fill="#a9b1d6">Background push still needs device permission and configured delivery; physical-phone lock-screen delivery remains to be verified.</text>
+  </g>
+</svg>

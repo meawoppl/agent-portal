@@ -180,6 +180,7 @@ fn route_scope(method: &Method, route: &str) -> Option<TokenScope> {
             "/api/sessions"
             | "/api/sessions/{id}"
             | "/api/agent/sessions"
+            | "/api/session-attention"
             | "/api/sessions/{id}/messages"
             | "/api/sessions/{id}/turn-metrics"
             | "/api/sessions/{id}/edit-stack"
@@ -198,6 +199,7 @@ fn route_scope(method: &Method, route: &str) -> Option<TokenScope> {
         (
             "POST",
             "/api/sessions/{id}/fork"
+            | "/api/sessions/{id}/attention"
             | "/api/sessions/{id}/stop"
             | "/api/sessions/{id}/pause"
             | "/api/sessions/{id}/resume"

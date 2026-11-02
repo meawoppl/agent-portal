@@ -5,7 +5,7 @@
 //! [`NotificationEvent`]; a background dispatcher task
 //! ([`dispatcher::spawn_dispatcher`]) drains those events and, per the delivery
 //! policy in §8.2, resolves the owning user, suppresses the push when that user
-//! already has a live web client, filters on their notification preferences,
+//! is actively viewing that conversation, filters on their notification preferences,
 //! and fans the surviving event out to every non-disabled push subscription
 //! via a [`PushTransport`].
 //!
@@ -71,6 +71,19 @@ pub enum ConfiguredTransport {
 }
 
 impl ConfiguredTransport {
+    pub fn supports(&self, platform: PushPlatform) -> bool {
+        match self {
+            Self::Log(_) => false,
+            Self::Registry {
+                webpush, apns, fcm, ..
+            } => match platform {
+                PushPlatform::Webpush => webpush.is_some(),
+                PushPlatform::Apns => apns.is_some(),
+                PushPlatform::Fcm => fcm.is_some(),
+            },
+        }
+    }
+
     /// Build the transport registry from startup config. `vapid_private_key`
     /// enables Web Push (C3); `native` enables APNs / FCM (C7). Missing config
     /// never panics — it just leaves that platform on the log fallback.
@@ -172,7 +185,7 @@ pub enum NotificationEvent {
         /// again in [`NotificationEvent::into_payload`].
         input_snippet: Option<String>,
     },
-    /// A turn finished (a `Result` message was stored); collapse per session.
+    /// An agent turn finished and its output was stored; collapse per session.
     TurnComplete {
         session_id: Uuid,
         session_name: String,

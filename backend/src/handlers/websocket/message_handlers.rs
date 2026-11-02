@@ -367,6 +367,29 @@ pub fn handle_agent_output(ctx: AgentOutputContext<'_>, frame: AgentOutputFrame)
             {
                 Ok(inserted) => {
                     inserted_created_at = Some(inserted.created_at);
+                    if crate::handlers::session_activity::activity_signal(
+                        agent_type.as_str(),
+                        &inserted.role,
+                        &inserted.content,
+                    ) == Some(shared::api::SessionActivityState::Idle)
+                    {
+                        match crate::handlers::attention::record_reply(&mut conn, &inserted) {
+                            Ok(true) => {
+                                notifications.emit(crate::push::NotificationEvent::TurnComplete {
+                                    session_id,
+                                    session_name: String::new(),
+                                })
+                            }
+                            Ok(false) => {}
+                            Err(e) => error!(
+                                "{}: session {}: {}",
+                                crate::markers::ATTENTION_PERSIST_FAILED,
+                                session_id,
+                                e
+                            ),
+                        }
+                    }
+
                     // `meta.created_at` becomes the frontend's reconnect
                     // watermark (matches `replay_history`'s `%Y-%m-%dT%H:%M:%S%.f`).
                     broadcast_meta =
@@ -393,14 +416,6 @@ pub fn handle_agent_output(ctx: AgentOutputContext<'_>, frame: AgentOutputFrame)
                     &content,
                     inserted_created_at,
                 );
-
-                // Turn finished — emit a push (mobile-apps plan §8.1, collapsed
-                // per session by the dispatcher). Suppressed automatically when
-                // a live web client is present; name backfilled from the row.
-                notifications.emit(crate::push::NotificationEvent::TurnComplete {
-                    session_id,
-                    session_name: String::new(),
-                });
             }
 
             session_manager.queue_truncation(session_id);
@@ -943,5 +958,58 @@ mod tests {
             "muse",
             &serde_json::json!({"type": "muse_record", "payload_type": "tool.result"})
         ));
+    }
+}
+
+#[cfg(test)]
+mod attention_delivery_tests {
+    #[tokio::test]
+    async fn codex_and_claude_completions_reach_attention_and_push_once() {
+        use super::{handle_agent_output, AgentOutputContext, AgentOutputFrame};
+        let Some(pool) = crate::test_support::shared_pool() else {
+            return;
+        };
+        let mut conn = pool.get().unwrap();
+        let user = crate::test_support::insert_user(&mut conn, "attention");
+        let state = crate::test_support::test_app_state(pool.clone());
+        for (agent, json) in [
+            (
+                shared::AgentType::Codex,
+                r#"{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1,"cached_input_tokens":0}}"#,
+            ),
+            (
+                shared::AgentType::Claude,
+                r#"{"type":"result","subtype":"success","result":"Done"}"#,
+            ),
+        ] {
+            let session = crate::test_support::insert_session(&mut conn, user.id, "agent");
+            let (notifications, mut rx) = crate::push::channel();
+            let (tx, _rx) = crate::handlers::websocket::session_manager::conn_channel(16);
+            for _ in 0..2 {
+                handle_agent_output(
+                    AgentOutputContext {
+                        session_manager: &state.session_manager,
+                        session_key: &Some(session.id.to_string().into()),
+                        db_session_id: Some(session.id),
+                        db_pool: &pool,
+                        notifications: &notifications,
+                        tx: &tx,
+                        image_store: &state.image_store,
+                    },
+                    AgentOutputFrame {
+                        content: serde_json::from_str(json).unwrap(),
+                        seq: Some(1),
+                        agent_type: agent,
+                    },
+                );
+            }
+            assert!(
+                matches!(rx.try_recv().unwrap(),crate::push::NotificationEvent::TurnComplete {session_id,..} if session_id==session.id)
+            );
+            assert!(
+                rx.try_recv().is_err(),
+                "duplicate output must not send another push"
+            );
+        }
     }
 }

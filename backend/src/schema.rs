@@ -236,6 +236,34 @@ diesel::table! {
 }
 
 diesel::table! {
+    session_attention (session_id) {
+        session_id -> Uuid,
+        reply_id -> Uuid,
+        reply_at -> Timestamp,
+        generation -> Int8,
+        preview -> Text,
+    }
+}
+
+diesel::table! {
+    session_attention_receipts (session_id, user_id) {
+        session_id -> Uuid,
+        user_id -> Uuid,
+        seen_generation -> Int8,
+        muted -> Bool,
+    }
+}
+
+diesel::table! {
+    session_attention_views (user_id, client_id) {
+        user_id -> Uuid,
+        client_id -> Uuid,
+        session_id -> Uuid,
+        expires_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
     session_continuations (id) {
         id -> Uuid,
         session_id -> Uuid,
@@ -483,6 +511,11 @@ diesel::joinable!(proxy_auth_tokens -> sessions (session_id));
 diesel::joinable!(proxy_auth_tokens -> users (user_id));
 diesel::joinable!(push_subscriptions -> users (user_id));
 diesel::joinable!(scheduled_tasks -> users (user_id));
+diesel::joinable!(session_attention -> sessions (session_id));
+diesel::joinable!(session_attention_receipts -> sessions (session_id));
+diesel::joinable!(session_attention_receipts -> users (user_id));
+diesel::joinable!(session_attention_views -> sessions (session_id));
+diesel::joinable!(session_attention_views -> users (user_id));
 diesel::joinable!(session_continuations -> sessions (session_id));
 diesel::joinable!(session_continuations -> users (user_id));
 diesel::joinable!(session_edit_stack_items -> sessions (session_id));
@@ -515,6 +548,9 @@ diesel::allow_tables_to_appear_in_same_query!(
     proxy_auth_tokens,
     push_subscriptions,
     scheduled_tasks,
+    session_attention,
+    session_attention_receipts,
+    session_attention_views,
     session_continuations,
     session_edit_stack_items,
     session_follow_heads,

@@ -81,6 +81,9 @@ pub fn test_app_state(pool: DbPool) -> AppState {
         forward_domain: None,
         archive: None,
         notifications: crate::push::channel().0,
+        push_transport: std::sync::Arc::new(crate::push::ConfiguredTransport::Log(
+            crate::push::LogTransport,
+        )),
         vapid_public_key: None,
         mobile_app_links: MobileAppLinksConfig::default(),
     }

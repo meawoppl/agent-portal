@@ -30,7 +30,7 @@ use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
-use web_sys::{HtmlSelectElement, MouseEvent};
+use web_sys::MouseEvent;
 use yew::prelude::*;
 use yew_router::prelude::*;
 
@@ -791,44 +791,27 @@ pub fn dashboard_page() -> Html {
         });
     }
 
-    // Mobile picker: live sessions first, then paused/stopped/hidden ones in
-    // their own group at the bottom. Stopping a session pauses it, so
-    // `effective_hidden_sessions` (hidden ∪ paused) covers all three.
-    let (mobile_live, mobile_dormant): (Vec<&PortalSession>, Vec<&PortalSession>) = active_sessions
-        .iter()
-        .filter(|entry| entry.info.scheduled_task_id.is_none())
-        .partition(|entry| !effective_hidden_sessions.contains(&entry.key));
-    let mobile_option = |entry: &&PortalSession| {
-        let session = &entry.info;
-        let connection = if session.paused {
-            "paused"
-        } else if effective_hidden_sessions.contains(&entry.key) {
-            "hidden"
-        } else if session_state.connected_sessions.contains(&entry.key) {
-            "connected"
-        } else {
-            session.status.as_str()
-        };
-        let location = if session.hostname.is_empty() {
-            session.working_directory.as_str()
-        } else {
-            session.hostname.as_str()
-        };
-        html! {
-            <option value={entry.key.to_string()}>
-                { format!("{} — {} ({connection}){}", session.session_name, location, if entry.portal.is_linked() { format!(" · {} · {}", entry.portal.origin(), entry.portal.account_label().unwrap_or("")) } else { String::new() }) }
-            </option>
-        }
-    };
-    let mobile_options = html! {
-        <>
-            { for mobile_live.iter().map(mobile_option) }
-            if !mobile_dormant.is_empty() {
-                <optgroup label="Paused, stopped & hidden — selecting resumes">
-                    { for mobile_dormant.iter().map(mobile_option) }
-                </optgroup>
+    let attention = super::attention::use_attention(
+        distinct_portals(home_portal.clone(), &sessions),
+        active_sessions.clone(),
+        session_state.focused_id,
+    );
+    let on_mobile_select = {
+        let sessions = active_sessions.clone();
+        let hidden = session_state.hidden_sessions.clone();
+        let select = focus.on_select_session.clone();
+        let pause = on_toggle_pause.clone();
+        let toggle = on_toggle_hidden.clone();
+        Callback::from(move |index: usize| {
+            if let Some(entry) = sessions.get(index) {
+                if entry.info.paused {
+                    pause.emit((entry.key, false));
+                } else if hidden.contains(&entry.key) {
+                    toggle.emit(entry.key);
+                }
+                select.emit(index);
             }
-        </>
+        })
     };
 
     html! {
@@ -990,52 +973,7 @@ pub fn dashboard_page() -> Html {
                         if is_mobile_dashboard { Some("mobile-session-mode") } else { None },
                     )} style={format!("--session-pill-min-width: {}px", *pill_width)}>
                     // Session Rail
-                    if is_mobile_dashboard {
-                        <div class={classes!(
-                            "mobile-session-selector",
-                            if session_state.focused_id.is_none() { Some("empty") } else { None },
-                        )}>
-                            <label for="mobile-session-select">
-                                { if session_state.focused_id.is_none() { "Choose a session" } else { "Session" } }
-                            </label>
-                            <select
-                                id="mobile-session-select"
-                                value={session_state.focused_id.map(|key| key.to_string()).unwrap_or_default()}
-                                onchange={{
-                                    let sessions = active_sessions.clone();
-                                    let hidden = session_state.hidden_sessions.clone();
-                                    let on_select = focus.on_select_session.clone();
-                                    let on_clear = focus.on_clear_selection.clone();
-                                    let on_toggle_pause = on_toggle_pause.clone();
-                                    let on_toggle_hidden = on_toggle_hidden.clone();
-                                    Callback::from(move |event: Event| {
-                                        let value = event.target_unchecked_into::<HtmlSelectElement>().value();
-                                        if value.is_empty() {
-                                            on_clear.emit(());
-                                        } else if let Some(index) = sessions.iter().position(|session| session.key.to_string() == value) {
-                                            // Picking a dormant session brings it back: resume
-                                            // a paused/stopped one (which also unhides it),
-                                            // or just unhide a hidden one.
-                                            let entry = &sessions[index];
-                                            if entry.info.paused {
-                                                on_toggle_pause.emit((entry.key, false));
-                                            } else if hidden.contains(&entry.key) {
-                                                on_toggle_hidden.emit(entry.key);
-                                            }
-                                            on_select.emit(index);
-                                        }
-                                    })
-                                }}
-                                aria-label="Select a session to open"
-                            >
-                                <option value="">{ "Select a session…" }</option>
-                                { mobile_options }
-                            </select>
-                            if session_state.focused_id.is_none() {
-                                <p>{ "Select a session to load its history and connect to its live stream." }</p>
-                            }
-                        </div>
-                    } else {
+                    if !is_mobile_dashboard {
                     <SessionRail
                         on_renamed={sessions_hook.refresh.clone()}
                         sessions={active_sessions.clone()}
@@ -1089,6 +1027,7 @@ pub fn dashboard_page() -> Html {
                                                 session={session.info.clone()}
                                                 portal={session.portal.clone()}
                                                 focused={is_focused}
+                                                attention={attention.rows.get(&session.key).cloned()}
                                                 on_awaiting_change={on_awaiting_change.clone()}
                                                 on_connected_change={on_connected_change.clone()}
                                                 on_message_sent={on_message_sent.clone()}
@@ -1118,6 +1057,15 @@ pub fn dashboard_page() -> Html {
                         }
                     </div>
                     </div>
+
+                    if is_mobile_dashboard {
+                        <super::mobile_ready::MobileReady sessions={active_sessions.clone()} rows={attention.rows.clone()}
+                            hidden={effective_hidden_sessions.clone()} focused={session_state.focused_id}
+                            unavailable={attention.unavailable}
+                            mutation_failed={attention.mutation_failed} toast={attention.toast} on_dismiss={attention.dismiss.clone()}
+                            on_select={on_mobile_select} on_mute={attention.mute.clone()}
+                            on_mark_read={attention.mark_read.clone()} on_settings={go_to_settings.clone()} />
+                    }
 
                     // Keyboard hints
                     <div class={classes!("keyboard-hints", if keyboard_nav.nav_mode { Some("nav-mode") } else { None })}>

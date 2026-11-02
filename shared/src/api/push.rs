@@ -144,6 +144,9 @@ pub struct NotificationPrefs {
     pub session_disconnected: bool,
     #[serde(default)]
     pub agent_message: bool,
+    /// Deliver even while this conversation is being viewed.
+    #[serde(default)]
+    pub always_notify: bool,
     /// How much content notifications carry (O4a). Defaults to `ToolName`
     /// for wire compat with prefs stored before this field existed.
     #[serde(default)]
@@ -157,6 +160,7 @@ impl Default for NotificationPrefs {
             turn_complete: true,
             session_disconnected: true,
             agent_message: false,
+            always_notify: false,
             content_detail: NotificationContentDetail::default(),
         }
     }

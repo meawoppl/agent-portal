@@ -146,7 +146,7 @@ self.addEventListener("push", (event) => {
     tag: payload.tag || undefined,
     icon: "/icon-192.png",
     badge: "/icon-192.png",
-    data: { session_id: payload.session_id || null },
+    data: { session_id: payload.event_kind === "test" ? null : (payload.session_id || null) },
   };
 
   event.waitUntil(self.registration.showNotification(title, options));

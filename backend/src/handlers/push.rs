@@ -210,6 +210,62 @@ pub async fn put_prefs(
 // We exercise the query layer directly (read/update the jsonb column) rather
 // than the Axum handler, which needs a full `AppState`; the handlers are thin
 // wrappers over exactly this read/parse/write logic.
+/// Exercise the actual configured transport, scoped to a subscription owned by
+/// the caller. A test deliberately bypasses viewing/mute preferences.
+pub async fn test_subscription(
+    State(state): State<Arc<AppState>>,
+    CurrentUserId(user): CurrentUserId,
+    Path(id): Path<Uuid>,
+) -> Result<EmptyResponse, AppError> {
+    use crate::push::{PushTransport, SendOutcome};
+    let mut conn = state.conn()?;
+    let sub = push_subscriptions::table
+        .filter(push_subscriptions::id.eq(id))
+        .filter(push_subscriptions::user_id.eq(user))
+        .first::<PushSubscription>(&mut conn)
+        .optional()?
+        .ok_or(AppError::NotFound("push subscription"))?;
+    let platform = sub
+        .platform_kind()
+        .ok_or(AppError::BadRequest("Unknown push platform"))?;
+    if !state.push_transport.supports(platform) {
+        return Err(AppError::BadRequest(
+            "Push delivery is not configured for this device on the server",
+        ));
+    }
+    let payload = crate::push::PushPayload {
+        session_id: Uuid::nil(),
+        event_kind: "test".into(),
+        title: "Agent Portal".into(),
+        body: "Notifications are working on this device.".into(),
+        collapse_key: "portal-notification-test".into(),
+    };
+    drop(conn);
+    let outcome = state
+        .push_transport
+        .send(&sub, &payload)
+        .await
+        .map_err(|e| {
+            tracing::warn!("Push test failed for {}: {}", sub.id, e);
+            AppError::BadRequest(
+                "The push service rejected this test. Try enabling notifications again.",
+            )
+        })?;
+    let mut conn = state.conn()?;
+    match outcome {
+        SendOutcome::Delivered => {
+            crate::push::dispatcher::record_success(&mut conn, id)?;
+        }
+        SendOutcome::GoneDeadEndpoint => {
+            crate::push::dispatcher::disable_subscription(&mut conn, id)?;
+            return Err(AppError::BadRequest(
+                "This subscription expired. Enable notifications again.",
+            ));
+        }
+    }
+    Ok(EmptyResponse::NO_CONTENT)
+}
+
 #[cfg(test)]
 mod db_tests {
     use super::*;
@@ -245,6 +301,7 @@ mod db_tests {
             turn_complete: false,
             session_disconnected: true,
             agent_message: true,
+            always_notify: false,
             content_detail: shared::api::NotificationContentDetail::Snippet,
         };
         assert_ne!(custom, NotificationPrefs::default());
@@ -263,5 +320,45 @@ mod db_tests {
         // Cleanup.
         use crate::schema::users;
         let _ = diesel::delete(users::table.find(user.id)).execute(&mut conn);
+    }
+}
+
+#[cfg(test)]
+mod notification_test_tests {
+    use super::*;
+    #[tokio::test]
+    async fn test_requires_owned_subscription_and_real_transport() {
+        let Some(pool) = crate::test_support::shared_pool() else {
+            return;
+        };
+        let mut conn = pool.get().unwrap();
+        let owner = crate::test_support::insert_user(&mut conn, "push-test");
+        let other = crate::test_support::insert_user(&mut conn, "push-test");
+        let state = Arc::new(crate::test_support::test_app_state(pool));
+        let sub = register_subscription(
+            State(state.clone()),
+            CurrentUserId(owner.id),
+            Json(RegisterPushSubscriptionRequest {
+                platform: shared::api::PushPlatform::Webpush,
+                endpoint_or_token: format!("https://example.invalid/{}", Uuid::new_v4()),
+                p256dh: Some("test".into()),
+                auth: Some("test".into()),
+                device_label: None,
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert!(matches!(
+            test_subscription(State(state.clone()), CurrentUserId(other.id), Path(sub.id)).await,
+            Err(AppError::NotFound(_))
+        ));
+        assert!(
+            matches!(
+                test_subscription(State(state), CurrentUserId(owner.id), Path(sub.id)).await,
+                Err(AppError::BadRequest(_))
+            ),
+            "log-only transport must never claim a test was delivered"
+        );
     }
 }

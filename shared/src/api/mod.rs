@@ -1,5 +1,7 @@
 //! Shared API request/response types for HTTP endpoints.
 
+mod attention;
+pub use attention::*;
 mod auth;
 mod dashboard;
 mod device_flow;

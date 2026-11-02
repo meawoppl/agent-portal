@@ -15,11 +15,11 @@ use yew::prelude::*;
 /// "is it open". Per-pane dialogs must **not** be listed here — see
 /// [`answering_permission_dialog`] for why.
 const MODAL_OVERLAY_SELECTOR: &str = ".sched-overlay, .share-dialog-overlay, .help-overlay, \
-     .launch-dialog-backdrop, .modal-overlay, .full-page-modal, .health-timer-overlay";
+     .launch-dialog-backdrop, .modal-overlay, .full-page-modal, .health-timer-overlay, .ready-backdrop";
 
 /// True while one of the [`MODAL_OVERLAY_SELECTOR`] overlays is open, so its own
 /// keys (Esc / backdrop click) win and nav shortcuts don't fire underneath it.
-fn modal_overlay_open() -> bool {
+pub(crate) fn modal_overlay_open() -> bool {
     gloo::utils::document()
         .query_selector(MODAL_OVERLAY_SELECTOR)
         .ok()
@@ -683,6 +683,7 @@ mod tests {
             ".launch-dialog-backdrop",
             ".modal-overlay",
             ".full-page-modal",
+            ".ready-backdrop",
             ".health-timer-overlay",
         ] {
             assert!(

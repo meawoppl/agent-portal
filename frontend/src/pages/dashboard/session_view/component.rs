@@ -82,6 +82,8 @@ pub struct SessionViewProps {
     /// `PortalClient` context.
     pub portal: PortalClient,
     pub focused: bool,
+    #[prop_or_default]
+    pub attention: Option<shared::api::SessionAttention>,
     pub on_awaiting_change: Callback<(SessionKey, bool)>,
     pub on_connected_change: Callback<(SessionKey, bool)>,
     pub on_message_sent: Callback<SessionKey>,
@@ -819,6 +821,26 @@ impl Component for SessionView {
         // Textarea focus + content restoration are owned by `InputBar`.
 
         if let Some(element) = self.messages_ref.cast::<Element>() {
+            // A receipt is valid only after this exact completed response has
+            // arrived in the transcript. Selecting a loading/hidden view is not reading it.
+            let rendered = ctx
+                .props()
+                .attention
+                .as_ref()
+                .filter(|reply| {
+                    reply.reply_at.as_deref().is_some_and(|at| {
+                        self.messages
+                            .iter()
+                            .any(|m| m.raw_iso().is_some_and(|raw| same_reply_time(raw, at)))
+                    })
+                })
+                .and_then(|reply| reply.reply_id);
+            if let Some(id) = rendered {
+                let _ = element.set_attribute("data-rendered-reply", &id.to_string());
+            } else {
+                let _ = element.remove_attribute("data-rendered-reply");
+            }
+
             if first_render {
                 let element_clone = element.clone();
                 let link = ctx.link().clone();
@@ -3052,6 +3074,16 @@ impl SessionView {
             dispatcher.emit(msg);
         }
     }
+}
+
+fn same_reply_time(raw: &str, expected: &str) -> bool {
+    let parse = |s: &str| {
+        chrono::DateTime::parse_from_rfc3339(s)
+            .map(|t| t.naive_utc())
+            .ok()
+            .or_else(|| chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f").ok())
+    };
+    parse(raw).zip(parse(expected)).is_some_and(|(a, b)| a == b)
 }
 
 #[cfg(test)]
