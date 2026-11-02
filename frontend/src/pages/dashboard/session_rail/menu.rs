@@ -1,8 +1,12 @@
 use crate::pages::dashboard::PortalSession;
 use crate::portal_client::SessionKey;
+use gloo::events::EventListener;
 use shared::{SessionInfo, SessionRole};
+use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::MouseEvent;
+use web_sys::{HtmlElement, MouseEvent};
+
+mod transit;
 use yew::prelude::*;
 
 use super::{repo_pr_menu_hint, sorted_prs};
@@ -243,7 +247,7 @@ fn render_menu_content(entry: &PortalSession, props: &SessionRailMenuProps) -> H
         html! {}
     };
 
-    let repo_option = repo_pr_submenu(session, props.on_close.clone());
+    let repo_option = html! { <RepoPrSubmenu key={entry.key.to_string()} session={session.clone()} on_close={props.on_close.clone()} /> };
 
     let rename_option = if matches!(session.my_role, SessionRole::Owner | SessionRole::Editor) {
         let on_rename = close_then(props.on_close.clone(), {
@@ -382,7 +386,67 @@ fn menu_option(extra: Classes, label: &str, hint: &str, onclick: Callback<MouseE
     }
 }
 
-fn repo_pr_submenu(session: &SessionInfo, on_close: Callback<()>) -> Html {
+#[derive(Properties, PartialEq)]
+struct RepoPrSubmenuProps {
+    session: SessionInfo,
+    on_close: Callback<()>,
+}
+
+#[function_component(RepoPrSubmenu)]
+fn repo_pr_submenu(props: &RepoPrSubmenuProps) -> Html {
+    let session = &props.session;
+    let on_close = props.on_close.clone();
+    let open = use_state_eq(|| false);
+    let trigger = use_node_ref();
+    let panel = use_node_ref();
+    let departure = use_mut_ref(|| (0.0, 0.0));
+    let onmouseenter = {
+        let open = open.clone();
+        let departure = departure.clone();
+        Callback::from(move |e: MouseEvent| {
+            *departure.borrow_mut() = (f64::from(e.client_x()), f64::from(e.client_y()));
+            open.set(true);
+        })
+    };
+    {
+        let open = open.clone();
+        let trigger = trigger.clone();
+        let panel = panel.clone();
+        use_effect_with(*open, move |is_open| {
+            // Observe geometry without an invisible overlay: neighboring menu
+            // actions must stay clickable while the pointer crosses toward PRs.
+            let listener = if *is_open {
+                web_sys::window()
+                    .and_then(|w| w.document())
+                    .map(|document| {
+                        EventListener::new(&document, "mousemove", move |event| {
+                            let Some(event) = event.dyn_ref::<MouseEvent>() else {
+                                return;
+                            };
+                            let (Some(trigger), Some(panel)) =
+                                (trigger.cast::<HtmlElement>(), panel.cast::<HtmlElement>())
+                            else {
+                                return;
+                            };
+                            let point = (f64::from(event.client_x()), f64::from(event.client_y()));
+                            let trigger = transit::Rect::from(trigger.get_bounding_client_rect());
+                            let panel = transit::Rect::from(panel.get_bounding_client_rect());
+                            if trigger.contains(point) {
+                                *departure.borrow_mut() = point;
+                            } else if !panel.contains(point)
+                                && !transit::toward_panel(*departure.borrow(), point, panel)
+                            {
+                                open.set(false);
+                            }
+                        })
+                    })
+            } else {
+                None
+            };
+            move || drop(listener)
+        });
+    }
+
     let prs = sorted_prs(&session.open_prs);
     if session.repo_url.is_none() && prs.is_empty() {
         return html! {
@@ -422,10 +486,12 @@ fn repo_pr_submenu(session: &SessionInfo, on_close: Callback<()>) -> Html {
         .collect::<Html>();
 
     html! {
-        <div class="pill-menu-submenu">
+        <div class={classes!("pill-menu-submenu", (*open).then_some("hover-open"))}>
             <button
                 type="button"
                 class="pill-menu-option repo-submenu-trigger"
+                ref={trigger}
+                {onmouseenter}
                 aria-haspopup="true"
                 onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}
             >
@@ -434,7 +500,7 @@ fn repo_pr_submenu(session: &SessionInfo, on_close: Callback<()>) -> Html {
                     { repo_pr_menu_hint(session.repo_url.as_deref(), prs.len()) }
                 </span>
             </button>
-            <div class="pill-submenu-panel" role="menu">
+            <div ref={panel} class="pill-submenu-panel" role="menu">
                 { repo_link }
                 { pr_rows }
             </div>
