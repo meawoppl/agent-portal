@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="sans-serif" fill="#c0caf5">
+<text x="55" y="52" font-size="24" fill="#565f89">PR #2362 · Keep submenus open during diagonal pointer movement</text>
+<text x="55" y="100" font-size="34" fill="#e6e9f5">Moving toward a PR could leave the hover area and close its menu; a safe triangle now</text>
+<text x="55" y="140" font-size="34" fill="#e6e9f5">keeps the panel open during transit, without intercepting neighboring actions.</text>
+<path d="M55 165H1945 M1000 190V1140" stroke="#3d4666"/>
+<text x="55" y="212" font-size="22" fill="#f7768e">BEFORE</text>
+<rect x="85" y="300" width="360" height="420" rx="8" fill="#1e202e" stroke="#565f89"/>
+<text x="109" y="355" font-size="23" fill="#c0caf5">Rename session</text>
+<rect x="95" y="390" width="340" height="65" fill="#3d4666"/>
+<text x="109" y="433" font-size="26" fill="#7aa2f7">Repo / PRs</text>
+<text x="109" y="510" font-size="23" fill="#c0caf5">Pause session</text>
+<text x="109" y="580" font-size="23" fill="#c0caf5">Hide session</text>
+<text x="109" y="650" font-size="23" fill="#c0caf5">Stop session</text>
+<rect x="465" y="390" width="440" height="340" rx="8" fill="#1e202e" stroke="#f7768e"/>
+<text x="489" y="440" font-size="23" fill="#c0caf5">Open Repository</text>
+<text x="489" y="510" font-size="23" fill="#c0caf5">Open PR #1</text>
+<text x="489" y="580" font-size="23" fill="#c0caf5">Open PR #2</text>
+<text x="489" y="690" font-size="23" fill="#c0caf5">Open PR #3</text>
+<path d="M205 430L495 680" stroke="#f7768e" stroke-width="3" stroke-dasharray="8 8"/>
+<text x="85" y="805" font-size="26" fill="#f7768e">CSS hover ends outside parent row</text>
+<text x="85" y="855" font-size="23" fill="#c0caf5">Diagonal path and 4px gap hide the panel.</text>
+<text x="85" y="910" font-size="23" fill="#c0caf5">The intended PR link disappears.</text>
+<text x="85" y="965" font-size="23" fill="#c0caf5">Keyboard uses focus-within.</text>
+<text x="85" y="1020" font-size="23" fill="#c0caf5">Touch panel is inline.</text>
+<text x="1040" y="212" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="1070" y="300" width="360" height="420" rx="8" fill="#1e202e" stroke="#565f89"/>
+<text x="1094" y="355" font-size="23" fill="#c0caf5">Rename session</text>
+<rect x="1080" y="390" width="340" height="65" fill="#3d4666"/>
+<text x="1094" y="433" font-size="26" fill="#7aa2f7">Repo / PRs</text>
+<text x="1094" y="510" font-size="23" fill="#c0caf5">Pause session</text>
+<text x="1094" y="580" font-size="23" fill="#c0caf5">Hide session</text>
+<text x="1094" y="650" font-size="23" fill="#c0caf5">Stop session</text>
+<rect x="1450" y="390" width="440" height="340" rx="8" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1474" y="440" font-size="23" fill="#c0caf5">Open Repository</text>
+<text x="1474" y="510" font-size="23" fill="#c0caf5">Open PR #1</text>
+<text x="1474" y="580" font-size="23" fill="#c0caf5">Open PR #2</text>
+<text x="1474" y="690" font-size="23" fill="#c0caf5">Open PR #3</text>
+<path d="M1190 430L1450 382L1450 738Z" fill="#9ece6a" fill-opacity="0.15" stroke="#9ece6a"/>
+<path d="M1190 430L1480 680" stroke="#9ece6a" stroke-width="3" stroke-dasharray="8 8"/>
+<text x="1070" y="805" font-size="26" fill="#9ece6a">Last trigger point + actual panel bounds</text>
+<text x="1070" y="855" font-size="23" fill="#c0caf5">toward_panel keeps hover-open during transit.</text>
+<text x="1070" y="910" font-size="23" fill="#c0caf5">Leaving the corridor closes hover immediately.</text>
+<text x="1070" y="965" font-size="23" fill="#c0caf5">No overlay: sibling actions remain clickable.</text>
+<text x="1070" y="1020" font-size="23" fill="#c0caf5">Keyboard focus and inline touch stay supported.</text>
+<text x="55" y="1172" font-size="22" fill="#565f89">Scope: the session Repo / PRs submenu. Triangle is illustrated here only; no shaded overlay is drawn in the app.</text>
+</g>
+</svg>
