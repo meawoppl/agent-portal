@@ -615,6 +615,8 @@ mod tests {
             api_error_status: None,
             api_error_code: None,
             startup_failure_reason: None,
+            // Synthetic results do not carry a claude.ai credential expiry.
+            credential_expires_at: None,
             // Remote timing and safety diagnostics are absent in synthetic results.
             resume_store_confirm_detail: None,
             safety_stops: None,
