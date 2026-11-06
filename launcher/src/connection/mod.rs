@@ -127,7 +127,7 @@ pub async fn run_launcher_loop(
 
         info!("Connecting to backend: {}", backend_url);
 
-        match ws_bridge::native_client::connect::<LauncherEndpoint>(backend_url).await {
+        match session_lib::connect::connect::<LauncherEndpoint>(backend_url).await {
             Ok(conn) => {
                 info!("Connected to backend");
                 backoff = Duration::from_secs(1);

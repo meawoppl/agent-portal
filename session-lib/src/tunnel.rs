@@ -701,17 +701,16 @@ pub async fn run_data_plane(
     ticket: String,
     sizing: shared::TunnelSizing,
 ) {
-    let conn =
-        match ws_bridge::native_client::connect::<shared::TunnelDataEndpoint>(&backend_url).await {
-            Ok(conn) => conn,
-            Err(e) => {
-                warn!(
-                    "Port-forward data plane unavailable ({}); tunneling over the control socket",
-                    e
-                );
-                return;
-            }
-        };
+    let conn = match crate::connect::connect::<shared::TunnelDataEndpoint>(&backend_url).await {
+        Ok(conn) => conn,
+        Err(e) => {
+            warn!(
+                "Port-forward data plane unavailable ({}); tunneling over the control socket",
+                e
+            );
+            return;
+        }
+    };
     let (mut write, mut read) = conn.split();
 
     // The ticket must be the first frame; the backend routes nothing until it
