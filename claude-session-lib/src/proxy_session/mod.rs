@@ -219,7 +219,7 @@ pub async fn connect_to_backend(
         info!("Reconnecting to backend...");
     }
 
-    match ws_bridge::native_client::connect::<SessionEndpoint>(backend_url).await {
+    match session_lib::connect::connect::<SessionEndpoint>(backend_url).await {
         Ok(conn) => {
             info!("Connected to backend");
             Ok(conn)
