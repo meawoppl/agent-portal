@@ -25,6 +25,8 @@ const HEARTBEAT_ACK_TIMEOUT: Duration =
 /// it (`SERVER_CAPABILITY_SYSTEM_STATS`); the heartbeat carries a reading
 /// regardless.
 const SYSTEM_STATS_INTERVAL: Duration = Duration::from_secs(5);
+/// How long registration waits for `LauncherRegisterAck` before retrying.
+const REGISTER_ACK_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_BACKOFF: Duration = Duration::from_secs(shared::protocol::MAX_RECONNECT_BACKOFF_SECS);
 /// Retry cadence while parked on a fatal rejection: start here, double to the
 /// cap. Deliberately much slower than the network-error backoff — a fatal
@@ -165,49 +167,59 @@ pub async fn run_launcher_loop(
                     continue;
                 }
 
-                // Wait for RegisterAck. `Err(reason)` = fatal rejection.
+                // Wait for RegisterAck. `Err(reason)` = fatal rejection. Bounded
+                // so an open socket the backend never answers retries instead
+                // of parking this loop forever.
                 let mut server_capabilities: Vec<String> = Vec::new();
-                let ack_ok = loop {
-                    match ws_receiver.recv().await {
-                        Some(Ok(ServerToLauncher::LauncherRegisterAck {
-                            protocol_version,
-                            success,
-                            error,
-                            fatal,
-                            reject_reason,
-                            capabilities,
-                            ..
-                        })) => {
-                            if let Err(error) =
-                                shared::protocol::check_protocol_version(protocol_version, "server")
-                            {
-                                error!("{error}");
-                                break Err(ParkedReason::ProtocolIncompatible);
+                let ack_wait = tokio::time::timeout(REGISTER_ACK_TIMEOUT, async {
+                    loop {
+                        match ws_receiver.recv().await {
+                            Some(Ok(ServerToLauncher::LauncherRegisterAck {
+                                protocol_version,
+                                success,
+                                error,
+                                fatal,
+                                reject_reason,
+                                capabilities,
+                                ..
+                            })) => {
+                                if let Err(error) = shared::protocol::check_protocol_version(
+                                    protocol_version,
+                                    "server",
+                                ) {
+                                    error!("{error}");
+                                    break Err(ParkedReason::ProtocolIncompatible);
+                                }
+                                if success {
+                                    info!("Registration successful");
+                                    server_capabilities = capabilities;
+                                    break Ok(true);
+                                }
+                                let msg = error.unwrap_or_default();
+                                if fatal {
+                                    error!("Registration rejected (fatal): {}", msg);
+                                    break Err(ParkedReason::Server(classify_fatal(
+                                        reject_reason,
+                                        &msg,
+                                    )));
+                                }
+                                error!("Registration failed: {}", msg);
+                                break Ok(false);
                             }
-                            if success {
-                                info!("Registration successful");
-                                server_capabilities = capabilities;
-                                break Ok(true);
+                            Some(Ok(_)) => continue,
+                            Some(Err(e)) => {
+                                warn!("Decode error during registration: {}", e);
+                                continue;
                             }
-                            let msg = error.unwrap_or_default();
-                            if fatal {
-                                error!("Registration rejected (fatal): {}", msg);
-                                break Err(ParkedReason::Server(classify_fatal(
-                                    reject_reason,
-                                    &msg,
-                                )));
-                            }
-                            error!("Registration failed: {}", msg);
-                            break Ok(false);
+                            None => break Ok(false),
                         }
-                        Some(Ok(_)) => continue,
-                        Some(Err(e)) => {
-                            warn!("Decode error during registration: {}", e);
-                            continue;
-                        }
-                        None => break Ok(false),
                     }
-                };
+                })
+                .await;
+                let ack_ok = ack_wait.unwrap_or_else(|_| {
+                    warn!("No RegisterAck within {:?}", REGISTER_ACK_TIMEOUT);
+                    Ok(false)
+                });
 
                 match ack_ok {
                     Err(reason) => {
