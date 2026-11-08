@@ -261,6 +261,8 @@ mod tests {
                         id: "answer-1".into(),
                         text: "Saved answer".into(),
                         delivery: None,
+                        // This synthetic history answer has no moderation decision.
+                        moderation: None,
                         memory_citation: None,
                         phase: None,
                         questions: None,
