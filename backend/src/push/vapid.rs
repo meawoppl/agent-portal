@@ -60,8 +60,13 @@ fn configured_keys(private: Option<&str>, public: Option<&str>) -> Result<Option
             let keys =
                 VapidKeys::from_private_key(private).context("invalid PORTAL_VAPID_PRIVATE_KEY")?;
             if let Some(public) = public {
-                // Accept optional base64 padding, but always serve the canonical key.
-                if public.trim_end_matches('=') != keys.public_key {
+                // Match the browser's accepted base64 alphabets and optional
+                // padding, but always serve the canonical URL-safe key.
+                let public = public
+                    .trim_end_matches('=')
+                    .replace('+', "-")
+                    .replace('/', "_");
+                if public != keys.public_key {
                     bail!("PORTAL_VAPID_PUBLIC_KEY does not match PORTAL_VAPID_PRIVATE_KEY");
                 }
             }
@@ -152,6 +157,15 @@ mod tests {
                 .unwrap();
             assert_eq!(resolved.public_key, keys.public_key);
         }
+        let standard = base64::engine::general_purpose::STANDARD
+            .encode(URL_SAFE_NO_PAD.decode(&keys.public_key).unwrap());
+        assert_eq!(
+            configured_keys(Some(&keys.private_key), Some(&standard))
+                .unwrap()
+                .unwrap()
+                .public_key,
+            keys.public_key
+        );
         let other = VapidKeys::generate().unwrap();
         let error = configured_keys(Some(&keys.private_key), Some(&other.public_key))
             .err()
