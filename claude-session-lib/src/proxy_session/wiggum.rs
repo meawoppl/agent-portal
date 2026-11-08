@@ -569,6 +569,8 @@ mod tests {
             message_normalization_detail: None,
             request_build_detail: None,
             process_turn_states: None,
+            // Per-thread CPU samples are optional and absent from synthetic results.
+            process_turn_threads: None,
             flag_fetch_kick: None,
             process_turn_index: None,
             time_to_request_cpu_ms: None,
@@ -620,6 +622,7 @@ mod tests {
             // Remote timing and safety diagnostics are absent in synthetic results.
             resume_store_confirm_detail: None,
             safety_stops: None,
+            stopped_by_permission_check: None,
             stop_reason: None,
             terminal_reason: None,
             fast_mode_state: None,
