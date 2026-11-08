@@ -47,9 +47,8 @@ fn to_info(row: PushSubscription) -> PushSubscriptionInfo {
 
 /// GET /api/push/vapid-key — the server's VAPID application-server public key.
 ///
-/// Returns 404 when the deployment has no key configured
-/// (`PORTAL_VAPID_PUBLIC_KEY` unset); the frontend treats that as "push
-/// unavailable" and degrades gracefully rather than erroring.
+/// Startup resolves a persistent identity automatically or uses the configured
+/// override. Only the public half is ever returned to browsers.
 pub async fn get_vapid_key(
     State(app_state): State<Arc<AppState>>,
 ) -> Result<Json<VapidKeyResponse>, AppError> {

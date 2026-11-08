@@ -493,6 +493,13 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    web_push_keys (id) {
+        id -> Bool,
+        private_key -> Text,
+    }
+}
+
 diesel::joinable!(custom_subdomains -> sessions (session_id));
 diesel::joinable!(custom_subdomains -> users (created_by));
 diesel::joinable!(deleted_session_costs -> users (user_id));
@@ -563,4 +570,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     turn_metrics,
     user_identities,
     users,
+    web_push_keys,
 );

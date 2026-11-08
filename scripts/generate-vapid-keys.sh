@@ -1,6 +1,6 @@
 #!/bin/bash
-# Generate a VAPID application-server key pair for Web Push (mobile-apps plan
-# §8.3, work item C3).
+# Generate an optional administrator override for the Web Push identity.
+# Portal normally generates and persists its keys automatically in PostgreSQL.
 #
 # Emits two env vars in the canonical VAPID format — URL-safe base64, no
 # padding — for a P-256 key pair:

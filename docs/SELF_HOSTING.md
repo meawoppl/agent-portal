@@ -68,12 +68,25 @@ database.
 
 ## Optional features
 
-Everything below is off unless configured in `.env`; the core chat works
-without any of it. See the environment table in the main README for details.
+Browser push notifications work without server configuration. Portal generates
+its VAPID identity on first startup and stores it in PostgreSQL, so restarts,
+upgrades, and backend replicas use the same key. Database backups must preserve
+the `web_push_keys` table alongside device subscriptions; treat backups as
+secrets. On each device, open **Settings → Notifications → Enable**, allow
+notifications, then send a test notification. HTTPS and browser support are
+required; iPhone/iPad users must first install Portal on their Home Screen.
+
+Administrators can override the identity with `PORTAL_VAPID_PRIVATE_KEY` in
+`.env` (URL-safe base64 or PEM). `PORTAL_VAPID_PUBLIC_KEY` is optional and, when
+provided, must match; otherwise Portal derives it. Generate an override with
+`scripts/generate-vapid-keys.sh`. Keep existing overrides across deployments:
+changing or removing one changes the public key and devices must subscribe
+again. Overrides are not copied into the database.
+
+The features below are off unless configured in `.env`; the core chat works
+without them. See the environment table in the main README for details.
 
 - **Speech-to-text** — `PORTAL_STT_BACKEND` and friends.
-- **Push notifications** — `PORTAL_VAPID_PRIVATE_KEY` / `PORTAL_VAPID_PUBLIC_KEY`
-  (generate with `scripts/generate-vapid-keys.sh`).
 - **Port forwarding** — `PORTAL_FORWARD_DOMAIN` needs a wildcard DNS record and
   a wildcard certificate, which Caddy can only obtain via a DNS-01 plugin. See
   [PORT_FORWARDING.md](PORT_FORWARDING.md).

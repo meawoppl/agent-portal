@@ -103,7 +103,8 @@ pub struct AppState {
     pub notifications: push::NotificationSender,
     pub push_transport: Arc<push::ConfiguredTransport>,
     /// VAPID application-server public key served to Web Push clients
-    /// (`GET /api/push/vapid-key`). `None` = push unconfigured (endpoint 404s).
+    /// (`GET /api/push/vapid-key`). Normal startup always resolves an identity;
+    /// tests can leave it absent to exercise the unavailable response.
     pub vapid_public_key: Option<String>,
     /// Native mobile app-link association payload configuration.
     pub mobile_app_links: config::MobileAppLinksConfig,
@@ -186,8 +187,13 @@ pub async fn run() -> anyhow::Result<()> {
 
     // Parse remaining configuration from environment variables
     let config = config::ServerConfig::from_env(args.dev_mode)?;
+    let vapid = push::vapid::resolve(
+        &mut *pool.get()?,
+        config.vapid_private_key.as_deref(),
+        config.vapid_public_key.as_deref(),
+    )?;
     let push_transport = Arc::new(push::ConfiguredTransport::from_config(
-        config.vapid_private_key,
+        Some(vapid.private_key),
         config.native_push,
     )?);
 
@@ -234,7 +240,7 @@ pub async fn run() -> anyhow::Result<()> {
         },
         notifications,
         push_transport: push_transport.clone(),
-        vapid_public_key: config.vapid_public_key,
+        vapid_public_key: Some(vapid.public_key),
         mobile_app_links: config.mobile_app_links,
     });
 
