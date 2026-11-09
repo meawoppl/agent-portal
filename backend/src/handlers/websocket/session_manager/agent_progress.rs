@@ -156,6 +156,15 @@ impl SessionManager {
         }
     }
 
+    pub(super) fn forget_session_progress(&self, session_id: Uuid) {
+        if let Entry::Occupied(mut entry) = self.agent_progress.entry(session_id) {
+            let members = entry.get().members.clone();
+            entry.get_mut().bars.clear();
+            self.broadcast_progress(session_id, entry.get_mut(), &members);
+            entry.remove();
+        }
+    }
+
     /// Drop bars not updated within `ttl` and tell each affected session's
     /// clients. Returns how many bars expired.
     pub fn sweep_stale_agent_progress(&self, ttl: Duration) -> usize {

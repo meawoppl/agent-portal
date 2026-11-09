@@ -960,6 +960,7 @@ pub async fn run_session_age_cleanup(app_state: Arc<AppState>) {
     }
     let db_pool = app_state.db_pool.clone();
     let archive = app_state.archive.clone();
+    let manager = app_state.session_manager.clone();
 
     // Blocking work on the blocking pool: Diesel queries plus, with an
     // object-store archive, the same `block_on` reads inside
@@ -995,7 +996,7 @@ pub async fn run_session_age_cleanup(app_state: Arc<AppState>) {
                     continue;
                 }
             }
-            match delete_session_with_data(&mut conn, session, true) {
+            match delete_session_with_data(&mut conn, session, true, &manager) {
                 Ok(_) => deleted += 1,
                 Err(e) => tracing::error!("Failed to delete old session {}: {:?}", session.id, e),
             }

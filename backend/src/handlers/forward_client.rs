@@ -10,7 +10,6 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use axum::body::Body;
-use dashmap::DashMap;
 use hyper::body::Incoming;
 use hyper::Uri;
 use hyper_util::client::legacy::connect::{Connected, Connection};
@@ -24,13 +23,11 @@ use super::websocket::{SessionManager, TunnelError};
 #[derive(Clone)]
 pub(crate) struct ForwardHttpClient {
     client: Client<TunnelConnector, Body>,
-    targets: std::sync::Arc<DashMap<String, TunnelTarget>>,
 }
 
 #[derive(Clone)]
 struct TunnelConnector {
     session_manager: SessionManager,
-    targets: std::sync::Arc<DashMap<String, TunnelTarget>>,
 }
 
 #[derive(Clone)]
@@ -38,6 +35,33 @@ struct TunnelTarget {
     session_key: String,
     generation: u64,
     port: u16,
+}
+
+impl TunnelTarget {
+    fn from_authority(authority: &str) -> Option<Self> {
+        let authority = authority.strip_suffix(".tunnel.invalid")?;
+        let (prefix, port) = authority.rsplit_once("-p")?;
+        let (prefix, generation) = prefix.rsplit_once("-g")?;
+        let (session, key) = prefix.split_once("-k")?;
+        Uuid::parse_str(session.strip_prefix('s')?).ok()?;
+        if key.len() % 2 != 0 {
+            return None;
+        }
+        let bytes: Option<Vec<u8>> = key
+            .as_bytes()
+            .chunks_exact(2)
+            .map(|pair| {
+                std::str::from_utf8(pair)
+                    .ok()
+                    .and_then(|pair| u8::from_str_radix(pair, 16).ok())
+            })
+            .collect();
+        Some(Self {
+            session_key: String::from_utf8(bytes?).ok()?,
+            generation: generation.parse().ok()?,
+            port: port.parse().ok()?,
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -55,11 +79,7 @@ pub(crate) enum ForwardClientError {
 
 impl ForwardHttpClient {
     pub(crate) fn new(session_manager: SessionManager) -> Self {
-        let targets = std::sync::Arc::new(DashMap::new());
-        let connector = TunnelConnector {
-            session_manager,
-            targets: targets.clone(),
-        };
+        let connector = TunnelConnector { session_manager };
         // A page load can fan out into hundreds of concurrent HTTP/1.1
         // connections after the browser's HTTP/2 connection terminates here.
         // Reuse them, but retain only a small warm set: otherwise a completed
@@ -70,7 +90,7 @@ impl ForwardHttpClient {
             .pool_idle_timeout(std::time::Duration::from_secs(30))
             .pool_timer(TokioTimer::new())
             .build(connector);
-        Self { client, targets }
+        Self { client }
     }
 
     /// Send one request through the pool for this exact proxy connection.
@@ -86,15 +106,13 @@ impl ForwardHttpClient {
         port: u16,
         mut request: hyper::Request<Body>,
     ) -> Result<ForwardResponse, ForwardClientError> {
-        let authority = format!("s{session_id}-g{generation}-p{port}.tunnel.invalid");
-        self.targets.insert(
-            authority.clone(),
-            TunnelTarget {
-                session_key: session_key.to_string(),
-                generation,
-                port,
-            },
-        );
+        // Encode the complete target into the authority instead of keeping a
+        // process-lifetime map of every connection generation ever forwarded.
+        let key: String = session_key
+            .bytes()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        let authority = format!("s{session_id}-k{key}-g{generation}-p{port}.tunnel.invalid");
 
         let path = request
             .uri()
@@ -122,7 +140,7 @@ impl Service<Uri> for TunnelConnector {
     fn call(&mut self, uri: Uri) -> Self::Future {
         let target = uri
             .authority()
-            .and_then(|authority| self.targets.get(authority.as_str()).map(|v| v.clone()));
+            .and_then(|authority| TunnelTarget::from_authority(authority.as_str()));
         let manager = self.session_manager.clone();
         Box::pin(async move {
             let target = target.ok_or(TunnelError::NotConnected)?;
@@ -204,6 +222,23 @@ pub(crate) fn tunnel_error<'a>(error: &'a (dyn StdError + 'static)) -> Option<&'
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn target_authorities_are_stateless_and_validate_generation() {
+        let authority = format!(
+            "s{}-k73657373696f6e2d6b6579-g42-p8080.tunnel.invalid",
+            uuid::Uuid::nil()
+        );
+        let target = super::TunnelTarget::from_authority(&authority).unwrap();
+        assert_eq!(target.session_key, "session-key");
+        assert_eq!(target.generation, 42);
+        assert_eq!(target.port, 8080);
+        assert!(super::TunnelTarget::from_authority("invalid").is_none());
+        assert!(super::TunnelTarget::from_authority(&authority.replace("-g42", "-gno")).is_none());
+        assert!(
+            super::TunnelTarget::from_authority(&authority.replace("-k736", "-kZ36")).is_none()
+        );
+    }
+
     use super::*;
     use axum::body::to_bytes;
     use base64::Engine;
