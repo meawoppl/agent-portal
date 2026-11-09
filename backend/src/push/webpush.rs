@@ -142,6 +142,7 @@ impl WebPushTransport {
         let mut request = self
             .http
             .post(message.endpoint.to_string())
+            .timeout(super::PUSH_DELIVERY_TIMEOUT)
             .header("TTL", message.ttl.to_string());
 
         if let Some(payload) = message.payload {

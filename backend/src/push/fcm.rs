@@ -212,6 +212,7 @@ impl FcmTransport {
         let response = self
             .http
             .post(&self.service_account.token_uri)
+            .timeout(super::PUSH_DELIVERY_TIMEOUT)
             .form(&[
                 ("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer"),
                 ("assertion", assertion.as_str()),
@@ -264,6 +265,7 @@ impl PushTransport for FcmTransport {
         let response = self
             .http
             .post(&self.endpoint)
+            .timeout(super::PUSH_DELIVERY_TIMEOUT)
             .bearer_auth(access_token)
             .json(&request)
             .send()

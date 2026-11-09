@@ -25,7 +25,7 @@ pub use webpush::WebPushTransport;
 use crate::models::PushSubscription;
 use shared::api::{NotificationContentDetail, NotificationPrefs, PushPlatform};
 use std::path::PathBuf;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{channel as bounded_channel, Receiver, Sender};
 use uuid::Uuid;
 
 /// APNs provider-token configuration. All fields must be present together; an
@@ -316,32 +316,90 @@ pub struct PushPayload {
 /// Non-blocking, infallible-from-the-caller's-perspective handle for emitting
 /// [`NotificationEvent`]s. Cheap to clone; stored on `AppState` and threaded
 /// into the event hooks. A send failure (the dispatcher task is gone) is
-/// logged at debug and swallowed — a hook must never block or fail its calling
+/// logged under PUSH_DISPATCH_FAILED and swallowed — a hook must never block or fail its calling
 /// path on notification delivery.
 #[derive(Clone)]
 pub struct NotificationSender {
-    tx: UnboundedSender<NotificationEvent>,
+    tx: Sender<NotificationEvent>,
 }
 
 impl NotificationSender {
-    /// Emit an event. Errors (channel closed) are logged and dropped.
-    pub fn emit(&self, event: NotificationEvent) {
-        if let Err(e) = self.tx.send(event) {
-            tracing::debug!("push notification channel closed, dropping event: {e}");
+    /// Emit without blocking. A full/closed queue logs and drops the event.
+    pub fn emit(&self, mut event: NotificationEvent) {
+        // Bound field allocations before queueing, not just at payload time.
+        // Replacing the strings releases oversized backing capacities too.
+        let name = match &mut event {
+            NotificationEvent::PermissionRequest {
+                session_name,
+                tool_name,
+                input_snippet,
+                ..
+            } => {
+                *tool_name = tool_name.chars().take(128).collect();
+                if let Some(snippet) = input_snippet {
+                    *snippet = snippet.chars().take(SNIPPET_BODY_MAX_CHARS).collect();
+                }
+                session_name
+            }
+            NotificationEvent::TurnComplete { session_name, .. }
+            | NotificationEvent::SessionDisconnected { session_name, .. } => session_name,
+        };
+        *name = name.chars().take(256).collect();
+        if let Err(error) = self.tx.try_send(event) {
+            tracing::warn!(
+                "{}: push notification queue unavailable; dropping event: {error}",
+                crate::markers::PUSH_DISPATCH_FAILED
+            );
         }
     }
 }
 
+/// Notification delivery is best-effort: producers never block agent output.
+const NOTIFICATION_QUEUE_CAPACITY: usize = 256;
+pub(super) const PUSH_DELIVERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+const PUSH_EVENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Create the notification channel: a [`NotificationSender`] for the hooks and
 /// the receiver the dispatcher task drains.
-pub fn channel() -> (NotificationSender, UnboundedReceiver<NotificationEvent>) {
-    let (tx, rx) = unbounded_channel();
+pub fn channel() -> (NotificationSender, Receiver<NotificationEvent>) {
+    let (tx, rx) = bounded_channel(NOTIFICATION_QUEUE_CAPACITY);
     (NotificationSender { tx }, rx)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn notification_backlog_and_field_allocations_are_bounded() {
+        let (sender, mut receiver) = channel();
+        for _ in 0..NOTIFICATION_QUEUE_CAPACITY + 1 {
+            sender.emit(NotificationEvent::PermissionRequest {
+                session_id: Uuid::nil(),
+                session_name: "x".repeat(5000),
+                tool_name: "y".repeat(5000),
+                input_snippet: Some("é".repeat(5000)),
+            });
+        }
+        assert_eq!(receiver.len(), NOTIFICATION_QUEUE_CAPACITY);
+        let NotificationEvent::PermissionRequest {
+            session_name,
+            tool_name,
+            input_snippet,
+            ..
+        } = receiver.try_recv().unwrap()
+        else {
+            panic!("wrong event");
+        };
+        assert_eq!(session_name.len(), 256);
+        assert_eq!(tool_name.len(), 128);
+        assert_eq!(
+            input_snippet.unwrap().chars().count(),
+            SNIPPET_BODY_MAX_CHARS
+        );
+        sender.emit(perm("new event after drain"));
+        assert_eq!(receiver.len(), NOTIFICATION_QUEUE_CAPACITY);
+    }
 
     fn perm(name: &str) -> NotificationEvent {
         NotificationEvent::PermissionRequest {
