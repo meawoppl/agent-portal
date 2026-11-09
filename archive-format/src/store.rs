@@ -243,7 +243,9 @@ impl ArchiveStore {
             match self {
                 Self::Local(store) => {
                     let path = store.object_path(&key);
-                    let dir = path.parent().expect("archive key has parent");
+                    let dir = path
+                        .parent()
+                        .ok_or_else(|| std::io::Error::other("archive key has no parent"))?;
                     std::fs::create_dir_all(dir)?;
                     let mut temp = tempfile::NamedTempFile::new_in(dir)?;
                     std::io::copy(file, &mut temp)?;

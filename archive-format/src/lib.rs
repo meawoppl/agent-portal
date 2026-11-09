@@ -387,7 +387,9 @@ pub fn stream_merge_transcript(
             (Some(_), None) => true,
             _ => false,
         };
-        let line = if take_left { left.take() } else { right.take() }.expect("nonempty input");
+        let Some(line) = (if take_left { left.take() } else { right.take() }) else {
+            break;
+        };
         let key = (line.created_at, line.id);
         if previous.is_some_and(|previous| previous >= key) {
             return Err(std::io::Error::new(
