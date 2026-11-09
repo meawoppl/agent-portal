@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200"><rect width="2000" height="1200" fill="#1a1b26"/><g font-family="Arial, sans-serif">
+<text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2380 · Bound notification backlogs and push delivery time</text>
+<text x="55" y="110" font-size="34" fill="#e6e9f5">A stalled provider used to block an unbounded notification queue.</text>
+<text x="55" y="152" font-size="34" fill="#e6e9f5">Bound storage and delivery time so push cannot grow memory indefinitely.</text>
+<path d="M55 170 H1945 M1000 190 V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="55" y="225" font-size="24" fill="#f7768e">BEFORE</text>
+<rect x="55" y="285" width="880" height="100" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="342" font-size="27" fill="#f7768e">UnboundedSender retains each notification</text>
+<path d="M495 385 v50" stroke="#565f89" stroke-width="3"/>
+<rect x="55" y="435" width="880" height="100" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="492" font-size="27" fill="#f7768e">Payload fields are clipped only at delivery</text>
+<path d="M495 535 v50" stroke="#565f89" stroke-width="3"/>
+<rect x="55" y="585" width="880" height="100" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="642" font-size="27" fill="#f7768e">One slow transport blocks the dispatcher</text>
+<path d="M495 685 v50" stroke="#565f89" stroke-width="3"/>
+<rect x="55" y="735" width="880" height="100" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="792" font-size="27" fill="#f7768e">Later events keep accumulating</text>
+<text x="1055" y="225" font-size="24" fill="#9ece6a">AFTER</text>
+<rect x="1055" y="285" width="880" height="100" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="342" font-size="27" fill="#9ece6a">NotificationSender admits up to 256 events</text>
+<path d="M1495 385 v50" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="435" width="880" height="100" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="492" font-size="27" fill="#9ece6a">Names and snippets are clipped before enqueue</text>
+<path d="M1495 535 v50" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="585" width="880" height="100" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="642" font-size="27" fill="#9ece6a">10-second delivery and request deadlines</text>
+<path d="M1495 685 v50" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="735" width="880" height="100" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="792" font-size="27" fill="#9ece6a">30-second event deadline; overflow is logged</text>
+<text x="55" y="1172" font-size="22" fill="#a9b1d6">Push remains best-effort: full queues drop new events under PUSH_DISPATCH_FAILED.</text>
+</g></svg>
