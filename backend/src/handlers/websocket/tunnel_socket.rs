@@ -24,7 +24,6 @@ use std::time::Duration;
 
 use axum::extract::ws::WebSocket;
 use shared::{TunnelDataEndpoint, TunnelFrame};
-use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use super::session_manager::DATA_PLANE_CHANNEL_CAPACITY;
@@ -39,7 +38,8 @@ const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub async fn handle_tunnel_data_socket(socket: WebSocket, app_state: Arc<AppState>) {
     let conn = ws_bridge::server::into_connection::<TunnelDataEndpoint>(socket);
-    let (mut ws_sender, mut ws_receiver) = conn.split();
+    let (ws_sender, mut ws_receiver) = conn.split();
+    let mut ws_sender = super::DeadlineSender(ws_sender);
 
     // First frame must be the ticket. Nothing is registered — and no frames are
     // routed — until it verifies.
@@ -73,7 +73,7 @@ pub async fn handle_tunnel_data_socket(socket: WebSocket, app_state: Arc<AppStat
 
     let session_manager = &app_state.session_manager;
     let (tx, mut rx) = conn_channel::<TunnelFrame>(DATA_PLANE_CHANNEL_CAPACITY);
-    let cancel = CancellationToken::new();
+    let cancel = rx.cancellation_token();
 
     // Generation-guarded: refuses a ticket replayed from a connection that has
     // since been superseded, and a socket that finished connecting only after

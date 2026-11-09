@@ -227,7 +227,7 @@ mod replay_tests {
     /// injection without standing up a full WS round-trip.
     fn capture_sender() -> (
         super::WebClientSender,
-        tokio::sync::mpsc::Receiver<shared::ServerToClient>,
+        crate::handlers::websocket::ConnReceiver<shared::ServerToClient>,
     ) {
         crate::handlers::websocket::conn_channel::<shared::ServerToClient>(64)
     }

@@ -24,7 +24,8 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
     let session_manager = app_state.session_manager.clone();
     let db_pool = app_state.db_pool.clone();
     let conn = ws_bridge::server::into_connection::<SessionEndpoint>(socket);
-    let (mut ws_sender, mut ws_receiver) = conn.split();
+    let (ws_sender, mut ws_receiver) = conn.split();
+    let mut ws_sender = super::DeadlineSender(ws_sender);
     let (tx, mut rx) =
         super::session_manager::conn_channel::<ServerToProxy>(super::PROXY_CHANNEL_CAPACITY);
 
@@ -36,14 +37,16 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
     // SessionManager; fired when the manager evicts this connection (e.g.
     // its channel died while the socket lingered half-open, #1256) so the
     // recv loop below exits and normal cleanup runs.
-    let cancel = tokio_util::sync::CancellationToken::new();
+    let cancel = rx.cancellation_token();
 
+    let writer_cancel = cancel.clone();
     let send_task = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
             if ws_sender.send(msg).await.is_err() {
                 break;
             }
         }
+        writer_cancel.cancel();
     });
 
     loop {
@@ -194,7 +197,13 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
     // exits when the channel closes, rather than being torn down before
     // the proxy sees the response.
     drop(tx);
-    let _ = send_task.await;
+    let mut send_task = send_task;
+    if tokio::time::timeout(std::time::Duration::from_secs(15), &mut send_task)
+        .await
+        .is_err()
+    {
+        send_task.abort();
+    }
 }
 
 /// Shared per-connection context for the proxy message handlers below.

@@ -337,7 +337,7 @@ mod tests {
     ) -> (
         Arc<AppState>,
         Uuid,
-        tokio::sync::mpsc::Receiver<ServerToLauncher>,
+        crate::handlers::websocket::ConnReceiver<ServerToLauncher>,
     ) {
         use crate::handlers::websocket::{conn_channel, LauncherConnection};
         let state = Arc::new(crate::test_support::test_app_state(pool));

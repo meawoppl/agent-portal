@@ -20,7 +20,7 @@ use shared::{FileDownloadResponseFields, ForwardStatusFields, ServerToClient, Se
 use std::collections::VecDeque;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 use uuid::Uuid;
 
 mod agent_progress;
@@ -117,45 +117,8 @@ impl std::ops::Deref for SessionId {
 pub type ProxySender = ConnSender<ServerToProxy>;
 pub type WebClientSender = ConnSender<ServerToClient>;
 
-/// Bounded, non-blocking sender for per-connection outbound channels
-/// (#939 phase 5).
-///
-/// Overflow is deliberately indistinguishable from a closed channel: the
-/// caller's existing send-failure handling evicts the connection and
-/// closes its socket (#1256 machinery), because a peer that can't drain
-/// its queue within the capacity budget is operationally identical to a
-/// wedged one — and an unbounded queue behind it grows memory without
-/// limit, which is the failure mode this bounds.
-pub struct ConnSender<T>(mpsc::Sender<T>);
-
-// Manual impl: `#[derive(Clone)]` would needlessly require `T: Clone`.
-impl<T> Clone for ConnSender<T> {
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
-    }
-}
-
-impl<T> ConnSender<T> {
-    pub fn send(&self, value: T) -> Result<(), mpsc::error::SendError<T>> {
-        self.0.try_send(value).map_err(|e| match e {
-            mpsc::error::TrySendError::Full(v) => mpsc::error::SendError(v),
-            mpsc::error::TrySendError::Closed(v) => mpsc::error::SendError(v),
-        })
-    }
-
-    /// Whether `self` and `other` are handles to the same underlying channel
-    /// (i.e. clones of one another). Used to identify a specific connection's
-    /// sender for eager removal from the presence registries on disconnect.
-    pub fn same_channel(&self, other: &Self) -> bool {
-        self.0.same_channel(&other.0)
-    }
-}
-
-/// Construct a bounded per-connection channel (see [`ConnSender`]).
-pub fn conn_channel<T>(capacity: usize) -> (ConnSender<T>, mpsc::Receiver<T>) {
-    let (tx, rx) = mpsc::channel(capacity);
-    (ConnSender(tx), rx)
-}
+mod outbound;
+pub use outbound::{conn_channel, ConnReceiver, ConnSender};
 
 /// Proxy outbound capacity. Sized so a full maximum-size file upload
 /// (PORTAL_MAX_IMAGE_MB=10MiB at ~1KiB decoded per chunk ≈ 10,240 frames)

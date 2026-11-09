@@ -247,7 +247,9 @@ mod tests {
         }
     }
 
-    fn drain(rx: &mut tokio::sync::mpsc::Receiver<ServerToClient>) -> Vec<Vec<ProgressBar>> {
+    fn drain(
+        rx: &mut crate::handlers::websocket::ConnReceiver<ServerToClient>,
+    ) -> Vec<Vec<ProgressBar>> {
         let mut frames = Vec::new();
         while let Ok(msg) = rx.try_recv() {
             match msg {
@@ -425,7 +427,7 @@ mod tests {
     }
 
     fn drain_pill(
-        rx: &mut tokio::sync::mpsc::Receiver<ServerToClient>,
+        rx: &mut crate::handlers::websocket::ConnReceiver<ServerToClient>,
     ) -> Vec<(Uuid, Option<f32>)> {
         let mut frames = Vec::new();
         while let Ok(msg) = rx.try_recv() {

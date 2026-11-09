@@ -66,10 +66,12 @@ pub async fn handle_web_client_socket(
     let db_pool = app_state.db_pool.clone();
     let initial_replay_limit = app_state.message_retention_count;
     let conn = ws_bridge::server::into_connection::<ClientEndpoint>(socket);
-    let (mut ws_sender, mut ws_receiver) = conn.split();
+    let (ws_sender, mut ws_receiver) = conn.split();
+    let mut ws_sender = super::DeadlineSender(ws_sender);
     let (tx, mut rx) =
         super::session_manager::conn_channel::<ServerToClient>(super::WEB_CLIENT_CHANNEL_CAPACITY);
 
+    let queue_cancel = rx.cancellation_token();
     let mut dashboard_jobs = tokio::task::JoinSet::new();
     let mut dashboard_ids = std::collections::HashSet::new();
     let mut compatibility_checked = false;
@@ -100,6 +102,7 @@ pub async fn handle_web_client_socket(
     let mut recheck = tokio::time::interval(LINKED_RECHECK_INTERVAL);
     loop {
         tokio::select! {
+            _ = queue_cancel.cancelled() => break,
             completed = dashboard_jobs.join_next(), if !dashboard_jobs.is_empty() => {
                 if let Some(Ok((request_id, result))) = completed {
                     dashboard_ids.remove(&request_id);
@@ -969,7 +972,7 @@ mod queued_input_tests {
 
     /// The stages the sender saw for one input, with whether each was queued.
     fn stages(
-        rx: &mut tokio::sync::mpsc::Receiver<ServerToClient>,
+        rx: &mut crate::handlers::websocket::ConnReceiver<ServerToClient>,
     ) -> Vec<(shared::InputDeliveryStage, bool)> {
         std::iter::from_fn(|| rx.try_recv().ok())
             .filter_map(|frame| match frame {
