@@ -84,7 +84,7 @@ mod tests {
     fn connected() -> (
         SessionManager,
         Uuid,
-        tokio::sync::mpsc::Receiver<ServerToLauncher>,
+        crate::handlers::websocket::ConnReceiver<ServerToLauncher>,
     ) {
         let manager = SessionManager::new();
         let host = Uuid::new_v4();

@@ -15,7 +15,7 @@ mod uploads;
 mod web_client_socket;
 
 pub use session_manager::{
-    conn_channel, ConnSender, DataPlaneConnection, DataPlaneSender, ForwardHealth,
+    conn_channel, ConnReceiver, ConnSender, DataPlaneConnection, DataPlaneSender, ForwardHealth,
     LauncherConnection, ProxySender, SessionId, SessionManager, TunnelError, TunnelIn,
     WebClientSender, DATA_PLANE_CHANNEL_CAPACITY, LAUNCHER_CHANNEL_CAPACITY,
     LAUNCHER_LIVENESS_DEADLINE_SECS, LIVENESS_SWEEP_INTERVAL_SECS, PROGRESS_BAR_TTL,
@@ -173,4 +173,21 @@ pub async fn handle_web_client_websocket(
         web_client_socket::handle_web_client_socket(socket, app_state, user_id, None)
             .instrument(request_span)
     })
+}
+
+/// A stalled transport must release its queued and in-flight payloads. A send
+/// timeout ends the connection: cancellation makes delivery uncertain, so the
+/// same socket must never be reused after an error.
+struct DeadlineSender<T: ws_bridge::WsCodec>(ws_bridge::WsSender<T>);
+impl<T: ws_bridge::WsCodec> DeadlineSender<T> {
+    async fn send(&mut self, message: T) -> Result<(), ws_bridge::SendError> {
+        tokio::time::timeout(std::time::Duration::from_secs(15), self.0.send(message))
+            .await
+            .unwrap_or(Err(ws_bridge::SendError::Closed))
+    }
+    async fn close(&mut self) -> Result<(), ws_bridge::SendError> {
+        tokio::time::timeout(std::time::Duration::from_secs(15), self.0.close())
+            .await
+            .unwrap_or(Err(ws_bridge::SendError::Closed))
+    }
 }

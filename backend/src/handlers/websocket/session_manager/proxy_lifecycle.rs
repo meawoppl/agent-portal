@@ -38,7 +38,7 @@ impl SessionManager {
             );
         }
 
-        self.sessions.insert(
+        let previous = self.sessions.insert(
             session_key,
             ProxyConnection {
                 log_span: tracing::Span::current(),
@@ -48,6 +48,12 @@ impl SessionManager {
                 last_seen: std::sync::atomic::AtomicU64::new(super::liveness::epoch_secs()),
             },
         );
+        // The liveness sweep can see only the new registry entry. Cancel the
+        // displaced socket now so a half-open predecessor cannot retain its
+        // tasks and queued payloads outside that sweep forever.
+        if let Some(previous) = previous {
+            previous.cancel.cancel();
+        }
         gen
     }
 
@@ -156,6 +162,22 @@ mod tests {
 
     fn register(mgr: &SessionManager, key: &str, sender: ProxySender) -> u64 {
         mgr.register_session(key.into(), sender, CancellationToken::new())
+    }
+
+    #[test]
+    fn reconnect_cancels_the_displaced_socket_only() {
+        let manager = SessionManager::new();
+        let old = CancellationToken::new();
+        let new = CancellationToken::new();
+        let (old_tx, _old_rx) = crate::handlers::websocket::conn_channel(4);
+        let (new_tx, _new_rx) = crate::handlers::websocket::conn_channel(4);
+        let old_gen = manager.register_session("same".into(), old_tx, old.clone());
+        manager.register_session("same".into(), new_tx, new.clone());
+        assert!(old.is_cancelled());
+        assert!(!new.is_cancelled());
+        manager.unregister_session("same", Some(old_gen));
+        assert!(!new.is_cancelled());
+        assert!(manager.is_proxy_connected("same"));
     }
 
     #[test]

@@ -508,7 +508,10 @@ fn restore_launcher(
     f: &Fixture,
     owner: Uuid,
     capable: bool,
-) -> (Uuid, tokio::sync::mpsc::Receiver<shared::ServerToLauncher>) {
+) -> (
+    Uuid,
+    backend::handlers::websocket::ConnReceiver<shared::ServerToLauncher>,
+) {
     use backend::handlers::websocket::{conn_channel, LauncherConnection};
     let id = Uuid::new_v4();
     let (sender, receiver) = conn_channel(8);

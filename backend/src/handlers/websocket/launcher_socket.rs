@@ -161,7 +161,8 @@ fn grace_old_launcher_token(app_state: &AppState, token_id: Uuid) {
 #[tracing::instrument(skip_all, fields(user, user_id, computer, launcher, launcher_id))]
 pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>) {
     let conn = ws_bridge::server::into_connection::<LauncherEndpoint>(socket);
-    let (mut ws_sender, mut ws_receiver) = conn.split();
+    let (ws_sender, mut ws_receiver) = conn.split();
+    let mut ws_sender = super::DeadlineSender(ws_sender);
 
     // Wait for LauncherRegister message
     let (
@@ -425,7 +426,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
     // Server-side kill switch: fired by the SessionManager if it evicts this
     // connection (channel dead / half-open socket, #1256) so the select loop
     // below exits and the launcher's reconnect logic takes over.
-    let cancel = tokio_util::sync::CancellationToken::new();
+    let cancel = rx.cancellation_token();
 
     // Atomically check for duplicate (user_id, hostname) and register. See
     // `SessionManager::try_register_launcher` — the check + claim happen under
@@ -1830,7 +1831,9 @@ mod owner_relay_tests {
     use super::*;
     use crate::test_support::{insert_session, insert_user, shared_pool, test_app_state};
 
-    fn frames(rx: &mut tokio::sync::mpsc::Receiver<ServerToClient>) -> Vec<ServerToClient> {
+    fn frames(
+        rx: &mut crate::handlers::websocket::ConnReceiver<ServerToClient>,
+    ) -> Vec<ServerToClient> {
         std::iter::from_fn(|| rx.try_recv().ok()).collect()
     }
 
@@ -1890,16 +1893,17 @@ mod owner_relay_tests {
             reason: None,
         };
         // A member's frames, as JSON, carry nothing about why.
-        let assert_bare = |member: &mut tokio::sync::mpsc::Receiver<ServerToClient>| {
-            let received = frames(member);
-            assert_eq!(received.len(), 1, "{received:?}");
-            let wire = serde_json::to_string(&received[0]).unwrap();
-            assert_eq!(wire, serde_json::to_string(&bare).unwrap());
-            assert!(
-                !wire.contains("secret") && !wire.contains("reason"),
-                "{wire}"
-            );
-        };
+        let assert_bare =
+            |member: &mut crate::handlers::websocket::ConnReceiver<ServerToClient>| {
+                let received = frames(member);
+                assert_eq!(received.len(), 1, "{received:?}");
+                let wire = serde_json::to_string(&received[0]).unwrap();
+                assert_eq!(wire, serde_json::to_string(&bare).unwrap());
+                assert!(
+                    !wire.contains("secret") && !wire.contains("reason"),
+                    "{wire}"
+                );
+            };
 
         let request_id = Uuid::new_v4();
         state

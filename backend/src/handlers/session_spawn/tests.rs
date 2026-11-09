@@ -6,7 +6,7 @@ struct Fixture {
     state: Arc<AppState>,
     parent: Session,
     headers: HeaderMap,
-    receiver: tokio::sync::mpsc::Receiver<shared::ServerToLauncher>,
+    receiver: crate::handlers::websocket::ConnReceiver<shared::ServerToLauncher>,
 }
 fn fixture() -> Option<Fixture> {
     let pool = shared_pool()?;

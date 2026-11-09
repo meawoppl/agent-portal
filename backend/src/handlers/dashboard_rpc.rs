@@ -181,7 +181,7 @@ mod tests {
         Arc<AppState>,
         Uuid,
         Uuid,
-        tokio::sync::mpsc::Receiver<ServerToLauncher>,
+        crate::handlers::websocket::ConnReceiver<ServerToLauncher>,
     ) {
         // These owner/correlation paths do not need database access.
         let pool = diesel::r2d2::Pool::builder()

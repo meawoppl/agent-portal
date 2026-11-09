@@ -185,7 +185,10 @@ mod tests {
         )
     }
 
-    fn data_sender() -> (DataPlaneSender, tokio::sync::mpsc::Receiver<TunnelFrame>) {
+    fn data_sender() -> (
+        DataPlaneSender,
+        crate::handlers::websocket::ConnReceiver<TunnelFrame>,
+    ) {
         conn_channel::<TunnelFrame>(8)
     }
 
