@@ -172,6 +172,120 @@ impl ArchiveStore {
         }
     }
 
+    /// Read one decompressed record at a time. Object downloads spool to disk,
+    /// so neither compressed nor parsed lifetime transcripts occupy the heap.
+    pub fn transcript_reader(
+        &self,
+        user_id: Uuid,
+        session_id: Uuid,
+    ) -> std::io::Result<Box<dyn std::io::BufRead>> {
+        use std::io::{Seek, Write};
+        let key = transcript_key(user_id, session_id);
+        let mut file = tempfile::tempfile()?;
+        match self {
+            Self::Local(store) => match std::fs::File::open(store.object_path(&key)) {
+                Ok(mut source) => {
+                    std::io::copy(&mut source, &mut file)?;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    return Ok(Box::new(std::io::Cursor::new(Vec::<u8>::new())))
+                }
+                Err(e) => return Err(e),
+            },
+            Self::Object(store) => {
+                use futures_util::TryStreamExt;
+                let result = store
+                    .handle
+                    .block_on(store.store.get(&store.object_path(&key)));
+                match result {
+                    Ok(result) => store.handle.block_on(async {
+                        let mut chunks = result.into_stream();
+                        while let Some(chunk) =
+                            chunks.try_next().await.map_err(std::io::Error::from)?
+                        {
+                            file.write_all(&chunk)?;
+                        }
+                        Ok::<_, std::io::Error>(())
+                    })?,
+                    Err(object_store::Error::NotFound { .. }) => {
+                        return Ok(Box::new(std::io::Cursor::new(Vec::<u8>::new())))
+                    }
+                    Err(e) => return Err(e.into()),
+                }
+            }
+        }
+        file.rewind()?;
+        let compression = self
+            .get_session_manifest(user_id, session_id)?
+            .and_then(|m| m.transcript)
+            .map(|t| t.compression)
+            .unwrap_or_else(|| TRANSCRIPT_COMPRESSION.to_string());
+        match compression.as_str() {
+            "zstd" => Ok(Box::new(std::io::BufReader::new(zstd::Decoder::new(file)?))),
+            other => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("unsupported transcript compression `{other}`"),
+            )),
+        }
+    }
+
+    /// Publish an already compressed, disk-spooled transcript before its
+    /// manifest. Multipart backpressure bounds upload buffers to two parts.
+    pub fn put_session_archive_file(
+        &self,
+        manifest: &SessionArchiveManifest,
+        transcript: Option<&mut std::fs::File>,
+    ) -> std::io::Result<()> {
+        use std::io::{Read, Seek};
+        if let Some(file) = transcript {
+            file.rewind()?;
+            let key = transcript_key(manifest.user_id, manifest.session_id);
+            match self {
+                Self::Local(store) => {
+                    let path = store.object_path(&key);
+                    let dir = path.parent().expect("archive key has parent");
+                    std::fs::create_dir_all(dir)?;
+                    let mut temp = tempfile::NamedTempFile::new_in(dir)?;
+                    std::io::copy(file, &mut temp)?;
+                    temp.persist(path).map_err(|e| e.error)?;
+                }
+                Self::Object(store) => store.handle.block_on(async {
+                    let upload = store.store.put_multipart(&store.object_path(&key)).await?;
+                    let mut upload = object_store::WriteMultipart::new(upload);
+                    let result = async {
+                        let mut buffer = vec![0; 64 * 1024];
+                        loop {
+                            let count = file.read(&mut buffer)?;
+                            if count == 0 {
+                                break;
+                            }
+                            upload
+                                .wait_for_capacity(2)
+                                .await
+                                .map_err(std::io::Error::from)?;
+                            upload.write(&buffer[..count]);
+                        }
+                        Ok::<_, std::io::Error>(())
+                    }
+                    .await;
+                    if let Err(error) = result {
+                        let _ = upload.abort().await;
+                        return Err(error);
+                    }
+                    upload
+                        .finish()
+                        .await
+                        .map(|_| ())
+                        .map_err(std::io::Error::from)
+                })?,
+            }
+        }
+        self.put_object(
+            &manifest_key(manifest.user_id, manifest.session_id),
+            serde_json::to_vec_pretty(manifest)?,
+        )
+    }
+
     pub fn get_session_manifest(
         &self,
         user_id: Uuid,
@@ -567,6 +681,46 @@ mod tests {
             .get_session_manifest(Uuid::from_u128(99), s1)
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn streamed_files_roundtrip_local_and_object() {
+        use std::io::{Read, Write};
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let stores = [
+            local_store(dir.path()),
+            ArchiveStore::Object(ObjectArchiveStore::new(
+                std::sync::Arc::new(object_store::memory::InMemory::new()),
+                Some("prefix".into()),
+                rt.handle().clone(),
+            )),
+        ];
+        let body = b"{\"record\":1}\n{\"record\":2}\n";
+        for store in stores {
+            let m = manifest(Uuid::from_u128(1), Uuid::from_u128(2));
+            let mut missing = String::new();
+            store
+                .transcript_reader(m.user_id, m.session_id)
+                .unwrap()
+                .read_to_string(&mut missing)
+                .unwrap();
+            assert!(missing.is_empty());
+            let mut file = tempfile::tempfile().unwrap();
+            file.write_all(&zstd_encode(body).unwrap()).unwrap();
+            store.put_session_archive_file(&m, Some(&mut file)).unwrap();
+            let mut decoded = Vec::new();
+            store
+                .transcript_reader(m.user_id, m.session_id)
+                .unwrap()
+                .read_to_end(&mut decoded)
+                .unwrap();
+            assert_eq!(decoded, body);
+            assert!(store
+                .get_session_manifest(m.user_id, m.session_id)
+                .unwrap()
+                .is_some());
+        }
     }
 
     #[test]

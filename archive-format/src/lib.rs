@@ -363,6 +363,49 @@ pub fn merge_transcript_lines(
     merged
 }
 
+/// Merge sorted records with one lookahead per input. Hot row ids replace
+/// archived copies without retaining their bodies; immutable row timestamps
+/// and the (created_at, id) ordering keep archive readers deterministic.
+/// Reject out-of-order inputs rather than publishing a corrupt transcript.
+pub fn stream_merge_transcript(
+    existing: impl Iterator<Item = std::io::Result<ArchiveMessageLine>>,
+    current: impl Iterator<Item = std::io::Result<ArchiveMessageLine>>,
+    hot_ids: &std::collections::HashSet<Uuid>,
+    mut visit: impl FnMut(&ArchiveMessageLine) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    let mut old = existing.filter(|line| match line {
+        Ok(line) => !hot_ids.contains(&line.id),
+        Err(_) => true,
+    });
+    let mut new = current;
+    let mut left = old.next().transpose()?;
+    let mut right = new.next().transpose()?;
+    let mut previous = None;
+    while left.is_some() || right.is_some() {
+        let take_left = match (&left, &right) {
+            (Some(a), Some(b)) => (a.created_at, a.id) <= (b.created_at, b.id),
+            (Some(_), None) => true,
+            _ => false,
+        };
+        let line = if take_left { left.take() } else { right.take() }.expect("nonempty input");
+        let key = (line.created_at, line.id);
+        if previous.is_some_and(|previous| previous >= key) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "archive transcript is not strictly ordered",
+            ));
+        }
+        visit(&line)?;
+        previous = Some(key);
+        if take_left {
+            left = old.next().transpose()?;
+        } else {
+            right = new.next().transpose()?;
+        }
+    }
+    Ok(())
+}
+
 /// Parse an uncompressed NDJSON transcript body into typed lines.
 pub fn parse_transcript_ndjson(ndjson: &[u8]) -> std::io::Result<Vec<ArchiveMessageLine>> {
     String::from_utf8_lossy(ndjson)
@@ -490,6 +533,58 @@ mod tests {
             merged.iter().map(clone_line).collect(),
         );
         assert_eq!(again.len(), merged.len());
+    }
+
+    #[test]
+    fn streaming_merge_matches_union_and_rejects_disorder() {
+        let t = chrono::NaiveDate::from_ymd_opt(2026, 7, 11)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap();
+        let line = |id, text: &str| ArchiveMessageLine {
+            id: Uuid::from_u128(id),
+            role: "user".into(),
+            created_at: t,
+            agent_type: "claude".into(),
+            content: serde_json::json!(text),
+        };
+        let old = vec![
+            line(1, "old retained"),
+            line(2, "old replaced"),
+            line(4, "tail"),
+        ];
+        let new = vec![line(2, "replacement"), line(3, "insert")];
+        let ids = new.iter().map(|l| l.id).collect();
+        let mut output = Vec::new();
+        stream_merge_transcript(
+            old.into_iter().map(Ok),
+            new.into_iter().map(Ok),
+            &ids,
+            |line| {
+                output.push(clone_line(line));
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            output.iter().map(|l| l.id.as_u128()).collect::<Vec<_>>(),
+            vec![1, 2, 3, 4]
+        );
+        assert_eq!(output[1].content, "replacement");
+        assert!(stream_merge_transcript(
+            vec![line(2, "b"), line(1, "a")].into_iter().map(Ok),
+            std::iter::empty(),
+            &Default::default(),
+            |_| Ok(())
+        )
+        .is_err());
+        assert!(stream_merge_transcript(
+            std::iter::once(Err(std::io::Error::other("read failed"))),
+            std::iter::empty(),
+            &Default::default(),
+            |_| Ok(())
+        )
+        .is_err());
     }
 
     pub(crate) fn clone_line(l: &ArchiveMessageLine) -> ArchiveMessageLine {
