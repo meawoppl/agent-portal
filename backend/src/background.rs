@@ -363,8 +363,7 @@ fn archive_one_session(
             diesel::pg::PgRowByRowLoadingMode>(conn)?;
     let current = rows.map(|row| {
         let (id, role, content, created_at, agent_type) = row.map_err(std::io::Error::other)?;
-        let content =
-            serde_json::from_str(&content).unwrap_or_else(|_| serde_json::Value::String(content));
+        let content = serde_json::from_str(&content).unwrap_or(serde_json::Value::String(content));
         Ok(ArchiveMessageLine {
             id,
             role,
