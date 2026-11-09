@@ -287,7 +287,7 @@ pub(crate) async fn close_session(
         Some(session.working_directory.clone()),
     );
 
-    super::helpers::delete_session_with_data(&mut conn, session, true)
+    super::helpers::delete_session_with_data(&mut conn, session, true, &app_state.session_manager)
         .map_err(|e| AppError::Internal(format!("{:?}", e)))?;
 
     Ok(())

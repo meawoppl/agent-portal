@@ -317,7 +317,12 @@ pub async fn update_user(
 
             // Delete all user's sessions and associated data
             let (deleted_sessions, deleted_messages, deleted_members) =
-                super::helpers::delete_user_sessions(&mut conn, user_id).map_err(|e| {
+                super::helpers::delete_user_sessions(
+                    &mut conn,
+                    user_id,
+                    &app_state.session_manager,
+                )
+                .map_err(|e| {
                     AppError::Internal(format!("Failed to delete user sessions: {e:?}"))
                 })?;
 

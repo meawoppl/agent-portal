@@ -149,6 +149,7 @@ pub fn delete_session_with_data(
     conn: &mut PooledConnection<ConnectionManager<PgConnection>>,
     session: &Session,
     record_costs: bool,
+    manager: &crate::handlers::websocket::SessionManager,
 ) -> Result<usize, DeleteSessionError> {
     let session_id = session.id;
 
@@ -234,6 +235,7 @@ pub fn delete_session_with_data(
             DeleteSessionError(format!("Failed to delete session: {}", e))
         })?;
 
+    manager.forget_deleted_session(session_id, &session.session_key);
     Ok(deleted_messages)
 }
 
@@ -244,17 +246,19 @@ pub fn delete_session_with_data(
 pub fn delete_user_sessions(
     conn: &mut PooledConnection<ConnectionManager<PgConnection>>,
     user_id: Uuid,
+    manager: &crate::handlers::websocket::SessionManager,
 ) -> Result<(usize, usize, usize), DeleteSessionError> {
     // Get all session IDs for this user
-    let session_ids: Vec<Uuid> = sessions::table
+    let sessions_to_clear: Vec<(Uuid, String)> = sessions::table
         .filter(sessions::user_id.eq(user_id))
-        .select(sessions::id)
+        .select((sessions::id, sessions::session_key))
         .load(conn)
         .map_err(|e| {
             error!("Failed to get user sessions: {}", e);
             DeleteSessionError(format!("Failed to get sessions: {}", e))
         })?;
 
+    let session_ids: Vec<Uuid> = sessions_to_clear.iter().map(|(id, _)| *id).collect();
     if session_ids.is_empty() {
         return Ok((0, 0, 0));
     }
@@ -286,6 +290,9 @@ pub fn delete_user_sessions(
             DeleteSessionError(format!("Failed to delete sessions: {}", e))
         })?;
 
+    for (id, key) in sessions_to_clear {
+        manager.forget_deleted_session(id, &key);
+    }
     Ok((deleted_sessions, deleted_messages, deleted_members))
 }
 
@@ -293,6 +300,25 @@ pub fn delete_user_sessions(
 mod tests {
     use super::*;
     use axum::http::HeaderValue;
+
+    #[test]
+    fn successful_delete_reclaims_session_tracking() {
+        let Some(pool) = crate::test_support::shared_pool() else {
+            return;
+        };
+        let mut conn = pool.get().unwrap();
+        let user = crate::test_support::insert_user(&mut conn, "reclaim-delete");
+        let session = crate::test_support::insert_session(&mut conn, user.id, "reclaim-delete");
+        let manager = crate::handlers::websocket::SessionManager::new();
+        manager.record_ack_seq(session.id, 42);
+        manager.add_subagent_tokens(session.id, 123);
+        delete_session_with_data(&mut conn, &session, false, &manager).unwrap();
+        assert_eq!(manager.last_ack_seq(session.id), 0);
+        assert_eq!(manager.subagent_tokens(session.id), 0);
+        diesel::delete(users::table.find(user.id))
+            .execute(&mut conn)
+            .unwrap();
+    }
 
     #[test]
     fn nickname_is_preferred_then_name_then_email() {

@@ -1116,9 +1116,12 @@ fn handle_launcher_message(
                 return;
             }
 
-            if let Err(e) =
-                super::super::helpers::delete_session_with_data(&mut db_conn, &session, true)
-            {
+            if let Err(e) = super::super::helpers::delete_session_with_data(
+                &mut db_conn,
+                &session,
+                true,
+                &app_state.session_manager,
+            ) {
                 error!(
                     "Failed to auto-delete scheduled session {}: {:?}",
                     session_id, e
