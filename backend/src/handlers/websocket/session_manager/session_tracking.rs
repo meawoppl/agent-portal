@@ -36,7 +36,7 @@ impl SessionManager {
         self.forget_forward_health_for_session(session_id);
         self.forward_failures.remove(&session_id);
         self.forget_session_progress(session_id);
-        self.web_clients.remove(session_key);
+        self.web_clients.remove(&session_id.to_string());
     }
 
     /// Highest output sequence number acked for `session_id` (0 if none yet).
