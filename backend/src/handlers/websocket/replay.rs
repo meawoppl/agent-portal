@@ -1,106 +1,121 @@
+#[cfg(test)]
 use super::WebClientSender;
-use crate::handlers::helpers::{parse_iso_cursor, sender_names};
+use crate::handlers::helpers::{display_name, parse_iso_cursor};
 use diesel::prelude::*;
 use shared::ServerToClient;
-use tracing::{error, info};
 use uuid::Uuid;
 
-/// Send historical messages from DB to a newly connected web client.
-///
-/// When the client supplies `replay_after`, we ship every message strictly
-/// newer than that cursor — that's the reconnect / focus-regain path and the
-/// frontend needs the full delta to stay consistent.
-///
-/// When `replay_after` is `None` (initial connection or hard refresh), we
-/// only ship the trailing `initial_replay_limit` messages. Pre-#788 we
-/// shipped the full session history every time and the frontend trimmed to
-/// `MAX_MESSAGES_PER_SESSION = 100` locally — long sessions paid the full
-/// `O(session_lifetime)` wire cost just to discard most of it. SQL now does
-/// the trim. The DB query is `created_at DESC` with a `LIMIT` (so Postgres
-/// returns the tail without sorting the whole table); the in-memory `.reverse()`
-/// restores the chronological order `ServerToClient::HistoryBatch` consumers
-/// expect (the frontend's `WsEvent::HistoryBatch` arm extends the message
-/// vector and trims from the front).
+const REPLAY_BATCH_BYTES: usize = 1024 * 1024;
+const REPLAY_BATCH_ROWS: usize = 128;
+
+/// A two-frame mailbox isolates blocking SQL from the socket. The consumer
+/// sends history before draining live output, and dropping it cancels production.
 pub(super) fn replay_history(
     db_pool: &crate::db::DbPool,
-    tx: &WebClientSender,
     session_id: Uuid,
     replay_after: Option<String>,
     initial_replay_limit: i64,
-) {
-    let mut conn = match db_pool.get() {
-        Ok(conn) => conn,
-        Err(e) => {
-            error!(
-                "Failed to get database connection for history replay: {}",
-                e
-            );
-            return;
+) -> tokio::sync::mpsc::Receiver<std::io::Result<ServerToClient>> {
+    let (tx, rx) = tokio::sync::mpsc::channel(2);
+    let pool = db_pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let result = stream_history(
+            &pool,
+            session_id,
+            replay_after,
+            initial_replay_limit,
+            |batch| tx.blocking_send(Ok(batch)).map_err(std::io::Error::other),
+        );
+        if let Err(error) = result {
+            let _ = tx.blocking_send(Err(error));
         }
-    };
-
-    use crate::schema::messages;
-
-    // Same cursor parser as the REST `list_messages` handler — including the
-    // trailing-`Z` strip, so frontend `js_sys::Date.toISOString()` watermarks
-    // parse instead of silently falling back to a full-history replay.
-    let replay_after_time = replay_after.as_deref().and_then(parse_iso_cursor);
-
-    let history: Vec<crate::models::Message> = if let Some(after) = replay_after_time {
-        messages::table
-            .filter(messages::session_id.eq(session_id))
-            .filter(messages::created_at.gt(after))
-            .order(messages::created_at.asc())
-            .load(&mut conn)
-            .unwrap_or_default()
-    } else {
-        let mut tail: Vec<crate::models::Message> = messages::table
-            .filter(messages::session_id.eq(session_id))
-            .order(messages::created_at.desc())
-            .limit(initial_replay_limit)
-            .load(&mut conn)
-            .unwrap_or_default();
-        tail.reverse();
-        tail
-    };
-
-    info!(
-        "Sending {} historical messages to web client (replay_after: {:?})",
-        history.len(),
-        replay_after
-    );
-
-    if history.is_empty() {
-        return;
-    }
-
-    // Look up sender names for user-role messages
-    let user_names = sender_names(&mut conn, &history);
-
-    // Surface the server-assigned `created_at` for the latest row so the
-    // frontend can use it directly as its reconnect-replay watermark
-    // without re-parsing per-message content. History is ordered ASC, so
-    // `last()` is the newest.
-    let last_created_at: Option<String> = history
-        .last()
-        .map(|msg| msg.created_at.format("%Y-%m-%dT%H:%M:%S%.6f").to_string());
-
-    let entries: Vec<shared::HistoryEntry> = history
-        .into_iter()
-        .map(|msg| {
-            // Typed sidecar travels with its content. All attribution/timestamp
-            // rides here — `content` stays raw (no `_`-key injection; see
-            // docs/PORTAL_META_SIDECAR.md).
-            let meta = Some(msg.portal_meta(user_names.get(&msg.user_id).cloned()));
-            let content = shared::content_value_or_fallback(&msg.role, &msg.content);
-            shared::HistoryEntry { content, meta }
-        })
-        .collect();
-
-    let _ = tx.send(ServerToClient::HistoryBatch {
-        entries,
-        last_created_at,
     });
+    rx
+}
+
+/// Stream the complete reconnect delta, or the requested initial tail, with
+/// libpq row-by-row loading. Batches are bounded apart from one individual row.
+fn stream_history(
+    db_pool: &crate::db::DbPool,
+    session_id: Uuid,
+    replay_after: Option<String>,
+    initial_replay_limit: i64,
+    mut send: impl FnMut(ServerToClient) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    use crate::schema::{messages, users};
+    let mut conn = db_pool.get().map_err(std::io::Error::other)?;
+    let after = replay_after.as_deref().and_then(parse_iso_cursor);
+    let mut query = messages::table
+        .left_join(users::table.on(messages::user_id.eq(users::id)))
+        .filter(messages::session_id.eq(session_id))
+        .select((
+            messages::all_columns,
+            (users::nickname, users::name, users::email).nullable(),
+        ))
+        .order((messages::created_at.asc(), messages::id.asc()))
+        .into_boxed();
+    if let Some(after) = after {
+        query = query.filter(messages::created_at.gt(after));
+    } else {
+        // Select only ids for the tail; never buffer a page of large bodies.
+        let ids: Vec<Uuid> = messages::table
+            .filter(messages::session_id.eq(session_id))
+            .order((messages::created_at.desc(), messages::id.desc()))
+            .limit(initial_replay_limit.max(0))
+            .select(messages::id)
+            .load(&mut conn)
+            .map_err(std::io::Error::other)?;
+        query = query.filter(messages::id.eq_any(ids));
+    }
+    type ReplayRow = (
+        crate::models::Message,
+        Option<(Option<String>, Option<String>, String)>,
+    );
+    let rows = query
+        .load_iter::<ReplayRow, diesel::pg::PgRowByRowLoadingMode>(&mut conn)
+        .map_err(std::io::Error::other)?;
+    let mut entries = Vec::new();
+    let mut bytes = 0;
+    let mut last_timestamp = None;
+    let mut complete_timestamp = after;
+    for row in rows {
+        let (msg, user) = row.map_err(std::io::Error::other)?;
+        if last_timestamp.is_some_and(|last| last != msg.created_at) {
+            complete_timestamp = last_timestamp;
+        }
+        if !entries.is_empty()
+            && (bytes >= REPLAY_BATCH_BYTES || entries.len() >= REPLAY_BATCH_ROWS)
+        {
+            // A timestamp group may span batches. Only advance past a group
+            // once all its rows have been sent, so reconnect cannot skip ties.
+            send(ServerToClient::HistoryBatch {
+                entries: std::mem::take(&mut entries),
+                last_created_at: complete_timestamp
+                    .map(|ts| ts.format("%Y-%m-%dT%H:%M:%S%.6f").to_string()),
+            })?;
+            bytes = 0;
+        }
+        bytes += msg.content.len();
+        last_timestamp = Some(msg.created_at);
+        let sender = user
+            .filter(|_| msg.role == "user")
+            .map(|(nickname, name, email)| {
+                display_name(nickname.as_deref(), name.as_deref(), &email)
+            });
+        let meta = Some(msg.portal_meta(sender));
+        entries.push(shared::HistoryEntry {
+            content: shared::content_value_or_fallback(&msg.role, &msg.content),
+            meta,
+        });
+    }
+    if !entries.is_empty() {
+        send(ServerToClient::HistoryBatch {
+            entries,
+            last_created_at: last_timestamp
+                .map(|ts| ts.format("%Y-%m-%dT%H:%M:%S%.6f").to_string()),
+        })?;
+    }
+    Ok(())
 }
 
 // =============================================================================
@@ -166,6 +181,46 @@ mod replay_tests {
         for uid in user_ids {
             let _ = diesel::delete(users::table.find(uid)).execute(conn);
         }
+    }
+
+    #[test]
+    fn streaming_batches_keep_timestamp_ties_replayable() {
+        let Some(pool) = crate::test_support::shared_pool() else {
+            return;
+        };
+        let mut conn = pool.get().unwrap();
+        let user = crate::test_support::insert_user(&mut conn, "replay-ties");
+        let session = make_session(&mut conn, user.id);
+        let stamps = seed_messages(&mut conn, session.id, user.id, 300);
+        use crate::schema::messages;
+        diesel::update(messages::table.filter(messages::session_id.eq(session.id)))
+            .set(messages::created_at.eq(stamps[0]))
+            .execute(&mut conn)
+            .unwrap();
+        let mut count = 0;
+        let mut batches = Vec::new();
+        super::stream_history(&pool, session.id, None, 300, |msg| {
+            if let shared::ServerToClient::HistoryBatch {
+                entries,
+                last_created_at,
+            } = msg
+            {
+                assert!(entries.len() <= super::REPLAY_BATCH_ROWS);
+                count += entries.len();
+                batches.push(last_created_at);
+            }
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(count, 300);
+        assert_eq!(batches.len(), 3);
+        assert!(batches[0].is_none() && batches[1].is_none());
+        assert!(batches[2].is_some());
+        assert!(super::stream_history(&pool, session.id, None, 300, |_| Err(
+            std::io::Error::other("client gone")
+        ))
+        .is_err());
+        cleanup(&mut conn, session.id, &[user.id]);
     }
 
     /// `replay_after = None` returns at most `initial_replay_limit` rows in
@@ -262,7 +317,10 @@ mod replay_tests {
         let (tx, mut rx) = capture_sender();
         // initial_replay_limit is unused on the `replay_after = Some(_)`
         // branch — that branch loads strictly-newer rows unbounded.
-        super::replay_history(&pool, &tx, session.id, Some(watermark), 100);
+        super::stream_history(&pool, session.id, Some(watermark), 100, |msg| {
+            tx.send(msg).map_err(std::io::Error::other)
+        })
+        .unwrap();
         drop(tx);
 
         let mut got: Option<shared::ServerToClient> = None;
@@ -324,7 +382,10 @@ mod replay_tests {
         drop(conn);
 
         let (tx, mut rx) = capture_sender();
-        super::replay_history(&pool, &tx, session.id, None, 100);
+        super::stream_history(&pool, session.id, None, 100, |msg| {
+            tx.send(msg).map_err(std::io::Error::other)
+        })
+        .unwrap();
         drop(tx);
 
         let mut batch: Option<shared::ServerToClient> = None;

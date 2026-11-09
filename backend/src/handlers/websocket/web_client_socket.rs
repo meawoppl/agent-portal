@@ -73,6 +73,8 @@ pub async fn handle_web_client_socket(
     let mut dashboard_jobs = tokio::task::JoinSet::new();
     let mut dashboard_ids = std::collections::HashSet::new();
     let mut compatibility_checked = false;
+    let mut pending_replay: Option<tokio::sync::mpsc::Receiver<std::io::Result<ServerToClient>>> =
+        None;
     let mut session_key: Option<SessionId> = None;
     let mut verified_session_id: Option<Uuid> = None;
     let mut pending_uploads: HashMap<String, PendingUpload> = HashMap::new();
@@ -114,7 +116,22 @@ pub async fn handle_web_client_socket(
             _ = recheck.tick(), if linked.is_some() => {
                 if linked.as_ref().is_some_and(|auth| outbound_auth.check(std::time::Instant::now(), true, || auth.authorize(&app_state, shared::api::TokenScope::Read)).is_err()) { break; }
             }
-            msg = rx.recv() => {
+            replayed = async {
+                match pending_replay.as_mut() {
+                    Some(replay) => replay.recv().await,
+                    None => std::future::pending().await,
+                }
+            }, if pending_replay.is_some() => {
+                match replayed {
+                    Some(Ok(msg)) => {
+                        if linked.as_ref().is_some_and(|auth| outbound_auth.check(std::time::Instant::now(), false, || auth.authorize(&app_state, shared::api::TokenScope::Read)).is_err()) { break; }
+                        if ws_sender.send(msg).await.is_err() { break; }
+                    }
+                    Some(Err(error)) => { warn!("History replay failed: {error}"); break; }
+                    None => pending_replay = None,
+                }
+            }
+            msg = rx.recv(), if pending_replay.is_none() => {
                 let Some(msg) = msg else { break; };
                 if linked.as_ref().is_some_and(|auth| outbound_auth.check(std::time::Instant::now(), false, || auth.authorize(&app_state, shared::api::TokenScope::Read)).is_err()) { break; }
                 if ws_sender.send(msg).await.is_err() { break; }
@@ -175,7 +192,7 @@ pub async fn handle_web_client_socket(
                             }
                             continue;
                         }
-                        if handle_web_client_message(client_msg, ctx, &mut session_key, &mut verified_session_id, &mut pending_uploads) { break; }
+                        if handle_web_client_message(client_msg, ctx, &mut session_key, &mut verified_session_id, &mut pending_uploads, &mut pending_replay) { break; }
                     }
                     Err(e) => { warn!("WebSocket decode error: {}", e); }
                 }
@@ -227,6 +244,7 @@ fn handle_web_client_message(
     session_key: &mut Option<SessionId>,
     verified_session_id: &mut Option<Uuid>,
     pending_uploads: &mut HashMap<String, PendingUpload>,
+    pending_replay: &mut Option<tokio::sync::mpsc::Receiver<std::io::Result<ServerToClient>>>,
 ) -> bool {
     let WebClientCtx {
         app_state,
@@ -252,6 +270,7 @@ fn handle_web_client_message(
             replay_after,
             session_key,
             verified_session_id,
+            pending_replay,
         ),
         ClientToServer::AgentInput {
             content,
@@ -483,7 +502,13 @@ fn handle_web_register(
     replay_after: Option<String>,
     session_key: &mut Option<SessionId>,
     verified_session_id: &mut Option<Uuid>,
+    pending_replay: &mut Option<tokio::sync::mpsc::Receiver<std::io::Result<ServerToClient>>>,
 ) -> bool {
+    // A socket owns exactly one replay/presence registration. Re-registering
+    // would orphan the previous subscription and its replay producer.
+    if session_key.is_some() {
+        return true;
+    }
     let WebClientCtx {
         app_state,
         session_manager,
@@ -510,7 +535,12 @@ fn handle_web_register(
                 session_name, session_id, user_id
             );
 
-            replay_history(db_pool, tx, session_id, replay_after, initial_replay_limit);
+            *pending_replay = Some(replay_history(
+                db_pool,
+                session_id,
+                replay_after,
+                initial_replay_limit,
+            ));
             replay_pending_permission(db_pool, session_id, tx);
             false
         }
@@ -744,6 +774,7 @@ mod viewer_rejection_tests {
             &mut Some(SessionId::from(session.to_string())),
             &mut Some(session),
             uploads,
+            &mut None,
         );
     }
 
@@ -964,6 +995,7 @@ mod queued_input_tests {
             &mut Some(SessionId::from(session.to_string())),
             &mut Some(session),
             &mut HashMap::new(),
+            &mut None,
         );
     }
 
