@@ -758,6 +758,10 @@ pub async fn run_liveness_sweep(app_state: Arc<AppState>) {
         LAUNCHER_LIVENESS_DEADLINE_SECS, PROXY_LIVENESS_DEADLINE_SECS,
     };
 
+    let expired = app_state.session_manager.sweep_expired_pending_messages();
+    if expired > 0 {
+        tracing::info!("Expired {expired} queued messages for disconnected proxies");
+    }
     let (proxies, launchers) = app_state.session_manager.sweep_stale_connections(
         PROXY_LIVENESS_DEADLINE_SECS,
         LAUNCHER_LIVENESS_DEADLINE_SECS,
