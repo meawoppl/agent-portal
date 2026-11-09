@@ -80,7 +80,7 @@ impl SessionManager {
         let mut replayed = 0;
         let now = Instant::now();
 
-        if let Some(mut pending) = self.pending_messages.get_mut(session_key) {
+        if let Some((_, mut pending)) = self.pending_messages.remove(session_key) {
             while let Some(pending_msg) = pending.pop_front() {
                 if now.duration_since(pending_msg.queued_at) < MAX_PENDING_MESSAGE_AGE {
                     if sender.send(pending_msg.msg).is_ok() {
@@ -98,8 +98,23 @@ impl SessionManager {
             }
         }
 
-        self.pending_messages.remove(session_key);
         replayed
+    }
+
+    /// Expiry must run even when a proxy never reconnects. Retain under the
+    /// shard lock so removing an empty queue cannot erase a concurrent enqueue.
+    pub fn sweep_expired_pending_messages(&self) -> usize {
+        let now = Instant::now();
+        let mut expired = 0;
+        self.pending_messages.retain(|_, queue| {
+            let before = queue.len();
+            queue.retain(|message| {
+                now.saturating_duration_since(message.queued_at) < MAX_PENDING_MESSAGE_AGE
+            });
+            expired += before - queue.len();
+            !queue.is_empty()
+        });
+        expired
     }
 
     fn queue_pending_message(&self, session_key: &str, msg: ServerToProxy) {
@@ -108,6 +123,10 @@ impl SessionManager {
             .entry(SessionId::from(session_key))
             .or_default();
 
+        let now = Instant::now();
+        queue.retain(|message| {
+            now.saturating_duration_since(message.queued_at) < MAX_PENDING_MESSAGE_AGE
+        });
         while queue.len() >= MAX_PENDING_MESSAGES_PER_SESSION {
             if let Some(dropped) = queue.pop_front() {
                 warn!(
@@ -140,6 +159,25 @@ mod tests {
 
     fn register(mgr: &SessionManager, key: &str, sender: super::super::ProxySender) -> u64 {
         mgr.register_session(key.into(), sender, CancellationToken::new())
+    }
+
+    #[test]
+    fn expired_offline_queues_are_reclaimed_without_reconnecting() {
+        let mgr = SessionManager::new();
+        mgr.send_to_session("gone", make_output(1));
+        mgr.send_to_session("mixed", make_output(2));
+        mgr.send_to_session("mixed", make_output(3));
+        let expired_at = Instant::now() - MAX_PENDING_MESSAGE_AGE - Duration::from_secs(1);
+        mgr.pending_messages.get_mut("gone").unwrap()[0].queued_at = expired_at;
+        mgr.pending_messages.get_mut("mixed").unwrap()[0].queued_at = expired_at;
+        assert_eq!(mgr.sweep_expired_pending_messages(), 2);
+        assert!(!mgr.pending_messages.contains_key("gone"));
+        assert_eq!(mgr.pending_messages.get("mixed").unwrap().len(), 1);
+        let (tx, mut rx) = crate::handlers::websocket::conn_channel(4);
+        register(&mgr, "mixed", tx);
+        assert!(rx.try_recv().is_ok());
+        assert!(rx.try_recv().is_err());
+        assert_eq!(mgr.sweep_expired_pending_messages(), 0);
     }
 
     #[test]
