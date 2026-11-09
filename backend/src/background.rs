@@ -303,8 +303,7 @@ fn archive_one_session(
 ) -> anyhow::Result<()> {
     use crate::archive::{
         transcript_key, ArchiveMemberEntry, ArchiveMessageLine, ArchiveTokenTotals,
-        ArchiveTranscriptInfo, ArchiveTurnStats, SessionArchiveBundle, SessionArchiveManifest,
-        ARCHIVE_SCHEMA_VERSION,
+        ArchiveTranscriptInfo, ArchiveTurnStats, SessionArchiveManifest, ARCHIVE_SCHEMA_VERSION,
     };
     use diesel::prelude::*;
     use schema::{messages, session_members, turn_metrics, users};
@@ -347,64 +346,75 @@ fn archive_one_session(
         )
     };
 
-    // Transcript rows, oldest first. Note: hot-DB retention may already
-    // have trimmed old messages; the archive preserves what remains (phase
-    // 2 orders archival ahead of retention deletion).
-    type MessageRow = (uuid::Uuid, String, String, chrono::NaiveDateTime, String);
-    let rows: Vec<MessageRow> = messages::table
+    // Keep record bodies off the heap: libpq's default loading mode buffers a
+    // whole result even for load_iter, so explicitly request row-by-row mode.
+    use std::io::{BufRead, Write};
+    let hot_ids: Vec<uuid::Uuid> = messages::table
         .filter(messages::session_id.eq(session.id))
-        .order(messages::created_at.asc())
-        .select((
-            messages::id,
-            messages::role,
-            messages::content,
-            messages::created_at,
-            messages::agent_type,
-        ))
+        .select(messages::id)
         .load(conn)?;
-
-    let current_lines: Vec<ArchiveMessageLine> = rows
-        .into_iter()
-        .map(|(id, role, content, created_at, agent_type)| {
-            // Stored content is JSON text; embed it as a value so the
-            // archive round-trips it. Non-JSON content (shouldn't exist)
-            // degrades to a JSON string.
-            let content = match serde_json::from_str(&content) {
-                Ok(value) => value,
-                Err(_) => serde_json::Value::String(content),
-            };
-            ArchiveMessageLine {
-                id,
-                role,
-                created_at,
-                agent_type,
-                content,
-            }
+    let hot_id_set: std::collections::HashSet<_> = hot_ids.iter().copied().collect();
+    let rows = messages::table
+        .filter(messages::id.eq_any(&hot_ids))
+        .order((messages::created_at.asc(), messages::id.asc()))
+        .select((messages::id, messages::role, messages::content,
+            messages::created_at, messages::agent_type))
+        .load_iter::<(uuid::Uuid, String, String, chrono::NaiveDateTime, String),
+            diesel::pg::PgRowByRowLoadingMode>(conn)?;
+    let current = rows.map(|row| {
+        let (id, role, content, created_at, agent_type) = row.map_err(std::io::Error::other)?;
+        let content = serde_json::from_str(&content).unwrap_or(serde_json::Value::String(content));
+        Ok(ArchiveMessageLine {
+            id,
+            role,
+            content,
+            created_at,
+            agent_type,
         })
-        .collect();
-
-    // Merge with any previously-archived transcript (#1258 phase 2):
-    // retention may have trimmed hot rows that only survive in the
-    // archive; a re-archive must never shrink it.
-    let existing_lines = runtime
+    });
+    let existing = runtime
         .store
-        .read_transcript_lines(session.user_id, session.id)?
-        .unwrap_or_default();
-    let merged_lines = crate::archive::merge_transcript_lines(existing_lines, current_lines);
-
+        .transcript_reader(session.user_id, session.id)?
+        .lines()
+        .filter_map(|line| match line {
+            Ok(line) if line.trim().is_empty() => None,
+            line => Some(line.and_then(|line| {
+                serde_json::from_str::<ArchiveMessageLine>(&line).map_err(std::io::Error::other)
+            })),
+        });
+    let mut compressed = tempfile::tempfile()?;
+    let mut encoder = zstd::Encoder::new(&mut compressed, 9)?;
     let mut message_counts: BTreeMap<String, i64> = BTreeMap::new();
-    for line in &merged_lines {
+    let mut user_message_count = 0i64;
+    let mut message_count = 0i64;
+    let mut transcript_bytes = 0u64;
+    let mut media_entries = BTreeMap::new();
+    archive_format::stream_merge_transcript(existing, current, &hot_id_set, |line| {
         *message_counts.entry(line.role.clone()).or_default() += 1;
-    }
-    // Substantive user messages (the history "User msgs" column): counted at
-    // archive time for every new/re-archived session; pre-existing manifests
-    // are backfilled lazily when their transcript is next viewed.
-    let user_message_count = merged_lines
-        .iter()
-        .filter(|l| {
-            l.role == "user" && shared::user_messages::is_substantive_user_record(&l.content)
-        })
-        .count() as i64;
+        message_count += 1;
+        if line.role == "user" && shared::user_messages::is_substantive_user_record(&line.content) {
+            user_message_count += 1;
+        }
+        if let Some(entries) = collect_session_media(
+            runtime,
+            session.user_id,
+            session.id,
+            std::slice::from_ref(line),
+        ) {
+            for entry in entries {
+                media_entries.entry(entry.media_id).or_insert(entry);
+            }
+        }
+        if runtime.config.transcripts {
+            // Only one record's serialization is live at a time.
+            let bytes = serde_json::to_vec(line)?;
+            encoder.write_all(&bytes)?;
+            encoder.write_all(b"\n")?;
+            transcript_bytes += bytes.len() as u64 + 1;
+        }
+        Ok(())
+    })?;
+    encoder.finish()?;
 
     // Turn aggregates for the manifest (analytics reads these, never the
     // transcript body).
@@ -468,87 +478,62 @@ fn archive_one_session(
     // blobs whose archive sidecar is present, so a media whose write-through
     // failed (or predates the feature) is simply omitted and the sweep never
     // fails on it. `None` when media archiving is disabled or none survived.
-    let media = collect_session_media(runtime, session.user_id, session.id, &merged_lines);
-
+    let media = (!media_entries.is_empty()).then(|| media_entries.into_values().collect());
     let archived_at = chrono::Utc::now().naive_utc();
-    let transcripts_enabled = runtime.config.transcripts && !merged_lines.is_empty();
-
-    let (transcript_ndjson, transcript_info) = if transcripts_enabled {
-        let mut ndjson = Vec::new();
-        for line in &merged_lines {
-            serde_json::to_writer(&mut ndjson, line)?;
-            ndjson.push(b'\n');
-        }
-        let info = ArchiveTranscriptInfo {
-            object_key: transcript_key(session.user_id, session.id),
-            compression: crate::archive::TRANSCRIPT_COMPRESSION.to_string(),
-            message_count: merged_lines.len() as i64,
-            bytes: ndjson.len() as u64,
-        };
-        (Some(ndjson), Some(info))
-    } else {
-        (None, None)
-    };
-
-    let bundle = SessionArchiveBundle {
-        manifest: SessionArchiveManifest {
-            schema_version: ARCHIVE_SCHEMA_VERSION,
-            session_id: session.id,
-            user_id: session.user_id,
-            owner_email,
-            owner_name,
-            session_name: session.session_name.clone(),
-            agent_type: session.agent_type.clone(),
-            status: session.status.clone(),
-            working_directory: session.working_directory.clone(),
-            hostname: session.hostname.clone(),
-            git_branch: session.git_branch.clone(),
-            repo_url: session.repo_url.clone(),
-            pr_url: session.pr_url.clone(),
-            client_version: session.client_version.clone(),
-            created_at: session.created_at,
-            last_activity: session.last_activity,
-            archived_at,
-            message_counts,
-            user_message_count: Some(user_message_count),
-            tokens: ArchiveTokenTotals {
-                input: session.input_tokens,
-                output: session.output_tokens,
-                cache_creation: session.cache_creation_tokens,
-                cache_read: session.cache_read_tokens,
-                thinking,
-                subagent,
-            },
-            total_cost_usd: session.total_cost_usd,
-            turns,
-            transcript: transcript_info,
-            media,
-            launcher_id: session.launcher_id,
-            launcher_version: session.launcher_version.clone(),
-            forked_from_session_id: session.forked_from_session_id,
-            fork_point_turn_id: session.fork_point_turn_id.clone(),
-            scheduled_task_id: session.scheduled_task_id,
-            claude_args: session.claude_args.0.clone(),
-            // Per-write provenance: whichever backend runs this sweep stamps
-            // its own version, so a re-archive reflects the newer writer.
-            archived_by_version: Some(shared::VERSION.to_string()),
-            members,
+    let transcripts_enabled = runtime.config.transcripts && message_count > 0;
+    let transcript_info = transcripts_enabled.then(|| ArchiveTranscriptInfo {
+        object_key: transcript_key(session.user_id, session.id),
+        compression: crate::archive::TRANSCRIPT_COMPRESSION.to_string(),
+        message_count,
+        bytes: transcript_bytes,
+    });
+    let manifest = SessionArchiveManifest {
+        schema_version: ARCHIVE_SCHEMA_VERSION,
+        session_id: session.id,
+        user_id: session.user_id,
+        owner_email,
+        owner_name,
+        session_name: session.session_name.clone(),
+        agent_type: session.agent_type.clone(),
+        status: session.status.clone(),
+        working_directory: session.working_directory.clone(),
+        hostname: session.hostname.clone(),
+        git_branch: session.git_branch.clone(),
+        repo_url: session.repo_url.clone(),
+        pr_url: session.pr_url.clone(),
+        client_version: session.client_version.clone(),
+        created_at: session.created_at,
+        last_activity: session.last_activity,
+        archived_at,
+        message_counts,
+        user_message_count: Some(user_message_count),
+        tokens: ArchiveTokenTotals {
+            input: session.input_tokens,
+            output: session.output_tokens,
+            cache_creation: session.cache_creation_tokens,
+            cache_read: session.cache_read_tokens,
+            thinking,
+            subagent,
         },
-        transcript_ndjson,
+        total_cost_usd: session.total_cost_usd,
+        turns,
+        transcript: transcript_info,
+        media,
+        launcher_id: session.launcher_id,
+        launcher_version: session.launcher_version.clone(),
+        forked_from_session_id: session.forked_from_session_id,
+        fork_point_turn_id: session.fork_point_turn_id.clone(),
+        scheduled_task_id: session.scheduled_task_id,
+        claude_args: session.claude_args.0.clone(),
+        // Per-write provenance: whichever backend runs this sweep stamps
+        // its own version, so a re-archive reflects the newer writer.
+        archived_by_version: Some(shared::VERSION.to_string()),
+        members,
     };
-
-    let bytes = bundle
-        .transcript_ndjson
-        .as_ref()
-        .map(|b| b.len() as u64)
-        .unwrap_or(0);
-    {
-        // Serialize with the history backfill's manifest rewrite — see
-        // `ArchiveRuntime::manifest_write_lock`.
-        let _manifest_guard = shared::sync::lock_recovering_poison(&runtime.manifest_write_lock);
-        runtime.store.put_session_archive(&bundle)?;
-    }
-    runtime.stats.record_success(bytes);
+    runtime
+        .store
+        .put_session_archive_file(&manifest, transcripts_enabled.then_some(&mut compressed))?;
+    runtime.stats.record_success(transcript_bytes);
     Ok(())
 }
 
@@ -727,13 +712,29 @@ pub(crate) fn ensure_session_archived(
     use diesel::prelude::*;
     use schema::sessions;
 
+    // One whole archive job at a time bounds process-wide working memory and
+    // prevents retention/sweep/close from reading and overwriting stale archives.
+    let _writer = runtime
+        .manifest_write_lock
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let session = match sessions::table
+        .find(session.id)
+        .first::<models::Session>(conn)
+    {
+        Ok(session) => session,
+        Err(e) => {
+            tracing::error!("{SESSION_ARCHIVE_FAILED} session={}: {e}", session.id);
+            return false;
+        }
+    };
     if is_archive_fresh(session.archived_at, session.last_activity) {
         return true;
     }
-    match archive_one_session(conn, runtime, session) {
+    match archive_one_session(conn, runtime, &session) {
         Ok(()) => {
             let _ = diesel::update(sessions::table.find(session.id))
-                .set(sessions::archived_at.eq(chrono::Utc::now().naive_utc()))
+                .set(sessions::archived_at.eq(session.last_activity))
                 .execute(conn);
             true
         }

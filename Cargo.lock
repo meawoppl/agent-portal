@@ -260,6 +260,7 @@ name = "archive-format"
 version = "2.15.17"
 dependencies = [
  "chrono",
+ "futures-util",
  "object_store",
  "serde",
  "serde_json",
@@ -694,6 +695,7 @@ dependencies = [
  "uuid",
  "web-push",
  "ws-bridge",
+ "zstd",
 ]
 
 [[package]]

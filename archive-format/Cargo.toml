@@ -21,11 +21,10 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
 zstd = "0.14.3"
+tempfile = "3"
+futures-util = "0.3"
 object_store = { version = "0.14.0", features = ["aws"] }
 tokio = { workspace = true }
-
-[dev-dependencies]
-tempfile = "3"
 
 [lints]
 workspace = true
