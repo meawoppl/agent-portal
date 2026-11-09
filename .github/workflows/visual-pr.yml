@@ -5,15 +5,12 @@ name: Visual PR
 # agent-facing fix instructions live in the reusable action
 # (github.com/meawoppl/visual-pr); this workflow just wires it up.
 #
-# pull_request_target runs THIS file from the BASE branch, so the check exists
-# for every open PR the moment it lands on main — old branches don't need a
-# rebase to start reporting. `edited` is included because v2 also validates
-# the PR description; correcting that description must re-run the check. The
-# PR head is checked out as DATA only (an SVG
-# to look at); nothing from the head is ever executed, which is what makes
-# _target safe here. Keep it that way.
+# Use the unprivileged PR event: this validator needs only read access and
+# must keep running when pull_request_target is restricted. Style comes from
+# the trusted base; the head checkout contains SVG data only and is never run.
+# Edited/labeled events revalidate body permalinks and exemption labels.
 on:
-  pull_request_target:
+  pull_request:
     types: [opened, edited, synchronize, reopened, labeled, unlabeled]
 
 permissions:
@@ -27,6 +24,8 @@ jobs:
       - name: Check out this repo's visual-pr config (base branch — trusted)
         uses: actions/checkout@v7
         with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
           sparse-checkout: .github/visual-pr
 
       - name: Check out the PR's visualization (head — data only)
@@ -36,7 +35,6 @@ jobs:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           path: pr-head
           # Only SVG data is read; never run anything from this checkout.
-          allow-unsafe-pr-checkout: true
           persist-credentials: false
           sparse-checkout: .0-pr-viz
 
