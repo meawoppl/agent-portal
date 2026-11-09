@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use diesel::prelude::*;
 use shared::api::NotificationPrefs;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::Receiver;
 use tracing::{debug, error};
 use uuid::Uuid;
 
@@ -29,13 +29,22 @@ use crate::AppState;
 /// channel; runs until the channel closes (backend shutdown).
 pub fn spawn_dispatcher(
     app_state: Arc<AppState>,
-    mut rx: UnboundedReceiver<NotificationEvent>,
+    mut rx: Receiver<NotificationEvent>,
     transport: Arc<ConfiguredTransport>,
 ) {
     tokio::spawn(async move {
         tracing::info!("push dispatcher started");
         while let Some(event) = rx.recv().await {
-            dispatch_one(&app_state, transport.as_ref(), event).await;
+            let session_id = event.session_id();
+            if tokio::time::timeout(
+                super::PUSH_EVENT_TIMEOUT,
+                dispatch_one(&app_state, transport.as_ref(), event),
+            )
+            .await
+            .is_err()
+            {
+                error!("{PUSH_DISPATCH_FAILED}: push event timed out for session {session_id}");
+            }
         }
         tracing::warn!("push notification channel closed; dispatcher exiting");
     });
@@ -124,7 +133,9 @@ async fn dispatch_one<T: PushTransport>(
     }
 
     for sub in &subs {
-        match transport.send(sub, &payload).await {
+        let result =
+            deliver_with_deadline(transport, sub, &payload, super::PUSH_DELIVERY_TIMEOUT).await;
+        match result {
             Ok(SendOutcome::Delivered) => {
                 if let Err(e) = record_success(&mut conn, sub.id) {
                     error!(
@@ -147,6 +158,21 @@ async fn dispatch_one<T: PushTransport>(
             }
         }
     }
+}
+
+async fn deliver_with_deadline<T: PushTransport>(
+    transport: &T,
+    sub: &PushSubscription,
+    payload: &super::PushPayload,
+    deadline: std::time::Duration,
+) -> Result<SendOutcome, super::transport::PushError> {
+    tokio::time::timeout(deadline, transport.send(sub, payload))
+        .await
+        .unwrap_or_else(|_| {
+            Err(super::transport::PushError::Transport(
+                "push delivery timed out".into(),
+            ))
+        })
 }
 
 /// Resolve `(owning user, session name, notification prefs)` for a session in
@@ -348,5 +374,58 @@ mod db_tests {
             .unwrap();
         dispatch_one(&state, &transport, event).await;
         assert_eq!(transport.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    struct Stuck;
+    impl PushTransport for Stuck {
+        async fn send(
+            &self,
+            _: &PushSubscription,
+            _: &super::super::PushPayload,
+        ) -> Result<SendOutcome, super::super::transport::PushError> {
+            std::future::pending().await
+        }
+    }
+    #[tokio::test]
+    async fn stuck_transport_times_out_and_next_delivery_can_proceed() {
+        let sub = PushSubscription {
+            id: Uuid::new_v4(),
+            user_id: Uuid::new_v4(),
+            platform: "webpush".into(),
+            endpoint_or_token: "unused".into(),
+            p256dh: None,
+            auth: None,
+            device_label: None,
+            created_at: chrono::Utc::now(),
+            last_success_at: None,
+            disabled_at: None,
+        };
+        let payload = super::super::NotificationEvent::TurnComplete {
+            session_id: Uuid::new_v4(),
+            session_name: "test".into(),
+        }
+        .into_payload(
+            "test".into(),
+            shared::api::NotificationContentDetail::Generic,
+        );
+        let deadline = std::time::Duration::from_millis(5);
+        assert!(deliver_with_deadline(&Stuck, &sub, &payload, deadline)
+            .await
+            .is_err());
+        assert_eq!(
+            deliver_with_deadline(
+                &crate::push::transport::LogTransport,
+                &sub,
+                &payload,
+                deadline
+            )
+            .await
+            .unwrap(),
+            SendOutcome::Delivered
+        );
     }
 }
