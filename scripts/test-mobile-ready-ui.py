@@ -112,7 +112,7 @@ async def exercise(browser, base, device, name):
     await page.route_web_socket('**/ws/**', ws)
     await page.goto(f'{base}/dashboard?session={A}')
     await expect(page.get_by_role('button', name='Ready sessions: 1', exact=True)).to_be_visible(timeout=60000)
-    # Mobile Chromium/WebKit can include overflowing content in innerWidth
+    # Mobile Chromium can include overflowing content in innerWidth
     # while CSS still matches the phone viewport. A keyboard-height resize
     # must not replace the mobile session controls with the desktop rail or
     # start loading background transcripts.
@@ -125,7 +125,9 @@ async def exercise(browser, base, device, name):
     }""")
     await page.set_viewport_size(dict(width=device['viewport']['width'], height=600))
     await page.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
-    assert await page.evaluate('innerWidth > 768 && matchMedia("(max-width: 768px)").matches')
+    assert await page.evaluate('matchMedia("(max-width: 768px)").matches')
+    if name == 'android':
+        assert await page.evaluate('innerWidth > 768'), 'fixture must reproduce the Chromium mismatch'
     await expect(page.locator('.mobile-ready-bar')).to_be_visible()
     await expect(page.locator('.session-rail')).to_have_count(0)
     assert B not in fetched and C not in fetched, 'overflow must not activate desktop hydration'
