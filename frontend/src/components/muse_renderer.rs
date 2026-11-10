@@ -242,6 +242,12 @@ pub fn render_task_tree(tree: &TaskTree) -> Html {
             }
         })
         .collect();
+    if let Some(counts) = tree.call_counts() {
+        footer.push(format!(
+            "{} model calls: {} completed, {} failed, {} cancelled",
+            counts.calls, counts.completed_calls, counts.failed_calls, counts.cancelled_calls
+        ));
+    }
     if hidden_reminders > 0 {
         let plural = if hidden_reminders == 1 { "" } else { "s" };
         footer.push(format!("{hidden_reminders} reminder task{plural} hidden"));

@@ -532,6 +532,24 @@ pub enum SendMode {
     Wiggum,
 }
 
+/// Portal projection of Muse model-call counters. Failed calls are not
+/// necessarily retried streams and must not inflate `stream_restarts`.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MuseCallCounts {
+    pub calls: u64,
+    pub completed_calls: u64,
+    pub failed_calls: u64,
+    pub cancelled_calls: u64,
+}
+
+/// Additive portal-owned sidecar on a durable Muse terminal event. The native
+/// ephemeral run.usage identity remains outside the durable transcript.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MuseTerminalTelemetry {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub muse_call_counts: Option<MuseCallCounts>,
+}
+
 /// Optional per-turn reasoning effort override for agents/models that support
 /// it. `None` on the wire means "use the agent/model default"; concrete values
 /// are deliberately kept small and provider-agnostic.
