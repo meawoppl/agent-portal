@@ -36,6 +36,7 @@ struct GeneratedItem<'a> {
 
 pub(crate) struct GeneratedMediaNormalizer {
     session_id: Uuid,
+    main_thread_id: Option<String>,
     credentials: Option<PortalCredentials>,
     client: Option<reqwest::Client>,
     recovery_root: PathBuf,
@@ -48,6 +49,7 @@ impl GeneratedMediaNormalizer {
     pub fn new(config: &SessionConfig) -> Self {
         Self {
             session_id: config.session_id,
+            main_thread_id: config.codex_thread_id.clone(),
             credentials: config.portal_credentials.clone(),
             client: reqwest::Client::builder()
                 .timeout(Duration::from_secs(15))
@@ -58,12 +60,18 @@ impl GeneratedMediaNormalizer {
         }
     }
 
+    pub fn set_main_thread(&mut self, thread_id: &str) {
+        self.main_thread_id = Some(thread_id.to_string());
+    }
+
     /// `Some` owns the visible output for this item. All other notifications
     /// continue through the ordinary classifier, preserving output ordering.
     pub async fn normalize(&mut self, msg: &mut ServerMessage) -> Option<serde_json::Value> {
         let (kind, item) = match msg {
-            ServerMessage::Notification(Notification::TurnStarted(_)) => {
-                self.references.clear();
+            ServerMessage::Notification(Notification::TurnStarted(p)) => {
+                if self.main_thread_id.as_deref() == Some(p.thread_id.as_str()) {
+                    self.references.clear();
+                }
                 return None;
             }
             ServerMessage::Notification(Notification::ItemStarted(p)) => {
@@ -124,6 +132,11 @@ impl GeneratedMediaNormalizer {
                     self.save_recovery(inline.as_bytes(), "base64").await.ok()
                 } else {
                     None
+                };
+                let error = if recovery.is_none() {
+                    format!("{error} No temporary recovery file is available; use native Codex history.")
+                } else {
+                    error
                 };
                 return CodexImageMedia {
                     error: Some(error),

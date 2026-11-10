@@ -443,6 +443,7 @@ pub(crate) async fn codex_io_task(
     // Surface the thread id to the proxy so it can persist it for the
     // next resume of this session. Emitted once per spawn after either
     // thread_start or thread/resume returns.
+    generated_media.set_main_thread(&thread_id);
     let _ = event_tx.send(IoEvent::CodexThreadId(thread_id.clone()));
 
     let _ = event_tx.send(IoEvent::RawOutput(to_raw_output(&ThreadStartedEvent::new(

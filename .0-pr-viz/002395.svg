@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200"><rect width="2000" height="1200" fill="#1a1b26"/><g font-family="Arial, sans-serif">
+<text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2395 · Move generated Codex images into archived Portal media</text>
+<text x="55" y="106" font-size="34" fill="#e6e9f5">Generated images leave the inline transcript and enter the authenticated media archive.</text>
+<text x="55" y="150" font-size="28" fill="#c0caf5">Portal references stay distinct from provider file IDs; upload failures remain recoverable.</text>
+<path d="M55 177H1945" stroke="#3d4666"/>
+<path d="M1000 190V1140" stroke="#565f89" stroke-dasharray="9 9"/>
+<text x="65" y="230" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1045" y="230" font-size="22" fill="#9ece6a">AFTER</text>
+<g><rect x="65" y="270" width="875" height="190" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="90" y="315" font-size="26" fill="#f7768e">ImageGeneration.result contains base64</text>
+<text x="90" y="358" font-size="23" fill="#c0caf5">Classifier serializes the original image string.</text>
+<text x="90" y="393" font-size="23" fill="#c0caf5">Output buffers and transcript rows retain its bytes.</text>
+</g>
+<g><rect x="1045" y="270" width="875" height="190" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1070" y="315" font-size="26" fill="#9ece6a">GeneratedMediaNormalizer::normalize</text>
+<text x="1070" y="358" font-size="23" fill="#c0caf5">Takes the source string before await/serialization.</text>
+<text x="1070" y="393" font-size="23" fill="#c0caf5">Decode and upload are capped at 10 MiB.</text>
+</g>
+<g><rect x="65" y="515" width="875" height="190" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="90" y="560" font-size="26" fill="#f7768e">Status card has no Portal media reference</text>
+<text x="90" y="603" font-size="23" fill="#c0caf5">A provider fileId is not an authenticated image URL.</text>
+<text x="90" y="638" font-size="23" fill="#c0caf5">The generation card cannot supply the image.</text>
+</g>
+<g><rect x="1045" y="515" width="875" height="190" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1070" y="560" font-size="26" fill="#9ece6a">POST /api/agent/sessions/{id}/media</text>
+<text x="1070" y="603" font-size="23" fill="#c0caf5">Existing authenticated upload persists media message.</text>
+<text x="1070" y="638" font-size="23" fill="#c0caf5">portalMedia carries the Portal-owned image UUID.</text>
+</g>
+<g><rect x="65" y="760" width="875" height="190" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="90" y="805" font-size="26" fill="#f7768e">No transfer or recovery outcome on the card</text>
+<text x="90" y="848" font-size="23" fill="#c0caf5">Inline data stays in the transcript.</text>
+<text x="90" y="883" font-size="23" fill="#c0caf5">Image status alone cannot explain upload failure.</text>
+</g>
+<g><rect x="1045" y="760" width="875" height="190" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1070" y="805" font-size="26" fill="#9ece6a">Failure is visible and recovery is bounded</text>
+<text x="1070" y="848" font-size="23" fill="#c0caf5">Native saved path or private recovery file.</text>
+<text x="1070" y="883" font-size="23" fill="#c0caf5">32 files, 64 MiB total, 24h TTL; filesystem lock.</text>
+</g>
+<text x="65" y="1010" font-size="23" fill="#a9b1d6">Provider-only file IDs retain their original meaning.</text>
+<text x="1045" y="1010" font-size="23" fill="#a9b1d6">Lifecycle repeats reuse small per-turn references.</text>
+<text x="65" y="1050" font-size="23" fill="#a9b1d6">Old upload responses still decode without media_id.</text>
+<text x="1045" y="1050" font-size="23" fill="#a9b1d6">HTTP and recovery-budget regressions are covered.</text>
+<text x="55" y="1172" font-size="22" fill="#e0af68">Limits: provider-only fileId needs local bytes; failed uploads need manual recovery before the temporary spool expires.</text>
+</g></svg>

@@ -107,7 +107,7 @@ pub(super) fn render_extended_item(
                             Some(media) if media.uploaded => html! { <div class="tool-meta">{ "Image saved in the media message." }</div> },
                             Some(media) => html! {
                                 <div class="tool-result error">
-                                    <div>{ media.error.as_deref().unwrap_or("Generated image could not be uploaded.") }</div>
+                                    <div>{ text_preview(media.error.as_deref().unwrap_or("Generated image could not be uploaded.")) }</div>
                                     { media.recovery_path.as_ref().map(|path| html! {
                                         <>
                                             <pre class="tool-input-content">{ text_preview(path) }</pre>
