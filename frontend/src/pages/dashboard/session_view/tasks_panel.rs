@@ -204,11 +204,17 @@ pub enum TasksPanelMsg {
     FinishDeparture,
 }
 
+/// A corrupted/reused-id stream must not grow an unbounded UI-side tombstone
+/// set. Beyond this cap, require explicit task notifications for completion.
+const MAX_AMBIGUOUS_TOOL_IDS: usize = 1024;
+
 pub struct TasksPanel {
     active_tasks: HashMap<TaskKey, TaskEntry>,
     /// Maps `tool_use_id → task_id` so a `ToolResult` event can find its
     /// task without the parent having to thread the mapping.
-    tool_use_to_task: HashMap<ToolUseId, HashSet<TaskKey>>,
+    tool_use_to_task: HashMap<ToolUseId, TaskKey>,
+    ambiguous_tool_uses: HashSet<ToolUseId>,
+    tool_result_fallback_disabled: bool,
     tasks_panel_open: bool,
     task_tick_handle: Option<Interval>,
     /// Animation state for the tasks tab: "entering", "progress", or
@@ -232,6 +238,8 @@ impl Component for TasksPanel {
         Self {
             active_tasks: HashMap::new(),
             tool_use_to_task: HashMap::new(),
+            ambiguous_tool_uses: HashSet::new(),
+            tool_result_fallback_disabled: false,
             tasks_panel_open: false,
             task_tick_handle: None,
             tab_anim: None,
@@ -244,6 +252,8 @@ impl Component for TasksPanel {
             TasksPanelMsg::Inbound(TasksInbound::ClearForReplay) => {
                 self.active_tasks.clear();
                 self.tool_use_to_task.clear();
+                self.ambiguous_tool_uses.clear();
+                self.tool_result_fallback_disabled = false;
                 true
             }
             TasksPanelMsg::Inbound(TasksInbound::Replay(event)) => {
@@ -263,16 +273,7 @@ impl Component for TasksPanel {
             }
             TasksPanelMsg::TaskTick => {
                 let now = js_sys::Date::now();
-                // Drop completed tasks older than 10 s — matches the
-                // pre-extraction behavior.
-                self.active_tasks.retain(|_, task| match task.completed_at {
-                    Some(t) => now - t < 10_000.0,
-                    None => true,
-                });
-                self.tool_use_to_task.retain(|_, keys| {
-                    keys.retain(|key| self.active_tasks.contains_key(key));
-                    !keys.is_empty()
-                });
+                self.prune_completed(now);
                 if self.active_tasks.is_empty() {
                     self.task_tick_handle = None;
                 }
@@ -343,6 +344,39 @@ impl Component for TasksPanel {
 }
 
 impl TasksPanel {
+    fn prune_completed(&mut self, now: f64) {
+        self.active_tasks.retain(|_, task| match task.completed_at {
+            Some(t) => now - t < 10_000.0,
+            None => true,
+        });
+        self.tool_use_to_task
+            .retain(|_, key| self.active_tasks.contains_key(key));
+        // Ambiguity is sticky for this hydrated panel lifetime: pruning an
+        // old run cannot make its late result identify the new run.
+    }
+
+    fn register_tool_run(&mut self, tool: ToolUseId, key: TaskKey) {
+        if self.tool_result_fallback_disabled || self.ambiguous_tool_uses.contains(&tool) {
+            return;
+        }
+        if self
+            .tool_use_to_task
+            .get(&tool)
+            .is_some_and(|existing| existing != &key)
+        {
+            self.tool_use_to_task.remove(&tool);
+            if self.ambiguous_tool_uses.len() < MAX_AMBIGUOUS_TOOL_IDS {
+                self.ambiguous_tool_uses.insert(tool);
+            } else {
+                self.tool_result_fallback_disabled = true;
+                self.tool_use_to_task.clear();
+                self.ambiguous_tool_uses.clear();
+            }
+        } else {
+            self.tool_use_to_task.insert(tool, key);
+        }
+    }
+
     fn running_count(&self) -> usize {
         self.active_tasks
             .values()
@@ -434,10 +468,7 @@ impl TasksPanel {
                 entry.parent_task_id = parent_task_id;
                 entry.awaited = awaited;
                 if let Some(tool_use_id) = tool_use_id {
-                    self.tool_use_to_task
-                        .entry(tool_use_id)
-                        .or_default()
-                        .insert(task_id);
+                    self.register_tool_run(tool_use_id, task_id);
                 }
             }
             TaskEvent::Progress {
@@ -490,16 +521,12 @@ impl TasksPanel {
                 tool_use_id,
                 completed_at,
             } => {
-                let Some(keys) = self.tool_use_to_task.get(&tool_use_id) else {
-                    return;
-                };
-                // A reused tool id cannot identify which run completed.
-                // Wait for an explicit notification instead of closing a
-                // resumed run because an old result arrived late.
-                if keys.len() != 1 {
+                if self.tool_result_fallback_disabled
+                    || self.ambiguous_tool_uses.contains(&tool_use_id)
+                {
                     return;
                 }
-                let Some(task_id) = keys.iter().next().cloned() else {
+                let Some(task_id) = self.tool_use_to_task.get(&tool_use_id).cloned() else {
                     return;
                 };
                 let Some(entry) = self.active_tasks.get_mut(&task_id) else {
@@ -786,6 +813,8 @@ mod tests {
         TasksPanel {
             active_tasks: HashMap::new(),
             tool_use_to_task: HashMap::new(),
+            ambiguous_tool_uses: HashSet::new(),
+            tool_result_fallback_disabled: false,
             tasks_panel_open: false,
             task_tick_handle: None,
             tab_anim: None,
@@ -853,7 +882,7 @@ mod tests {
         assert_eq!(e.task_type, "local_agent");
         assert_eq!(
             panel.tool_use_to_task.get(&ToolUseId("tu1".to_string())),
-            Some(&HashSet::from([TaskKey::new("t1", None)]))
+            Some(&TaskKey::new("t1", None))
         );
 
         panel.apply_event(progress("t1", "Bash", 1_000.0));
@@ -1087,6 +1116,41 @@ mod tests {
         panel.apply_event(with_run(started("task", "shared-tool", 2_000.0), "run-2"));
         panel.apply_event(tool_result("shared-tool", 3_000.0));
         assert_eq!(panel.running_count(), 2);
+    }
+
+    #[test]
+    fn ambiguity_survives_pruning_and_progress_does_not_resurrect_completed_runs() {
+        let mut panel = mk_panel();
+        panel.apply_event(with_run(started("task", "shared-tool", 1_000.0), "run-1"));
+        panel.apply_event(with_run(started("task", "shared-tool", 2_000.0), "run-2"));
+        panel.apply_event(with_run(
+            notification("task", TaskStatus::Completed, 3_000.0),
+            "run-1",
+        ));
+        panel.apply_event(with_run(progress("task", "Read", 4_000.0), "run-1"));
+        let old = TaskKey::new("task", Some("run-1".into()));
+        let new = TaskKey::new("task", Some("run-2".into()));
+        assert_eq!(panel.active_tasks[&old].status, TaskStatus::Completed);
+        panel.prune_completed(14_000.0);
+        assert!(!panel.active_tasks.contains_key(&old));
+        panel.apply_event(tool_result("shared-tool", 15_000.0));
+        assert_eq!(panel.active_tasks[&new].status, TaskStatus::Running);
+        assert!(panel
+            .ambiguous_tool_uses
+            .contains(&ToolUseId("shared-tool".into())));
+    }
+
+    #[test]
+    fn ambiguity_tombstones_have_a_bounded_memory_cost() {
+        let mut panel = mk_panel();
+        for index in 0..=MAX_AMBIGUOUS_TOOL_IDS {
+            let tool = ToolUseId(format!("tool-{index}"));
+            panel.register_tool_run(tool.clone(), TaskKey::new("task", Some("run-1".into())));
+            panel.register_tool_run(tool, TaskKey::new("task", Some("run-2".into())));
+        }
+        assert!(panel.tool_result_fallback_disabled);
+        assert!(panel.tool_use_to_task.is_empty());
+        assert!(panel.ambiguous_tool_uses.is_empty());
     }
 
     #[test]
