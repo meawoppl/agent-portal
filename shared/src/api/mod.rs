@@ -136,6 +136,9 @@ mod tests {
     #[test]
     fn codex_permission_input_bash_roundtrip() {
         let input = CodexPermissionInput::Bash {
+            kind: None,
+            reason: None,
+            network_approval_context: None,
             command: "ls -la".to_string(),
             cwd: "/tmp".to_string(),
             parsed_cmd: None,

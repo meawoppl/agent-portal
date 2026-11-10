@@ -37,6 +37,10 @@ pub enum CodexEvent {
     },
     #[serde(rename = "turn.failed")]
     TurnFailed { error: Option<CodexError> },
+    #[serde(rename = "hook/completed")]
+    HookCompleted {
+        params: Box<codex_codes::HookCompletedNotification>,
+    },
     #[serde(rename = "item.started")]
     ItemStarted { item: Option<CodexItem> },
     #[serde(rename = "item.updated")]

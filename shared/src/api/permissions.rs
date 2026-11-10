@@ -62,6 +62,18 @@ pub enum CodexPermissionInput {
     },
     /// Codex `item/commandExecution/requestApproval` — single-string command form.
     Bash {
+        /// Managed checkpoints require a fresh one-time human decision; this
+        /// preserves the request kind without advertising support for them.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<codex_codes::CommandExecutionApprovalKind>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+        #[serde(
+            rename = "networkApprovalContext",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        network_approval_context: Option<codex_codes::NetworkApprovalContext>,
         #[serde(default)]
         command: String,
         #[serde(default)]
@@ -105,6 +117,16 @@ pub enum CodexPermissionInput {
 }
 
 impl CodexPermissionInput {
+    pub fn requires_fresh_human_decision(&self) -> bool {
+        matches!(
+            self,
+            Self::Bash {
+                kind: Some(codex_codes::CommandExecutionApprovalKind::HumanCommand),
+                ..
+            }
+        )
+    }
+
     /// Human-readable tool name matching the historical `tool_name` strings
     /// the wire used to carry alongside this payload. Kept stable for the
     /// frontend's CSS / sort keys and for the existing `PendingPermission`

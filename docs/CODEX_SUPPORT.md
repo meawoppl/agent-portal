@@ -369,3 +369,19 @@ saved file or history. The small per-turn media-reference cache is also capped.
 
 Provider-only attachment IDs without inline bytes or a local saved path remain
 visible as metadata; the Portal does not fetch attachments from the provider.
+
+### Hook diagnostics and managed checkpoints
+
+Portal shows failed or blocked Codex hooks as plain-text diagnostic cards. Normal
+hook completions and all pre/post-model-request notifications are suppressed to
+avoid per-request transcript noise. Model-only hook context is excluded, and
+persisted diagnostic details are bounded.
+
+Command-approval cards preserve the typed action kind, reason, and network
+context. A `humanCommand` request is labelled as a managed checkpoint and never
+offers remembered approval. Codex responses remain one-time accept/decline.
+Portal does **not** advertise `requiredHumanApproval`; managed checkpoints remain
+disabled until the approval path can verify fresh matched human decisions across
+reconnects and restarts. [Issue #2396](https://github.com/meawoppl/agent-portal/issues/2396)
+tracks the request-matching, provenance, and capability-gating work needed before
+enabling them.

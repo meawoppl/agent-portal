@@ -549,7 +549,7 @@ fn classify_codex_event(output: &str) -> Option<ActivityTag> {
         CodexEvent::TurnCompleted { .. } | CodexEvent::TurnFailed { .. } => {
             Some(ActivityTag::Result)
         }
-        CodexEvent::Error { .. } => Some(ActivityTag::Error),
+        CodexEvent::Error { .. } | CodexEvent::HookCompleted { .. } => Some(ActivityTag::Error),
         // `thread.started` / `turn.started` and the streaming deltas
         // (PlanDelta / ReasoningTextDelta / ReasoningSummaryPartAdded) and the
         // diff/plan/patch updates don't render visible per-event cards (the

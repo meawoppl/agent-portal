@@ -50,6 +50,7 @@ pub enum AgentFrameKind {
     CodexItemUpdated,
     CodexItemCompleted,
     CodexError,
+    CodexHookCompleted,
     CodexTurnDiffUpdated,
     CodexFileChangePatchUpdated,
     CodexTurnPlanUpdated,
@@ -193,6 +194,7 @@ impl FrameRenderer {
             | AgentFrameKind::CodexItemUpdated
             | AgentFrameKind::CodexItemCompleted
             | AgentFrameKind::CodexError
+            | AgentFrameKind::CodexHookCompleted
             | AgentFrameKind::CodexTurnDiffUpdated
             | AgentFrameKind::CodexFileChangePatchUpdated
             | AgentFrameKind::CodexTurnPlanUpdated
@@ -254,6 +256,7 @@ impl CodexEvent {
             }
             Self::ReasoningTextDelta { .. } => AgentFrameKind::CodexReasoningTextDelta,
             Self::ThreadCompacted { .. } => AgentFrameKind::CodexThreadCompacted,
+            Self::HookCompleted { .. } => AgentFrameKind::CodexHookCompleted,
             Self::Unknown => AgentFrameKind::RawJson,
         }
     }

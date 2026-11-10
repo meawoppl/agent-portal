@@ -113,6 +113,17 @@ pub struct PendingPermission {
     pub permission_suggestions: Vec<shared::PermissionSuggestion>,
 }
 
+impl PendingPermission {
+    pub fn requires_fresh_human_decision(&self) -> bool {
+        serde_json::from_value::<shared::CodexPermissionInput>(self.input.clone())
+            .is_ok_and(|input| input.requires_fresh_human_decision())
+    }
+
+    pub fn can_remember(&self) -> bool {
+        !self.permission_suggestions.is_empty() && !self.requires_fresh_human_decision()
+    }
+}
+
 /// Parsed AskUserQuestion option
 #[derive(Clone, Debug, Deserialize)]
 pub struct AskUserOption {
@@ -478,9 +489,25 @@ fn format_codex_permission_input(input: &shared::CodexPermissionInput) -> String
                 format!("Patch {} file(s):\n  {}", paths.len(), paths.join("\n  "))
             }
         }
-        C::Bash { command, .. } | C::ExecCommand { command, .. } => {
-            format!("$ {}", command)
+        C::Bash {
+            command,
+            reason,
+            network_approval_context,
+            ..
+        } => {
+            let mut details = vec![format!("$ {command}")];
+            if let Some(reason) = reason {
+                details.push(format!("Reason: {reason}"));
+            }
+            if let Some(network) = network_approval_context {
+                details.push(format!(
+                    "Network destination: {} ({:?})",
+                    network.host, network.protocol
+                ));
+            }
+            details.join("\n")
         }
+        C::ExecCommand { command, .. } => format!("$ {command}"),
         C::Permissions { reason, .. } => non_empty(reason.as_deref())
             .map(|s| s.to_string())
             .unwrap_or_else(|| pretty_input(input)),
