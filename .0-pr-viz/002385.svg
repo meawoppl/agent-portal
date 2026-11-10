@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="Arial, sans-serif">
+<text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2385 · Honor typed Claude usage limits and explain API failures</text>
+<text x="55" y="105" font-size="34" fill="#e6e9f5">Text-only limit detection guessed reset times and lost throttled state.</text>
+<text x="55" y="147" font-size="34" fill="#e6e9f5">Typed errors now preserve exact resets and explain recovery without automatic retries.</text>
+<path d="M55 178 H1945 M1000 190 V1140" stroke="#565f89" stroke-width="2" stroke-dasharray="7 7"/>
+<text x="55" y="225" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1040" y="225" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="55" y="275" width="900" height="210" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="79" y="320" font-size="26" fill="#7aa2f7">parse_usage_limit_reset</text>
+<text x="79" y="375" font-size="23" fill="#c0caf5">Only legacy text: resets 5pm (TZ)</text>
+<text x="79" y="428" font-size="23" fill="#f7768e">New wording misses continuation scheduling.</text>
+<rect x="1040" y="275" width="900" height="210" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1064" y="320" font-size="26" fill="#7aa2f7">assistant_usage_limit</text>
+<text x="1064" y="375" font-size="23" fill="#c0caf5">api_error_params.rate_limit_info.resets_at</text>
+<text x="1064" y="428" font-size="23" fill="#9ece6a">Exact epoch first; legacy text remains fallback.</text>
+<rect x="55" y="540" width="900" height="210" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="79" y="585" font-size="26" fill="#7aa2f7">activity_signal</text>
+<text x="79" y="640" font-size="23" fill="#c0caf5">Generic failed Result reports Idle.</text>
+<text x="79" y="693" font-size="23" fill="#f7768e">A preceding usage limit loses its state.</text>
+<rect x="1040" y="540" width="900" height="210" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1064" y="585" font-size="26" fill="#7aa2f7">ActivityHistory</text>
+<text x="1064" y="640" font-size="23" fill="#c0caf5">Read back within the failed turn.</text>
+<text x="1064" y="693" font-size="23" fill="#9ece6a">Keep Throttled; stop at boundaries or 64 frames.</text>
+<rect x="55" y="805" width="900" height="210" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="79" y="850" font-size="26" fill="#7aa2f7">render_assistant_message_content</text>
+<text x="79" y="905" font-size="23" fill="#c0caf5">Most typed API errors render as plain text.</text>
+<text x="79" y="958" font-size="23" fill="#f7768e">Window status and shared-budget scope are absent.</text>
+<rect x="1040" y="805" width="900" height="210" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1064" y="850" font-size="26" fill="#7aa2f7">render_assistant_api_error</text>
+<text x="1064" y="905" font-size="23" fill="#c0caf5">Known kinds explain manual recovery.</text>
+<text x="1064" y="958" font-size="23" fill="#9ece6a">Usage windows show status; scope names the limit.</text>
+<text x="55" y="1172" font-size="22" fill="#a9b1d6">Scope: manual retry guidance; existing continuation controls schedule known resets. No automatic network retries.</text>
+</g>
+</svg>
