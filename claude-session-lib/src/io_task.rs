@@ -561,6 +561,7 @@ pub(crate) async fn claude_io_task(
     // `record_content_frame`d on assistant/text frames, finalized on
     // `ClaudeOutput::Result`. See `session_lib::turn_tracker`.
     let mut turn_tracker = TurnTracker::new(session_id);
+    let mut cost_tracker = shared::claude_cost::ClaudeTurnCostTracker::default();
     // Model + service tier observed for the current turn. Picked up from
     // `ClaudeOutput::System(Init)` (issued at session start) and the
     // assistant message's `model` field (per-message); the tracker doesn't
@@ -807,7 +808,7 @@ pub(crate) async fn claude_io_task(
                                     .saturating_sub(subagent_tokens_at_turn_start),
                                 stop_reason: r.stop_reason.clone(),
                                 is_error: r.is_error,
-                                total_cost_usd: Some(r.total_cost_usd),
+                                total_cost_usd: cost_tracker.observe(r),
                                 model_context_window,
                             };
                             if let Some(metrics) = turn_tracker.finalize(
