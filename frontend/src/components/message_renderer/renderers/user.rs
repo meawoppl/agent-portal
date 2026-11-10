@@ -362,7 +362,7 @@ mod transcript_metadata_tests {
 
     #[test]
     fn permission_chips_join_results_by_id_and_render_without_tool_output() {
-        let mut message: shared::UserMessage = serde_json::from_str(r#"{"session_id":"session","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool-a"}]},"tool_result_meta":[{"id":"tool-b","permission_decision":{"decision":"accept","source":"classifier","reason_type":"classifier"}},{"id":"tool-a","permission_decision":{"decision":"reject","source":"hook","reason_type":"hook"}}]}"#).unwrap();
+        let mut message: shared::UserMessage = serde_json::from_str(r#"{"session_id":"00000000-0000-0000-0000-000000000000","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool-a"}]},"tool_result_meta":[{"id":"tool-b","permission_decision":{"decision":"accept","source":"classifier","reason_type":"classifier"}},{"id":"tool-a","permission_decision":{"decision":"reject","source":"hook","reason_type":"hook"}}]}"#).unwrap();
         let text =
             super::super::visible_text(&render_tool_result_permission(&message, "tool-a").unwrap());
         assert!(text.contains("Denied by hook"));
