@@ -267,3 +267,10 @@
     color: var(--text-secondary);
     font-family: monospace;
 }
+
+.task-pill-report {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    margin-top: 0.4rem;
+    font-size: 0.85rem;
+}
