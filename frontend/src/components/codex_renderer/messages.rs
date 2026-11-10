@@ -62,3 +62,18 @@ pub(super) fn render_error_block(message: Option<&str>) -> Html {
         </div>
     }
 }
+
+/// Retrying transport/provider errors are progress, not terminal red cards.
+/// Older archives have no retry metadata and retain the normal error display.
+pub(super) fn render_codex_error(error: &shared::codex_errors::CodexErrorDetails) -> Html {
+    let message = error.message.as_deref().unwrap_or("Unknown error");
+    if error.will_retry {
+        return html! { <div class="codex-retry-message" role="status">{ format!("Retrying… {message}") }</div> };
+    }
+    html! {
+        <>
+            { render_error_block(Some(message)) }
+            { error.action_hint().map(|hint| html! { <div class="codex-error-hint">{ hint }</div> }).unwrap_or_default() }
+        </>
+    }
+}

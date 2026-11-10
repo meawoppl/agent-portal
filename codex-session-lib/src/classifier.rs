@@ -84,13 +84,9 @@ fn classify_notification(notif: Notification) -> Vec<AgentOutput> {
         }
 
         Notification::Error(p) => {
-            let message = if p.error.message.is_empty() {
-                "Unknown error".to_string()
-            } else {
-                p.error.message.clone()
-            };
             vec![AgentOutput::Visible(to_raw_output(&ErrorEvent::new(
-                message,
+                &p.error,
+                p.will_retry,
             )))]
         }
 
@@ -337,6 +333,19 @@ mod tests {
             }
             other => panic!("expected Visible, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn retry_notification_retains_typed_capacity_and_retry_metadata() {
+        let notif: codex_codes::ErrorNotification = serde_json::from_str(
+            r#"{"error":{"message":"capacity unavailable","codexErrorInfo":"policyCapacityUnavailable"},"willRetry":true}"#,
+        ).unwrap();
+        let out = classify(ServerMessage::Notification(Notification::Error(notif)));
+        let AgentOutput::Visible(value) = &out[0] else {
+            panic!("expected visible error")
+        };
+        assert_eq!(value["willRetry"], true);
+        assert_eq!(value["codexErrorInfo"], "policyCapacityUnavailable");
     }
 
     #[test]

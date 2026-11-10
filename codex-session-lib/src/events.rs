@@ -26,6 +26,8 @@ pub(crate) struct TurnCompletedEvent {
     pub duration_ms: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<CodexUsageEvent>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<shared::codex_errors::CodexErrorDetails>,
 }
 
 impl TurnCompletedEvent {
@@ -41,6 +43,7 @@ impl TurnCompletedEvent {
             status,
             duration_ms,
             usage,
+            error: None,
         }
     }
 }
@@ -93,14 +96,15 @@ impl ItemEvent {
 pub(crate) struct ErrorEvent {
     #[serde(rename = "type")]
     pub event_type: &'static str,
-    pub message: String,
+    #[serde(flatten)]
+    pub details: shared::codex_errors::CodexErrorDetails,
 }
 
 impl ErrorEvent {
-    pub fn new(message: String) -> Self {
+    pub fn new(error: &codex_codes::TurnError, will_retry: bool) -> Self {
         Self {
             event_type: "error",
-            message,
+            details: shared::codex_errors::CodexErrorDetails::from_turn_error(error, will_retry),
         }
     }
 }

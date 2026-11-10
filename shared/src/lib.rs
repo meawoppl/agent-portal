@@ -121,6 +121,7 @@ pub fn version_parts() -> Option<(u64, u64, u64)> {
 }
 
 // Proxy token types in separate module
+pub mod codex_errors;
 pub mod proxy_tokens;
 pub use proxy_tokens::*;
 

@@ -532,7 +532,15 @@ fn edit_stack_output_releases_next(agent_type: &str, content: &serde_json::Value
     let kind = content.get("type").and_then(|value| value.as_str());
     match agent_type {
         "claude" => matches!(kind, Some("result" | "error")),
-        "codex" => matches!(kind, Some("turn.completed" | "turn.failed" | "error")),
+        "codex" => match kind {
+            Some("turn.completed" | "turn.failed") => true,
+            Some("error") => {
+                serde_json::from_value::<shared::codex_errors::CodexErrorDetails>(content.clone())
+                    .map(|error| !error.will_retry)
+                    .unwrap_or(true)
+            }
+            _ => false,
+        },
         "muse" => content
             .get("payload_type")
             .and_then(|value| value.as_str())
@@ -953,6 +961,14 @@ mod tests {
         assert!(!edit_stack_output_releases_next(
             "codex",
             &serde_json::json!({"type": "thread.started"})
+        ));
+        assert!(!edit_stack_output_releases_next(
+            "codex",
+            &serde_json::json!({"type":"error","message":"retry","willRetry":true})
+        ));
+        assert!(edit_stack_output_releases_next(
+            "codex",
+            &serde_json::json!({"type":"error","message":"terminal","willRetry":false})
         ));
         assert!(!edit_stack_output_releases_next(
             "muse",

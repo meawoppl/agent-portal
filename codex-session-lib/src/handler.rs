@@ -41,16 +41,20 @@ pub(crate) fn handle_codex_server_message(
         let error_sent = p.turn.error.as_ref().is_none_or(|error| {
             event_tx
                 .send(IoEvent::Classified(AgentOutput::Visible(to_raw_output(
-                    &ErrorEvent::new(error.message.clone()),
+                    &ErrorEvent::new(error, false),
                 ))))
                 .is_ok()
         });
-        let event = TurnCompletedEvent::new(
+        let mut event = TurnCompletedEvent::new(
             p.turn.id.clone(),
             turn_status_label(&p.turn.status).to_string(),
             p.turn.duration_ms,
             latest_token_usage.cloned(),
         );
+        event.error =
+            p.turn.error.as_ref().map(|error| {
+                shared::codex_errors::CodexErrorDetails::from_turn_error(error, false)
+            });
         let ok = event_tx
             .send(IoEvent::Classified(AgentOutput::Visible(to_raw_output(
                 &event,
@@ -211,6 +215,23 @@ mod tests {
                 other => panic!("expected turn completion, got {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn capacity_error_survives_completion_so_activity_stays_throttled() {
+        let msg = ServerMessage::from_json_str(r#"{"method":"turn/completed","params":{"threadId":"t","turn":{"id":"turn-1","status":"failed","items":[],"error":{"message":"limit reached","codexErrorInfo":"usageLimitExceeded"}}}}"#).unwrap();
+        let (outputs, sent, ended) = classified(msg, None);
+        assert!(sent && ended);
+        assert_eq!(outputs.len(), 2);
+        let AgentOutput::Visible(error) = &outputs[0] else {
+            panic!("expected error")
+        };
+        assert_eq!(error["codexErrorInfo"], "usageLimitExceeded");
+        assert_eq!(error["willRetry"], false);
+        let AgentOutput::Visible(completed) = &outputs[1] else {
+            panic!("expected completion")
+        };
+        assert_eq!(completed["error"]["codexErrorInfo"], "usageLimitExceeded");
     }
 
     #[test]

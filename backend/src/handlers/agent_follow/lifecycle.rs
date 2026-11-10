@@ -1,5 +1,6 @@
 //! Follow-specific lifecycle metadata; peek remains a compact message digest.
 use shared::api::SessionActivityState;
+use shared::codex_errors::CodexLifecycleFrame;
 
 #[derive(Default, Debug)]
 pub(super) struct Lifecycle {
@@ -40,18 +41,36 @@ pub(super) fn classify(agent: &str, content: &str) -> Lifecycle {
                 _ => Lifecycle::default(),
             }
         }
-        "codex" => {
-            use codex_codes::ThreadEvent;
-            match serde_json::from_str::<ThreadEvent>(content) {
-                Ok(ThreadEvent::TurnStarted(_)) => Lifecycle {
-                    activity: Some(Busy),
-                    kind: Some("status"),
-                },
-                Ok(ThreadEvent::TurnCompleted(_)) => Lifecycle::terminal(false),
-                Ok(ThreadEvent::TurnFailed(_)) => Lifecycle::terminal(true),
-                _ => Lifecycle::default(),
+        "codex" => match serde_json::from_str::<CodexLifecycleFrame>(content) {
+            Ok(CodexLifecycleFrame::Started) => Lifecycle {
+                activity: Some(Busy),
+                kind: Some("status"),
+            },
+            Ok(CodexLifecycleFrame::Completed { status, error }) => {
+                let failed = error.is_some()
+                    || status
+                        .as_deref()
+                        .is_some_and(|s| matches!(s, "failed" | "interrupted"));
+                let mut state = Lifecycle::terminal(failed);
+                if let Some(error) = error {
+                    state.activity = Some(error.activity());
+                }
+                state
             }
-        }
+            Ok(CodexLifecycleFrame::Failed { error }) => {
+                let mut state = Lifecycle::terminal(true);
+                if let Some(error) = error {
+                    state.activity = Some(error.activity());
+                }
+                state
+            }
+            Ok(CodexLifecycleFrame::Error { error }) => Lifecycle {
+                activity: Some(error.activity()),
+                kind: Some("error"),
+            },
+            _ => Lifecycle::default(),
+        },
+
         "muse" => {
             use muse_codes::{MusePayload, MuseRecord};
             let Ok(record) = serde_json::from_str::<MuseRecord>(content) else {
@@ -92,6 +111,28 @@ mod tests {
             assert_eq!(result.activity, Some(SessionActivityState::Idle), "{agent}");
         }
     }
+    #[test]
+    fn codex_retries_and_capacity_completions_do_not_claim_idle() {
+        for (content, expected) in [
+            (
+                r#"{"type":"error","message":"retry","willRetry":true}"#,
+                SessionActivityState::Busy,
+            ),
+            (
+                r#"{"type":"error","message":"capacity","willRetry":true,"codexErrorInfo":"serverOverloaded"}"#,
+                SessionActivityState::Throttled,
+            ),
+            (
+                r#"{"type":"turn.completed","status":"failed","error":{"message":"capacity","codexErrorInfo":"usageLimitExceeded"}}"#,
+                SessionActivityState::Throttled,
+            ),
+        ] {
+            let result = classify("codex", content);
+            assert_eq!(result.activity, Some(expected));
+            assert_eq!(result.kind, Some("error"));
+        }
+    }
+
     fn muse_record(kind: &str, payload: serde_json::Value) -> serde_json::Value {
         json!({"schema_version":1,"id":"m","stream":{"kind":"run","id":"r"},"sequence":1,"recorded_at":1,"record_type":"event","durability":"durable","causation_id":"c","payload_type":kind,"payload_schema_version":1,"payload":payload})
     }
