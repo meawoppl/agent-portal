@@ -3,6 +3,25 @@
 use codex_codes::{HookCompletedNotification, HookEventName, HookOutputEntryKind, HookRunStatus};
 use yew::prelude::*;
 
+fn hook_event_label(event: &HookEventName) -> &'static str {
+    match event {
+        HookEventName::PreModelRequest => "Before model request",
+        HookEventName::PostModelRequest => "After model request",
+        HookEventName::PreToolUse => "Before tool use",
+        HookEventName::PermissionRequest => "Permission request",
+        HookEventName::PostToolUse => "After tool use",
+        HookEventName::PreCompact => "Before compaction",
+        HookEventName::PostCompact => "After compaction",
+        HookEventName::SessionStart => "Session start",
+        HookEventName::SessionEnd => "Session end",
+        HookEventName::UserPromptSubmit => "Prompt submission",
+        HookEventName::SubagentStart => "Subagent start",
+        HookEventName::SubagentStop => "Subagent stop",
+        HookEventName::Stop => "Stop",
+        HookEventName::Interrupt => "Interrupt",
+    }
+}
+
 pub(super) fn render_hook_failure(notification: &HookCompletedNotification) -> Option<Html> {
     let run = &notification.run;
     if matches!(
@@ -21,7 +40,7 @@ pub(super) fn render_hook_failure(notification: &HookCompletedNotification) -> O
         <div class="claude-message error-message-display codex-hook-failure" role="status">
             <div class="message-header">
                 <span class="message-type-badge result error">{ title }</span>
-                <span class="init-badge">{ format!("{:?}", run.event_name) }</span>
+                <span class="init-badge">{ hook_event_label(&run.event_name) }</span>
             </div>
             <div class="message-body">
                 if !run.source_path.0.is_empty() {
