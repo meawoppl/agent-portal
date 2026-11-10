@@ -273,9 +273,10 @@ fn classify_payload(record: &MuseRecord, payload: &MusePayload) -> AgentOutput {
 
 /// Wire shape the frontend receives for one journal record.
 ///
-/// The envelope is preserved verbatim under `record` so the renderer can
-/// key on `(stream_id, id)`, group by `causation_id`, and order within a
-/// turn by `sequence` — the identity rules measured in MUSE_SUPPORT.md.
+/// The native identity and payload are preserved so the renderer can key on
+/// `(stream_id, id)`, group by `causation_id`, and order within a turn by
+/// `sequence`. A terminal may also carry the portal-owned typed telemetry
+/// projection; its native journal payload and durability remain unchanged.
 /// `payload_type` is lifted to the top level so a renderer can dispatch (or
 /// fall back to a labeled passthrough) without re-parsing.
 fn to_event(record: &MuseRecord) -> serde_json::Value {
