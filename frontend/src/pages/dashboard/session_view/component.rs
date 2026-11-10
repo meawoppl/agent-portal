@@ -37,8 +37,9 @@ use super::forward_surface::ForwardSurface;
 use super::helpers::{
     autoscroll_transition, classify_output_msg_type, clear_completed_tools,
     enrich_codex_file_change_permission, ephemeral_summary, format_tool_elapsed, is_awaiting,
-    parse_iso_ms_utc, reconcile_pending_sends, running_tool_key, update_pending_send_delivery,
-    upsert_tool_progress, ActiveToolProgress, ActivityTag, MuseLiveTurn,
+    parse_iso_ms_utc, reconcile_edit_stack_activity, reconcile_pending_sends, running_tool_key,
+    update_pending_send_delivery, upsert_tool_progress, ActiveToolProgress, ActivityTag,
+    MuseLiveTurn,
 };
 use super::input_bar::{InputBar, InputBarInbound};
 use super::outbox::Outbox;
@@ -2550,19 +2551,12 @@ impl SessionView {
                 .emit((Self::session_key(ctx), tag, activity_ts));
         }
         reconcile_pending_sends(&mut self.pending_sends, tag, &output.content);
-        if let Some((item_id, _)) = self.edit_stack_active {
-            match tag {
-                ActivityTag::Result => {
-                    self.complete_edit_stack_item(ctx, item_id, "completed");
-                    self.edit_stack_active = None;
-                }
-                ActivityTag::Error => {
-                    self.complete_edit_stack_item(ctx, item_id, "failed");
-                    self.edit_stack_active = None;
-                    self.edit_stack_send_all = false;
-                }
-                _ => {}
-            }
+        if let Some((item_id, status)) = reconcile_edit_stack_activity(
+            &mut self.edit_stack_active,
+            &mut self.edit_stack_send_all,
+            tag,
+        ) {
+            self.complete_edit_stack_item(ctx, item_id, status);
         }
 
         // Retire any active-tool strip entries this message completes: a

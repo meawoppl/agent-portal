@@ -1332,6 +1332,11 @@
     color: var(--error);
 }
 
+.codex-hook-failure .error-text {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
 .error-recovery-button {
     margin-top: 0.75rem;
     padding: 0.45rem 0.8rem;

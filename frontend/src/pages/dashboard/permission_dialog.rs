@@ -257,7 +257,7 @@ fn collapsible_prompt(props: &CollapsiblePromptProps) -> Html {
 fn render_standard_permission(props: &PermissionDialogProps) -> Html {
     let perm = &props.permission;
     let input_preview = format_permission_input(&perm.tool_name, &perm.input);
-    let has_suggestions = !perm.permission_suggestions.is_empty();
+    let has_suggestions = perm.can_remember();
 
     let onkeydown = nav_keydown(props);
 
@@ -281,6 +281,11 @@ fn render_standard_permission(props: &PermissionDialogProps) -> Html {
             {onkeydown}
         >
             <div class="permission-body">
+                if perm.requires_fresh_human_decision() {
+                    <div class="permission-checkpoint" role="status">
+                        { "Managed checkpoint — a fresh human decision is required. This choice applies once and cannot be remembered." }
+                    </div>
+                }
                 <div class="permission-tool">
                     <span class="tool-label">{ "Tool:" }</span>
                     <span class="tool-name">{ &perm.tool_name }</span>

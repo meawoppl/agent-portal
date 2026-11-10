@@ -4,6 +4,7 @@ use yew::prelude::*;
 
 mod events;
 mod extended_items;
+mod hooks;
 mod lifecycle;
 mod messages;
 mod patch;
@@ -86,6 +87,7 @@ fn render_codex_event(
             item => render_item(item, true, session_id),
         },
         CodexEvent::Error { error } => Some(messages::render_codex_error(error)),
+        CodexEvent::HookCompleted { params } => hooks::render_hook_failure(params),
         CodexEvent::FileChangePatchUpdated { params } => Some(render_file_change_patch(
             params.as_ref().and_then(|p| p.changes.as_deref()),
         )),

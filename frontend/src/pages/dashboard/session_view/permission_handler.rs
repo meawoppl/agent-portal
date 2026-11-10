@@ -350,7 +350,7 @@ impl PermissionHandler {
             return;
         }
 
-        let has_suggestions = !perm.permission_suggestions.is_empty();
+        let has_suggestions = perm.can_remember();
         let msg = match resolve_standard_choice(self.selected, has_suggestions) {
             StandardChoice::Approve => PermissionHandlerMsg::Approve { remember: false },
             StandardChoice::ApproveAndRemember => PermissionHandlerMsg::Approve { remember: true },
@@ -487,7 +487,7 @@ fn max_option_index(perm: &PendingPermission) -> usize {
             })
             .unwrap_or(0);
     }
-    if !perm.permission_suggestions.is_empty() {
+    if perm.can_remember() {
         2
     } else {
         1
@@ -676,7 +676,7 @@ pub fn build_permission_response(
             request_id,
             allow: true,
             input: Some(perm.input.clone()),
-            permissions: if remember {
+            permissions: if remember && !perm.requires_fresh_human_decision() {
                 perm.permission_suggestions.clone()
             } else {
                 vec![]
@@ -1235,5 +1235,20 @@ mod tests {
     fn all_multi_select_is_always_answerable() {
         let parsed = mk_parsed(&[(true, 2), (true, 3)]);
         assert!(all_single_select_answered(&parsed, &QuestionAnswers::new()));
+    }
+    #[test]
+    fn human_checkpoint_cannot_offer_or_emit_remembered_approval() {
+        let mut permission = mk_perm("Bash", 2);
+        permission.input = serde_json::from_str(r#"{"tool":"bash","command":"deploy","kind":"humanCommand","reason":"Managed checkpoint"}"#).unwrap();
+        assert!(permission.requires_fresh_human_decision());
+        assert!(!permission.can_remember());
+        assert_eq!(max_option_index(&permission), 1);
+        let response = build_permission_response(
+            "checkpoint".into(),
+            PermissionResponseKind::Approve { remember: true },
+            &permission,
+        );
+        assert!(response.allow);
+        assert!(response.permissions.is_empty());
     }
 }

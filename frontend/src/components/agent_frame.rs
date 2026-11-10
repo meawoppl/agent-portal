@@ -37,8 +37,8 @@ pub enum AgentFrameKind {
     ClaudeUser,
     ClaudeError,
     ClaudeRateLimitEvent,
-    /// Command transport bookkeeping. Recognized but omitted from the
-    /// transcript; see the grouping filter for #1913.
+    /// Command lifecycle. Ordinary queue/ack frames stay hidden; scheduler
+    /// starts explain automatic turns with a wakeup marker.
     ClaudeCommandLifecycle,
     Portal,
     OptimisticUser,
@@ -50,6 +50,7 @@ pub enum AgentFrameKind {
     CodexItemUpdated,
     CodexItemCompleted,
     CodexError,
+    CodexHookCompleted,
     CodexTurnDiffUpdated,
     CodexFileChangePatchUpdated,
     CodexTurnPlanUpdated,
@@ -193,6 +194,7 @@ impl FrameRenderer {
             | AgentFrameKind::CodexItemUpdated
             | AgentFrameKind::CodexItemCompleted
             | AgentFrameKind::CodexError
+            | AgentFrameKind::CodexHookCompleted
             | AgentFrameKind::CodexTurnDiffUpdated
             | AgentFrameKind::CodexFileChangePatchUpdated
             | AgentFrameKind::CodexTurnPlanUpdated
@@ -254,6 +256,7 @@ impl CodexEvent {
             }
             Self::ReasoningTextDelta { .. } => AgentFrameKind::CodexReasoningTextDelta,
             Self::ThreadCompacted { .. } => AgentFrameKind::CodexThreadCompacted,
+            Self::HookCompleted { .. } => AgentFrameKind::CodexHookCompleted,
             Self::Unknown => AgentFrameKind::RawJson,
         }
     }

@@ -382,6 +382,14 @@ pub(super) fn classify_output_msg_type(output: &str) -> ActivityTag {
         return tag;
     }
     if let Ok(parsed) = ClaudeMessage::parse(output) {
+        // Portal-local and Codex errors share {type: error, message}. Match
+        // the renderer registry's Codex precedence so willRetry survives the
+        // lenient local-error fallback instead of becoming a terminal error.
+        if matches!(parsed, ClaudeMessage::LocalError(_)) {
+            if let Some(tag) = classify_codex_event(output) {
+                return tag;
+            }
+        }
         return message_type_tag(&parsed);
     }
     if let Some(tag) = classify_codex_event(output) {
@@ -549,6 +557,10 @@ fn classify_codex_event(output: &str) -> Option<ActivityTag> {
         CodexEvent::TurnCompleted { .. } | CodexEvent::TurnFailed { .. } => {
             Some(ActivityTag::Result)
         }
+        // Retry and hook diagnostics are notices, not turn terminators.
+        // Error drives edit-stack failure and stops Send all in SessionView.
+        CodexEvent::Error { error } if error.will_retry => Some(ActivityTag::System),
+        CodexEvent::HookCompleted { .. } => Some(ActivityTag::System),
         CodexEvent::Error { .. } => Some(ActivityTag::Error),
         // `thread.started` / `turn.started` and the streaming deltas
         // (PlanDelta / ReasoningTextDelta / ReasoningSummaryPartAdded) and the
@@ -579,6 +591,25 @@ fn is_sed_print_read(command: &str) -> bool {
     }
 
     command.contains('p')
+}
+
+/// Settle the active edit-stack turn only on a terminal activity signal.
+/// Diagnostic notices leave the active item and Send all mode unchanged.
+pub(super) fn reconcile_edit_stack_activity(
+    active: &mut Option<(uuid::Uuid, uuid::Uuid)>,
+    send_all: &mut bool,
+    tag: ActivityTag,
+) -> Option<(uuid::Uuid, &'static str)> {
+    let status = match tag {
+        ActivityTag::Result => "completed",
+        ActivityTag::Error => "failed",
+        _ => return None,
+    };
+    let (item_id, _) = active.take()?;
+    if tag == ActivityTag::Error {
+        *send_all = false;
+    }
+    Some((item_id, status))
 }
 
 /// Drain pending optimistic-send entries when the server confirms our input.
@@ -2018,5 +2049,43 @@ mod tests {
         assert_eq!(format_tool_elapsed(3725.0), "1h 02m");
         // Negative guards to zero rather than panicking.
         assert_eq!(format_tool_elapsed(-5.0), "0s");
+    }
+    #[test]
+    fn nonterminal_codex_notices_preserve_the_active_edit_stack_turn_and_send_all() {
+        let hook = r#"{"type":"hook/completed","params":{"threadId":"thread","run":{"eventName":"preToolUse","status":"blocked","executionMode":"sync","handlerType":"command","sourcePath":"/hook","scope":"turn"}}}"#;
+        let retry = r#"{"type":"error","message":"Retrying connection","willRetry":true}"#;
+        let terminal = r#"{"type":"error","message":"Request failed","willRetry":false}"#;
+        let item = uuid::Uuid::new_v4();
+        let prompt = uuid::Uuid::new_v4();
+        let mut active = Some((item, prompt));
+        let mut send_all = true;
+        for notice in [hook, retry] {
+            let tag = classify_output_msg_type(notice);
+            assert_eq!(tag, ActivityTag::System);
+            assert_eq!(
+                reconcile_edit_stack_activity(&mut active, &mut send_all, tag),
+                None
+            );
+            assert_eq!(active, Some((item, prompt)));
+            assert!(send_all);
+        }
+        let tag = classify_output_msg_type(terminal);
+        assert_eq!(tag, ActivityTag::Error);
+        assert_eq!(
+            reconcile_edit_stack_activity(&mut active, &mut send_all, tag),
+            Some((item, "failed"))
+        );
+        assert!(active.is_none());
+        assert!(!send_all);
+
+        active = Some((item, prompt));
+        send_all = true;
+        let completed = classify_output_msg_type(r#"{"type":"turn.completed"}"#);
+        assert_eq!(
+            reconcile_edit_stack_activity(&mut active, &mut send_all, completed),
+            Some((item, "completed"))
+        );
+        assert!(active.is_none());
+        assert!(send_all);
     }
 }

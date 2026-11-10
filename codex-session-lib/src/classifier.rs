@@ -121,6 +121,10 @@ fn classify_notification(notif: Notification) -> Vec<AgentOutput> {
             vec![AgentOutput::Visible(event)]
         }
 
+        Notification::HookCompleted(notification) => visible_hook_failure(notification)
+            .map(|notification| passthrough("hook/completed", &notification))
+            .unwrap_or_else(|| vec![AgentOutput::Noop]),
+
         // Streaming/plan/diff notifications — emit a typed passthrough block.
         Notification::PlanDelta(p) => passthrough("item/plan/delta", &p),
         Notification::TurnPlanUpdated(p) => passthrough("turn/plan/updated", &p),
@@ -139,6 +143,38 @@ fn classify_notification(notif: Notification) -> Vec<AgentOutput> {
     }
 }
 
+/// Preserve actionable hook failures without turning per-model-call hooks
+/// into a transcript stream. Model-only context and opaque source metadata are
+/// deliberately excluded from this user-facing bounded projection.
+fn visible_hook_failure(
+    mut notification: codex_codes::HookCompletedNotification,
+) -> Option<codex_codes::HookCompletedNotification> {
+    use codex_codes::{HookEventName, HookOutputEntryKind, HookRunStatus};
+    if matches!(
+        notification.run.event_name,
+        HookEventName::PreModelRequest | HookEventName::PostModelRequest
+    ) || !matches!(
+        notification.run.status,
+        HookRunStatus::Failed | HookRunStatus::Blocked
+    ) {
+        return None;
+    }
+    let run = &mut notification.run;
+    run.source = None;
+    run.entries
+        .retain(|entry| !matches!(entry.kind, HookOutputEntryKind::Context));
+    run.entries.truncate(8);
+    for entry in &mut run.entries {
+        entry.text = shared::strings::truncate_with_ellipsis(&entry.text, 2_000);
+    }
+    run.status_message = run
+        .status_message
+        .as_ref()
+        .map(|message| shared::strings::truncate_with_ellipsis(message, 2_000));
+    run.source_path.0 = shared::strings::truncate_with_ellipsis(&run.source_path.0, 1_000);
+    Some(notification)
+}
+
 fn is_guardian_approval(message: &str) -> bool {
     message.starts_with("Automatic approval review approved")
 }
@@ -148,6 +184,9 @@ fn classify_request(request_id: String, request: ServerRequest) -> Vec<AgentOutp
         ServerRequest::CmdExecApproval(p) => permission(
             request_id,
             CodexPermissionInput::Bash {
+                kind: p.kind,
+                reason: p.reason,
+                network_approval_context: p.network_approval_context,
                 command: p.command.unwrap_or_else(|| "(unknown)".to_string()),
                 cwd: p.cwd.map(|c| c.0).unwrap_or_default(),
                 parsed_cmd: None,
@@ -555,5 +594,98 @@ mod tests {
             }
             other => panic!("expected PermissionRequest, got {other:?}"),
         }
+    }
+    fn hook_notification(event: &str, status: &str) -> codex_codes::HookCompletedNotification {
+        serde_json::from_value(json!({
+            "threadId": "thread", "turnId": "turn", "run": {
+                "id": "hook", "eventName": event, "status": status,
+                "scope": "turn", "executionMode": "sync", "handlerType": "command", "sourcePath": "/hooks/check",
+                "statusMessage": "Hook refused the operation",
+                "source": { "opaque": "model-only source" },
+                "entries": [{"kind":"context","text":"model-only context"},{"kind":"error","text":"Human-readable refusal"}]
+            }
+        })).unwrap()
+    }
+
+    #[test]
+    fn hook_failures_are_visible_without_model_only_context_or_lifecycle_noise() {
+        for status in ["failed", "blocked"] {
+            let output = classify(ServerMessage::Notification(Notification::HookCompleted(
+                hook_notification("preToolUse", status),
+            )));
+            let [AgentOutput::Visible(event)] = output.as_slice() else {
+                panic!("hook failure must be visible")
+            };
+            assert_eq!(event["type"], "hook/completed");
+            assert_eq!(
+                event["params"]["run"]["entries"][0]["text"],
+                "Human-readable refusal"
+            );
+            assert!(!event.to_string().contains("model-only"));
+        }
+        for event in ["preModelRequest", "postModelRequest"] {
+            for status in ["failed", "blocked", "completed"] {
+                assert_eq!(
+                    classify(ServerMessage::Notification(Notification::HookCompleted(
+                        hook_notification(event, status)
+                    ))),
+                    vec![AgentOutput::Noop]
+                );
+            }
+        }
+        for status in ["running", "completed", "stopped"] {
+            assert_eq!(
+                classify(ServerMessage::Notification(Notification::HookCompleted(
+                    hook_notification("preToolUse", status)
+                ))),
+                vec![AgentOutput::Noop]
+            );
+        }
+    }
+
+    #[test]
+    fn hook_failure_diagnostic_projection_is_bounded() {
+        let mut notification = hook_notification("userPromptSubmit", "blocked");
+        notification.run.entries = (0..100)
+            .map(|_| codex_codes::HookOutputEntry {
+                kind: codex_codes::HookOutputEntryKind::Error,
+                text: "x".repeat(10_000),
+            })
+            .collect();
+        notification.run.status_message = Some("x".repeat(10_000));
+        notification.run.source_path.0 = "x".repeat(10_000);
+        let bounded = visible_hook_failure(notification).unwrap();
+        assert_eq!(bounded.run.entries.len(), 8);
+        assert!(bounded
+            .run
+            .entries
+            .iter()
+            .all(|entry| entry.text.chars().count() <= 2_000));
+        assert!(bounded.run.status_message.unwrap().chars().count() <= 2_000);
+        assert!(bounded.run.source_path.0.chars().count() <= 1_000);
+        assert!(bounded.run.source.is_none());
+    }
+
+    #[test]
+    fn human_command_preparation_preserves_context_without_remembered_suggestions() {
+        let params = serde_json::from_value(json!({
+            "command": "deploy", "cwd": "/workspace", "kind": "humanCommand",
+            "reason": "Managed policy checkpoint", "networkApprovalContext": {"host":"example.com","protocol":"https"}
+        })).unwrap();
+        let output = classify(ServerMessage::Request {
+            id: RequestId::Integer(42),
+            request: ServerRequest::CmdExecApproval(params),
+        });
+        let [AgentOutput::PermissionRequest {
+            input, suggestions, ..
+        }] = output.as_slice()
+        else {
+            panic!("expected manual permission")
+        };
+        let typed: CodexPermissionInput = serde_json::from_value(input.clone()).unwrap();
+        assert!(typed.requires_fresh_human_decision());
+        assert!(suggestions.is_empty());
+        assert_eq!(input["reason"], "Managed policy checkpoint");
+        assert_eq!(input["networkApprovalContext"]["host"], "example.com");
     }
 }
