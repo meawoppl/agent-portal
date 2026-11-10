@@ -120,6 +120,21 @@ mod tests {
     }
 
     #[test]
+    fn inference_hook_denial_is_typed_and_terminal() {
+        // A workspace hook denial must stop the turn, not enter capacity backoff.
+        let error: CodexErrorDetails = serde_json::from_str(
+            r#"{"message":"workspace hook denied inference","codexErrorInfo":"inferenceHookDenied"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            error.codex_error_info,
+            Some(CodexErrorInfo::InferenceHookDenied)
+        );
+        assert_eq!(error.activity(), Idle);
+        assert!(!error.will_retry);
+    }
+
+    #[test]
     fn retry_and_capacity_have_distinct_activity() {
         let retry: CodexErrorDetails =
             serde_json::from_str(r#"{"message":"network retry","willRetry":true}"#).unwrap();
