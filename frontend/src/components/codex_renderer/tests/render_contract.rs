@@ -91,3 +91,23 @@ fn app_server_reasoning_keeps_its_trace_and_lifecycle_id() {
         serde_json::from_str(r#"{"type":"reasoning","id":"r1","text":"hi"}"#).unwrap();
     assert!(matches!(exec, CodexItem::Thread(_)));
 }
+
+#[test]
+fn retries_render_as_status_instead_of_terminal_error_cards() {
+    use yew::virtual_dom::VNode;
+    let event: CodexEvent =
+        serde_json::from_str(r#"{"type":"error","message":"connection reset","willRetry":true}"#)
+            .unwrap();
+    let node = render_codex_frame_content(&event, Uuid::nil()).unwrap();
+    let VNode::VTag(tag) = node else {
+        panic!("retry should be one status line")
+    };
+    assert!(tag
+        .attributes
+        .iter()
+        .any(|(key, value)| key == "class" && value == "codex-retry-message"));
+    assert!(tag
+        .attributes
+        .iter()
+        .any(|(key, value)| key == "role" && value == "status"));
+}

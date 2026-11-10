@@ -335,3 +335,20 @@ fn event_reasoning_text_delta_typed_no_op() {
     let event: CodexEvent = serde_json::from_str(json).unwrap();
     assert!(matches!(event, CodexEvent::ReasoningTextDelta { .. }));
 }
+
+#[test]
+fn error_frames_keep_retry_and_action_metadata_with_legacy_fallback() {
+    let retry: CodexEvent = serde_json::from_str(r#"{"type":"error","message":"try again","willRetry":true,"codexErrorInfo":"serverOverloaded"}"#).unwrap();
+    let CodexEvent::Error { error } = retry else {
+        panic!("expected error")
+    };
+    assert!(error.will_retry);
+    assert!(error.action_hint().unwrap().contains("later"));
+    let legacy: CodexEvent =
+        serde_json::from_str(r#"{"type":"error","message":"old failure"}"#).unwrap();
+    let CodexEvent::Error { error } = legacy else {
+        panic!("expected legacy error")
+    };
+    assert!(!error.will_retry);
+    assert_eq!(error.message.as_deref(), Some("old failure"));
+}

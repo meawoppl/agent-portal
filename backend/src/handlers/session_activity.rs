@@ -152,6 +152,22 @@ pub(crate) fn activity_signal(
     {
         return Some(Throttled);
     }
+    if agent == "codex" {
+        // Completion follows the visible terminal error. Preserve its capacity
+        // refusal instead of overwriting Throttled with Idle on the next row.
+        let error = match kind {
+            "error" => Some(value.clone()),
+            "turn.completed" | "turn.failed" => {
+                value.get("error").filter(|e| !e.is_null()).cloned()
+            }
+            _ => None,
+        };
+        if let Some(error) = error.and_then(|error| {
+            serde_json::from_value::<shared::codex_errors::CodexErrorDetails>(error).ok()
+        }) {
+            return Some(error.activity());
+        }
+    }
     match (agent, kind) {
         ("claude", "result" | "error") => Some(Idle),
         ("claude", "assistant" | "stream_event") => Some(Busy),
@@ -228,6 +244,48 @@ mod tests {
             activity_signal("codex", "user", "Please continue"),
             Some(Busy)
         );
+    }
+
+    #[test]
+    fn codex_retry_capacity_and_completion_keep_correct_activity() {
+        for (frame, expected) in [
+            (
+                r#"{"type":"error","message":"retrying network","willRetry":true}"#,
+                Busy,
+            ),
+            (
+                r#"{"type":"error","message":"bad request","willRetry":false}"#,
+                Idle,
+            ),
+            (r#"{"type":"error","message":"legacy error"}"#, Idle),
+            (
+                r#"{"type":"error","message":"retry capacity","codexErrorInfo":"serverOverloaded","willRetry":true}"#,
+                Throttled,
+            ),
+            (
+                r#"{"type":"turn.completed","status":"failed","error":{"message":"limit","codexErrorInfo":"usageLimitExceeded"}}"#,
+                Throttled,
+            ),
+            (
+                r#"{"type":"turn.completed","status":"failed","error":{"message":"context","codexErrorInfo":"contextWindowExceeded"}}"#,
+                Idle,
+            ),
+            (r#"{"type":"turn.completed","status":"completed"}"#, Idle),
+            (r#"{"type":"item.started"}"#, Busy),
+        ] {
+            assert_eq!(
+                activity_signal("codex", "assistant", frame),
+                Some(expected),
+                "{frame}"
+            );
+        }
+        // The completion immediately after an error must not erase throttling.
+        for frame in [
+            r#"{"type":"error","message":"capacity","codexErrorInfo":"rateLimitExceeded"}"#,
+            r#"{"type":"turn.completed","error":{"message":"capacity","codexErrorInfo":"rateLimitExceeded"}}"#,
+        ] {
+            assert_eq!(activity_signal("codex", "error", frame), Some(Throttled));
+        }
     }
 
     #[test]

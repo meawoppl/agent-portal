@@ -1990,3 +1990,15 @@
     color: var(--text-muted);
 }
 
+
+/* Retriable Codex failures are ongoing work, not terminal error cards. */
+.codex-retry-message {
+    color: var(--text-muted);
+    padding: 0.35rem 0.75rem;
+    font-size: 0.85rem;
+}
+.codex-error-hint {
+    color: var(--text-secondary);
+    padding: 0 0.75rem 0.5rem;
+    font-size: 0.85rem;
+}

@@ -84,7 +84,7 @@ fn render_codex_event(
             }
             item => render_item(item, true, session_id),
         },
-        CodexEvent::Error { message } => Some(render_error_block(message.as_deref())),
+        CodexEvent::Error { error } => Some(messages::render_codex_error(error)),
         CodexEvent::FileChangePatchUpdated { params } => Some(render_file_change_patch(
             params.as_ref().and_then(|p| p.changes.as_deref()),
         )),

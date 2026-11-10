@@ -22,9 +22,7 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CodexEvent {
     #[serde(rename = "thread.started")]
-    ThreadStarted {
-        thread_id: Option<String>,
-    },
+    ThreadStarted { thread_id: Option<String> },
     #[serde(rename = "turn.started")]
     TurnStarted {},
     #[serde(rename = "turn.completed")]
@@ -38,23 +36,16 @@ pub enum CodexEvent {
         status: Option<String>,
     },
     #[serde(rename = "turn.failed")]
-    TurnFailed {
-        error: Option<CodexError>,
-    },
+    TurnFailed { error: Option<CodexError> },
     #[serde(rename = "item.started")]
-    ItemStarted {
-        item: Option<CodexItem>,
-    },
+    ItemStarted { item: Option<CodexItem> },
     #[serde(rename = "item.updated")]
-    ItemUpdated {
-        item: Option<CodexItem>,
-    },
+    ItemUpdated { item: Option<CodexItem> },
     #[serde(rename = "item.completed")]
-    ItemCompleted {
-        item: Option<CodexItem>,
-    },
+    ItemCompleted { item: Option<CodexItem> },
     Error {
-        message: Option<String>,
+        #[serde(flatten)]
+        error: shared::codex_errors::CodexErrorDetails,
     },
     // Streaming-delta / plan / diff notifications. The proxy forwards these as
     // `{"type": "<slash-named method>", "params": <inner-payload>}`. The
@@ -74,17 +65,11 @@ pub enum CodexEvent {
         params: Option<TurnPlanUpdatedParams>,
     },
     #[serde(rename = "item/plan/delta")]
-    PlanDelta {
-        params: Option<PlanDeltaParams>,
-    },
+    PlanDelta { params: Option<PlanDeltaParams> },
     #[serde(rename = "item/reasoning/summaryPartAdded")]
-    ReasoningSummaryPartAdded {
-        params: Option<serde_json::Value>,
-    },
+    ReasoningSummaryPartAdded { params: Option<serde_json::Value> },
     #[serde(rename = "item/reasoning/textDelta")]
-    ReasoningTextDelta {
-        params: Option<serde_json::Value>,
-    },
+    ReasoningTextDelta { params: Option<serde_json::Value> },
     #[serde(rename = "thread/compacted")]
     ThreadCompacted {
         params: Option<ContextCompactedParams>,
@@ -272,10 +257,7 @@ impl CodexUsage {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct CodexError {
-    pub message: Option<String>,
-}
+pub type CodexError = shared::codex_errors::CodexErrorDetails;
 
 /// Stable per-item identifier carried through the `started` → `updated` →
 /// `completed` lifecycle. Used by the message-group dedup pass to collapse

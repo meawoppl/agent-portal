@@ -153,6 +153,7 @@ pub(super) fn render_turn_failed(
             </div>
             <div class="message-body">
                 <div class="error-text">{ message }</div>
+                { error.and_then(|e| e.action_hint()).map(|hint| html! { <div class="codex-error-hint">{ hint }</div> }).unwrap_or_default() }
             </div>
             { metrics_footer }
         </div>
