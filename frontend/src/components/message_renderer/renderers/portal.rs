@@ -29,7 +29,7 @@ pub fn render_portal_message(
     html! {
         <div class="claude-message portal-message">
             <div class="message-header" title={timestamp.unwrap_or_default().to_string()}>
-                <span class="message-type-badge portal">{ "Portal" }</span>
+                <span class="message-type-badge portal">{ if msg.automated { "Automated" } else { "Portal" } }</span>
                 if !copy_text.is_empty() {
                     <CopyButton text={copy_text} title="Copy portal text" />
                 }

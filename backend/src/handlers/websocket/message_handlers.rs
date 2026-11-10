@@ -95,10 +95,12 @@ pub fn replay_pending_inputs_from_db(
             }
         };
 
+        let (content, automated) = shared::PortalMessage::input_wire_parts(content);
         let msg = ServerToProxy::SequencedInput {
             session_id,
             seq: input.seq_num,
             content,
+            automated,
             send_mode: parse_send_mode(&input.send_mode),
             reasoning_effort: input
                 .reasoning_effort

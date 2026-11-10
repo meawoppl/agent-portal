@@ -125,7 +125,10 @@ async fn send_claude_user_input(
         pending_echo_drops,
         synthesize_visible_echo,
     } = args;
-    let input = ClaudeInput::user_message(text.clone(), session_id);
+    let automated = display_event
+        .as_deref()
+        .is_some_and(automated_display_input);
+    let input = claude_user_input(text.clone(), session_id, automated);
     let result = client.send(&input).await;
 
     if result.is_ok() {
@@ -146,8 +149,33 @@ async fn send_claude_user_input(
     result.map(|_| input)
 }
 
+fn automated_display_input(value: &serde_json::Value) -> bool {
+    if let Ok(portal) = serde_json::from_value::<shared::PortalMessage>(value.clone()) {
+        if portal.message_type == shared::PortalMessage::MESSAGE_TYPE {
+            return portal.automated || portal.agent_facing_text().is_some();
+        }
+    }
+    matches!(serde_json::from_value::<ClaudeOutput>(value.clone()),
+        Ok(ClaudeOutput::User(user)) if user.text_not_typed == Some(true))
+}
+
+fn claude_user_input(text: String, session_id: Uuid, automated: bool) -> ClaudeInput {
+    let mut input = ClaudeInput::user_message(text, session_id);
+    if let ClaudeInput::User(user) = &mut input {
+        user.text_not_typed = automated.then_some(true);
+    }
+    input
+}
+
+pub(crate) fn automated_user_echo_value(text: String, session_id: Uuid) -> serde_json::Value {
+    let ClaudeInput::User(user) = claude_user_input(text, session_id, true) else {
+        return serde_json::Value::Null;
+    };
+    serde_json::to_value(ClaudeOutput::User(user)).unwrap_or_default()
+}
+
 pub(crate) fn claude_user_echo_value(text: String, session_id: Uuid) -> serde_json::Value {
-    let input = ClaudeInput::user_message(text, session_id);
+    let input = claude_user_input(text, session_id, false);
     let ClaudeInput::User(user) = input else {
         return serde_json::Value::Null;
     };
@@ -456,9 +484,12 @@ impl ClaudeIoState {
     /// rate-limit latch, then advances the retry budget.
     fn on_rate_limit_terminator(&mut self) -> RateLimitDecision {
         self.current_turn_was_rate_limited = false;
-        let Some(input) = self.last_input.clone() else {
+        let Some(mut input) = self.last_input.clone() else {
             return RateLimitDecision::NoInput;
         };
+        if let ClaudeInput::User(user) = &mut input {
+            user.text_not_typed = Some(true);
+        }
         if self.rate_limit_attempts >= MAX_RATE_LIMIT_RETRIES {
             let attempts = self.rate_limit_attempts;
             self.rate_limit_attempts = 0;
@@ -1181,6 +1212,37 @@ mod tests {
     // --- claude_control_response: neutral PermissionDecision → ControlResponse.
     // Ported from the deleted `ClaudeAdapter::permission_response` tests; this is
     // permission hot-path code so the characterization net moves with the logic.
+
+    #[test]
+    fn automation_provenance_preserves_literal_commands_and_human_inputs() {
+        let session_id = Uuid::nil();
+        let text = "/do-something @file";
+        let input = claude_user_input(text.into(), session_id, true);
+        let ClaudeInput::User(user) = input else {
+            panic!("user input")
+        };
+        assert_eq!(user.text_not_typed, Some(true));
+        let human = claude_user_echo_value(text.into(), session_id);
+        assert!(!automated_display_input(&human));
+        assert!(automated_display_input(&automated_user_echo_value(
+            text.into(),
+            session_id
+        )));
+        let portal = shared::PortalMessage::automated_prompt(text.into());
+        assert_eq!(portal.agent_facing_text().as_deref(), Some(text));
+        assert!(automated_display_input(&portal.to_json()));
+        assert!(!automated_display_input(
+            &shared::PortalMessage::text(text.into()).to_json()
+        ));
+        assert!(automated_display_input(
+            &shared::PortalMessage::agent_message(
+                "codex".into(),
+                session_id.to_string(),
+                text.into()
+            )
+            .to_json()
+        ));
+    }
 
     #[test]
     fn control_response_allow_uses_empty_input_by_default() {

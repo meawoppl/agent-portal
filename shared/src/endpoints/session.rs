@@ -273,6 +273,10 @@ pub enum ServerToProxy {
     #[serde(rename = "ClaudeInput")]
     AgentInput {
         content: serde_json::Value,
+        /// Literal automated input; absent means legacy/human input. Kept
+        /// outside content so older proxies still receive plain prompt text.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        automated: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         send_mode: Option<SendMode>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -284,6 +288,10 @@ pub enum ServerToProxy {
         session_id: Uuid,
         seq: i64,
         content: serde_json::Value,
+        /// Literal automated input; absent means legacy/human input. Kept
+        /// outside content so older proxies still receive plain prompt text.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        automated: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         send_mode: Option<SendMode>,
         /// Optional per-turn reasoning effort override. Agents that do not

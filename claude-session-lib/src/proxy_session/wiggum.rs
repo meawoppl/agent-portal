@@ -13,7 +13,7 @@ use session_lib::agent::Agent;
 use session_lib::output_buffer::PendingOutputBuffer;
 use session_lib::session::Session;
 
-use crate::io_task::claude_user_echo_value;
+use crate::io_task::automated_user_echo_value;
 
 use super::git_metadata::{check_and_send_branch_update_if_branch_changed, GitMetadataState};
 use super::{
@@ -28,7 +28,7 @@ const WIGGUM_MAX_ITERATIONS: u32 = 50;
 /// exact wording drives DONE-loop detection, and the activation card quotes
 /// it so the transcript shows what framing was applied (the agent-side echo
 /// deliberately shows only the user's original text — see
-/// `claude_user_echo_value` use below).
+/// `automated_user_echo_value` use below).
 const WIGGUM_FRAMING: &str = "Take action on the directions above until fully complete. If complete, respond only with DONE.";
 
 /// Build the wiggum loop prompt sent to the agent: the original user prompt
@@ -139,18 +139,19 @@ pub(super) async fn handle_wiggum_activation<A: Agent>(
     // display event is already the user's own prompt, so it survives.
     let (prompt, display_event) = {
         let framed = wiggum_prompt(&original_prompt);
-        let display = claude_user_echo_value(original_prompt.clone(), session_id);
+        let display = automated_user_echo_value(original_prompt.clone(), session_id);
         if reminder_pending.swap(false, std::sync::atomic::Ordering::SeqCst) {
             let (text, display) = super::portal_reminder::fold_session_start_reminder(
                 framed,
                 Some(display),
                 claude_session.config().plugin_skill_reminder.as_deref(),
-                |text| claude_user_echo_value(text.to_string(), session_id),
+                |text| automated_user_echo_value(text.to_string(), session_id),
             );
             (
                 text,
-                display
-                    .unwrap_or_else(|| claude_user_echo_value(original_prompt.clone(), session_id)),
+                display.unwrap_or_else(|| {
+                    automated_user_echo_value(original_prompt.clone(), session_id)
+                }),
             )
         } else {
             (framed, display)
@@ -298,7 +299,7 @@ pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
                         // Resend the prompt
                         let mut prompt = wiggum_prompt(&state.original_prompt);
                         let mut display_event =
-                            claude_user_echo_value(state.original_prompt.clone(), session_id);
+                            automated_user_echo_value(state.original_prompt.clone(), session_id);
                         // A compaction mid-loop re-armed the reminder; this
                         // resend is the next input, so it carries it.
                         if reminder_pending.swap(false, std::sync::atomic::Ordering::SeqCst) {
@@ -307,7 +308,7 @@ pub(super) async fn handle_session_event_with_wiggum<A: Agent>(
                                     prompt,
                                     Some(display_event.clone()),
                                     claude_session.config().plugin_skill_reminder.as_deref(),
-                                    |text| claude_user_echo_value(text.to_string(), session_id),
+                                    |text| automated_user_echo_value(text.to_string(), session_id),
                                 );
                             prompt = text;
                             display_event = display.unwrap_or(display_event);
