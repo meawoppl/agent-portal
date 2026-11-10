@@ -51,6 +51,9 @@ pub struct ImportSessionResponse {
 /// run tools, or contribute to Portal's live usage accounting.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImportedMessage {
+    /// Native record clock, when available. Missing on older launchers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<chrono::DateTime<chrono::Utc>>,
     pub role: String,
     pub content: serde_json::Value,
 }
