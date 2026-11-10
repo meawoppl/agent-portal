@@ -91,13 +91,15 @@ impl MuseClassifier {
                 return vec![AgentOutput::Noop];
             }
             MusePayload::RunTerminal(terminal) => {
-                let counts = self
-                    .pending_usage
-                    .take()
-                    .filter(|usage| {
-                        usage.command_id == terminal.command_id
-                            && usage.run_stream == terminal.run_stream
-                    })
+                let matches_usage = self.pending_usage.as_ref().is_some_and(|usage| {
+                    usage.command_id == terminal.command_id
+                        && usage.run_stream == terminal.run_stream
+                });
+                // A child or stale terminal can interleave before this run's
+                // terminal. Only consume telemetry on an identity match.
+                let counts = matches_usage
+                    .then(|| self.pending_usage.take())
+                    .flatten()
                     .map(|usage| shared::MuseCallCounts {
                         calls: usage.calls,
                         completed_calls: usage.completed_calls,
@@ -443,6 +445,31 @@ mod tests {
                 .unwrap()
                 .muse_call_counts,
             None
+        );
+        let mut other_stream = terminal("cmd-1");
+        other_stream.payload["run_stream"]["id"] = json!("child-run");
+        let output = classifier.classify(other_stream);
+        let [AgentOutput::Visible(value)] = output.as_slice() else {
+            panic!("durable terminal")
+        };
+        assert_eq!(
+            shared::MuseTerminalTelemetry::deserialize(value)
+                .unwrap()
+                .muse_call_counts,
+            None
+        );
+        let output = classifier.classify(terminal("cmd-1"));
+        let [AgentOutput::Visible(value)] = output.as_slice() else {
+            panic!("durable terminal")
+        };
+        assert_eq!(
+            shared::MuseTerminalTelemetry::deserialize(value)
+                .unwrap()
+                .muse_call_counts
+                .unwrap()
+                .calls,
+            4,
+            "unrelated command/child terminals must not consume main-run telemetry"
         );
     }
 
