@@ -47,7 +47,11 @@ pub fn handle_turn_metrics_report(
     let mut conn = match db_pool.get() {
         Ok(c) => c,
         Err(e) => {
-            error!("Failed to get DB connection for turn metrics insert: {}", e);
+            error!(
+                "{} DB connection: {}",
+                crate::markers::TURN_METRICS_PERSIST_FAILED,
+                e
+            );
             return;
         }
     };
@@ -67,8 +71,10 @@ pub fn handle_turn_metrics_report(
             Ok(row) => row,
             Err(e) => {
                 error!(
-                    "Failed to resolve owner for session {} (turn metrics insert): {}",
-                    session_id, e
+                    "{} owner lookup for session {}: {}",
+                    crate::markers::TURN_METRICS_PERSIST_FAILED,
+                    session_id,
+                    e
                 );
                 return;
             }
@@ -101,7 +107,11 @@ pub fn handle_turn_metrics_report(
         }
     }
 
+    metrics.total_cost_usd = metrics
+        .total_cost_usd
+        .filter(|cost| cost.is_finite() && *cost >= 0.0);
     let new_row = NewTurnMetric {
+        id: metrics.id,
         session_id,
         user_id: owner_id,
         user_message_id: metrics.user_message_id,
@@ -131,13 +141,37 @@ pub fn handle_turn_metrics_report(
     };
 
     use crate::schema::turn_metrics;
-    let inserted: TurnMetric = match diesel::insert_into(turn_metrics::table)
-        .values(&new_row)
-        .get_result(&mut conn)
-    {
-        Ok(row) => row,
+    // Stable driver IDs make re-delivery harmless. Insert and native Codex
+    // session-cost addition commit together; Claude uses its result ledger.
+    let inserted: TurnMetric = match conn.transaction::<_, diesel::result::Error, _>(|conn| {
+        let row = diesel::insert_into(turn_metrics::table)
+            .values(&new_row)
+            .on_conflict(turn_metrics::id)
+            .do_nothing()
+            .get_result::<TurnMetric>(conn)
+            .optional()?;
+        if row.is_some() && metrics.agent_type == shared::AgentType::Codex && metrics.id.is_some() {
+            if let Some(cost) = metrics.total_cost_usd {
+                use diesel::sql_types::{Double, Uuid as SqlUuid};
+                diesel::sql_query(
+                    "UPDATE sessions SET total_cost_usd = total_cost_usd + $2 WHERE id = $1",
+                )
+                .bind::<SqlUuid, _>(session_id)
+                .bind::<Double, _>(cost)
+                .execute(conn)?;
+            }
+        }
+        Ok(row)
+    }) {
+        Ok(Some(row)) => row,
+        Ok(None) => return,
         Err(e) => {
-            error!("Failed to insert turn metrics row: {}", e);
+            error!(
+                "{} session {}: {}",
+                crate::markers::TURN_METRICS_PERSIST_FAILED,
+                session_id,
+                e
+            );
             return;
         }
     };
@@ -215,6 +249,76 @@ fn should_persist_model(stored: Option<&str>, observed: Option<&str>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::should_persist_model;
+
+    #[test]
+    fn codex_cost_and_metric_identity_commit_once_across_replay() {
+        use crate::schema::{sessions, turn_metrics, users};
+        use crate::test_support::{insert_session, insert_user, shared_pool, test_app_state};
+        use diesel::prelude::*;
+        let Some(pool) = shared_pool() else {
+            return;
+        };
+        let mut conn = pool.get().unwrap();
+        let owner = insert_user(&mut conn, "codex_native_cost");
+        let session = insert_session(&mut conn, owner.id, "native-cost");
+        let app = test_app_state(pool);
+        let mut metrics: shared::TurnMetrics = serde_json::from_str(r#"{"session_id":"00000000-0000-0000-0000-000000000000","agent_type":"codex","model":"gpt-6","started_at":"2026-11-09T23:00:00Z"}"#).unwrap();
+        metrics.id = Some(uuid::Uuid::new_v4());
+        metrics.total_cost_usd = Some(2.5);
+        for _ in 0..2 {
+            super::handle_turn_metrics_report(
+                &app.session_manager,
+                &None,
+                Some(session.id),
+                &app.db_pool,
+                metrics.clone(),
+            );
+        }
+        let total = || {
+            sessions::table
+                .find(session.id)
+                .select(sessions::total_cost_usd)
+                .first::<f64>(&mut app.db_pool.get().unwrap())
+                .unwrap()
+        };
+        assert_eq!(total(), 2.5);
+        assert_eq!(
+            turn_metrics::table
+                .filter(turn_metrics::session_id.eq(session.id))
+                .count()
+                .get_result::<i64>(&mut conn)
+                .unwrap(),
+            1
+        );
+        metrics.id = Some(uuid::Uuid::new_v4());
+        metrics.total_cost_usd = None;
+        super::handle_turn_metrics_report(
+            &app.session_manager,
+            &None,
+            Some(session.id),
+            &app.db_pool,
+            metrics.clone(),
+        );
+        assert_eq!(total(), 2.5);
+        metrics.id = Some(uuid::Uuid::new_v4());
+        metrics.agent_type = shared::AgentType::Claude;
+        metrics.total_cost_usd = Some(99.0);
+        super::handle_turn_metrics_report(
+            &app.session_manager,
+            &None,
+            Some(session.id),
+            &app.db_pool,
+            metrics,
+        );
+        assert_eq!(
+            total(),
+            2.5,
+            "Claude result ledger remains the only Claude session-cost source"
+        );
+        diesel::delete(users::table.find(owner.id))
+            .execute(&mut conn)
+            .unwrap();
+    }
 
     #[test]
     fn writes_when_model_changes() {

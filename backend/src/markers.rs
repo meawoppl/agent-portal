@@ -32,6 +32,11 @@ pub const ATTENTION_PERSIST_FAILED: &str = "ATTENTION_PERSIST_FAILED";
 /// this accounting transaction automatically.
 pub const COST_ACCOUNTING_PERSIST_FAILED: &str = "COST_ACCOUNTING_PERSIST_FAILED";
 
+/// A turn metric and its optional native Codex cost could not commit. Bursts
+/// indicate database/schema failures; inspect DB health and retained billing
+/// evidence before reconciliation. Reports are best effort, not a durable outbox.
+pub const TURN_METRICS_PERSIST_FAILED: &str = "TURN_METRICS_PERSIST_FAILED";
+
 /// Emitted when a browser/agent input could **not be persisted** to the
 /// `pending_inputs` table — either the INSERT failed or no DB connection was
 /// available to attempt it. The message may still reach a live proxy, but the
@@ -206,6 +211,7 @@ mod tests {
     const ALL_MARKERS: &[&str] = &[
         ATTENTION_PERSIST_FAILED,
         COST_ACCOUNTING_PERSIST_FAILED,
+        TURN_METRICS_PERSIST_FAILED,
         SPAWN_LIFECYCLE_FAILED,
         PENDING_INPUT_PERSIST_FAILED,
         INPUT_SEQ_BUMP_FAILED,
@@ -259,6 +265,7 @@ mod tests {
         let sources: &[&str] = &[
             include_str!("background.rs"),
             include_str!("handlers/websocket/message_handlers.rs"),
+            include_str!("handlers/websocket/turn_metrics.rs"),
             include_str!("handlers/websocket/permissions.rs"),
             include_str!("push/dispatcher.rs"),
             include_str!("handlers/websocket/session_manager/input_queue.rs"),

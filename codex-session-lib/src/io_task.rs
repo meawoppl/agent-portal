@@ -382,37 +382,31 @@ pub(crate) async fn codex_io_task(
                     let model = started_thread_model(resp.model, &configured_model_fallback);
                     resumed_thread = Some((prior.clone(), model));
                 }
-                Err(e) if config.codex_require_resume => {
+                Err(e) => {
+                    let reason = crate::cost::request_error(&e);
                     let _ = event_tx.send(IoEvent::Error(SessionError::CommunicationError(format!(
-                        "Could not resume Codex conversation {prior}: {e}. No new conversation was created."
+                        "Could not resume Codex conversation {prior}: {reason}. No new conversation was created."
                     ))));
                     return;
-                }
-                Err(e) => {
-                    // Fall through to `thread_start`. Common failure modes: the
-                    // codex binary upgraded across a thread storage breaking
-                    // change, or the thread was archived out of band. The
-                    // portal transcript is rehydrated by the backend's replay
-                    // path independently, so the session stays usable.
-                    tracing::warn!(
-                        "Codex thread/resume of {} failed: {} — falling back to fresh thread_start",
-                        prior,
-                        e
-                    );
                 }
             }
         } else if config.codex_require_resume {
             let _ = event_tx.send(IoEvent::Error(SessionError::CommunicationError(
-                "Cannot resume: the saved Codex thread mapping is missing. No new conversation was created.".into()
+                "Cannot resume: the saved Codex thread mapping is missing. Restore the mapping or fork a new session to start fresh. No new conversation was created.".into()
             )));
             return;
         } else {
-            tracing::info!(
-                "Codex resume requested but no prior thread_id is known — starting fresh thread"
-            );
+            // Backend reconciliation can mark a never-launched desired session
+            // as resumed. With no native mapping there may be no old thread;
+            // retain that first-launch path, but never imply context survived.
+            let _ = event_tx.send(IoEvent::RawOutput(shared::PortalMessage::reminder(
+                "New Codex conversation".into(),
+                "No native Codex conversation mapping was found. Starting a fresh conversation; an existing portal transcript remains visible but is not restored native Codex context.".into(),
+            ).to_json()));
         }
     }
 
+    let fresh_thread = resumed_thread.is_none();
     let (thread_id, thread_model) = match resumed_thread {
         Some(thread) => thread,
         None => {
@@ -450,6 +444,9 @@ pub(crate) async fn codex_io_task(
         &thread_id,
     ))));
 
+    let native_cost_baseline = crate::cost::read_thread_cost(&mut client, &thread_id).await;
+    let mut native_cost = crate::cost::ThreadCostTracker::new(fresh_thread, native_cost_baseline);
+
     // Turn/queue/approval bookkeeping, gathered into a state struct with pure
     // transition methods (issue #917). `current_turn_id` tracks the turn being
     // driven so we can name it on `turn/interrupt` requests (codex-codes
@@ -483,6 +480,7 @@ pub(crate) async fn codex_io_task(
                 result = client.next_message() => {
                     match result {
                         Ok(Some(mut msg)) => {
+                            if !crate::cost::is_parent_lifecycle(&msg, &thread_id) { continue; }
                             if let Err(e) = settle_unsupported_request(&mut client, &msg).await {
                                 let _ = event_tx.send(IoEvent::Error(
                                     SessionError::CommunicationError(e.to_string()),
@@ -598,6 +596,11 @@ pub(crate) async fn codex_io_task(
                                 codex_codes::Notification::TurnCompleted(p),
                             ) = &msg
                             {
+                                let completed_instant = Instant::now();
+                                let completed_utc = chrono::Utc::now();
+                                let total_cost_usd = if p.thread_id == thread_id {
+                                    native_cost.observe(crate::cost::read_thread_cost(&mut client, &thread_id).await)
+                                } else { None };
                                 let status = match p.turn.status {
                                     codex_codes::TurnStatus::Completed => "completed",
                                     codex_codes::TurnStatus::Interrupted => "interrupted",
@@ -648,14 +651,15 @@ pub(crate) async fn codex_io_task(
                                     context_snapshot_tokens: None,
                                     stop_reason: Some(status.to_string()),
                                     is_error,
-                                    total_cost_usd: None,
+                                    total_cost_usd,
                                     model_context_window,
                                 };
-                                if let Some(metrics) = turn_tracker.finalize(
-                                    Instant::now(),
-                                    chrono::Utc::now(),
+                                if let Some(mut metrics) = turn_tracker.finalize(
+                                    completed_instant,
+                                    completed_utc,
                                     outcome,
                                 ) {
+                                    metrics.id = Some(uuid::Uuid::new_v4());
                                     if metrics.has_known_model() {
                                         let _ = event_tx
                                             .send(IoEvent::TurnMetricsReady(Box::new(metrics)));
@@ -998,6 +1002,7 @@ pub(crate) async fn codex_io_task(
                 result = client.next_message() => {
                     match result {
                         Ok(Some(mut msg)) => {
+                            if !crate::cost::is_parent_lifecycle(&msg, &thread_id) { continue; }
                             if let Err(e) = settle_unsupported_request(&mut client, &msg).await {
                                 let _ = event_tx.send(IoEvent::Error(
                                     SessionError::CommunicationError(e.to_string()),
@@ -1234,8 +1239,8 @@ async fn start_codex_turn_request(
             true
         }
         Err(e) => {
-            let message = e.to_string();
-            let event = TurnFailedEvent::new(e.to_string());
+            let message = crate::cost::request_error(&e);
+            let event = TurnFailedEvent::new(message.clone());
             let _ = event_tx.send(IoEvent::RawOutput(to_raw_output(&event)));
             if let Some(delivered) = delivered {
                 let _ = delivered.send(Err(message));
@@ -1920,6 +1925,8 @@ while IFS= read -r line; do
   method=$(printf '%s' "$line" | sed -n 's/^{{"id":[0-9]*,"method":"\([^"]*\)".*/\1/p')
   [ -z "$id" ] && continue
   case "$method" in
+    thread/resume)
+      printf '{{"id":%s,"error":{{"code":-32000,"message":"resume refused","data":{{"type":"modelProviderMismatch","modelProvider":"original","currentModelProvider":"current"}}}}}}\n' "$id" ;;
     thread/start)
       printf '{{"id":%s,"result":{{"approvalPolicy":"never","cwd":"/tmp","thread":{{"id":"thread-1"}}}}}}\n' "$id"
       printf '{{"id":"refresh-idle","method":"account/chatgptAuthTokens/refresh","params":{{"reason":"unauthorized","previousAccountId":"acct-secret"}}}}\n'
@@ -1968,6 +1975,73 @@ done
         assert_eq!(reply["error"]["code"], -32000, "{reply}");
         assert_eq!(reply["error"]["message"], TOKEN_REFRESH_UNSUPPORTED);
         assert!(reply.get("result").is_none());
+    }
+
+    #[tokio::test]
+    async fn first_launch_reconcile_without_mapping_remains_possible_and_explicit() {
+        let dir = tempfile::tempdir().unwrap();
+        let (codex, _) = fake_codex(dir.path(), "serve");
+        let mut config = config(dir.path(), codex);
+        config.resume = true;
+        let (_tx, command_rx) = mpsc::unbounded_channel();
+        let (event_tx, mut events) = mpsc::unbounded_channel();
+        let task = tokio::spawn(codex_io_task(config, command_rx, event_tx));
+        let mut explained = false;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(event) = events.recv().await {
+                match event {
+                    IoEvent::RawOutput(value)
+                        if value
+                            .to_string()
+                            .contains("No native Codex conversation mapping") =>
+                    {
+                        explained = true
+                    }
+                    IoEvent::CodexThreadId(_) => break,
+                    IoEvent::Error(error) => panic!("first launch failed: {error}"),
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert!(explained);
+        task.abort();
+        let _ = task.await;
+    }
+
+    #[tokio::test]
+    async fn provider_resume_failure_is_visible_and_never_creates_a_fresh_thread() {
+        let dir = tempfile::tempdir().unwrap();
+        let (codex, log) = fake_codex(dir.path(), "serve");
+        let mut config = config(dir.path(), codex);
+        config.resume = true;
+        config.codex_thread_id = Some("original-thread".into());
+        config.codex_require_resume = false; // The ordinary path must be safe too.
+        let (_tx, command_rx) = mpsc::unbounded_channel();
+        let (event_tx, mut events) = mpsc::unbounded_channel();
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            codex_io_task(config, command_rx, event_tx),
+        )
+        .await
+        .unwrap();
+        let mut errors = vec![];
+        while let Ok(event) = events.try_recv() {
+            if let IoEvent::Error(error) = event {
+                errors.push(error.to_string());
+            }
+        }
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("configured for current")
+                    && error.contains("No new conversation was created")),
+            "{errors:?}"
+        );
+        let requests = std::fs::read_to_string(log).unwrap();
+        assert!(requests.contains("thread/resume"));
+        assert!(!requests.contains("thread/start"));
     }
 
     #[tokio::test]
