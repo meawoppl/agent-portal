@@ -88,11 +88,12 @@ async fn handle_server_message(
     match server_msg {
         ServerToProxy::AgentInput {
             content,
+            automated,
             send_mode,
             reasoning_effort,
         } => event_tx
             .send(input_event(
-                content,
+                shared::PortalMessage::input_with_provenance(content, automated),
                 send_mode,
                 reasoning_effort,
                 None,
@@ -103,6 +104,7 @@ async fn handle_server_message(
             session_id,
             seq,
             content,
+            automated,
             send_mode,
             reasoning_effort,
             client_msg_id,
@@ -110,7 +112,7 @@ async fn handle_server_message(
             let ack = Some(PortalInputAck { session_id, seq });
             event_tx
                 .send(input_event(
-                    content,
+                    shared::PortalMessage::input_with_provenance(content, automated),
                     send_mode,
                     reasoning_effort,
                     ack,

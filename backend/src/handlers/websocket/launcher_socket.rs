@@ -979,7 +979,7 @@ fn handle_launcher_message(
             }
 
             let session_key = session_id.to_string();
-            let content_value = serde_json::Value::String(content);
+            let content_value = shared::PortalMessage::automated_prompt(content).to_json();
 
             // Set sender attribution to "Scheduler"
             app_state.session_manager.set_last_input_sender(
@@ -992,8 +992,8 @@ fn handle_launcher_message(
             // (same as web-client and agent-messaging input) so the paths
             // can't drift in their seq/persist/deliver semantics (see
             // SessionManager::enqueue_input). `send_mode: None` persists the
-            // `Normal` default and sends the same untagged wire frame this
-            // handler built by hand before.
+            // `Normal` default. The typed envelope preserves automation
+            // provenance through persistence and reconnect replay.
             app_state.session_manager.enqueue_input(
                 &app_state.db_pool,
                 &session_key,
@@ -1793,8 +1793,10 @@ mod tests {
                 seq,
                 content,
                 send_mode,
+                automated,
                 ..
             } => {
+                assert!(*automated);
                 assert_eq!(
                     content,
                     &serde_json::Value::String("scheduled nudge".to_string())
@@ -1813,6 +1815,12 @@ mod tests {
             .expect("pending row");
         assert_eq!(row.seq_num, seq);
         assert_eq!(row.send_mode, "normal");
+        let persisted: shared::PortalMessage = serde_json::from_str(&row.content).unwrap();
+        assert!(persisted.automated);
+        assert_eq!(
+            persisted.agent_facing_text().as_deref(),
+            Some("scheduled nudge")
+        );
 
         // ...with Scheduler attribution for the sender chip.
         assert_eq!(

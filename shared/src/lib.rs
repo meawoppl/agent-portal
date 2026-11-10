@@ -850,6 +850,10 @@ pub struct PortalMessage {
     #[serde(rename = "type")]
     pub message_type: String,
     pub content: Vec<PortalContent>,
+    /// This envelope is an input composed by the portal, delivered literally
+    /// rather than interpreted as human CLI commands or at-mentions.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub automated: bool,
 }
 
 impl PortalMessage {
@@ -861,11 +865,43 @@ impl PortalMessage {
         Self {
             message_type: Self::MESSAGE_TYPE.to_string(),
             content,
+            automated: false,
         }
     }
 
     pub fn text(text: String) -> Self {
         Self::with_content(vec![PortalContent::Text { text }])
+    }
+
+    /// Durable input provenance: preserved in pending rows and replayed with
+    /// the prompt, so reconnects cannot turn automation into human commands.
+    pub fn automated_prompt(text: String) -> Self {
+        Self {
+            automated: true,
+            ..Self::text(text)
+        }
+    }
+
+    /// Convert durable automation envelopes into backwards-compatible wire
+    /// text plus additive provenance. Older proxies ignore the new flag and
+    /// still receive the prompt rather than a JSON envelope as its text.
+    pub fn input_wire_parts(content: serde_json::Value) -> (serde_json::Value, bool) {
+        if let Ok(portal) = serde_json::from_value::<Self>(content.clone()) {
+            if portal.message_type == Self::MESSAGE_TYPE && portal.automated {
+                if let Some(text) = portal.agent_facing_text() {
+                    return (serde_json::Value::String(text), true);
+                }
+            }
+        }
+        (content, false)
+    }
+
+    /// Restore additive wire provenance for the common input classifier.
+    pub fn input_with_provenance(content: serde_json::Value, automated: bool) -> serde_json::Value {
+        match content {
+            serde_json::Value::String(text) if automated => Self::automated_prompt(text).to_json(),
+            other => other,
+        }
     }
 
     pub fn image(media_type: String, data: String) -> Self {
@@ -949,6 +985,7 @@ impl PortalMessage {
     /// agent-facing representation.
     pub fn agent_facing_text(&self) -> Option<String> {
         match self.content.as_slice() {
+            [PortalContent::Text { text }] if self.automated => Some(text.clone()),
             [PortalContent::AgentMessage {
                 from_agent_type,
                 from_session_id,

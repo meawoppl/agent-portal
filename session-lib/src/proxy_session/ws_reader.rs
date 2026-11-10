@@ -227,11 +227,12 @@ async fn handle_ws_message(
     match proxy_msg {
         ServerToProxy::AgentInput {
             content,
+            automated,
             send_mode,
             reasoning_effort,
         } => {
             return route_portal_input(
-                content,
+                shared::PortalMessage::input_with_provenance(content, automated),
                 send_mode,
                 reasoning_effort,
                 None,
@@ -244,12 +245,13 @@ async fn handle_ws_message(
             session_id,
             seq,
             content,
+            automated,
             send_mode,
             reasoning_effort,
             client_msg_id,
         } => {
             return route_portal_input(
-                content,
+                shared::PortalMessage::input_with_provenance(content, automated),
                 send_mode,
                 reasoning_effort,
                 Some(PortalInputAck { session_id, seq }),

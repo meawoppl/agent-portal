@@ -88,7 +88,11 @@ pub fn render_user_message(
     timestamp: Option<&str>,
     session_id: Uuid,
 ) -> Html {
-    let label = human_label(meta, current_user_id);
+    let label = if msg.text_not_typed == Some(true) {
+        "Automated".to_string()
+    } else {
+        human_label(meta, current_user_id)
+    };
     let delivery = meta.and_then(|m| m.delivery.as_ref());
     let pending_class = if delivery.is_some_and(shared::DeliveryMeta::pending) {
         " pending"

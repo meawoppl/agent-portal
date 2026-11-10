@@ -644,6 +644,7 @@ fn server_to_proxy_sequenced_input_golden() {
         session_id: nil(),
         seq: 5,
         content: json!({"text": "hello"}),
+        automated: false,
         send_mode: Some(SendMode::Wiggum),
         reasoning_effort: Some(crate::ReasoningEffort::Xhigh),
         client_msg_id: None,

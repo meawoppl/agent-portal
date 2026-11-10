@@ -318,6 +318,7 @@ pub(super) mod test_support {
             session_id: Uuid::nil(),
             seq: n as i64,
             content: serde_json::json!({"n": n}),
+            automated: false,
             send_mode: None,
             reasoning_effort: None,
             client_msg_id: None,

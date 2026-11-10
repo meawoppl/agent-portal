@@ -129,6 +129,7 @@ impl SessionManager {
             }
         };
 
+        let (content, automated) = shared::PortalMessage::input_wire_parts(content);
         let sent = if seq > 0 {
             self.send_or_queue(
                 session_key,
@@ -136,6 +137,7 @@ impl SessionManager {
                     session_id,
                     seq,
                     content,
+                    automated,
                     send_mode,
                     reasoning_effort,
                     client_msg_id,
@@ -146,6 +148,7 @@ impl SessionManager {
                 session_key,
                 ServerToProxy::AgentInput {
                     content,
+                    automated,
                     send_mode,
                     reasoning_effort,
                 },
