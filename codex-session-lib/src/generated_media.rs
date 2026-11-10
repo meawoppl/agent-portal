@@ -10,7 +10,7 @@ use codex_codes::{GeneratedImageRef, Notification, ServerMessage, ThreadItemPayl
 use serde::Serialize;
 use session_lib::snapshot::{PortalCredentials, SessionConfig};
 use shared::codex_media::CodexImageMedia;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncReadExt;
 use uuid::Uuid;
 
 const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
@@ -351,6 +351,7 @@ async fn decode_image(inline: &str, saved_path: Option<&Path>) -> Result<Vec<u8>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::AsyncWriteExt;
 
     fn png() -> Vec<u8> {
         b"\x89PNG\r\n\x1a\nimage-fixture".to_vec()
@@ -538,5 +539,21 @@ mod tests {
             .save_recovery(&vec![0; MAX_RECOVERY_FILE_BYTES + 1], "png")
             .await
             .is_err());
+    }
+    #[tokio::test]
+    async fn saved_provider_attachment_keeps_native_recovery_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let image_path = dir.path().join("generated.png");
+        tokio::fs::write(&image_path, png()).await.unwrap();
+        let mut normalizer = normalizer(&dir.path().join("recovery"), None);
+        let path = serde_json::to_string(&image_path.to_string_lossy()).unwrap();
+        let mut msg = ServerMessage::from_json_str(&format!(r#"{{"method":"item/completed","params":{{"threadId":"t","turnId":"turn","item":{{"type":"imageGeneration","id":"image-1","status":"completed","fileId":"provider-file","savedPath":{path}}}}}}}"#)).unwrap();
+        let output = normalizer.normalize(&mut msg).await.unwrap();
+        assert_eq!(output["item"]["fileId"], "provider-file");
+        assert_eq!(
+            output["item"]["portalMedia"]["recovery_path"],
+            image_path.to_string_lossy().as_ref()
+        );
+        assert_eq!(tokio::fs::read(&image_path).await.unwrap(), png());
     }
 }

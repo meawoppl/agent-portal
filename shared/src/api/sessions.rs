@@ -418,3 +418,16 @@ mod agent_session_wire_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod show_media_compatibility_tests {
+    #[test]
+    fn older_upload_response_without_media_identity_still_decodes() {
+        let response: super::ShowMediaResponse = serde_json::from_str(
+            r#"{"session_name":"test","content_type":"image/png","persisted":true}"#,
+        )
+        .unwrap();
+        assert!(response.persisted);
+        assert!(response.media_id.is_none());
+    }
+}
