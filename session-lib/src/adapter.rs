@@ -229,6 +229,9 @@ impl AgentOutputClassifier for ClaudeAdapter {
             // Route them over the non-persisted side-channel so they neither
             // consume retention rows nor render as unknown-message cards.
             ClaudeOutput::PromptSuggestion(_) => vec![AgentOutput::Ephemeral(raw)],
+            ClaudeOutput::System(ref system) if system.as_permission_check_status().is_some() => {
+                vec![AgentOutput::Ephemeral(raw)]
+            }
             // Everything else (System, User, Assistant, Error, RateLimitEvent)
             // is user-visible.
             _ => vec![AgentOutput::Visible(raw)],
@@ -242,6 +245,24 @@ mod tests {
     use serde_json::json;
 
     // --- classify golden tests ---------------------------------------------
+
+    #[test]
+    fn permission_check_status_is_live_only_but_unknown_system_frames_remain_visible() {
+        for status in ["checking", "done"] {
+            let raw = json!({"type":"system","subtype":"permission_check_status","status":status,"tool_use_id":"tool","uuid":"frame","session_id":"session"});
+            let output = serde_json::from_value(raw.clone()).unwrap();
+            assert!(matches!(
+                ClaudeAdapter.classify(output).as_slice(),
+                [AgentOutput::Ephemeral(_)]
+            ));
+        }
+        let raw = json!({"type":"system","subtype":"new_safety_notice","session_id":"session"});
+        let output = serde_json::from_value(raw).unwrap();
+        assert!(matches!(
+            ClaudeAdapter.classify(output).as_slice(),
+            [AgentOutput::Visible(_)]
+        ));
+    }
 
     #[test]
     fn classify_control_cancel_is_not_visible_output() {

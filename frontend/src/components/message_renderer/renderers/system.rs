@@ -39,6 +39,40 @@ pub fn render_system_message(msg: &shared::SystemMessage, timestamp: Option<&str
         return html! {};
     }
 
+    if let Some(claude_codes::io::KnownSystemEvent::Informational(info)) =
+        msg.as_known_system_event()
+    {
+        // Hook/provider text is untrusted plain text, never Markdown or HTML.
+        let level = match info.level.as_str() {
+            "error" => "error",
+            "warning" | "warn" => "warning",
+            _ => "info",
+        };
+        let outcome = info.prompt_submit_outcome.as_ref().and_then(|outcome| {
+            use claude_codes::PromptSubmitOutcomeKind::*;
+            let kind = match outcome.kind.as_ref()? {
+                BlockedByHook => "Prompt blocked by hook",
+                StoppedByHook => "Prompt stopped by hook",
+                DroppedByHook => "Prompt dropped by hook",
+                NotPassedOn => "Prompt not passed on",
+                NoVerdict => "Prompt ended without a hook verdict",
+                Other(_) => return None,
+            };
+            Some((kind, outcome))
+        });
+        return html! {
+            <div class={classes!("claude-message", "system-message", level)} title={timestamp.unwrap_or_default().to_string()}>
+                <span class="message-type-badge system">{ level }</span>
+                if let Some((kind, outcome)) = outcome {
+                    <div>{ kind }</div>
+                    if let Some(reason) = &outcome.reason { <div>{ reason }</div> }
+                    <div>{ if outcome.prompt_kept { "Prompt kept in conversation" } else { "Prompt not kept in conversation" } }</div>
+                }
+                <div>{ info.content }</div>
+            </div>
+        };
+    }
+
     // `thinking_tokens` markers are collapsed into a single counted chip by the
     // grouping layer (`GroupCategory::Thinking`), so they never reach here via a
     // group. Suppress any that slip through as a standalone `Single` rather than

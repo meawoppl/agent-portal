@@ -810,6 +810,80 @@ pub(crate) fn format_tool_elapsed(seconds: f64) -> String {
     }
 }
 
+/// Display-only checks, keyed by tool plus subagent identity. They never
+/// enter transcript state; a best-effort signal must not decide permission.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PermissionCheck {
+    pub tool_use_id: String,
+    pub agent_id: Option<String>,
+}
+
+pub(crate) fn update_permission_checks(
+    checks: &mut Vec<PermissionCheck>,
+    status: &claude_codes::PermissionCheckStatusMessage,
+) {
+    let key = PermissionCheck {
+        tool_use_id: status.tool_use_id.clone(),
+        agent_id: status.agent_id.clone(),
+    };
+    checks.retain(|check| check != &key);
+    if status.status == claude_codes::PermissionCheckStatus::Checking {
+        // Live best-effort state is bounded even if a CLI loses its done frame.
+        if checks.len() >= 128 {
+            checks.remove(0);
+        }
+        checks.push(key);
+    }
+}
+
+pub(crate) fn clear_permission_checks(checks: &mut Vec<PermissionCheck>, content: &str) {
+    if checks.is_empty() {
+        return;
+    }
+    let Ok(output) = serde_json::from_str::<shared::ClaudeOutput>(content) else {
+        return;
+    };
+    let (ids, agent_id) = match output {
+        shared::ClaudeOutput::Result(_) => {
+            checks.clear();
+            return;
+        }
+        shared::ClaudeOutput::Assistant(asst) => {
+            (tool_frame_ids(&asst.message.content), asst.agent_id)
+        }
+        shared::ClaudeOutput::User(user) => (tool_frame_ids(&user.message.content), user.agent_id),
+        shared::ClaudeOutput::ToolProgress(tool) => (
+            vec![running_tool_key(
+                &tool.tool_use_id,
+                tool.parent_tool_use_id.as_deref(),
+            )],
+            None,
+        ),
+        shared::ClaudeOutput::System(system) => {
+            if let Some(claude_codes::io::KnownSystemEvent::PermissionDenied(denied)) =
+                system.as_known_system_event()
+            {
+                (vec![denied.tool_use_id], denied.agent_id)
+            } else {
+                return;
+            }
+        }
+        _ => return,
+    };
+    checks.retain(|check| check.agent_id != agent_id || !ids.contains(&check.tool_use_id));
+}
+
+fn tool_frame_ids(blocks: &[shared::ContentBlock]) -> Vec<String> {
+    blocks
+        .iter()
+        .filter_map(|block| match block {
+            shared::ContentBlock::ToolUse(tool) => Some(tool.id.clone()),
+            shared::ContentBlock::ToolResult(tool) => Some(tool.tool_use_id.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
 /// Derive a one-line human summary from a neutral ephemeral live-status frame
 /// (`WsEvent::Ephemeral`) for the transient status strip.
 ///
@@ -945,6 +1019,31 @@ fn muse_task_id(value: &serde_json::Value) -> Option<&str> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn permission_checks_are_keyed_and_cleared_by_completion() {
+        let frame = |status, agent: Option<&str>| {
+            serde_json::from_value::<claude_codes::PermissionCheckStatusMessage>(serde_json::json!({"tool_use_id":"tool","agent_id":agent,"status":status,"uuid":"f","session_id":"s"})).unwrap()
+        };
+        let mut checks = vec![];
+        update_permission_checks(&mut checks, &frame("checking", None));
+        update_permission_checks(&mut checks, &frame("checking", Some("sub")));
+        update_permission_checks(&mut checks, &frame("checking", None));
+        assert_eq!(checks.len(), 2);
+        update_permission_checks(&mut checks, &frame("done", Some("sub")));
+        assert_eq!(checks.len(), 1);
+        clear_permission_checks(
+            &mut checks,
+            r#"{"type":"user","session_id":"00000000-0000-0000-0000-000000000000","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool","content":"ok"}]}}"#,
+        );
+        assert!(checks.is_empty());
+        update_permission_checks(&mut checks, &frame("checking", None));
+        clear_permission_checks(
+            &mut checks,
+            r#"{"type":"result","subtype":"success","is_error":false,"duration_ms":0,"duration_api_ms":0,"num_turns":1,"total_cost_usd":0,"session_id":"s"}"#,
+        );
+        assert!(checks.is_empty());
+    }
 
     #[test]
     fn ephemeral_summary_prefers_streaming_text() {
