@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="Arial, sans-serif">
+<text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2402 · Dispatch queued work at idle</text>
+<text x="55" y="108" font-size="34" fill="#e6e9f5">Queued work waited at idle and could run during another turn.</text>
+<text x="55" y="151" font-size="34" fill="#e6e9f5">One dispatch decision now waits for work to finish and pauses on failed turns.</text>
+<path d="M55 180H1945" stroke="#565f89"/>
+<path d="M1000 190V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="55" y="234" font-size="22" font-weight="bold" fill="#f7768e">BEFORE</text>
+<text x="1055" y="234" font-size="22" font-weight="bold" fill="#9ece6a">AFTER</text>
+<g><rect x="55" y="285" width="890" height="180" rx="14" fill="#1e202e" stroke="#f7768e"/>
+<text x="81" y="329" font-size="26" fill="#f7768e">is_awaiting == true</text>
+<text x="81" y="373" font-size="23" fill="#c0caf5">A completed turn means awaiting user input.</text>
+<text x="81" y="408" font-size="23" fill="#c0caf5">Both queue gates treat that idle state as busy.</text>
+</g>
+<g><rect x="55" y="545" width="890" height="180" rx="14" fill="#1e202e" stroke="#f7768e"/>
+<text x="81" y="589" font-size="26" fill="#f7768e">is_awaiting == false</text>
+<text x="81" y="633" font-size="23" fill="#c0caf5">Work in progress can pass the inverted guard.</text>
+<text x="81" y="668" font-size="23" fill="#c0caf5">Buttons and queue drain repeat the same mistake.</text>
+</g>
+<g><rect x="55" y="805" width="890" height="180" rx="14" fill="#1e202e" stroke="#f7768e"/>
+<text x="81" y="849" font-size="26" fill="#f7768e">ActivityTag::Result</text>
+<text x="81" y="893" font-size="23" fill="#c0caf5">Failed Claude/Codex results can look successful.</text>
+<text x="81" y="928" font-size="23" fill="#c0caf5">The active work item can be marked completed.</text>
+</g>
+<g><rect x="1055" y="285" width="890" height="180" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1081" y="329" font-size="26" fill="#9ece6a">latest_turn_activity / EditStackDispatch</text>
+<text x="1081" y="373" font-size="23" fill="#c0caf5">Working holds; awaiting input sends the next item.</text>
+<text x="1081" y="408" font-size="23" fill="#c0caf5">No activity still permits the first prompt.</text>
+</g>
+<g><rect x="1055" y="545" width="890" height="180" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1081" y="589" font-size="26" fill="#9ece6a">edit_stack_dispatch</text>
+<text x="1081" y="633" font-size="23" fill="#c0caf5">Buttons and drain share Busy / Drained / Send(id).</text>
+<text x="1081" y="668" font-size="23" fill="#c0caf5">Active items, permissions and pending sends still hold.</text>
+</g>
+<g><rect x="1055" y="805" width="890" height="180" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1081" y="849" font-size="26" fill="#9ece6a">reconcile_edit_stack_activity</text>
+<text x="1081" y="893" font-size="23" fill="#c0caf5">Failed terminal results pause Send All.</text>
+<text x="1081" y="928" font-size="23" fill="#c0caf5">Manual sending can resume explicitly from idle.</text>
+</g>
+<text x="55" y="1172" font-size="22" fill="#e0af68">Scope: frontend queue policy and terminal classification. Durable operation IDs and exactly-once scheduling are separate work.</text>
+</g></svg>

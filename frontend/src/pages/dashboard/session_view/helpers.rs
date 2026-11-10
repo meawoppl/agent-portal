@@ -708,6 +708,18 @@ pub(super) fn reconcile_pending_sends(
         ActivityTag::Assistant | ActivityTag::Result => {
             pending_sends.retain(pending_has_client_msg_id);
         }
+        ActivityTag::Error
+            if crate::components::agent_frame::AgentFrameRegistry::parse(
+                output,
+                shared::AgentType::Claude,
+            )
+            .kind()
+            .is_terminator() =>
+        {
+            // A failed result still proves the turn reached the agent. Keep
+            // correlated rows receipt-driven, just as successful results do.
+            pending_sends.retain(pending_has_client_msg_id);
+        }
         _ => {}
     }
 }
@@ -2277,6 +2289,15 @@ mod edit_stack_dispatch_tests {
             let mut send_all = true;
             let tag = classify_output_msg_type(failed);
             assert_eq!(tag, ActivityTag::Error);
+            let mut pending = vec![RenderedMessage::new(
+                r#"{"type":"user","content":"queued"}"#.into(),
+                None,
+            )];
+            reconcile_pending_sends(&mut pending, tag, failed);
+            assert!(
+                pending.is_empty(),
+                "failed terminal still settles a legacy unconfirmed echo"
+            );
             assert_eq!(
                 reconcile_edit_stack_activity(&mut active, &mut send_all, tag),
                 Some((active_id, "failed"))
