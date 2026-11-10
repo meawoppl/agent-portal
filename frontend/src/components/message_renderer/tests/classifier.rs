@@ -318,3 +318,22 @@ fn claude_command_lifecycle_is_typed_not_raw_json() {
         "command lifecycle bookkeeping must not create a transcript row"
     );
 }
+
+#[test]
+fn scheduled_command_start_has_one_visible_wakeup_marker_without_queue_noise() {
+    let started = r#"{"command_uuid":"cmd","state":"started","wakeup_source":"loop_wakeup","scheduled_for":1893456000000,"uuid":"frame","session_id":"session","type":"command_lifecycle"}"#;
+    let completed = started.replace("\"started\"", "\"completed\"");
+    let queued = started.replace("\"started\"", "\"queued\"");
+    let groups = group_messages(
+        &[
+            rendered(queued),
+            rendered(started.to_string()),
+            rendered(started.to_string()),
+            rendered(completed),
+        ],
+        shared::AgentType::Claude,
+        None,
+    );
+    assert_eq!(groups.len(), 1);
+    assert!(matches!(&groups[0], MessageGroup::Single(message) if message.content == started));
+}

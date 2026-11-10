@@ -227,7 +227,10 @@ pub fn render_assistant_message_content(
             html! { <div class="error-text">{ content_blocks_to_text(&msg.message.content) }</div> },
         )
     } else {
-        render_content_blocks(&msg.message.content, session_id)
+        render_content_blocks_with_thinking_duration(
+            &msg.message.content, session_id,
+            msg.thinking_duration_ms.filter(|_| matches!(msg.message.content.as_slice(), [ContentBlock::Thinking(_)])),
+        )
     };
     if completion_states.is_empty() && content.is_none() && login.is_none() && api_error.is_none() {
         return None;
@@ -249,9 +252,17 @@ pub fn render_assistant_message_content(
 /// visible output (so callers can omit the surrounding wrapper/card entirely
 /// rather than emit a spaced-but-empty element).
 pub fn render_content_blocks(blocks: &[ContentBlock], session_id: Uuid) -> Option<Html> {
+    render_content_blocks_with_thinking_duration(blocks, session_id, None)
+}
+
+fn render_content_blocks_with_thinking_duration(
+    blocks: &[ContentBlock],
+    session_id: Uuid,
+    thinking_duration_ms: Option<u64>,
+) -> Option<Html> {
     let rendered: Vec<Html> = blocks
         .iter()
-        .filter_map(|block| render_block(block, session_id))
+        .filter_map(|block| render_block(block, session_id, thinking_duration_ms))
         .collect();
     (!rendered.is_empty()).then(|| html! { <>{ for rendered.into_iter() }</> })
 }
@@ -259,7 +270,11 @@ pub fn render_content_blocks(blocks: &[ContentBlock], session_id: Uuid) -> Optio
 /// Render one content block. `None` means the block renders nothing (e.g. a
 /// tool result that returned no content) — the caller drops it rather than
 /// emitting an empty box.
-fn render_block(block: &ContentBlock, session_id: Uuid) -> Option<Html> {
+fn render_block(
+    block: &ContentBlock,
+    session_id: Uuid,
+    thinking_duration_ms: Option<u64>,
+) -> Option<Html> {
     let rendered = match block {
         ContentBlock::Text(t) => {
             html! {
@@ -314,6 +329,9 @@ fn render_block(block: &ContentBlock, session_id: Uuid) -> Option<Html> {
             html! {
                 <div class="thinking-block">
                     <span class="thinking-label" title={sig_title}>{ "thinking" }</span>
+                    if let Some(duration) = thinking_duration_ms {
+                        <span class="thinking-duration">{ format!("thought for {}", shared::fmt::format_duration(duration)) }</span>
+                    }
                     if !utils::is_non_blank(&th.thinking) {
                         <div class="thinking-content muted" title="Thinking text was omitted by the model; the encrypted signature is preserved in the raw message.">
                             { "thinking omitted" }
@@ -448,5 +466,18 @@ mod tests {
                 AssistantCompletionState::Resumed
             ]
         );
+    }
+    #[test]
+    fn transcript_metadata_thinking_duration_only_attaches_to_its_thinking_frame() {
+        let mut message = assistant(r#", "thinking_duration_ms": 12000"#);
+        message.message.content = vec![serde_json::from_str(
+            r#"{"type":"thinking","thinking":"reasoning","signature":""}"#,
+        )
+        .unwrap()];
+        let html = render_assistant_message_content(&message, Uuid::nil(), None).unwrap();
+        assert!(super::super::visible_text(&html).contains("thought for 12.0s"));
+        message.thinking_duration_ms = None;
+        let html = render_assistant_message_content(&message, Uuid::nil(), None).unwrap();
+        assert!(!super::super::visible_text(&html).contains("thought for"));
     }
 }

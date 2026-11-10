@@ -139,7 +139,33 @@ fn render_init_bar(msg: &shared::SystemMessage, timestamp: Option<&str>) -> Html
             if tool_count > 0 {
                 <span class="init-badge">{ format!("{} tools", tool_count) }</span>
             }
+            { render_init_directories(init.as_ref()) }
         </div>
+    }
+}
+
+fn render_init_directories(init: Option<&claude_codes::io::InitMessage>) -> Html {
+    let Some(init) = init else { return html! {} };
+    if init.original_cwd.is_none() && init.additional_directories.is_none() {
+        return html! {};
+    }
+    html! {
+        <details class="init-directories">
+            <summary class="init-badge">{ "Folders" }</summary>
+            <div class="init-directory-list">
+                if let Some(folder) = &init.original_cwd {
+                    <div>{ "Base folder: " }<code>{ folder }</code></div>
+                }
+                if let Some(folders) = &init.additional_directories {
+                    if folders.is_empty() {
+                        <div>{ "No additional folders" }</div>
+                    } else {
+                        <div>{ "Additional folders (permission checks still apply):" }</div>
+                        { for folders.iter().map(|folder| html! { <div><code>{ folder }</code></div> }) }
+                    }
+                }
+            </div>
+        </details>
     }
 }
 
@@ -480,5 +506,20 @@ mod tests {
         }));
 
         assert!(!is_compaction_beginning(&msg));
+    }
+    #[test]
+    fn transcript_metadata_folders_distinguish_unknown_from_an_empty_grant_list() {
+        let mut init: claude_codes::io::InitMessage = serde_json::from_str(r#"{"session_id":"session","original_cwd":"/workspace","additional_directories":["/shared/notes"]}"#).unwrap();
+        let text = super::super::visible_text(&render_init_directories(Some(&init)));
+        assert!(text.contains("/workspace"));
+        assert!(text.contains("/shared/notes"));
+        init.original_cwd = None;
+        init.additional_directories = Some(vec![]);
+        assert!(
+            super::super::visible_text(&render_init_directories(Some(&init)))
+                .contains("No additional folders")
+        );
+        init.additional_directories = None;
+        assert!(super::super::visible_text(&render_init_directories(Some(&init))).is_empty());
     }
 }

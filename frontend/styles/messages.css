@@ -2038,3 +2038,26 @@
     font-size: 0.8rem;
     font-weight: 600;
 }
+
+.thinking-duration,
+.tool-permission-chip {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.thinking-duration {
+    margin-left: 0.5rem;
+}
+
+.tool-permission-details {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 0.25rem;
+}
+
+.init-directory-list {
+    padding: 0.5rem;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}

@@ -529,6 +529,7 @@ pub fn group_messages(
 ) -> Vec<MessageGroup> {
     let mut groups = Vec::new();
     let mut current: Option<(MessageIdentity, Vec<RenderedMessage>)> = None;
+    let mut seen_wakeups = std::collections::HashSet::new();
 
     fn flush(
         out: &mut Vec<MessageGroup>,
@@ -558,11 +559,14 @@ pub fn group_messages(
         }
         let kind = frame.kind();
 
-        // Claude command lifecycle frames are transport bookkeeping, not
-        // conversation. Recognize and omit them rather than surfacing raw JSON
-        // or leaving empty keyed rows in the transcript (#1913).
-        if kind == AgentFrameKind::ClaudeCommandLifecycle {
-            continue;
+        // Show exactly one started scheduler fire per command; ordinary
+        // lifecycle acknowledgements neither create nor split transcript rows.
+        if let AgentFrame::Claude(ClaudeMessage::CommandLifecycle(message)) = &frame {
+            if super::renderers::command_wakeup_label(message).is_none()
+                || !seen_wakeups.insert(message.command_uuid.clone())
+            {
+                continue;
+            }
         }
 
         // Cumulative `turn/diff/updated` events are dropped entirely — Codex
