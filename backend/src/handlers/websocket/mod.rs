@@ -1,3 +1,4 @@
+mod claude_cost;
 use tracing::Instrument;
 mod continuations;
 pub mod launcher_socket;

@@ -404,7 +404,9 @@ pub fn handle_agent_output(ctx: AgentOutputContext<'_>, frame: AgentOutputFrame)
 
             if role == shared::MessageRole::Result {
                 let subagent_tokens = session_manager.subagent_tokens(session_id);
-                store_result_metadata(&mut conn, session_id, &content, subagent_tokens);
+                if inserted_created_at.is_some() {
+                    store_result_metadata(&mut conn, session_id, &content, subagent_tokens);
+                }
 
                 // A turn killed by a transient 529 provider overload leaves the
                 // session stalled on a user-visible error. Auto-retry it (bounded
@@ -660,11 +662,13 @@ fn store_result_metadata(
 
     // Try typed deserialization first
     if let Ok(result) = claude_codes::io::ResultMessage::deserialize(content) {
-        if let Err(e) = diesel::update(sessions::table.find(session_id))
-            .set(sessions::total_cost_usd.eq(result.total_cost_usd))
-            .execute(conn)
-        {
-            error!("Failed to update session cost: {}", e);
+        if let Err(e) = super::claude_cost::record_result_cost(conn, session_id, &result) {
+            error!(
+                "{}: session {}: {}",
+                crate::markers::COST_ACCOUNTING_PERSIST_FAILED,
+                session_id,
+                e
+            );
         }
 
         if let Some(usage) = &result.usage {
@@ -701,10 +705,21 @@ fn store_result_metadata(
 
     if let Some(cost_val) = cost {
         if let Err(e) = diesel::update(sessions::table.find(session_id))
-            .set(sessions::total_cost_usd.eq(cost_val))
+            .set(
+                sessions::total_cost_usd.eq(diesel::dsl::sql::<diesel::sql_types::Double>(
+                    "GREATEST(total_cost_usd, ",
+                )
+                .bind::<diesel::sql_types::Double, _>(cost_val)
+                .sql(")")),
+            )
             .execute(conn)
         {
-            error!("Failed to update session cost: {}", e);
+            error!(
+                "{}: session {}: {}",
+                crate::markers::COST_ACCOUNTING_PERSIST_FAILED,
+                session_id,
+                e
+            );
         }
     }
 

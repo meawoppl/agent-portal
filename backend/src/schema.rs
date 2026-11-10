@@ -1,6 +1,13 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
+    claude_result_cost_ledger (session_id, result_uuid) {
+        session_id -> Uuid,
+        result_uuid -> Text,
+    }
+}
+
+diesel::table! {
     custom_subdomains (label) {
         label -> Text,
         session_id -> Uuid,
@@ -500,6 +507,7 @@ diesel::table! {
     }
 }
 
+diesel::joinable!(claude_result_cost_ledger -> sessions (session_id));
 diesel::joinable!(custom_subdomains -> sessions (session_id));
 diesel::joinable!(custom_subdomains -> users (created_by));
 diesel::joinable!(deleted_session_costs -> users (user_id));
@@ -540,6 +548,7 @@ diesel::joinable!(turn_metrics -> users (user_id));
 diesel::joinable!(user_identities -> users (user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
+    claude_result_cost_ledger,
     custom_subdomains,
     deleted_session_costs,
     federation_policy,

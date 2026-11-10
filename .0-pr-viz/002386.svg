@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="Arial, sans-serif">
+<text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2386 · Replay-safe Claude cost accounting</text>
+<text x="55" y="108" font-size="34" fill="#e6e9f5">Cumulative costs inflated turn totals and fell on resume.</text>
+<text x="55" y="151" font-size="34" fill="#e6e9f5">Disjoint result deltas now add once, guarded by durable result identity.</text>
+<path d="M55 180H1945" stroke="#565f89"/>
+<path d="M1000 190V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="55" y="234" font-size="22" font-weight="bold" fill="#f7768e">BEFORE</text>
+<text x="1055" y="234" font-size="22" font-weight="bold" fill="#9ece6a">AFTER</text>
+<g><rect x="55" y="285" width="890" height="180" rx="14" fill="#1e202e" stroke="#7aa2f7"/>
+<text x="81" y="329" font-size="26" fill="#7aa2f7">ResultMessage.total_cost_usd</text>
+<text x="81" y="373" font-size="23" fill="#c0caf5">Turn 1: $2; turn 2: $5 (process cumulative)</text>
+<text x="81" y="408" font-size="23" fill="#c0caf5">The second result includes the first turn.</text>
+</g>
+<path d="M500 475v52m-10-10 10 10 10-10" fill="none" stroke="#565f89" stroke-width="3"/>
+<g><rect x="55" y="545" width="890" height="180" rx="14" fill="#1e202e" stroke="#f7768e"/>
+<text x="81" y="589" font-size="26" fill="#f7768e">TurnOutcome.total_cost_usd</text>
+<text x="81" y="633" font-size="23" fill="#c0caf5">Stores $2 and $5 as if both were turn deltas.</text>
+<text x="81" y="668" font-size="23" fill="#c0caf5">SUM reports $7 for $5 of work.</text>
+</g>
+<path d="M500 735v52m-10-10 10 10 10-10" fill="none" stroke="#565f89" stroke-width="3"/>
+<g><rect x="55" y="805" width="890" height="180" rx="14" fill="#1e202e" stroke="#f7768e"/>
+<text x="81" y="849" font-size="26" fill="#f7768e">sessions.total_cost_usd</text>
+<text x="81" y="893" font-size="23" fill="#c0caf5">Each result overwrites the session total.</text>
+<text x="81" y="928" font-size="23" fill="#c0caf5">A resumed process can lower lifetime spending.</text>
+</g>
+<g><rect x="1055" y="285" width="890" height="180" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1081" y="329" font-size="26" fill="#9ece6a">ClaudeResultCost / ClaudeTurnCostTracker</text>
+<text x="1081" y="373" font-size="23" fill="#c0caf5">Modern per-model costs: $2, then $3.</text>
+<text x="1081" y="408" font-size="23" fill="#c0caf5">Legacy process snapshots are differenced for metrics.</text>
+</g>
+<path d="M1500 475v52m-10-10 10 10 10-10" fill="none" stroke="#565f89" stroke-width="3"/>
+<g><rect x="1055" y="545" width="890" height="180" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1081" y="589" font-size="26" fill="#9ece6a">claude_result_cost_ledger</text>
+<text x="1081" y="633" font-size="23" fill="#c0caf5">Unique (session_id, result_uuid) persists after trim.</text>
+<text x="1081" y="668" font-size="23" fill="#c0caf5">Result identity and cost increment commit together.</text>
+</g>
+<path d="M1500 735v52m-10-10 10 10 10-10" fill="none" stroke="#565f89" stroke-width="3"/>
+<g><rect x="1055" y="805" width="890" height="180" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1081" y="849" font-size="26" fill="#9ece6a">record_result_cost</text>
+<text x="1081" y="893" font-size="23" fill="#c0caf5">New deltas add atomically: $2 + $3 = $5.</text>
+<text x="1081" y="928" font-size="23" fill="#c0caf5">Replay adds nothing; resume preserves prior spending.</text>
+</g>
+<text x="55" y="1172" font-size="22" fill="#e0af68">Legacy/anonymous results retain a compatibility estimate. Historical costs are not automatically backfilled.</text>
+</g></svg>
