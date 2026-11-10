@@ -358,6 +358,9 @@ fn log_claude_output(output: &ClaudeOutput) {
                 ControlRequestPayload::Initialize(_) => {
                     debug!("  initialize");
                 }
+                ControlRequestPayload::ApplyFlagSettings(_) => {
+                    debug!("  apply_flag_settings");
+                }
                 ControlRequestPayload::Interrupt => {
                     debug!("  interrupt");
                 }

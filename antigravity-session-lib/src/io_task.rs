@@ -19,7 +19,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::DEFAULT_MODEL;
 
-type Delivery = Option<oneshot::Sender<Result<(), String>>>;
+type Delivery = Option<oneshot::Sender<session_lib::io::InputDeliveryResult>>;
 
 struct PendingInput {
     text: String,
@@ -552,7 +552,7 @@ fn emit_user_input_display(
 
 fn fail_delivery(delivered: Delivery, message: &str) {
     if let Some(delivered) = delivered {
-        let _ = delivered.send(Err(message.to_string()));
+        let _ = delivered.send(Err(message.to_string().into()));
     }
 }
 

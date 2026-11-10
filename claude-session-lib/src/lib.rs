@@ -12,6 +12,7 @@
 
 pub mod agent;
 pub mod auth;
+mod effort;
 pub mod io_task;
 pub mod login;
 pub mod proxy_session;

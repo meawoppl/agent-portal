@@ -469,8 +469,15 @@ fn handle_proxy_message(
         ProxyToServer::InputAck {
             session_id: ack_session_id,
             ack_seq,
+            rejected_seq,
         } => {
-            handle_input_ack(*db_session_id, db_pool, ack_session_id, ack_seq);
+            handle_input_ack(
+                *db_session_id,
+                db_pool,
+                ack_session_id,
+                ack_seq,
+                rejected_seq,
+            );
         }
         ProxyToServer::InputProgressAck {
             session_id: ack_session_id,
@@ -736,6 +743,7 @@ fn handle_input_ack(
     db_pool: &crate::db::DbPool,
     ack_session_id: Uuid,
     ack_seq: i64,
+    rejected_seq: Option<i64>,
 ) {
     let Some(current_session_id) = db_session_id else {
         return;
@@ -749,31 +757,58 @@ fn handle_input_ack(
         return;
     }
 
+    if rejected_seq.is_some_and(|seq| seq <= 0 || ack_seq != 0) {
+        warn!(
+            "Ignoring invalid terminal input rejection for session {}",
+            current_session_id
+        );
+        return;
+    }
     let mut conn = match db_pool.get() {
         Ok(conn) => conn,
         Err(e) => {
-            error!("Failed to get database connection for input ack: {}", e);
+            if let Some(seq) = rejected_seq {
+                error!(
+                    "{}: session {} seq {}: {}",
+                    crate::markers::INPUT_REJECTION_PERSIST_FAILED,
+                    current_session_id,
+                    seq,
+                    e
+                );
+            } else {
+                error!("Failed to get database connection for input ack: {}", e);
+            }
             return;
         }
     };
 
     use crate::schema::pending_inputs;
-    let deleted = diesel::delete(
-        pending_inputs::table
-            .filter(pending_inputs::session_id.eq(current_session_id))
-            .filter(pending_inputs::seq_num.le(ack_seq)),
-    )
-    .execute(&mut conn);
+    let rows = pending_inputs::table.filter(pending_inputs::session_id.eq(current_session_id));
+    let deleted = if let Some(seq) = rejected_seq {
+        diesel::delete(rows.filter(pending_inputs::seq_num.eq(seq))).execute(&mut conn)
+    } else {
+        diesel::delete(rows.filter(pending_inputs::seq_num.le(ack_seq))).execute(&mut conn)
+    };
 
     match deleted {
         Ok(count) => {
             info!(
-                "Deleted {} pending inputs for session {} (ack_seq={})",
-                count, current_session_id, ack_seq
+                "Deleted {} pending inputs for session {} (ack_seq={}, rejected_seq={:?})",
+                count, current_session_id, ack_seq, rejected_seq
             );
         }
         Err(e) => {
-            error!("Failed to delete pending inputs: {}", e);
+            if let Some(seq) = rejected_seq {
+                error!(
+                    "{}: session {} seq {}: {}",
+                    crate::markers::INPUT_REJECTION_PERSIST_FAILED,
+                    current_session_id,
+                    seq,
+                    e
+                );
+            } else {
+                error!("Failed to delete pending inputs: {}", e);
+            }
         }
     }
 }
@@ -797,6 +832,63 @@ fn failure_reason(raw: &str) -> Option<String> {
 #[cfg(test)]
 mod failure_reason_tests {
     use super::*;
+
+    #[test]
+    fn rejected_input_ack_removes_only_the_bound_unsent_row_and_is_idempotent() {
+        use crate::schema::{pending_inputs, users};
+        let Some(pool) = crate::test_support::shared_pool() else {
+            return;
+        };
+        let mut conn = pool.get().unwrap();
+        let user = crate::test_support::insert_user(&mut conn, "input_rejection");
+        let session = crate::test_support::insert_session(&mut conn, user.id, "rejection");
+        let other = crate::test_support::insert_session(&mut conn, user.id, "other");
+        for session_id in [session.id, other.id] {
+            for seq_num in [1, 2, 3] {
+                diesel::insert_into(pending_inputs::table)
+                    .values(crate::models::NewPendingInput {
+                        session_id,
+                        seq_num,
+                        content: "queued".into(),
+                        send_mode: "normal".into(),
+                        client_msg_id: None,
+                        reasoning_effort: None,
+                    })
+                    .execute(&mut conn)
+                    .unwrap();
+            }
+        }
+        let remaining = |conn: &mut diesel::PgConnection, id| {
+            pending_inputs::table
+                .filter(pending_inputs::session_id.eq(id))
+                .select(pending_inputs::seq_num)
+                .order(pending_inputs::seq_num)
+                .load::<i64>(conn)
+                .unwrap()
+        };
+        handle_input_ack(Some(session.id), &pool, session.id, 0, Some(2));
+        assert_eq!(remaining(&mut conn, session.id), [1, 3]);
+        handle_input_ack(Some(session.id), &pool, session.id, 0, Some(2));
+        assert_eq!(remaining(&mut conn, session.id), [1, 3]);
+        handle_input_ack(Some(session.id), &pool, other.id, 0, Some(1));
+        assert_eq!(remaining(&mut conn, other.id), [1, 2, 3]);
+        handle_input_ack(Some(session.id), &pool, session.id, 3, Some(3));
+        handle_input_ack(Some(session.id), &pool, session.id, 0, Some(0));
+        assert_eq!(
+            remaining(&mut conn, session.id),
+            [1, 3],
+            "malformed mixed/zero acknowledgements cannot remove rows"
+        );
+        handle_input_ack(Some(session.id), &pool, session.id, 1, None);
+        assert_eq!(
+            remaining(&mut conn, session.id),
+            [3],
+            "legacy cumulative acceptance remains supported"
+        );
+        diesel::delete(users::table.find(user.id))
+            .execute(&mut conn)
+            .unwrap();
+    }
 
     #[test]
     fn reasons_are_bounded_cleaned_and_empty_is_none() {

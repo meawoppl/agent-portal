@@ -21,6 +21,12 @@ pub enum SessionError {
     #[error("Serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),
 
+    /// The user input is proven not to have been sent, rather than an
+    /// uncertain transport failure. Blocking callers must preserve this
+    /// distinction when settling their durable input acknowledgement.
+    #[error("Input rejected before send: {0}")]
+    InputRejected(String),
+
     /// Agent-specific error that doesn't fit the other variants. Per-agent
     /// crates (claude-session-lib, codex-session-lib) collapse their typed
     /// SDK errors into this variant via `to_string()` so session-lib does not

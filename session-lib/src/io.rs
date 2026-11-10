@@ -10,6 +10,30 @@ use tokio::sync::oneshot;
 use crate::adapter::{AgentOutput, PermissionDecision};
 use crate::error::SessionError;
 
+/// A failed delivery can be ambiguous, or definitively rejected before any
+/// user input reached the agent. Only the latter may remove its durable queue
+/// row; transport errors must remain replayable.
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
+pub enum InputDeliveryError {
+    #[error("{0}")]
+    Unknown(String),
+    #[error("{0}")]
+    RejectedBeforeSend(String),
+}
+
+impl From<String> for InputDeliveryError {
+    fn from(message: String) -> Self {
+        Self::Unknown(message)
+    }
+}
+impl From<&str> for InputDeliveryError {
+    fn from(message: &str) -> Self {
+        Self::Unknown(message.to_string())
+    }
+}
+
+pub type InputDeliveryResult = Result<(), InputDeliveryError>;
+
 /// Neutral commands sent from `Session<A>` to the per-agent I/O task.
 ///
 /// These carry no concrete-protocol types — each I/O task translates them into
@@ -25,7 +49,7 @@ pub enum IoCommand {
         /// Optional per-turn reasoning effort override. Only agents whose
         /// native protocol supports this use it; others ignore it.
         reasoning_effort: Option<shared::ReasoningEffort>,
-        delivered: Option<oneshot::Sender<Result<(), String>>>,
+        delivered: Option<oneshot::Sender<InputDeliveryResult>>,
         /// Optional typed portal event to display in place of the user-facing
         /// text for this input (e.g. an inter-agent
         /// `PortalContent::AgentMessage`). Agent I/O tasks emit this verbatim

@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub mod claude_cost;
+pub mod claude_effort;
 
 /// The portal version, `major.minor.{git commit count}` — derived at build
 /// time by `build.rs` (issue #1096) so no PR ever edits a version line. Every

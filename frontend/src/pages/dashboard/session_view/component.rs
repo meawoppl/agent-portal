@@ -556,6 +556,7 @@ pub struct SessionView {
     /// `PermissionHandler`'s "refocus textarea after answer" event so this
     /// component holds zero textarea / upload / send-mode state itself.
     input_bar_dispatcher: Option<Callback<InputBarInbound>>,
+    claude_effort: shared::claude_effort::ClaudeEffortStatus,
     /// Messages sent but not yet confirmed by the server echo
     pending_sends: Vec<RenderedMessage>,
     /// Per-turn performance metrics, sorted by `started_at ASC` (PR 2 of N).
@@ -738,6 +739,7 @@ impl Component for SessionView {
             last_message_timestamp: None,
             tasks_dispatcher: None,
             input_bar_dispatcher: None,
+            claude_effort: Default::default(),
             pending_sends: Vec::new(),
             turn_metrics: Vec::new(),
             continuation_statuses: HashMap::new(),
@@ -1890,6 +1892,13 @@ impl SessionView {
                 // browser was offline and therefore never visited the normal
                 // live-output cleanup path.
                 self.muse_live_turn = MuseLiveTurn::default();
+                for message in &messages {
+                    if let Ok(output) =
+                        serde_json::from_str::<shared::ClaudeOutput>(&message.content)
+                    {
+                        self.observe_claude_effort(&message.content, &output);
+                    }
+                }
                 self.messages.extend(messages);
                 retain_newest_items_by_cost(
                     &mut self.messages,
@@ -2234,9 +2243,11 @@ impl SessionView {
         });
         let session_key = Self::session_key(ctx);
         self.dispatch_tasks(TasksInbound::ClearForReplay);
+        self.claude_effort = Default::default();
         for msg in &messages {
             let tag = classify_output_msg_type(&msg.content);
             if let Ok(claude_msg) = serde_json::from_str::<shared::ClaudeOutput>(&msg.content) {
+                self.observe_claude_effort(&msg.content, &claude_msg);
                 for ev in derive_task_events(&claude_msg, &msg.created_at, false) {
                     self.dispatch_tasks(TasksInbound::Replay(ev));
                 }
@@ -2523,6 +2534,15 @@ impl SessionView {
         }
     }
 
+    fn observe_claude_effort(&mut self, content: &str, output: &shared::ClaudeOutput) {
+        if matches!(output, shared::ClaudeOutput::System(_)) {
+            let capability =
+                serde_json::from_str::<shared::claude_effort::ClaudeEffortCapability>(content)
+                    .unwrap_or_default();
+            self.claude_effort.observe(output, capability);
+        }
+    }
+
     fn handle_received_output(&mut self, ctx: &Context<Self>, output: RenderedMessage) -> bool {
         let tag = classify_output_msg_type(&output.content);
         if let Some(shared::MessageSource::Agent { session_id, .. }) = output.source() {
@@ -2533,6 +2553,7 @@ impl SessionView {
             ));
         }
         if let Ok(claude_msg) = serde_json::from_str::<shared::ClaudeOutput>(&output.content) {
+            self.observe_claude_effort(&output.content, &claude_msg);
             // Live task events use the server-assigned row timestamp when the
             // backend supplied it, falling back to browser time only for
             // pre-metadata/error frames.
@@ -3062,6 +3083,7 @@ impl SessionView {
             <InputBar
                 session_id={ctx.props().session.id}
                 agent_type={ctx.props().session.agent_type}
+                claude_effort={self.claude_effort.clone()}
                 focused={ctx.props().focused}
                 ws_connected={self.ws_connected}
                 stt_enabled={ctx.props().stt_enabled}

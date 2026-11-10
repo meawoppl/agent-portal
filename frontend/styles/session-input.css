@@ -90,6 +90,21 @@
     cursor: pointer;
 }
 
+.reasoning-effort-control {
+    display: inline-flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+    align-self: center;
+    align-items: center;
+    gap: 2px;
+}
+
+.reasoning-effort-reported {
+    color: var(--text-muted);
+    font: 0.65rem var(--font-mono, monospace);
+    white-space: nowrap;
+}
+
 .reasoning-effort-select {
     align-self: center;
     flex: 0 0 auto;

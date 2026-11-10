@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="Arial, sans-serif">
+<text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2400 · Acknowledged Claude effort controls</text>
+<text x="55" y="108" font-size="34" fill="#e6e9f5">Claude effort stayed hidden because its driver discarded overrides.</text>
+<text x="55" y="151" font-size="34" fill="#e6e9f5">Typed settings acknowledgements now gate prompts, so the picker can safely return.</text>
+<path d="M55 180H1945" stroke="#565f89"/>
+<path d="M1000 190V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="55" y="234" font-size="22" font-weight="bold" fill="#f7768e">BEFORE</text>
+<text x="1055" y="234" font-size="22" font-weight="bold" fill="#9ece6a">AFTER</text>
+<g><rect x="55" y="285" width="890" height="180" rx="14" fill="#1e202e" stroke="#e0af68"/>
+<text x="81" y="329" font-size="26" fill="#e0af68">supported_reasoning_effort</text>
+<text x="81" y="373" font-size="23" fill="#c0caf5">Only Codex receives composer effort overrides.</text>
+<text x="81" y="408" font-size="23" fill="#c0caf5">Claude picker stays hidden to avoid a false control.</text>
+</g>
+<g><rect x="55" y="545" width="890" height="180" rx="14" fill="#1e202e" stroke="#f7768e"/>
+<text x="81" y="589" font-size="26" fill="#f7768e">IoCommand::UserInput</text>
+<text x="81" y="633" font-size="23" fill="#c0caf5">reasoning_effort is discarded by the Claude driver.</text>
+<text x="81" y="668" font-size="23" fill="#c0caf5">No settings request precedes the user prompt.</text>
+</g>
+<g><rect x="55" y="805" width="890" height="180" rx="14" fill="#1e202e" stroke="#e0af68"/>
+<text x="81" y="849" font-size="26" fill="#e0af68">Claude composer state</text>
+<text x="81" y="893" font-size="23" fill="#c0caf5">CLI-reported effort is not shown in the composer.</text>
+<text x="81" y="928" font-size="23" fill="#c0caf5">Old drivers provide no effort-control capability.</text>
+</g>
+<g><rect x="1055" y="285" width="890" height="180" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1081" y="329" font-size="26" fill="#9ece6a">ClaudeEffortCapability / ClaudeEffortStatus</text>
+<text x="1081" y="373" font-size="23" fill="#c0caf5">New drivers enable controls on init; old drivers stay hidden.</text>
+<text x="1081" y="408" font-size="23" fill="#c0caf5">Reported effort is shown; ultrathink gates XHigh.</text>
+</g>
+<g><rect x="1055" y="545" width="890" height="180" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1081" y="589" font-size="26" fill="#9ece6a">EffortController</text>
+<text x="1081" y="633" font-size="23" fill="#c0caf5">Typed apply_flag_settings; one pending prompt, 10s bound.</text>
+<text x="1081" y="668" font-size="23" fill="#c0caf5">Only its matching success ACK releases the user input.</text>
+</g>
+<g><rect x="1055" y="805" width="890" height="180" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1081" y="849" font-size="26" fill="#9ece6a">Auto / InputAck.rejected_seq</text>
+<text x="1081" y="893" font-size="23" fill="#c0caf5">Auto null-clears flags; rejection removes one queue row.</text>
+<text x="1081" y="928" font-size="23" fill="#c0caf5">Unknown delivery stays replayable; XHigh follows native init.</text>
+</g>
+<text x="55" y="1172" font-size="22" fill="#e0af68">Old backends ignore rejected_seq; use a current backend. Lost rejection frames retain existing at-least-once delivery limits.</text>
+</g></svg>

@@ -46,6 +46,8 @@ pub struct InputBarProps {
     pub session_id: Uuid,
     /// Composer overrides are available only for drivers that apply them.
     pub agent_type: shared::AgentType,
+    #[prop_or_default]
+    pub claude_effort: shared::claude_effort::ClaudeEffortStatus,
     /// Whether the parent session is currently focused. When `true`, the bar
     /// grabs textarea focus on transitions.
     pub focused: bool,
@@ -115,17 +117,18 @@ fn composer_placeholder() -> &'static str {
     }
 }
 
-/// Only Codex currently applies per-turn effort. Hiding unsupported controls
+/// Only an acknowledged-capable driver may apply effort. Hiding unsupported controls
 /// also requires filtering persisted preferences on every submission path:
 /// otherwise a previously saved override would keep riding on hidden inputs.
 fn supported_reasoning_effort(
     agent: shared::AgentType,
+    claude: &shared::claude_effort::ClaudeEffortStatus,
     effort: Option<ReasoningEffort>,
 ) -> Option<ReasoningEffort> {
-    if agent == shared::AgentType::Codex {
-        effort
-    } else {
-        None
+    match agent {
+        shared::AgentType::Codex => effort,
+        shared::AgentType::Claude => effort.filter(|effort| claude.permits(*effort)),
+        _ => None,
     }
 }
 
@@ -917,7 +920,7 @@ impl Component for InputBar {
                             onclick={link.callback(|_| InputBarMsg::AcceptSuggestion)}
                         >{ "Tab" }</button>
                     }
-                    { self.render_reasoning_effort_select(ctx.props().agent_type, handle_effort_change) }
+                    { self.render_reasoning_effort_select(ctx, handle_effort_change) }
                     { self.render_voice_input(ctx) }
                     { self.render_send_button(ctx) }
                     <div class="drop-hint">{ "Drop files here to upload" }</div>
@@ -1222,25 +1225,43 @@ impl InputBar {
     }
 
     fn effective_reasoning_effort(&self, ctx: &Context<Self>) -> Option<ReasoningEffort> {
-        supported_reasoning_effort(ctx.props().agent_type, self.reasoning_effort)
+        supported_reasoning_effort(
+            ctx.props().agent_type,
+            &ctx.props().claude_effort,
+            self.reasoning_effort,
+        )
     }
 
     fn render_reasoning_effort_select(
         &self,
-        agent: shared::AgentType,
+        ctx: &Context<Self>,
         onchange: Callback<Event>,
     ) -> Html {
-        if agent != shared::AgentType::Codex {
+        let agent = ctx.props().agent_type;
+        let claude = &ctx.props().claude_effort;
+        if agent != shared::AgentType::Codex && agent != shared::AgentType::Claude {
             return Html::default();
         }
         let selected = self
-            .reasoning_effort
+            .effective_reasoning_effort(ctx)
             .map(|effort| effort.as_str())
             .unwrap_or("auto");
         // A select has no HTML value attribute. Yew inserts options in reverse
         // order, so leaving selection implicit can display XHigh even on Auto.
         // Set selected on each option, as in the model picker.
+        let actual_effort = if agent == shared::AgentType::Claude {
+            claude.reported_effort.as_ref().map(|effort| html! {
+                <span class="reasoning-effort-reported" title="Last effort reported by Claude after model and organization limits">
+                    {format!("Effort: {effort}")}
+                </span>
+            }).unwrap_or_default()
+        } else {
+            Html::default()
+        };
         html! {
+            <span class="reasoning-effort-control">
+            { actual_effort }
+            if agent == shared::AgentType::Codex || claude.control_supported {
             <select
                 class="reasoning-effort-select"
                 title="Reasoning effort for the next turn"
@@ -1248,12 +1269,16 @@ impl InputBar {
                 {onchange}
             >
                 <option value="auto" selected={selected == "auto"}>{ "Auto" }</option>
-                <option value="minimal" selected={selected == "minimal"}>{ "Minimal" }</option>
+                if agent == shared::AgentType::Codex {
+                    <option value="minimal" selected={selected == "minimal"}>{ "Minimal" }</option>
+                }
                 <option value="low" selected={selected == "low"}>{ "Low" }</option>
                 <option value="medium" selected={selected == "medium"}>{ "Medium" }</option>
                 <option value="high" selected={selected == "high"}>{ "High" }</option>
-                <option value="xhigh" selected={selected == "xhigh"}>{ "XHigh" }</option>
+                <option value="xhigh" selected={selected == "xhigh"} disabled={agent == shared::AgentType::Claude && !claude.ultrathink_available}>{ "XHigh" }</option>
             </select>
+            }
+            </span>
         }
     }
 
@@ -1510,14 +1535,17 @@ mod tests {
             shared::AgentType::Muse,
             shared::AgentType::Antigravity,
         ] {
-            assert_eq!(supported_reasoning_effort(agent, saved), None);
+            assert_eq!(
+                supported_reasoning_effort(agent, &Default::default(), saved),
+                None
+            );
         }
         assert_eq!(
-            supported_reasoning_effort(shared::AgentType::Codex, saved),
+            supported_reasoning_effort(shared::AgentType::Codex, &Default::default(), saved),
             saved
         );
         assert_eq!(
-            supported_reasoning_effort(shared::AgentType::Codex, None),
+            supported_reasoning_effort(shared::AgentType::Codex, &Default::default(), None),
             None
         );
     }
