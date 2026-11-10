@@ -65,7 +65,9 @@ EXPOSE 3000
 # =============================================================================
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+# Keep the fast startup probe in the image: older Watchtower versions omit
+# StartInterval when recreating containers, and Docker backfills it from here.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --start-interval=1s --retries=3 \
     CMD curl -f http://localhost:3000/ || exit 1
 
 # Run the backend (expects environment variables to be passed in)

@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="monospace" font-size="24" fill="#a9b1d6">PR #2399 · Probe new containers promptly during startup</text>
+<text x="55" y="108" font-family="monospace" font-size="34" fill="#e6e9f5">The image carries the startup interval so recreated containers retain fast readiness.</text>
+<path d="M1000 190V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="55" y="225" font-family="monospace" font-size="24" fill="#f7768e">BEFORE</text>
+<text x="1055" y="225" font-family="monospace" font-size="24" fill="#9ece6a">AFTER</text>
+<g><rect x="55" y="285" width="885" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="340" font-family="monospace" font-size="28" fill="#7aa2f7">Dockerfile HEALTHCHECK</text>
+<text x="80" y="393" font-family="monospace" font-size="25" fill="#c0caf5">Only a 30s regular interval is specified</text>
+</g>
+<g><rect x="55" y="530" width="885" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="585" font-family="monospace" font-size="28" fill="#7aa2f7">Older Watchtower recreation</text>
+<text x="80" y="638" font-family="monospace" font-size="25" fill="#c0caf5">StartInterval field is omitted</text>
+</g>
+<g><rect x="55" y="775" width="885" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="830" font-family="monospace" font-size="28" fill="#7aa2f7">Routing waits for healthy status</text>
+<text x="80" y="883" font-family="monospace" font-size="25" fill="#c0caf5">Observed rollout gaps: 32-34 seconds</text>
+</g>
+<g><rect x="1055" y="285" width="885" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1080" y="340" font-family="monospace" font-size="28" fill="#7aa2f7">Dockerfile HEALTHCHECK</text>
+<text x="1080" y="393" font-family="monospace" font-size="25" fill="#c0caf5">--start-interval=1s</text>
+</g>
+<g><rect x="1055" y="530" width="885" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1080" y="585" font-family="monospace" font-size="28" fill="#7aa2f7">Docker 25 image merge</text>
+<text x="1080" y="638" font-family="monospace" font-size="25" fill="#c0caf5">Omitted field is backfilled from image</text>
+</g>
+<g><rect x="1055" y="775" width="885" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1080" y="830" font-family="monospace" font-size="28" fill="#7aa2f7">Startup readiness check</text>
+<text x="1080" y="883" font-family="monospace" font-size="25" fill="#c0caf5">Fast probes during the existing grace</text>
+</g>
+<text x="55" y="1172" font-family="monospace" font-size="22" fill="#e0af68">Requires Docker 25+ (production: 25.0.13). This improves startup probing; it does not provide zero-downtime deployment.</text>
+</svg>
