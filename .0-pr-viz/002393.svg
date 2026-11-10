@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="monospace" font-size="24" fill="#a9b1d6">PR #2393 · Antigravity usage scopes and typed activity</text>
+<text x="55" y="108" font-family="monospace" font-size="34" fill="#e6e9f5">Conversation counters now yield turn deltas; typed actions expose URL fetches and errors.</text>
+<path d="M1000 190V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="55" y="225" font-family="monospace" font-size="24" fill="#f7768e">BEFORE</text>
+<text x="1055" y="225" font-family="monospace" font-size="24" fill="#9ece6a">AFTER</text>
+<g><rect x="55" y="285" width="885" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="340" font-family="monospace" font-size="28" fill="#7aa2f7">cumulative_usage / UsageUpdate.total</text>
+<text x="80" y="393" font-family="monospace" font-size="25" fill="#c0caf5">Conversation counters used as turn spend</text>
+</g>
+<g><rect x="55" y="530" width="885" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="585" font-family="monospace" font-size="28" fill="#7aa2f7">context_snapshot_tokens</text>
+<text x="80" y="638" font-family="monospace" font-size="25" fill="#c0caf5">Cumulative input shown as context size</text>
+</g>
+<g><rect x="55" y="775" width="885" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="830" font-family="monospace" font-size="28" fill="#7aa2f7">action_summary / trajectory update</text>
+<text x="80" y="883" font-family="monospace" font-size="25" fill="#c0caf5">URL fetch and error_code missing</text>
+</g>
+<g><rect x="1055" y="285" width="885" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1080" y="340" font-family="monospace" font-size="28" fill="#7aa2f7">finalize_turn_metrics</text>
+<text x="1080" y="393" font-family="monospace" font-size="25" fill="#c0caf5">Subtract initialize response baseline</text>
+</g>
+<g><rect x="1055" y="530" width="885" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1080" y="585" font-family="monospace" font-size="28" fill="#7aa2f7">context_snapshot_tokens: None</text>
+<text x="1080" y="638" font-family="monospace" font-size="25" fill="#c0caf5">No context gauge from cumulative spend</text>
+</g>
+<g><rect x="1055" y="775" width="885" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1080" y="830" font-family="monospace" font-size="28" fill="#7aa2f7">Typed StepUpdate actions</text>
+<text x="1080" y="883" font-family="monospace" font-size="25" fill="#c0caf5">URL/title, correct action fields and code</text>
+</g>
+<text x="55" y="1172" font-family="monospace" font-size="22" fill="#e0af68">Uses antigravity-codes 0.1.23. Historical metrics stay unchanged; no unsupported context occupancy is inferred.</text>
+</svg>
