@@ -639,6 +639,40 @@ fn server_to_proxy_register_ack_golden_omits_absent_ticket() {
 }
 
 #[test]
+fn automated_prompt_keeps_durable_provenance_and_legacy_wire_text() {
+    let envelope = crate::PortalMessage::automated_prompt("/literal @file".into()).to_json();
+    let (content, automated) = crate::PortalMessage::input_wire_parts(envelope.clone());
+    assert!(automated);
+    assert_eq!(content, serde_json::Value::String("/literal @file".into()));
+    assert_eq!(
+        crate::PortalMessage::input_with_provenance(content.clone(), automated),
+        envelope
+    );
+    let msg = ServerToProxy::AgentInput {
+        content,
+        automated,
+        send_mode: None,
+        reasoning_effort: None,
+    };
+    let wire = serde_json::to_string(&msg).unwrap();
+    // The additive flag is ignored by old proxies, whose payload stays text.
+    #[derive(serde::Deserialize)]
+    struct LegacyInput {
+        content: String,
+    }
+    let legacy: LegacyInput = serde_json::from_str(&wire).unwrap();
+    assert_eq!(legacy.content, "/literal @file");
+    let old_wire = r#"{"type":"ClaudeInput","content":"/human @file"}"#;
+    assert!(matches!(
+        serde_json::from_str::<ServerToProxy>(old_wire).unwrap(),
+        ServerToProxy::AgentInput {
+            automated: false,
+            ..
+        }
+    ));
+}
+
+#[test]
 fn server_to_proxy_sequenced_input_golden() {
     let msg = ServerToProxy::SequencedInput {
         session_id: nil(),
