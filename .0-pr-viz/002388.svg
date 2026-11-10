@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="Arial, sans-serif">
+<text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2388 · Honest composer effort controls</text>
+<text x="55" y="108" font-size="34" fill="#e6e9f5">The effort picker appeared for drivers that ignored its value.</text>
+<text x="55" y="151" font-size="34" fill="#e6e9f5">Only Codex now exposes and forwards composer effort overrides.</text>
+<path d="M55 180H1945" stroke="#565f89"/>
+<path d="M1000 190V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="55" y="234" font-size="22" font-weight="bold" fill="#f7768e">BEFORE</text>
+<text x="1055" y="234" font-size="22" font-weight="bold" fill="#9ece6a">AFTER</text>
+<g><rect x="55" y="285" width="890" height="180" rx="14" fill="#1e202e" stroke="#f7768e"/>
+<text x="81" y="329" font-size="26" fill="#f7768e">render_reasoning_effort_select</text>
+<text x="81" y="373" font-size="23" fill="#c0caf5">Every agent shows Auto through XHigh.</text>
+<text x="81" y="408" font-size="23" fill="#c0caf5">Claude, Muse and Antigravity ignore the override.</text>
+</g>
+<g><rect x="55" y="545" width="890" height="180" rx="14" fill="#1e202e" stroke="#e0af68"/>
+<text x="81" y="589" font-size="26" fill="#e0af68">Saved reasoning_effort</text>
+<text x="81" y="633" font-size="23" fill="#c0caf5">A session preference survives between visits.</text>
+<text x="81" y="668" font-size="23" fill="#c0caf5">Hiding only the picker would still send its value.</text>
+</g>
+<g><rect x="55" y="805" width="890" height="180" rx="14" fill="#1e202e" stroke="#f7768e"/>
+<text x="81" y="849" font-size="26" fill="#f7768e">Text, uploads and secret drops</text>
+<text x="81" y="893" font-size="23" fill="#c0caf5">All submission paths forward the saved selection.</text>
+<text x="81" y="928" font-size="23" fill="#c0caf5">The UI suggests a setting changed when it did not.</text>
+</g>
+<g><rect x="1055" y="285" width="890" height="180" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1081" y="329" font-size="26" fill="#9ece6a">InputBarProps.agent_type</text>
+<text x="1081" y="373" font-size="23" fill="#c0caf5">The session supplies the actual agent type.</text>
+<text x="1081" y="408" font-size="23" fill="#c0caf5">The picker renders only for Codex.</text>
+</g>
+<g><rect x="1055" y="545" width="890" height="180" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1081" y="589" font-size="26" fill="#9ece6a">supported_reasoning_effort</text>
+<text x="1081" y="633" font-size="23" fill="#c0caf5">Codex retains its chosen override or Auto.</text>
+<text x="1081" y="668" font-size="23" fill="#c0caf5">Unsupported drivers receive None.</text>
+</g>
+<g><rect x="1055" y="805" width="890" height="180" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1081" y="849" font-size="26" fill="#9ece6a">effective_reasoning_effort</text>
+<text x="1081" y="893" font-size="23" fill="#c0caf5">Text, uploads and secret drops share the guard.</text>
+<text x="1081" y="928" font-size="23" fill="#c0caf5">Hidden persisted preferences cannot leak to sends.</text>
+</g>
+<text x="55" y="1172" font-size="22" fill="#e0af68">Claude live effort, resolved effort display and ultrathink capability remain follow-up integration work.</text>
+</g></svg>
