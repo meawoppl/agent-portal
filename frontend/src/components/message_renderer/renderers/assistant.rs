@@ -228,8 +228,10 @@ pub fn render_assistant_message_content(
         )
     } else {
         render_content_blocks_with_thinking_duration(
-            &msg.message.content, session_id,
-            msg.thinking_duration_ms.filter(|_| matches!(msg.message.content.as_slice(), [ContentBlock::Thinking(_)])),
+            &msg.message.content,
+            session_id,
+            msg.thinking_duration_ms
+                .filter(|_| matches!(msg.message.content.as_slice(), [ContentBlock::Thinking(_)])),
         )
     };
     if completion_states.is_empty() && content.is_none() && login.is_none() && api_error.is_none() {

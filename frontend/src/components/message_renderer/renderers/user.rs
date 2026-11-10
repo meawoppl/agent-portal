@@ -235,11 +235,19 @@ fn permission_decision_label(decision: &claude_codes::ToolPermissionDecision) ->
         PermissionDecisionOutcome::Cancelled => return "Permission cancelled".into(),
         PermissionDecisionOutcome::Unknown(kind) => return format!("Permission: {kind}"),
     };
-    let origin = decision
+    let reason = decision
         .reason_type
         .as_ref()
-        .map(|reason| reason.as_str())
-        .unwrap_or(&decision.source);
+        .and_then(|reason| match reason {
+            claude_codes::io::PermissionDecisionReasonType::Other
+            | claude_codes::io::PermissionDecisionReasonType::Unknown(_) => None,
+            known => Some(known.as_str()),
+        });
+    let origin = match decision.source.as_str() {
+        "hook" | "classifier" | "user_temporary" | "user_permanent" | "user_reject"
+        | "user_abort" => decision.source.as_str(),
+        source => reason.unwrap_or(source),
+    };
     if matches!(decision.decision, PermissionDecisionOutcome::Accept) && origin == "classifier" {
         return "Auto-approved (classifier)".into();
     }
