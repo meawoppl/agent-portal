@@ -454,7 +454,12 @@ impl<A: Agent> Session<A> {
                     "I/O task closed before accepting input".to_string(),
                 )
             })?
-            .map_err(|error| SessionError::Agent(error.to_string()))
+            .map_err(|error| match error {
+                crate::io::InputDeliveryError::Unknown(message) => SessionError::Agent(message),
+                crate::io::InputDeliveryError::RejectedBeforeSend(message) => {
+                    SessionError::InputRejected(message)
+                }
+            })
     }
 
     /// Queue user input to the agent and return a receiver that resolves when
@@ -800,6 +805,47 @@ mod tests {
             GUARD_DROPPED.load(Ordering::SeqCst),
             "stop() should abort the io task and reap it"
         );
+    }
+
+    #[tokio::test]
+    async fn blocking_delivery_retains_a_definitive_pre_send_rejection() {
+        struct RejectAgent;
+        impl Agent for RejectAgent {
+            fn spawn_io_task(
+                _config: SessionConfig,
+                mut commands: mpsc::UnboundedReceiver<IoCommand>,
+                _events: mpsc::UnboundedSender<IoEvent>,
+            ) -> Result<tokio::task::JoinHandle<()>, SessionError> {
+                Ok(tokio::spawn(async move {
+                    while let Some(command) = commands.recv().await {
+                        if let IoCommand::UserInput {
+                            delivered: Some(delivered),
+                            ..
+                        } = command
+                        {
+                            let _ = delivered.send(Err(
+                                crate::io::InputDeliveryError::RejectedBeforeSend(
+                                    "unsupported effort".into(),
+                                ),
+                            ));
+                        }
+                    }
+                }))
+            }
+        }
+        let mut session = Session::<RejectAgent>::new(SessionConfig::default())
+            .await
+            .unwrap();
+        let result = session
+            .send_input_with_display_and_effort(
+                serde_json::Value::String("pending".into()),
+                None,
+                Some(shared::ReasoningEffort::High),
+            )
+            .await;
+        assert!(matches!(result, Err(SessionError::InputRejected(_))));
+        assert!(matches!(session.state, SessionState::Running));
+        session.stop().await.unwrap();
     }
 
     #[tokio::test]

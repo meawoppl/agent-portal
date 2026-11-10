@@ -767,7 +767,17 @@ fn handle_input_ack(
     let mut conn = match db_pool.get() {
         Ok(conn) => conn,
         Err(e) => {
-            error!("Failed to get database connection for input ack: {}", e);
+            if let Some(seq) = rejected_seq {
+                error!(
+                    "{}: session {} seq {}: {}",
+                    crate::markers::INPUT_REJECTION_PERSIST_FAILED,
+                    current_session_id,
+                    seq,
+                    e
+                );
+            } else {
+                error!("Failed to get database connection for input ack: {}", e);
+            }
             return;
         }
     };

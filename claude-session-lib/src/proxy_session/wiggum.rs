@@ -137,14 +137,29 @@ pub(super) async fn handle_wiggum_activation<A: Agent>(
     // Wiggum is the other way a user input reaches the agent, so it claims the
     // session-start reminder too (see `fold_session_start_reminder`). The
     // display event is already the user's own prompt, so it survives.
+    let recovery_inbox = claude_session.recovery_context().clone();
+    let recovery = recovery_inbox.claim();
+    let carries_recovery = recovery.is_some();
+    let inject_reminder = reminder_pending.swap(false, std::sync::atomic::Ordering::SeqCst);
     let (prompt, display_event) = {
         let framed = wiggum_prompt(&original_prompt);
         let display = automated_user_echo_value(original_prompt.clone(), session_id);
-        if reminder_pending.swap(false, std::sync::atomic::Ordering::SeqCst) {
+        if inject_reminder || carries_recovery {
+            let mut context = claude_session
+                .config()
+                .plugin_skill_reminder
+                .clone()
+                .unwrap_or_default();
+            if let Some(recovery) = recovery {
+                if !context.is_empty() {
+                    context.push_str("\n\n");
+                }
+                context.push_str(&recovery);
+            }
             let (text, display) = super::portal_reminder::fold_session_start_reminder(
                 framed,
                 Some(display),
-                claude_session.config().plugin_skill_reminder.as_deref(),
+                Some(&context),
                 |text| automated_user_echo_value(text.to_string(), session_id),
             );
             (
@@ -171,6 +186,24 @@ pub(super) async fn handle_wiggum_activation<A: Agent>(
         )
         .await
     {
+        if carries_recovery {
+            recovery_inbox.settle(false);
+        }
+        if matches!(e, session_lib::error::SessionError::InputRejected(_)) {
+            if inject_reminder {
+                reminder_pending.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+            *wiggum_state = None;
+            emit_input_failure(
+                ws_write,
+                session_id,
+                wiggum_input.client_msg_id,
+                session_lib::proxy_session::input_delivery::AGENT_REJECTED,
+            )
+            .await;
+            session_lib::proxy_session::reject_portal_input(ws_write, wiggum_input.ack).await;
+            return None;
+        }
         error!("Failed to send wiggum prompt to Claude: {}", e);
         emit_input_failure(
             ws_write,
@@ -180,6 +213,9 @@ pub(super) async fn handle_wiggum_activation<A: Agent>(
         )
         .await;
         return Some(ConnectionResult::AgentExited);
+    }
+    if carries_recovery {
+        recovery_inbox.settle(true);
     }
     emit_input_progress(
         ws_write,
