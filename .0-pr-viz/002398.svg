@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="Arial, sans-serif">
+<text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2398 · Explain Codex hook failures and preserve managed approval context</text>
+<text x="55" y="105" font-size="34" fill="#e6e9f5">Failed hooks vanished and managed checkpoint context became a plain Bash prompt.</text>
+<text x="55" y="147" font-size="34" fill="#e6e9f5">Bounded hook cards and typed approval context explain what needs attention.</text>
+<path d="M55 178 H1945 M1000 190 V1140" stroke="#565f89" stroke-width="2" stroke-dasharray="7 7"/>
+<text x="55" y="225" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1040" y="225" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="55" y="275" width="900" height="210" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="79" y="320" font-size="26" fill="#7aa2f7">Notification::HookCompleted</text>
+<text x="79" y="375" font-size="23" fill="#c0caf5">All hook completions become Noop.</text>
+<text x="79" y="428" font-size="23" fill="#f7768e">Failed or blocked work has no hook explanation.</text>
+<rect x="1040" y="275" width="900" height="210" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1064" y="320" font-size="26" fill="#7aa2f7">visible_hook_failure</text>
+<text x="1064" y="375" font-size="23" fill="#c0caf5">Keep failed/blocked hooks with bounded details.</text>
+<text x="1064" y="428" font-size="23" fill="#9ece6a">Drop model-only context and per-model-call noise.</text>
+<rect x="55" y="540" width="900" height="210" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="79" y="585" font-size="26" fill="#7aa2f7">CodexPermissionInput::Bash</text>
+<text x="79" y="640" font-size="23" fill="#c0caf5">Only command, cwd and parsed_cmd survive.</text>
+<text x="79" y="693" font-size="23" fill="#f7768e">kind, reason and network context disappear.</text>
+<rect x="1040" y="540" width="900" height="210" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1064" y="585" font-size="26" fill="#7aa2f7">Typed managed checkpoint context</text>
+<text x="1064" y="640" font-size="23" fill="#c0caf5">Preserve kind, reason, networkApprovalContext.</text>
+<text x="1064" y="693" font-size="23" fill="#9ece6a">The approval dialog labels the fresh decision.</text>
+<rect x="55" y="805" width="900" height="210" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="79" y="850" font-size="26" fill="#7aa2f7">build_permission_response</text>
+<text x="79" y="905" font-size="23" fill="#c0caf5">Remembering depends only on UI selection.</text>
+<text x="79" y="958" font-size="23" fill="#f7768e">Managed kind is unavailable to guard the choice.</text>
+<rect x="1040" y="805" width="900" height="210" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1064" y="850" font-size="26" fill="#7aa2f7">requires_fresh_human_decision</text>
+<text x="1064" y="905" font-size="23" fill="#c0caf5">No remembered option for humanCommand.</text>
+<text x="1064" y="958" font-size="23" fill="#9ece6a">Response builder drops any remembered suggestions.</text>
+<text x="55" y="1172" font-size="22" fill="#a9b1d6">Scope: requiredHumanApproval stays unadvertised. Issue #2396 must enforce fresh matched human decisions before enablement.</text>
+</g>
+</svg>
