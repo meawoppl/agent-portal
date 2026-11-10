@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="Arial, sans-serif">
+<text x="55" y="52" font-size="24" fill="#a9b1d6" letter-spacing="1">PR #2384 · Keep Codex retries active and explain terminal failures</text>
+<text x="55" y="106" font-size="34" fill="#e6e9f5">Retry errors lost their meaning; typed details now preserve activity and recovery.</text>
+<text x="55" y="150" font-size="28" fill="#c0caf5">Completion retains capacity errors, so the following frame cannot erase throttling.</text>
+<path d="M55 177H1945" stroke="#3d4666"/>
+<path d="M1000 190V1140" stroke="#565f89" stroke-dasharray="9 9"/>
+<text x="65" y="230" font-size="22" font-weight="bold" letter-spacing="4" fill="#f7768e">BEFORE</text>
+<text x="1045" y="230" font-size="22" font-weight="bold" letter-spacing="4" fill="#9ece6a">AFTER</text>
+<g><rect x="65" y="270" width="875" height="160" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="90" y="315" font-size="26" fill="#7aa2f7">Notification::Error / TurnCompleted</text>
+<text x="90" y="358" font-size="23" fill="#c0caf5">Typed willRetry and codexErrorInfo arrive.</text>
+<text x="90" y="395" font-size="23" fill="#f7768e">ErrorEvent retains only message.</text></g>
+<path d="M500 430V475" stroke="#f7768e" stroke-width="3"/>
+<g><rect x="65" y="475" width="875" height="210" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="90" y="520" font-size="26" fill="#f7768e">Every error looks terminal</text>
+<text x="90" y="563" font-size="23" fill="#c0caf5">Dashboard goes Idle during a retry.</text>
+<text x="90" y="600" font-size="23" fill="#c0caf5">Edit stack can dispatch the next queued input.</text>
+<text x="90" y="637" font-size="23" fill="#c0caf5">Transcript draws a red error card.</text></g>
+<path d="M500 685V730" stroke="#f7768e" stroke-width="3"/>
+<g><rect x="65" y="730" width="875" height="180" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="90" y="775" font-size="26" fill="#f7768e">turn.completed always means Idle</text>
+<text x="90" y="818" font-size="23" fill="#c0caf5">Terminal capacity details are unavailable.</text>
+<text x="90" y="855" font-size="23" fill="#c0caf5">Message follow also loses error state.</text></g>
+<g><rect x="1045" y="270" width="890" height="160" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1070" y="315" font-size="26" fill="#7aa2f7">CodexErrorDetails</text>
+<text x="1070" y="358" font-size="23" fill="#c0caf5">Preserves typed codexErrorInfo and willRetry.</text>
+<text x="1070" y="395" font-size="23" fill="#9ece6a">ErrorEvent + TurnCompletedEvent carry details.</text></g>
+<path d="M1490 430V475" stroke="#9ece6a" stroke-width="3"/>
+<g><rect x="1045" y="475" width="890" height="210" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1070" y="520" font-size="26" fill="#9ece6a">Retry remains ongoing work</text>
+<text x="1070" y="563" font-size="23" fill="#c0caf5">Busy for retry; Throttled for capacity refusal.</text>
+<text x="1070" y="600" font-size="23" fill="#c0caf5">Retry errors do not release queued input.</text>
+<text x="1070" y="637" font-size="23" fill="#c0caf5">Muted retry status; terminal recovery hints.</text></g>
+<path d="M1490 685V730" stroke="#9ece6a" stroke-width="3"/>
+<g><rect x="1045" y="730" width="890" height="180" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1070" y="775" font-size="26" fill="#9ece6a">Completion preserves capacity state</text>
+<text x="1070" y="818" font-size="23" fill="#c0caf5">Dashboard and follow agree on Throttled.</text>
+<text x="1070" y="855" font-size="23" fill="#c0caf5">Successful completion returns to Idle.</text></g>
+<text x="65" y="990" font-size="25" fill="#c0caf5">Regression coverage: retry metadata, completion ordering, follow state, edit stack and rendering.</text>
+<text x="65" y="1035" font-size="23" fill="#a9b1d6">Old message-only archives remain terminal errors; future SDK codes keep a generic visible fallback.</text>
+<text x="55" y="1172" font-size="22" fill="#e0af68">Scope: preserves provider signals; does not add automatic retries or change the provider's capacity limits.</text>
+</g></svg>
