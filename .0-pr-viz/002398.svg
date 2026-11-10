@@ -2,19 +2,19 @@
 <rect width="2000" height="1200" fill="#1a1b26"/>
 <g font-family="Arial, sans-serif">
 <text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2398 · Explain Codex hook failures and preserve managed approval context</text>
-<text x="55" y="105" font-size="34" fill="#e6e9f5">Failed hooks vanished and managed checkpoint context became a plain Bash prompt.</text>
+<text x="55" y="105" font-size="34" fill="#e6e9f5">Failed hooks vanished and retry diagnostics could fail queued turns.</text>
 <text x="55" y="147" font-size="34" fill="#e6e9f5">Bounded hook cards and typed approval context explain what needs attention.</text>
 <path d="M55 178 H1945 M1000 190 V1140" stroke="#565f89" stroke-width="2" stroke-dasharray="7 7"/>
 <text x="55" y="225" font-size="22" fill="#f7768e">BEFORE</text>
 <text x="1040" y="225" font-size="22" fill="#9ece6a">AFTER</text>
 <rect x="55" y="275" width="900" height="210" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
 <text x="79" y="320" font-size="26" fill="#7aa2f7">Notification::HookCompleted</text>
-<text x="79" y="375" font-size="23" fill="#c0caf5">All hook completions become Noop.</text>
-<text x="79" y="428" font-size="23" fill="#f7768e">Failed or blocked work has no hook explanation.</text>
+<text x="79" y="375" font-size="23" fill="#c0caf5">Hooks vanish; retry notices become terminal errors.</text>
+<text x="79" y="428" font-size="23" fill="#f7768e">Blocked work is unexplained; queued turns fail early.</text>
 <rect x="1040" y="275" width="900" height="210" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
-<text x="1064" y="320" font-size="26" fill="#7aa2f7">visible_hook_failure</text>
-<text x="1064" y="375" font-size="23" fill="#c0caf5">Keep failed/blocked hooks with bounded details.</text>
-<text x="1064" y="428" font-size="23" fill="#9ece6a">Drop model-only context and per-model-call noise.</text>
+<text x="1064" y="320" font-size="26" fill="#7aa2f7">visible_hook_failure / notice classification</text>
+<text x="1064" y="375" font-size="23" fill="#c0caf5">Bound failed/blocked details; drop model context.</text>
+<text x="1064" y="428" font-size="23" fill="#9ece6a">Hook and retry notices preserve the active turn.</text>
 <rect x="55" y="540" width="900" height="210" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
 <text x="79" y="585" font-size="26" fill="#7aa2f7">CodexPermissionInput::Bash</text>
 <text x="79" y="640" font-size="23" fill="#c0caf5">Only command, cwd and parsed_cmd survive.</text>
