@@ -209,16 +209,6 @@ fn validate_prepared(
     Ok(())
 }
 
-/// Import timestamps are isolated from normal live inserts. Historical rows
-/// retain their native clock without changing the common NewMessage contract.
-#[derive(Insertable)]
-#[diesel(table_name = messages)]
-struct ImportedMessageRow {
-    #[diesel(embed)]
-    message: crate::models::NewSourcedMessage,
-    created_at: chrono::NaiveDateTime,
-}
-
 fn store_import(
     conn: &mut PgConnection,
     draft: DesiredSessionDraft,
@@ -233,28 +223,24 @@ fn store_import(
         diesel::update(sessions::table.find(id)).set(sessions::last_model.eq(prepared.session.model)).execute(conn)?;
         let imported_at = sessions::table.find(id).select(sessions::created_at).first::<chrono::NaiveDateTime>(conn)?;
         let row_count = prepared.messages.len() as i64;
-        let mut rows: Vec<_> = prepared.messages.into_iter().enumerate().map(|(index, m)| ImportedMessageRow {
+        let mut rows: Vec<_> = prepared.messages.into_iter().enumerate().map(|(index, m)| crate::models::NewHistoricalMessage {
             // Cursor/retention clock is ingestion, not the native event date.
             created_at: imported_at - chrono::Duration::microseconds(row_count - index as i64),
-            message: crate::models::NewSourcedMessage {
-                source_created_at: m.timestamp.map(|time| time.naive_utc()),
-                message: crate::models::NewMessage {
+            source_created_at: m.timestamp.map(|time| time.naive_utc()),
+            message: crate::models::NewMessage {
                 session_id: id, user_id: user, role: m.role, content: m.content.to_string(), agent_type: "codex".into(),
                 provenance_kind: None, provenance_session_id: None, provenance_agent_type: None,
-                },
             },
         }).collect();
         let history = if include_history { "Saved conversation history was copied. Attachments remain in Codex; local media is shown as a reference." }
             else { "Earlier messages were not copied into Portal. The complete saved context remains in Codex." };
-        rows.push(ImportedMessageRow {
+        rows.push(crate::models::NewHistoricalMessage {
             created_at: imported_at,
-            message: crate::models::NewSourcedMessage {
             source_created_at: None,
             message: crate::models::NewMessage {
-            session_id: id, user_id: user, role: "assistant".into(), agent_type: "codex".into(),
-            content: shared::PortalMessage::text(format!("**Imported Codex conversation**\n\n{history}\n\nThis session is paused. Finish any work in the original client and close that conversation, then use **Resume** here. Running commands are not transferred.")).to_json().to_string(),
-            provenance_kind: None, provenance_session_id: None, provenance_agent_type: None,
-            },
+                session_id: id, user_id: user, role: "assistant".into(), agent_type: "codex".into(),
+                content: shared::PortalMessage::text(format!("**Imported Codex conversation**\n\n{history}\n\nThis session is paused. Finish any work in the original client and close that conversation, then use **Resume** here. Running commands are not transferred.")).to_json().to_string(),
+                provenance_kind: None, provenance_session_id: None, provenance_agent_type: None,
             },
         });
         // Stay below PostgreSQL's bind-parameter limit on large conversations.

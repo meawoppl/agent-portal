@@ -210,7 +210,7 @@ pub struct Message {
     pub provenance_kind: Option<String>,
     pub provenance_session_id: Option<Uuid>,
     pub provenance_agent_type: Option<String>,
-    /// Original agent record clock; display only, never replay/retention.
+    /// Original record clock; display only, never replay/retention.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_created_at: Option<NaiveDateTime>,
 }
@@ -281,9 +281,10 @@ pub struct NewMessage {
 /// live inserts, whose missing source time remains explicitly unknown.
 #[derive(Debug, Insertable)]
 #[diesel(table_name = crate::schema::messages)]
-pub struct NewSourcedMessage {
+pub struct NewHistoricalMessage {
     #[diesel(embed)]
     pub message: NewMessage,
+    pub created_at: NaiveDateTime,
     pub source_created_at: Option<NaiveDateTime>,
 }
 

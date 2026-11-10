@@ -258,47 +258,40 @@ fn store_restore(
         diesel::update(sessions::table.find(id))
             .set(sessions::history_restore.eq(value))
             .execute(conn)?;
-        // Copy original timestamps: defaulting every row to transaction time
-        // destroys chronological scrollback. Fresh IDs keep archives independent.
-        let row = |role: String, content: String, agent_type: String, created_at, source_created_at: Option<chrono::NaiveDateTime>| {
-            (
-                messages::session_id.eq(id),
-                messages::user_id.eq(user),
-                messages::role.eq(role),
-                messages::content.eq(content),
-                messages::agent_type.eq(agent_type),
-                messages::created_at.eq(created_at),
-                messages::source_created_at.eq(source_created_at),
-            )
-        };
+        let ingested_at = sessions::table.find(id).select(sessions::created_at).first::<chrono::NaiveDateTime>(conn)?;
         let mut selected = Vec::new();
         let mut bytes = 0;
         for line in lines.iter().rev() {
             let content = super::session_restore::stored_content(line.content.clone());
-            if bytes + content.len() > shared::api::MAX_IMPORT_HISTORY_BYTES
-                || selected.len() >= shared::api::MAX_IMPORT_MESSAGES
-            {
-                break;
-            }
+            if bytes + content.len() > shared::api::MAX_IMPORT_HISTORY_BYTES || selected.len() >= shared::api::MAX_IMPORT_MESSAGES { break; }
             bytes += content.len();
-            selected.push(row(line.role.clone(), content, line.agent_type.clone(), line.created_at, line.source_created_at.map(|time| time.naive_utc())));
+            selected.push((line.role.clone(), content, line.agent_type.clone(), line.source_created_at.map(|time| time.naive_utc()).unwrap_or(line.created_at)));
         }
         selected.reverse();
+        let row_count = selected.len() as i64;
         let mode = match recipe.mode {
             HistoryRestoreMode::Native => "Native continuation: the saved agent conversation will be branched on Resume. If it is missing, launch fails instead of starting empty.",
             HistoryRestoreMode::Context => "Archived-context recovery: this is a new agent conversation, not an exact native resume. A bounded recent excerpt accompanies your next message (and the first message after a process restart). Files, attachments, running tools and unsaved native state are not recovered.",
         };
         let notice = format!("**Restored from History**\n\n{mode}\n\nCopied {} of {} archived records for display. [Original archive](/history/{user}/{}) is preserved. This session is paused. Use **Resume**, then send a new instruction. Historical requests are not queued or replayed.", selected.len(), lines.len(), recipe.source_session_id);
-        selected.push(row(
-            "portal".into(),
-            shared::PortalMessage::text(notice).to_json().to_string(),
-            agent.as_str().into(),
-            chrono::Utc::now().naive_utc(),
-            None,
-        ));
-        for chunk in selected.chunks(500) {
-            diesel::insert_into(messages::table).values(chunk).execute(conn)?;
-        }
+        let mut rows: Vec<_> = selected.into_iter().enumerate().map(|(index, (role, content, agent_type, original_at))| crate::models::NewHistoricalMessage {
+            created_at: ingested_at - chrono::Duration::microseconds(row_count - index as i64),
+            source_created_at: Some(original_at),
+            message: crate::models::NewMessage {
+                session_id: id, user_id: user, role, content, agent_type,
+                provenance_kind: None, provenance_session_id: None, provenance_agent_type: None,
+            },
+        }).collect();
+        rows.push(crate::models::NewHistoricalMessage {
+            created_at: ingested_at,
+            source_created_at: None,
+            message: crate::models::NewMessage {
+                session_id: id, user_id: user, role: "portal".into(), agent_type: agent.as_str().into(),
+                content: shared::PortalMessage::text(notice).to_json().to_string(),
+                provenance_kind: None, provenance_session_id: None, provenance_agent_type: None,
+            },
+        });
+        for chunk in rows.chunks(500) { diesel::insert_into(messages::table).values(chunk).execute(conn)?; }
         Ok(())
     })
 }

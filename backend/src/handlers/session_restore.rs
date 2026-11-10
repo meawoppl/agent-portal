@@ -217,28 +217,25 @@ fn store_restore(
     conn.transaction(|conn| {
         create_desired_session(conn, draft)?;
         crate::db::session_lifecycle::pause(conn, id)?;
-        let mut rows: Vec<_> = lines
-            .into_iter()
-            .map(|line| crate::models::NewSourcedMessage {
-                source_created_at: line.source_created_at.map(|time| time.naive_utc()),
-                message: crate::models::NewMessage {
-                session_id: id,
-                user_id: user,
-                role: line.role,
-                content: stored_content(line.content),
-                agent_type: line.agent_type,
-                provenance_kind: None,
-                provenance_session_id: None,
-                provenance_agent_type: None,
-                },
-            })
-            .collect();
+        let ingested_at = sessions::table.find(id).select(sessions::created_at).first::<chrono::NaiveDateTime>(conn)?;
+        let row_count = lines.len() as i64;
+        let mut rows: Vec<_> = lines.into_iter().enumerate().map(|(index, line)| crate::models::NewHistoricalMessage {
+            created_at: ingested_at - chrono::Duration::microseconds(row_count - index as i64),
+            // A legacy archive still has a known original display clock: its
+            // server-created timestamp. Never reuse it as the new replay clock.
+            source_created_at: Some(line.source_created_at.map(|time| time.naive_utc()).unwrap_or(line.created_at)),
+            message: crate::models::NewMessage {
+                session_id: id, user_id: user, role: line.role, content: stored_content(line.content), agent_type: line.agent_type,
+                provenance_kind: None, provenance_session_id: None, provenance_agent_type: None,
+            },
+        }).collect();
         let scrollback = if trimmed {
             "The most recent part of the transcript was copied; the agent still has the whole conversation."
         } else {
             "The transcript was copied from history."
         };
-        rows.push(crate::models::NewSourcedMessage {
+        rows.push(crate::models::NewHistoricalMessage {
+            created_at: ingested_at,
             source_created_at: None,
             message: crate::models::NewMessage {
             session_id: id,

@@ -70,7 +70,7 @@ pub struct PortalMeta {
     /// client-clock sentinel would reintroduce the #784 skew bug.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<String>,
-    /// Original event clock for presentation only. Never a reconnect watermark.
+    /// Original record clock for presentation only. Never a reconnect watermark.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_created_at: Option<String>,
     /// Who produced the message. `Option` (= this session's own agent output)
