@@ -35,6 +35,7 @@ enum SessionState {
 pub struct Session<A: Agent> {
     id: Uuid,
     config: SessionConfig,
+    recovery_context: crate::recovery_context::RecoveryContext,
     /// Channel to send commands (input, permission responses) to the I/O task.
     command_tx: Option<mpsc::UnboundedSender<IoCommand>>,
     buffer: OutputBuffer,
@@ -122,7 +123,9 @@ mod kill_tests {
 
 impl<A: Agent> Session<A> {
     /// Create a new session, spawning the per-agent I/O task.
-    pub async fn new(config: SessionConfig) -> Result<Self, SessionError> {
+    pub async fn new(mut config: SessionConfig) -> Result<Self, SessionError> {
+        let recovery_context =
+            crate::recovery_context::RecoveryContext::new(config.recovery_context.take());
         let buffer = OutputBuffer::new(config.session_id);
         let memory_events = config
             .memory_events_path
@@ -140,6 +143,7 @@ impl<A: Agent> Session<A> {
         Ok(Self {
             id: config.session_id,
             config,
+            recovery_context,
             command_tx: Some(command_tx),
             buffer,
             state: SessionState::Running,
@@ -164,6 +168,8 @@ impl<A: Agent> Session<A> {
         // Always resume when restoring.
         let mut config = snapshot.config;
         config.resume = true;
+        let recovery_context =
+            crate::recovery_context::RecoveryContext::new(config.recovery_context.take());
 
         let memory_events = config
             .memory_events_path
@@ -187,6 +193,7 @@ impl<A: Agent> Session<A> {
         Ok(Self {
             id: snapshot.id,
             config,
+            recovery_context,
             command_tx,
             buffer,
             state,
@@ -206,9 +213,11 @@ impl<A: Agent> Session<A> {
             self.state,
             SessionState::Running | SessionState::WaitingForPermission
         );
+        let mut config = self.config.clone();
+        config.recovery_context = self.recovery_context.snapshot();
         SessionSnapshot::new(
             self.id,
-            self.config.clone(),
+            config,
             self.buffer.to_snapshot(),
             self.pending_permission.clone(),
             was_running,
@@ -225,9 +234,9 @@ impl<A: Agent> Session<A> {
         &self.config
     }
 
-    /// Claim recovered reference text for a real input, preserving slash commands.
-    pub fn take_recovery_context(&mut self) -> Option<String> {
-        self.config.recovery_context.take()
+    /// Reference text waiting for an accepted real input, preserving slash commands.
+    pub fn recovery_context(&self) -> &crate::recovery_context::RecoveryContext {
+        &self.recovery_context
     }
 
     /// Where the launcher posts this session's plugin context changes.
@@ -823,10 +832,21 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            session.take_recovery_context().as_deref(),
+            session.recovery_context().claim().as_deref(),
             Some("quoted past request")
         );
-        assert_eq!(session.take_recovery_context(), None);
+        assert_eq!(session.recovery_context().claim(), None);
+        assert_eq!(
+            session.snapshot().config.recovery_context.as_deref(),
+            Some("quoted past request")
+        );
+        session.recovery_context().settle(false);
+        assert_eq!(
+            session.recovery_context().claim().as_deref(),
+            Some("quoted past request")
+        );
+        session.recovery_context().settle(true);
+        assert_eq!(session.snapshot().config.recovery_context, None);
 
         // The launcher's handle and the session's are the same inbox.
         let launcher_side = session.config().context_updates.clone();

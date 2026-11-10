@@ -40,6 +40,7 @@ pub mod output_buffer;
 pub mod paths;
 pub mod probe;
 pub mod proxy_session;
+pub mod recovery_context;
 pub mod session;
 pub mod snapshot;
 pub mod strings;

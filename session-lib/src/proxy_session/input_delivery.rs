@@ -8,6 +8,7 @@
 //! I/O task so it enters the replay buffer before proxy forwarding.
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use tokio::sync::oneshot;
 use tracing::{debug, error};
@@ -31,7 +32,7 @@ pub const AGENT_CLOSED: &str = "The agent closed before accepting this input";
 pub async fn handle_input<A, Refresh, RefreshFuture, Display>(
     ws_write: &SharedWsWrite,
     session_id: Uuid,
-    reminder_pending: &AtomicBool,
+    reminder_pending: &Arc<AtomicBool>,
     claude_session: &mut Session<A>,
     input: PortalInput,
     refresh_git: Refresh,
@@ -58,10 +59,11 @@ where
     if slash_command && portal_reminder::is_clear_command(&input.text) {
         reminder_pending.store(true, Ordering::SeqCst);
     }
+    let recovery_inbox = claude_session.recovery_context().clone();
     let recovery = if slash_command {
         None
     } else {
-        claude_session.take_recovery_context()
+        recovery_inbox.claim()
     };
     let inject_reminder = !slash_command && reminder_pending.swap(false, Ordering::SeqCst);
     // A plugin change posted while the session ran. Peeked, not taken: it is
@@ -72,6 +74,10 @@ where
     // the same revision.
     let (current, pending) = inbox.snapshot();
     let context_update = if slash_command { None } else { pending };
+    let bootstrap = BootstrapDelivery {
+        reminder: inject_reminder.then(|| reminder_pending.clone()),
+        recovery: recovery.as_ref().map(|_| recovery_inbox),
+    };
     let (text, display_event) = if inject_reminder || recovery.is_some() {
         let mut context = fresh_plugin_context(
             current,
@@ -116,6 +122,7 @@ where
         Ok(delivered) => delivered,
         Err(e) => {
             error!("Failed to send to Claude: {}", e);
+            bootstrap.settle(false, true);
             emit_input_failure(ws_write, session_id, input.client_msg_id, AGENT_STOPPED).await;
             return Some(ConnectionResult::AgentExited);
         }
@@ -127,6 +134,7 @@ where
         input.ack,
         delivered,
         context_update.map(|update| (inbox, update)),
+        bootstrap,
     );
     None
 }
@@ -152,6 +160,27 @@ fn settle_context_update(
     }
 }
 
+/// Resources claimed while composing an input remain pending until the agent
+/// accepts it. In particular, rejecting effort must not consume recovered text
+/// or the fresh-conversation reminder before the user retries with Auto.
+struct BootstrapDelivery {
+    reminder: Option<Arc<AtomicBool>>,
+    recovery: Option<crate::recovery_context::RecoveryContext>,
+}
+
+impl BootstrapDelivery {
+    fn settle(&self, accepted: bool, definitely_unsent: bool) {
+        if let Some(recovery) = &self.recovery {
+            recovery.settle(accepted);
+        }
+        if definitely_unsent {
+            if let Some(reminder) = &self.reminder {
+                reminder.store(true, Ordering::SeqCst);
+            }
+        }
+    }
+}
+
 fn spawn_delivery_completion(
     ws_write: SharedWsWrite,
     session_id: Uuid,
@@ -159,9 +188,17 @@ fn spawn_delivery_completion(
     ack: Option<PortalInputAck>,
     delivered: oneshot::Receiver<crate::io::InputDeliveryResult>,
     context: Option<(crate::ContextInbox, crate::ContextUpdate)>,
+    bootstrap: BootstrapDelivery,
 ) {
     tokio::spawn(async move {
         let outcome = delivered.await;
+        bootstrap.settle(
+            matches!(&outcome, Ok(Ok(()))),
+            matches!(
+                &outcome,
+                Ok(Err(crate::io::InputDeliveryError::RejectedBeforeSend(_)))
+            ),
+        );
         if let Some((inbox, update)) = &context {
             settle_context_update(&outcome, inbox, update);
         }
@@ -200,6 +237,28 @@ fn spawn_delivery_completion(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn definitive_rejection_preserves_recovered_text_and_rearms_first_input_reminder() {
+        let reminder = Arc::new(AtomicBool::new(false));
+        let recovery = crate::recovery_context::RecoveryContext::new(Some("quoted history".into()));
+        assert_eq!(recovery.claim().as_deref(), Some("quoted history"));
+        let bootstrap = BootstrapDelivery {
+            reminder: Some(reminder.clone()),
+            recovery: Some(recovery.clone()),
+        };
+        bootstrap.settle(false, true);
+        assert!(reminder.load(Ordering::SeqCst));
+        assert_eq!(
+            recovery.claim().as_deref(),
+            Some("quoted history"),
+            "retry with Auto keeps recovered context"
+        );
+        reminder.store(false, Ordering::SeqCst);
+        bootstrap.settle(true, false);
+        assert!(recovery.snapshot().is_none());
+        assert!(!reminder.load(Ordering::SeqCst));
+    }
 
     /// Toggle a plugin off, deliver the change, then `/clear`: the fresh
     /// conversation must start with the new plugin context, not the launch one.
