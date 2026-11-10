@@ -574,6 +574,7 @@ pub struct SessionView {
     /// ends. Kept out of the memoized message-render props on purpose (see the
     /// `helpers` tool-progress section).
     active_tools: Vec<ActiveToolProgress>,
+    permission_checks: Vec<super::helpers::PermissionCheck>,
     /// Agent-driven progress bars (`agent-portal progress`), replaced wholesale
     /// by each `WsEvent::AgentProgress` snapshot. Live-only, like `active_tools`.
     agent_progress: Vec<shared::api::ProgressBar>,
@@ -740,6 +741,7 @@ impl Component for SessionView {
             turn_metrics: Vec::new(),
             continuation_statuses: HashMap::new(),
             active_tools: Vec::new(),
+            permission_checks: Vec::new(),
             agent_progress: Vec::new(),
             ephemeral_status: None,
             muse_live_turn: MuseLiveTurn::default(),
@@ -1729,6 +1731,12 @@ impl Component for SessionView {
                                     </div>
                                 }
                                 { self.render_active_tools() }
+                                { for self.permission_checks.iter().map(|check| html! {
+                                    <div class="ephemeral-status-strip" role="status" title={check.tool_use_id.clone()}>
+                                        <span class="ephemeral-status-spinner" />
+                                        <span class="ephemeral-status-text">{ "Checking tool permission..." }</span>
+                                    </div>
+                                }) }
                                 { self.render_ephemeral_status() }
                             </div>
                             if !is_tailing {
@@ -2003,6 +2011,8 @@ impl SessionView {
                 // Ephemeral live status: refresh the running-tool strip. Never
                 // touches `messages` (no persistence, no replay watermark).
                 let key = running_tool_key(&tool_use_id, parent_tool_use_id.as_deref());
+                self.permission_checks
+                    .retain(|check| check.tool_use_id != key);
                 upsert_tool_progress(
                     &mut self.active_tools,
                     ActiveToolProgress {
@@ -2023,6 +2033,17 @@ impl SessionView {
                 true
             }
             WsEvent::Ephemeral(payload) => {
+                if let Ok(shared::ClaudeOutput::System(system)) =
+                    serde_json::from_value(payload.clone())
+                {
+                    if let Some(status) = system.as_permission_check_status() {
+                        super::helpers::update_permission_checks(
+                            &mut self.permission_checks,
+                            &status,
+                        );
+                        return true;
+                    }
+                }
                 if payload.get("type").and_then(|value| value.as_str()) == Some("prompt_suggestion")
                 {
                     if let Ok(shared::ClaudeOutput::PromptSuggestion(suggestion)) =
@@ -2548,6 +2569,7 @@ impl SessionView {
         // tool_result for the running tool, or a turn `result` that ends the
         // turn entirely. (The live heartbeat side-channel only adds entries.)
         clear_completed_tools(&mut self.active_tools, &output.content);
+        super::helpers::clear_permission_checks(&mut self.permission_checks, &output.content);
         // Generic status is superseded by any durable message. Muse live
         // records instead stay overlaid on their matching group until the
         // durable terminal record makes the whole turn replayable.
