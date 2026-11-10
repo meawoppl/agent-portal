@@ -76,10 +76,10 @@ pub struct SessionConfig {
     /// [`claude_conversation_id`](Self::claude_conversation_id).
     #[serde(default)]
     pub codex_thread_id: Option<String>,
-    /// Fail the launch instead of falling back to a fresh thread when
-    /// `thread/resume` fails or `codex_thread_id` is missing. Set for imported
-    /// conversations, whose only context lives in the native thread; ordinary
-    /// sessions fall back because the portal transcript survives regardless.
+    /// Require a saved native thread mapping. Set for imported/restored
+    /// conversations. A known thread's resume failure always stops; an ordinary
+    /// unmapped session can be a never-launched reconcile target and starts
+    /// fresh with an explicit notice rather than claiming native continuity.
     #[serde(default)]
     pub codex_require_resume: bool,
     /// Claude's *current* conversation id, learned from its output stream and

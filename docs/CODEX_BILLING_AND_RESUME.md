@@ -25,6 +25,8 @@ A failed resume never silently creates a replacement native conversation.
 Provider mismatch, missing configuration and provider-policy conflicts show the
 structured reason and recovery action. Restore the original provider/mapping,
 use a compatible computer, or explicitly fork a new portal session to start
-fresh. A missing saved thread mapping also stops with an explanation. The
-existing portal transcript remains visible; it does not itself restore native
+fresh. Imported/restored sessions also stop if their required mapping is missing.
+An ordinary unmapped session may be a never-launched reconciliation target; it
+starts fresh with an explicit notice. The existing portal transcript remains
+visible; it does not itself restore native
 agent context. Turn-start provider failures use the same actionable messages.

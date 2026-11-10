@@ -390,11 +390,19 @@ pub(crate) async fn codex_io_task(
                     return;
                 }
             }
-        } else {
+        } else if config.codex_require_resume {
             let _ = event_tx.send(IoEvent::Error(SessionError::CommunicationError(
                 "Cannot resume: the saved Codex thread mapping is missing. Restore the mapping or fork a new session to start fresh. No new conversation was created.".into()
             )));
             return;
+        } else {
+            // Backend reconciliation can mark a never-launched desired session
+            // as resumed. With no native mapping there may be no old thread;
+            // retain that first-launch path, but never imply context survived.
+            let _ = event_tx.send(IoEvent::RawOutput(shared::PortalMessage::reminder(
+                "New Codex conversation".into(),
+                "No native Codex conversation mapping was found. Starting a fresh conversation; an existing portal transcript remains visible but is not restored native Codex context.".into(),
+            ).to_json()));
         }
     }
 
@@ -1967,6 +1975,39 @@ done
         assert_eq!(reply["error"]["code"], -32000, "{reply}");
         assert_eq!(reply["error"]["message"], TOKEN_REFRESH_UNSUPPORTED);
         assert!(reply.get("result").is_none());
+    }
+
+    #[tokio::test]
+    async fn first_launch_reconcile_without_mapping_remains_possible_and_explicit() {
+        let dir = tempfile::tempdir().unwrap();
+        let (codex, _) = fake_codex(dir.path(), "serve");
+        let mut config = config(dir.path(), codex);
+        config.resume = true;
+        let (_tx, command_rx) = mpsc::unbounded_channel();
+        let (event_tx, mut events) = mpsc::unbounded_channel();
+        let task = tokio::spawn(codex_io_task(config, command_rx, event_tx));
+        let mut explained = false;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(event) = events.recv().await {
+                match event {
+                    IoEvent::RawOutput(value)
+                        if value
+                            .to_string()
+                            .contains("No native Codex conversation mapping") =>
+                    {
+                        explained = true
+                    }
+                    IoEvent::CodexThreadId(_) => break,
+                    IoEvent::Error(error) => panic!("first launch failed: {error}"),
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert!(explained);
+        task.abort();
+        let _ = task.await;
     }
 
     #[tokio::test]
