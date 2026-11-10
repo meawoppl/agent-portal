@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="Arial, sans-serif">
+<text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2403 · Import generated images as Portal media</text>
+<text x="55" y="108" font-size="34" fill="#e6e9f5">Imported image bytes stayed inside transcript JSON, without a served Portal image.</text>
+<text x="55" y="151" font-size="34" fill="#e6e9f5">A bounded media plan now strips inline bytes and materializes only after commit.</text>
+<path d="M55 180H1945" stroke="#565f89"/>
+<path d="M1000 190V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="55" y="234" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1055" y="234" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="55" y="285" width="890" height="205" rx="14" fill="#1e202e" stroke="#7aa2f7"/>
+<text x="81" y="329" font-size="26" fill="#7aa2f7">PreparedSessionImport</text>
+<text x="81" y="385" font-size="26" fill="#c0caf5">Saved item.completed + base64 result</text>
+<text x="81" y="429" font-size="26" fill="#c0caf5">Original source timestamp</text>
+<path d="M500 497v35" stroke="#565f89" stroke-width="3"/>
+<rect x="55" y="545" width="890" height="205" rx="14" fill="#1e202e" stroke="#f7768e"/>
+<text x="81" y="589" font-size="26" fill="#f7768e">store_import</text>
+<text x="81" y="645" font-size="26" fill="#c0caf5">Raw generated-image item persisted</text>
+<text x="81" y="689" font-size="26" fill="#c0caf5">No /api/images reference created</text>
+<path d="M500 757v35" stroke="#565f89" stroke-width="3"/>
+<rect x="55" y="805" width="890" height="205" rx="14" fill="#1e202e" stroke="#f7768e"/>
+<text x="81" y="849" font-size="26" fill="#f7768e">Imported transcript</text>
+<text x="81" y="905" font-size="26" fill="#c0caf5">Image remains encoded in history</text>
+<text x="81" y="949" font-size="26" fill="#c0caf5">Attachments notice points to native history</text>
+<rect x="1055" y="285" width="890" height="205" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1081" y="329" font-size="26" fill="#9ece6a">ImportMediaPlan::prepare</text>
+<text x="1081" y="385" font-size="26" fill="#c0caf5">Decode supported image; strip inline result</text>
+<text x="1081" y="429" font-size="26" fill="#c0caf5">128 images; configured size + 8 MiB budget</text>
+<path d="M1500 497v35" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="545" width="890" height="205" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1081" y="589" font-size="26" fill="#9ece6a">commit_import_plan</text>
+<text x="1081" y="645" font-size="26" fill="#c0caf5">Session + history stay one SQL transaction</text>
+<text x="1081" y="689" font-size="26" fill="#c0caf5">Only the successful winner materializes media</text>
+<path d="M1500 757v35" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="805" width="890" height="205" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1081" y="849" font-size="26" fill="#9ece6a">Owner / session scoped media</text>
+<text x="1081" y="905" font-size="26" fill="#c0caf5">Portal image row + typed portalMedia reference</text>
+<text x="1081" y="949" font-size="26" fill="#c0caf5">Cache inserted before response; archive batch</text>
+<text x="55" y="1090" font-size="25" fill="#e0af68">No-history, rollback, duplicate: no extra assets.</text>
+<text x="1055" y="1090" font-size="25" fill="#e0af68">Source clocks remain unchanged.</text>
+<text x="55" y="1172" font-size="22" fill="#a9b1d6">Archive writes remain best-effort, as for live media; native file/provider-only assets remain visible references.</text>
+</g></svg>
