@@ -3,7 +3,9 @@
 //! relay separates the forwarded port from the port injected into each child.
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
-use shared::api::{CreateForwardRequest, CreateForwardResponse, SessionForwardsResponse};
+use shared::api::{
+    ApiError, ApiErrorCode, CreateForwardRequest, CreateForwardResponse, SessionForwardsResponse,
+};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -322,8 +324,8 @@ const POLL: Duration = if cfg!(test) {
     Duration::from_secs(5)
 };
 /// How long the forward must stay missing before it counts as closed or
-/// replaced. A restarting backend or a reconnect can report no forward or a
-/// 404 for a while; tearing the service down then would also delete the
+/// replaced. A restarting backend or a reconnect can report no forward for a
+/// while; tearing the service down then would also delete the
 /// recipe it needs to come back (#2264).
 const ABSENCE_GRACE: Duration = if cfg!(test) {
     Duration::from_secs(1)
@@ -369,6 +371,7 @@ async fn forward_missing(
 ) -> Option<Option<String>> {
     let response = client
         .get(format!("{base}/api/agent/sessions/{session}/forwards"))
+        .header(reqwest::header::ACCEPT, "application/json")
         .bearer_auth(token)
         .send()
         .await
@@ -378,12 +381,16 @@ async fn forward_missing(
     classify_forwards(status, &body, port)
 }
 
-/// Read one forwards answer: 404/410 mean the session or forward is gone; a
-/// readable list says whether `port` is in it; anything else (auth or server
-/// errors, a malformed body) is unknown.
+/// Only an application-level answer can confirm closure. A reverse proxy can
+/// return 404/410 for every route throughout an outage, so status alone must
+/// never delete a durable recipe, however long the routing gap lasts. A typed
+/// non-retryable NotFound or a readable forward list is authoritative; other
+/// failures (including legacy plain-text errors) are unknown.
 fn classify_forwards(status: u16, body: &[u8], port: u16) -> Option<Option<String>> {
     if status == 404 || status == 410 {
-        return Some(Some(format!("HTTP {status}")));
+        let error = serde_json::from_slice::<ApiError>(body).ok()?;
+        return (error.code == ApiErrorCode::NotFound && !error.retryable)
+            .then(|| Some(format!("HTTP {status}: {}", error.message)));
     }
     if !(200..300).contains(&status) {
         return None;
@@ -464,7 +471,8 @@ async fn serve(root: PathBuf, recipe: Recipe, credentials: Credentials) -> Resul
                         if unhealthy >= 3 { bail!("service failed three health checks"); }
                         // A user closing or replacing the forward wins over recovery,
                         // but only once its absence has lasted: a backend restart or
-                        // reconnect can briefly report no forward or a 404.
+                        // reconnect can briefly report no forward. Proxy errors are
+                        // unknown and never count toward confirmed absence.
                         let (current_base, token) = credentials()?;
                         if current_base != base { bail!("configured backend changed; register the service again"); }
                         let answer = forward_missing(&client, &base, &token, recipe.session, port).await;
@@ -639,6 +647,8 @@ mod tests {
         let backend = format!("http://{}", listener.local_addr().unwrap());
         let forwarded = Arc::new(AtomicU16::new(0));
         let registrations = Arc::new(AtomicUsize::new(0));
+        let routing_gap = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let gap = routing_gap.clone();
         let (forward, posts) = (forwarded.clone(), registrations.clone());
         let _api = Task(tokio::spawn(async move {
             loop {
@@ -665,6 +675,10 @@ mod tests {
                             break;
                         }
                     }
+                }
+                if gap.load(Ordering::SeqCst) {
+                    stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 19\r\nConnection: close\r\n\r\n404 page not found\n").await.unwrap();
+                    continue;
                 }
                 let info = |port| shared::api::ForwardInfo {
                     port,
@@ -726,6 +740,22 @@ mod tests {
             client.get(&url).send().await.unwrap().text().await.unwrap(),
             third.child_port.to_string()
         );
+        // An infrastructure 404 lasting beyond the closure grace cannot
+        // revoke a healthy service or erase its recovery recipe.
+        routing_gap.store(true, Ordering::SeqCst);
+        tokio::time::sleep(ABSENCE_GRACE + POLL * 4).await;
+        assert!(recipe_path(root.path(), recipe.session).exists());
+        assert!(
+            !restored.is_finished(),
+            "proxy outage must not stop the service"
+        );
+        assert_eq!(
+            client.get(&url).send().await.unwrap().text().await.unwrap(),
+            third.child_port.to_string()
+        );
+        routing_gap.store(false, Ordering::SeqCst);
+        tokio::time::sleep(POLL * 2).await;
+
         // A brief gap, as during a backend restart, keeps the service and its
         // recipe: the forward reappears before the absence is confirmed.
         forwarded.store(0, Ordering::SeqCst);
@@ -822,9 +852,32 @@ mod tests {
             Some(Some("forwards now []".into()))
         );
         for gone in [404, 410] {
+            for body in [
+                b"".as_slice(),
+                b"404 page not found\n",
+                b"<html>gone</html>",
+            ] {
+                assert_eq!(classify_forwards(gone, body, 7000), None);
+            }
+            let error = |code, retryable| {
+                serde_json::to_vec(&ApiError {
+                    code,
+                    message: "session".into(),
+                    retryable,
+                })
+                .unwrap()
+            };
             assert_eq!(
-                classify_forwards(gone, b"", 7000),
-                Some(Some(format!("HTTP {gone}")))
+                classify_forwards(gone, &error(ApiErrorCode::NotFound, false), 7000),
+                Some(Some(format!("HTTP {gone}: session")))
+            );
+            assert_eq!(
+                classify_forwards(gone, &error(ApiErrorCode::Unavailable, false), 7000),
+                None
+            );
+            assert_eq!(
+                classify_forwards(gone, &error(ApiErrorCode::NotFound, true), 7000),
+                None
             );
         }
         for unknown in [401, 403, 500, 502, 503] {
