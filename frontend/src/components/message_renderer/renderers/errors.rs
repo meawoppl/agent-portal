@@ -286,7 +286,7 @@ fn limit_scope_label(scope: Option<&claude_codes::RateLimitScope>) -> &'static s
 
 fn render_usage_window(
     label: &'static str,
-    window: Option<&claude_codes::UnifiedWindowUsage>,
+    window: Option<&claude_codes::io::UnifiedWindowUsage>,
 ) -> Html {
     let Some(window) = window else {
         return html! {};
