@@ -153,19 +153,12 @@ pub(crate) fn activity_signal(
         return Some(Throttled);
     }
     if agent == "codex" {
-        // Completion follows the visible terminal error. Preserve its capacity
-        // refusal instead of overwriting Throttled with Idle on the next row.
-        let error = match kind {
-            "error" => Some(value.clone()),
-            "turn.completed" | "turn.failed" => {
-                value.get("error").filter(|e| !e.is_null()).cloned()
-            }
-            _ => None,
-        };
-        if let Some(error) = error.and_then(|error| {
-            serde_json::from_value::<shared::codex_errors::CodexErrorDetails>(error).ok()
-        }) {
-            return Some(error.activity());
+        // Completion follows the visible terminal error. The shared typed
+        // projection preserves its capacity refusal instead of claiming Idle.
+        if let Ok(frame) =
+            serde_json::from_str::<shared::codex_errors::CodexLifecycleFrame>(content)
+        {
+            return Some(frame.activity());
         }
     }
     match (agent, kind) {

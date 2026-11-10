@@ -18,6 +18,42 @@ pub struct CodexErrorDetails {
     pub will_retry: bool,
 }
 
+/// The normalized completion carries error metadata beyond exec ThreadEvent.
+/// Preserve it here so replay and live follow agree with dashboard activity.
+#[derive(serde::Deserialize)]
+#[serde(tag = "type")]
+pub enum CodexLifecycleFrame {
+    #[serde(rename = "turn.started")]
+    Started,
+    #[serde(rename = "turn.completed")]
+    Completed {
+        #[serde(default)]
+        status: Option<String>,
+        #[serde(default)]
+        error: Option<CodexErrorDetails>,
+    },
+    #[serde(rename = "turn.failed")]
+    Failed { error: Option<CodexErrorDetails> },
+    #[serde(rename = "error")]
+    Error {
+        #[serde(flatten)]
+        error: CodexErrorDetails,
+    },
+}
+
+impl CodexLifecycleFrame {
+    pub fn activity(&self) -> crate::api::SessionActivityState {
+        use crate::api::SessionActivityState::{Busy, Idle};
+        match self {
+            Self::Started => Busy,
+            Self::Completed { error, .. } | Self::Failed { error } => {
+                error.as_ref().map_or(Idle, CodexErrorDetails::activity)
+            }
+            Self::Error { error } => error.activity(),
+        }
+    }
+}
+
 impl CodexErrorDetails {
     pub fn from_turn_error(error: &codex_codes::TurnError, will_retry: bool) -> Self {
         Self {

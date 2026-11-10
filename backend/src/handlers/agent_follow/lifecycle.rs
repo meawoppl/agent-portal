@@ -1,5 +1,6 @@
 //! Follow-specific lifecycle metadata; peek remains a compact message digest.
 use shared::api::SessionActivityState;
+use shared::codex_errors::CodexLifecycleFrame;
 
 #[derive(Default, Debug)]
 pub(super) struct Lifecycle {
@@ -19,31 +20,6 @@ impl Lifecycle {
             kind: Some(if failed { "error" } else { "status" }),
         }
     }
-}
-
-/// The normalized completion carries error metadata beyond exec ThreadEvent.
-/// Preserve it here so replay and live follow agree with dashboard activity.
-#[derive(serde::Deserialize)]
-#[serde(tag = "type")]
-enum CodexLifecycleFrame {
-    #[serde(rename = "turn.started")]
-    Started,
-    #[serde(rename = "turn.completed")]
-    Completed {
-        #[serde(default)]
-        status: Option<String>,
-        #[serde(default)]
-        error: Option<shared::codex_errors::CodexErrorDetails>,
-    },
-    #[serde(rename = "turn.failed")]
-    Failed {
-        error: Option<shared::codex_errors::CodexErrorDetails>,
-    },
-    #[serde(rename = "error")]
-    Error {
-        #[serde(flatten)]
-        error: shared::codex_errors::CodexErrorDetails,
-    },
 }
 
 pub(super) fn classify(agent: &str, content: &str) -> Lifecycle {
