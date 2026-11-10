@@ -286,10 +286,25 @@ pub fn codex_item_id(item: &CodexItem) -> Option<&str> {
     match item {
         CodexItem::Thread(it) => Some(thread_item_id(it)),
         CodexItem::AppServer(item) => match &item.payload {
-            AppServerThreadItem::ContextCompaction { id } => Some(id),
-            AppServerThreadItem::CollabAgentToolCall { id, .. } => Some(id),
-            AppServerThreadItem::Reasoning { id, .. } => Some(id),
-            _ => None,
+            AppServerThreadItem::UserMessage { id, .. }
+            | AppServerThreadItem::HookPrompt { id, .. }
+            | AppServerThreadItem::AgentMessage { id, .. }
+            | AppServerThreadItem::Plan { id, .. }
+            | AppServerThreadItem::Reasoning { id, .. }
+            | AppServerThreadItem::CommandExecution { id, .. }
+            | AppServerThreadItem::FileChange { id, .. }
+            | AppServerThreadItem::McpToolCall { id, .. }
+            | AppServerThreadItem::DynamicToolCall { id, .. }
+            | AppServerThreadItem::CollabAgentToolCall { id, .. }
+            | AppServerThreadItem::SubAgentActivity { id, .. }
+            | AppServerThreadItem::WebSearch { id, .. }
+            | AppServerThreadItem::ImageView { id, .. }
+            | AppServerThreadItem::Sleep { id, .. }
+            | AppServerThreadItem::ImageGeneration { id, .. }
+            | AppServerThreadItem::EnteredReviewMode { id, .. }
+            | AppServerThreadItem::ExitedReviewMode { id, .. }
+            | AppServerThreadItem::ContextCompaction { id, .. }
+            | AppServerThreadItem::FunctionCallOutput { id, .. } => Some(id),
         },
     }
 }

@@ -3,6 +3,7 @@ use uuid::Uuid;
 use yew::prelude::*;
 
 mod events;
+mod extended_items;
 mod lifecycle;
 mod messages;
 mod patch;
@@ -184,7 +185,7 @@ fn render_item(item: Option<&CodexItem>, completed: bool, session_id: Uuid) -> O
                 agents_states,
                 completed,
             )),
-            _ => None,
+            item => Some(extended_items::render_extended_item(item, completed)),
         },
     }
 }
