@@ -19,8 +19,9 @@ use yew::prelude::*;
 /// A task's own id (from `system.task_started.task_id`).
 ///
 /// Distinct from [`ToolUseId`] so the reverse index below cannot be indexed
-/// with the wrong kind of id: `active_tasks` is keyed by `TaskId`, the reverse
-/// index maps `ToolUseId → TaskId`, and the compiler now rejects looking one up
+/// with the wrong kind of id: `active_tasks` is keyed by [`TaskKey`], whose
+/// task-id component is a `TaskId`. The reverse index maps `ToolUseId` to
+/// specific task runs, and the compiler rejects looking one up
 /// with the other. Both were bare `String` (#921); a `tool_use_to_task.get(task_id)`
 /// slip used to compile and silently miss.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -596,7 +597,7 @@ fn render_task_pill(task: &TaskEntry) -> Html {
                 <span class={format!("task-status-dot {}", status_class)} />
                 <span class="task-type-pill">{ type_label }</span>
                 if task.awaited {
-                    <span class="task-tool-badge">{ "awaited" }</span>
+                    <span class="task-tool-badge">{ "Caller waiting" }</span>
                 }
                 if let Some(label) = &task.handback_label {
                     <span class="task-report-status">{ label }</span>

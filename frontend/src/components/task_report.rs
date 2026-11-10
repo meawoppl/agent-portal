@@ -66,6 +66,17 @@ mod tests {
             message.handback = Some(kind);
             assert_eq!(TaskReport::from_notification(&message).text, None);
         }
+        message.handback = Some(claude_codes::TaskHandback::Withheld);
+        message.handback_report = Some(claude_codes::HandbackReport {
+            text: "must not expose a withheld report".into(),
+            warning: Some("Report withheld by review".into()),
+        });
+        assert_eq!(TaskReport::from_notification(&message).text, None);
+        assert_eq!(
+            TaskReport::from_notification(&message).warning,
+            Some("Report withheld by review")
+        );
+        message.handback_report = None;
         message.handback = None;
         assert_eq!(
             TaskReport::from_notification(&message).text,
