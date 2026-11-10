@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="monospace" font-size="24" fill="#a9b1d6">PR #2383 · Preserve managed forwards through proxy outages</text>
+<text x="55" y="110" font-family="monospace" font-size="34" fill="#e6e9f5">A routing 404 used to delete the service recipe; typed backend answers now decide closure.</text>
+<path d="M1000 190V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="55" y="225" font-family="monospace" font-size="24" fill="#f7768e">BEFORE</text>
+<text x="1055" y="225" font-family="monospace" font-size="24" fill="#9ece6a">AFTER</text>
+<g><rect x="55" y="285" width="885" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="340" font-family="monospace" font-size="28" fill="#7aa2f7">Proxy outage</text>
+<text x="80" y="393" font-family="monospace" font-size="25" fill="#c0caf5">404 page not found</text>
+</g>
+<g><rect x="55" y="530" width="885" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="585" font-family="monospace" font-size="28" fill="#7aa2f7">classify_forwards</text>
+<text x="80" y="638" font-family="monospace" font-size="25" fill="#f7768e">Any 404/410 counts as missing</text>
+</g>
+<g><rect x="55" y="775" width="885" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="830" font-family="monospace" font-size="28" fill="#7aa2f7">ABSENCE_GRACE expires</text>
+<text x="80" y="883" font-family="monospace" font-size="25" fill="#f7768e">remove_at deletes durable recipe</text>
+</g>
+<g><rect x="1055" y="285" width="885" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1080" y="340" font-family="monospace" font-size="28" fill="#7aa2f7">forward_missing</text>
+<text x="1080" y="393" font-family="monospace" font-size="25" fill="#c0caf5">Requests Accept: application/json</text>
+</g>
+<g><rect x="1055" y="530" width="885" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1080" y="585" font-family="monospace" font-size="28" fill="#7aa2f7">classify_forwards</text>
+<text x="1080" y="638" font-family="monospace" font-size="25" fill="#c0caf5">Plain proxy error =&gt; unknown</text>
+</g>
+<g><rect x="1055" y="775" width="885" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1080" y="830" font-family="monospace" font-size="28" fill="#7aa2f7">Backend confirms absence</text>
+<text x="1080" y="883" font-family="monospace" font-size="25" fill="#c0caf5">Typed NotFound or readable forward list</text>
+</g>
+<text x="55" y="1172" font-family="monospace" font-size="22" fill="#a9b1d6">Closure grace remains; older plain-text errors are unknown. Handshake timeout is covered separately by #2368.</text>
+</svg>
