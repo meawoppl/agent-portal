@@ -680,6 +680,8 @@ pub(super) fn reconcile_pending_sends(
     tag: ActivityTag,
     output: &str,
 ) {
+    use crate::components::codex_renderer::events::CodexEvent;
+
     if pending_sends.is_empty() {
         return;
     }
@@ -709,12 +711,18 @@ pub(super) fn reconcile_pending_sends(
             pending_sends.retain(pending_has_client_msg_id);
         }
         ActivityTag::Error
-            if crate::components::agent_frame::AgentFrameRegistry::parse(
-                output,
-                shared::AgentType::Claude,
-            )
-            .kind()
-            .is_terminator() =>
+            if matches!(
+                serde_json::from_str::<shared::ClaudeOutput>(output),
+                Ok(shared::ClaudeOutput::Result(_))
+            ) || matches!(
+                serde_json::from_str::<crate::components::codex_renderer::events::CodexEvent>(
+                    output
+                ),
+                Ok(
+                    crate::components::codex_renderer::events::CodexEvent::TurnCompleted { .. }
+                        | crate::components::codex_renderer::events::CodexEvent::TurnFailed { .. }
+                )
+            ) =>
         {
             // A failed result still proves the turn reached the agent. Keep
             // correlated rows receipt-driven, just as successful results do.
