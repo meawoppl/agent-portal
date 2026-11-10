@@ -36,6 +36,7 @@ pub mod responses;
 pub mod retention;
 pub mod scheduled_tasks;
 pub mod session_access;
+mod session_import_media;
 pub mod session_imports;
 pub mod session_restore;
 pub mod session_spawn;

@@ -129,7 +129,10 @@ pub async fn import_session(
     let LauncherToServer::PrepareSessionImportResult { result, .. } = reply else {
         return Err(AppError::BadGateway("Unexpected import response"));
     };
-    let prepared = result.map_err(AppError::BadGatewayMessage)?;
+    let mut prepared = result.map_err(AppError::BadGatewayMessage)?;
+    if !include_history {
+        prepared.messages.clear();
+    }
     validate_prepared(&prepared, &source, agent_type)?;
     let (hostname, version) = state
         .session_manager
@@ -150,22 +153,45 @@ pub async fn import_session(
         fork_point_turn_id: None,
         fork_create_worktree: false,
     };
+    let plan = super::session_import_media::ImportMediaPlan::prepare(
+        prepared,
+        (state.max_image_mb as usize).saturating_mul(1024 * 1024),
+        include_history,
+    )
+    .map_err(|_| AppError::BadGateway("Invalid imported image metadata"))?;
+    validate_prepared(&plan.prepared, &source, agent_type)?;
     let mut conn = state.conn()?;
-    let result = store_import(&mut conn, draft, prepared, include_history);
-    let already_imported = match result {
-        Ok(()) => false,
-        // The unique session ID serializes concurrent requests. The losing
-        // transaction rolls back, including all messages, before this lookup.
-        Err(diesel::result::Error::DatabaseError(
-            diesel::result::DatabaseErrorKind::UniqueViolation,
-            _,
-        )) if imported_exists(&mut conn, session_id, user)? => true,
-        Err(e) => return Err(e.into()),
-    };
+    let already_imported = commit_import_plan(&mut conn, draft, plan, include_history, &state)?;
     Ok(Json(ImportSessionResponse {
         session_id,
         already_imported,
     }))
+}
+
+/// The transaction winner alone materializes media. A failed/duplicate import
+/// cannot allocate live blobs or start external archive writes.
+fn commit_import_plan(
+    conn: &mut PgConnection,
+    draft: DesiredSessionDraft,
+    plan: super::session_import_media::ImportMediaPlan,
+    include_history: bool,
+    state: &AppState,
+) -> QueryResult<bool> {
+    let id = draft.session_id;
+    let user = draft.user_id;
+    let super::session_import_media::ImportMediaPlan { prepared, images } = plan;
+    let already_imported = match store_import(conn, draft, prepared, include_history) {
+        Ok(()) => false,
+        Err(diesel::result::Error::DatabaseError(
+            diesel::result::DatabaseErrorKind::UniqueViolation,
+            _,
+        )) if imported_exists(conn, id, user)? => true,
+        Err(error) => return Err(error),
+    };
+    if !already_imported && include_history {
+        let _ = images.materialize(state, user, id);
+    }
+    Ok(already_imported)
 }
 
 fn imported_exists(conn: &mut PgConnection, id: Uuid, user: Uuid) -> QueryResult<bool> {
@@ -212,9 +238,12 @@ fn validate_prepared(
 fn store_import(
     conn: &mut PgConnection,
     draft: DesiredSessionDraft,
-    prepared: PreparedSessionImport,
+    mut prepared: PreparedSessionImport,
     include_history: bool,
 ) -> QueryResult<()> {
+    if !include_history {
+        prepared.messages.clear();
+    }
     let id = draft.session_id;
     let user = draft.user_id;
     conn.transaction(|conn| {
@@ -232,7 +261,7 @@ fn store_import(
                 provenance_kind: None, provenance_session_id: None, provenance_agent_type: None,
             },
         }).collect();
-        let history = if include_history { "Saved conversation history was copied. Attachments remain in Codex; local media is shown as a reference." }
+        let history = if include_history { "Saved conversation history was copied. Supported inline generated images were copied to Portal; native file/provider attachments remain in Codex." }
             else { "Earlier messages were not copied into Portal. The complete saved context remains in Codex." };
         rows.push(crate::models::NewHistoricalMessage {
             created_at: imported_at,
@@ -378,6 +407,112 @@ mod tests {
             Ok(())
         });
     }
+    #[test]
+    fn image_import_materializes_only_committed_winner_and_preserves_clocks() {
+        use super::super::session_import_media::{tests as media, ImportMediaPlan};
+        use crate::schema::{messages, sessions, users};
+        let Some(pool) = shared_pool() else { return };
+        let mut conn = pool.get().unwrap();
+        let owner = insert_user(&mut conn, "import_media").id;
+        let state = crate::test_support::test_app_state(pool.clone());
+        let id = Uuid::new_v4();
+        let draft = |session_id, user_id| DesiredSessionDraft {
+            session_id,
+            user_id,
+            working_directory: "/tmp".into(),
+            session_name: "Imported images".into(),
+            hostname: "test".into(),
+            launcher_id: None,
+            client_version: None,
+            launcher_version: None,
+            agent_type: AgentType::Codex,
+            claude_args: vec![],
+            forked_from_session_id: None,
+            fork_point_turn_id: None,
+            fork_create_worktree: false,
+        };
+        let plan = || {
+            ImportMediaPlan::prepare(
+                media::prepared(vec![media::image_event(media::PNG)]),
+                1024,
+                true,
+            )
+            .unwrap()
+        };
+        let image_id = |plan: &ImportMediaPlan| {
+            Uuid::parse_str(
+                plan.prepared.messages[1].content["item"]["portalMedia"]["image_id"]
+                    .as_str()
+                    .unwrap(),
+            )
+            .unwrap()
+        };
+        let first = plan();
+        let first_id = image_id(&first);
+        let source_time = first.prepared.messages[0].timestamp.unwrap().naive_utc();
+        assert!(!commit_import_plan(&mut conn, draft(id, owner), first, true, &state).unwrap());
+        let stored = state.image_store.get(&first_id).unwrap();
+        assert_eq!(stored.user_id, owner);
+        assert_eq!(stored.session_id, Some(id));
+        assert_eq!(stored.content_type, "image/png");
+        let rows = messages::table
+            .filter(messages::session_id.eq(id))
+            .order(messages::created_at.asc())
+            .select((
+                messages::content,
+                messages::created_at,
+                messages::source_created_at,
+            ))
+            .load::<(String, chrono::NaiveDateTime, Option<chrono::NaiveDateTime>)>(&mut conn)
+            .unwrap();
+        assert_eq!(rows.len(), 3);
+        assert!(rows.iter().all(|row| !row.0.contains(media::PNG)));
+        assert_eq!(rows[0].2, Some(source_time));
+        assert_eq!(rows[1].2, Some(source_time));
+        assert!(rows[0].1 < rows[1].1 && rows[1].1 < rows[2].1);
+        let retry = plan();
+        let retry_id = image_id(&retry);
+        assert!(commit_import_plan(&mut conn, draft(id, owner), retry, true, &state).unwrap());
+        assert!(state.image_store.get(&retry_id).is_none());
+        let failed = plan();
+        let failed_id = image_id(&failed);
+        assert!(commit_import_plan(
+            &mut conn,
+            draft(Uuid::new_v4(), Uuid::new_v4()),
+            failed,
+            true,
+            &state
+        )
+        .is_err());
+        assert!(state.image_store.get(&failed_id).is_none());
+        let hidden = plan();
+        let hidden_id = image_id(&hidden);
+        let hidden_session = Uuid::new_v4();
+        assert!(!commit_import_plan(
+            &mut conn,
+            draft(hidden_session, owner),
+            hidden,
+            false,
+            &state
+        )
+        .unwrap());
+        assert!(state.image_store.get(&hidden_id).is_none());
+        assert_eq!(
+            messages::table
+                .filter(messages::session_id.eq(hidden_session))
+                .count()
+                .get_result::<i64>(&mut conn)
+                .unwrap(),
+            1
+        );
+        diesel::delete(sessions::table.filter(sessions::id.eq_any([id, hidden_session])))
+            .execute(&mut conn)
+            .unwrap();
+        diesel::delete(users::table.find(owner))
+            .execute(&mut conn)
+            .unwrap();
+    }
+
     fn connected_test_state(
         pool: crate::db::DbPool,
         owner: Uuid,
