@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="monospace" font-size="24" fill="#a9b1d6">PR #2387 · Deliver automated Claude prompts literally</text>
+<text x="55" y="108" font-family="monospace" font-size="34" fill="#e6e9f5">Generated prompts keep their provenance through scheduling, replay and CLI delivery.</text>
+<path d="M1000 190V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="55" y="225" font-family="monospace" font-size="24" fill="#f7768e">BEFORE</text>
+<text x="1055" y="225" font-family="monospace" font-size="24" fill="#9ece6a">AFTER</text>
+<g><rect x="55" y="285" width="885" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="340" font-family="monospace" font-size="28" fill="#7aa2f7">InjectInput / Wiggum / retries</text>
+<text x="80" y="393" font-family="monospace" font-size="25" fill="#c0caf5">Generated text looks like human input</text>
+</g>
+<g><rect x="55" y="530" width="885" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="585" font-family="monospace" font-size="28" fill="#7aa2f7">ClaudeInput::user_message</text>
+<text x="80" y="638" font-family="monospace" font-size="25" fill="#c0caf5">No text_not_typed flag</text>
+</g>
+<g><rect x="55" y="775" width="885" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="830" font-family="monospace" font-size="28" fill="#7aa2f7">Claude command expansion</text>
+<text x="80" y="883" font-family="monospace" font-size="25" fill="#c0caf5">Leading / and @ may change the prompt</text>
+</g>
+<g><rect x="1055" y="285" width="885" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1080" y="340" font-family="monospace" font-size="28" fill="#7aa2f7">PortalMessage::automated_prompt</text>
+<text x="1080" y="393" font-family="monospace" font-size="25" fill="#c0caf5">Durable envelope survives pending replay</text>
+</g>
+<g><rect x="1055" y="530" width="885" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1080" y="585" font-family="monospace" font-size="28" fill="#7aa2f7">input_wire_parts</text>
+<text x="1080" y="638" font-family="monospace" font-size="25" fill="#c0caf5">Plain text + additive automated flag</text>
+</g>
+<g><rect x="1055" y="775" width="885" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1080" y="830" font-family="monospace" font-size="28" fill="#7aa2f7">claude_user_input</text>
+<text x="1080" y="883" font-family="monospace" font-size="25" fill="#c0caf5">text_not_typed=true; Automated badge</text>
+</g>
+<text x="55" y="1172" font-family="monospace" font-size="22" fill="#e0af68">Human inputs keep CLI command expansion. Older proxies receive plain text but need updating to apply the literal-input flag.</text>
+</svg>
