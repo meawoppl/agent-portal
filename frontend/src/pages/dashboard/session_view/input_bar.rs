@@ -1259,7 +1259,7 @@ impl InputBar {
             Html::default()
         };
         html! {
-            <span class={classes!("reasoning-effort-control", (agent == shared::AgentType::Claude && claude.reported_effort.is_some()).then_some("has-reported-effort"))}>
+            <span class="reasoning-effort-control">
             { actual_effort }
             if agent == shared::AgentType::Codex || claude.control_supported {
             <select

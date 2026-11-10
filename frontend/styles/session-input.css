@@ -105,10 +105,6 @@
     white-space: nowrap;
 }
 
-.reasoning-effort-control.has-reported-effort .reasoning-effort-select {
-    height: 28px;
-}
-
 .reasoning-effort-select {
     align-self: center;
     flex: 0 0 auto;
