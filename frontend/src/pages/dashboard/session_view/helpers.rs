@@ -382,6 +382,14 @@ pub(super) fn classify_output_msg_type(output: &str) -> ActivityTag {
         return tag;
     }
     if let Ok(parsed) = ClaudeMessage::parse(output) {
+        // Portal-local and Codex errors share {type: error, message}. Match
+        // the renderer registry's Codex precedence so willRetry survives the
+        // lenient local-error fallback instead of becoming a terminal error.
+        if matches!(parsed, ClaudeMessage::LocalError(_)) {
+            if let Some(tag) = classify_codex_event(output) {
+                return tag;
+            }
+        }
         return message_type_tag(&parsed);
     }
     if let Some(tag) = classify_codex_event(output) {
