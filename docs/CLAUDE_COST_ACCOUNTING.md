@@ -19,6 +19,13 @@ without a stable UUID. It cannot reconstruct exact legacy lifetime cost across
 process resumes because those snapshots lack an unambiguous process boundary.
 Use a current Claude CLI for exact disjoint-result accounting.
 
+If accounting fails after transcript persistence, the backend emits
+`COST_ACCOUNTING_PERSIST_FAILED`. The ledger and total roll back together, but
+transport acknowledgement does not automatically retry that accounting
+transaction. Restore database/schema health and reconcile the affected result
+UUIDs against the retained transcript and ledger before retrying. This is not
+an exactly-once guarantee during a database outage.
+
 ## Existing data and deployment boundary
 
 The ledger migration marks result UUIDs already present in the hot transcript

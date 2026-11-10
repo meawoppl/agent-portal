@@ -25,6 +25,13 @@
 /// A single occurrence can be a transient connection failure.
 pub const ATTENTION_PERSIST_FAILED: &str = "ATTENTION_PERSIST_FAILED";
 
+/// A persisted Claude result could not update its durable cost ledger/total.
+/// A burst indicates database or migration failure; inspect the ledger schema
+/// and reconcile affected result UUIDs from retained transcripts before retrying.
+/// A one-off can be transient, but transport acknowledgement does not retry
+/// this accounting transaction automatically.
+pub const COST_ACCOUNTING_PERSIST_FAILED: &str = "COST_ACCOUNTING_PERSIST_FAILED";
+
 /// Emitted when a browser/agent input could **not be persisted** to the
 /// `pending_inputs` table — either the INSERT failed or no DB connection was
 /// available to attempt it. The message may still reach a live proxy, but the
@@ -198,6 +205,7 @@ mod tests {
     /// a real emit site.
     const ALL_MARKERS: &[&str] = &[
         ATTENTION_PERSIST_FAILED,
+        COST_ACCOUNTING_PERSIST_FAILED,
         SPAWN_LIFECYCLE_FAILED,
         PENDING_INPUT_PERSIST_FAILED,
         INPUT_SEQ_BUMP_FAILED,

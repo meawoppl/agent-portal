@@ -653,7 +653,12 @@ fn store_result_metadata(
     // Try typed deserialization first
     if let Ok(result) = claude_codes::io::ResultMessage::deserialize(content) {
         if let Err(e) = super::claude_cost::record_result_cost(conn, session_id, &result) {
-            error!("Failed to update session cost: {}", e);
+            error!(
+                "{}: session {}: {}",
+                crate::markers::COST_ACCOUNTING_PERSIST_FAILED,
+                session_id,
+                e
+            );
         }
 
         if let Some(usage) = &result.usage {
@@ -699,7 +704,12 @@ fn store_result_metadata(
             )
             .execute(conn)
         {
-            error!("Failed to update session cost: {}", e);
+            error!(
+                "{}: session {}: {}",
+                crate::markers::COST_ACCOUNTING_PERSIST_FAILED,
+                session_id,
+                e
+            );
         }
     }
 
