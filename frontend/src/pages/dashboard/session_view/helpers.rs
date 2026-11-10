@@ -524,7 +524,10 @@ fn classify_codex_event(output: &str) -> Option<ActivityTag> {
             CodexItem::AppServer(item) => match &item.payload {
                 AppServerThreadItem::ContextCompaction { .. }
                 | AppServerThreadItem::CollabAgentToolCall { .. } => Some(ActivityTag::Assistant),
-                _ => None,
+                AppServerThreadItem::UserMessage { .. } => Some(ActivityTag::Suppressed),
+                // Every app-server item now has either a specialized card or
+                // a bounded diagnostic fallback, so visible work gets a tick.
+                _ => Some(ActivityTag::Assistant),
             },
             CodexItem::Thread(ThreadItem::Error(_)) => Some(ActivityTag::Error),
             CodexItem::Thread(ThreadItem::CommandExecution(ref it))
@@ -1258,6 +1261,23 @@ mod tests {
         let json =
             r#"{"type":"item.completed","item":{"type":"error","id":"e1","message":"boom"}}"#;
         assert_eq!(classify_output_msg_type(json), ActivityTag::Error);
+    }
+
+    #[test]
+    fn new_app_server_cards_get_activity_ticks() {
+        for item in [
+            r#"{"type":"imageGeneration","id":"x","result":"","status":"completed"}"#,
+            r#"{"type":"subAgentActivity","id":"x","agentPath":"/worker","agentThreadId":"t","kind":"started"}"#,
+            r#"{"type":"dynamicToolCall","id":"x","tool":"lookup","arguments":{},"status":"completed"}"#,
+            r#"{"type":"sleep","id":"x","durationMs":500}"#,
+        ] {
+            let wire = format!(r#"{{"type":"item.completed","item":{item}}}"#);
+            assert_eq!(
+                classify_codex_event(&wire),
+                Some(ActivityTag::Assistant),
+                "{wire}"
+            );
+        }
     }
 
     #[test]

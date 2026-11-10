@@ -559,7 +559,8 @@ pub(crate) async fn codex_io_task(
                                 // codex: the first `ItemStarted` of an
                                 // `agentMessage` item. Tool-style items
                                 // (CommandExecution / FileChange / McpToolCall /
-                                // DynamicToolCall / WebSearch) bump the tool
+                                // DynamicToolCall / WebSearch / ImageGeneration /
+                                // sub-agent starts) bump the tool
                                 // count instead.
                                 if let codex_codes::Notification::ItemStarted(p) = notif {
                                     use codex_codes::ThreadItemPayload;
@@ -572,10 +573,7 @@ pub(crate) async fn codex_io_task(
                                                     .record_content_frame(Instant::now());
                                             }
                                         }
-                                        ThreadItemPayload::CommandExecution { .. }
-                                        | ThreadItemPayload::FileChange { .. }
-                                        | ThreadItemPayload::McpToolCall { .. }
-                                        | ThreadItemPayload::DynamicToolCall { .. } => {
+                                        item if crate::helpers::item_counts_as_tool(item) => {
                                             turn_tracker.record_tool_call();
                                         }
                                         _ => {}

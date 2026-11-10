@@ -17,10 +17,51 @@ pub(crate) fn parse_request_id(s: &str) -> codex_codes::RequestId {
     }
 }
 
+/// Count starts of visible tool work, not later sub-agent status updates.
+pub(crate) fn item_counts_as_tool(item: &codex_codes::ThreadItemPayload) -> bool {
+    use codex_codes::{SubAgentActivityKind, ThreadItemPayload as Item};
+    matches!(
+        item,
+        Item::CommandExecution { .. }
+            | Item::FileChange { .. }
+            | Item::McpToolCall { .. }
+            | Item::DynamicToolCall { .. }
+            | Item::WebSearch { .. }
+            | Item::ImageGeneration { .. }
+            | Item::ImageView { .. }
+            | Item::CollabAgentToolCall { .. }
+            | Item::SubAgentActivity {
+                kind: SubAgentActivityKind::Started,
+                ..
+            }
+            | Item::Sleep { .. }
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use codex_codes::RequestId;
+
+    #[test]
+    fn new_tool_work_counts_but_subagent_status_updates_do_not() {
+        for wire in [
+            r#"{"type":"webSearch","id":"x","query":"query"}"#,
+            r#"{"type":"imageGeneration","id":"x","result":"","status":"inProgress"}"#,
+            r#"{"type":"subAgentActivity","id":"x","agentPath":"/worker","agentThreadId":"t","kind":"started"}"#,
+            r#"{"type":"dynamicToolCall","id":"x","tool":"lookup","arguments":{},"status":"inProgress"}"#,
+        ] {
+            let item: codex_codes::ThreadItemPayload = serde_json::from_str(wire).unwrap();
+            assert!(item_counts_as_tool(&item), "{wire}");
+        }
+        for kind in ["interacted", "interrupted", "completed"] {
+            let wire = format!(
+                r#"{{"type":"subAgentActivity","id":"x","agentPath":"/worker","agentThreadId":"t","kind":"{kind}"}}"#
+            );
+            let item: codex_codes::ThreadItemPayload = serde_json::from_str(&wire).unwrap();
+            assert!(!item_counts_as_tool(&item), "{wire}");
+        }
+    }
 
     #[test]
     fn request_id_round_trips_both_variants() {

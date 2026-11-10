@@ -111,3 +111,45 @@ fn retries_render_as_status_instead_of_terminal_error_cards() {
         .iter()
         .any(|(key, value)| key == "role" && value == "status"));
 }
+
+#[test]
+fn app_server_only_items_render_and_keep_lifecycle_identity() {
+    use super::super::codex_event_item_id;
+    for item in [
+        r#"{"type":"imageGeneration","id":"x","result":"BASE64_SENTINEL","status":"completed","revisedPrompt":"a mountain"}"#,
+        r#"{"type":"imageGeneration","id":"x","fileId":"image-1","status":"completed"}"#,
+        r#"{"type":"subAgentActivity","id":"x","agentPath":"/reviewer","agentThreadId":"t","kind":"started","model":"gpt-6","reasoningEffort":"high"}"#,
+        r#"{"type":"dynamicToolCall","id":"x","tool":"lookup","arguments":{"query":"answer"},"status":"completed","success":true,"contentItems":[{"type":"inputText","text":"found"}]}"#,
+        r#"{"type":"plan","id":"x","text":"inspect then fix"}"#,
+        r#"{"type":"imageView","id":"x","path":"/tmp/image.png"}"#,
+        r#"{"type":"enteredReviewMode","id":"x","review":"current changes"}"#,
+        r#"{"type":"exitedReviewMode","id":"x","review":"complete"}"#,
+        r#"{"type":"hookPrompt","id":"x","fragments":[{"text":"hook guidance"}]}"#,
+        r#"{"type":"sleep","id":"x","durationMs":500}"#,
+        r#"{"type":"functionCallOutput","id":"x","name":"custom","output":"result"}"#,
+    ] {
+        for kind in ["item.started", "item.completed"] {
+            let wire = format!(r#"{{"type":"{kind}","item":{item}}}"#);
+            let event: CodexEvent = serde_json::from_str(&wire).unwrap();
+            assert!(
+                render_codex_frame_content(&event, Uuid::nil()).is_some(),
+                "{wire}"
+            );
+            assert_eq!(codex_event_item_id(&wire).as_deref(), Some("x"), "{wire}");
+        }
+    }
+}
+
+#[test]
+fn unknown_wire_events_and_items_keep_raw_json_route() {
+    use crate::components::agent_frame::{AgentFrame, AgentFrameRegistry};
+    for wire in [
+        r#"{"type":"future.event","details":"retain me"}"#,
+        r#"{"type":"item.completed","item":{"type":"futureItem","id":"x","details":"retain me"}}"#,
+    ] {
+        assert!(matches!(
+            AgentFrameRegistry::parse(wire, shared::AgentType::Codex),
+            AgentFrame::RawJson
+        ));
+    }
+}
