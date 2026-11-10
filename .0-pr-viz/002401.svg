@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200"><rect width="2000" height="1200" fill="#1a1b26"/><g font-family="Arial, sans-serif">
+<text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2401 · Preserve Codex timing, answer phases and original import dates</text>
+<text x="55" y="106" font-size="34" fill="#e6e9f5">Keep original event clocks for display; keep server ingestion clocks for replay and retention.</text>
+<text x="55" y="150" font-size="28" fill="#c0caf5">Typed item metadata retains durations and phase without duplicating the full payload.</text>
+<path d="M55 177H1945" stroke="#3d4666"/>
+<path d="M1000 190V1140" stroke="#565f89" stroke-dasharray="9 9"/>
+<text x="65" y="230" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1045" y="230" font-size="22" fill="#9ece6a">AFTER</text>
+<g><rect x="65" y="270" width="875" height="190" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="90" y="315" font-size="26" fill="#f7768e">Exec normalization drops timing and phase</text>
+<text x="90" y="358" font-size="23" fill="#c0caf5">Agent commentary looks like a final answer.</text>
+<text x="90" y="393" font-size="23" fill="#c0caf5">Command, MCP and reasoning cards have no duration.</text>
+</g>
+<g><rect x="1045" y="270" width="875" height="190" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1070" y="315" font-size="26" fill="#9ece6a">ThreadWithMetadata keeps typed display details</text>
+<text x="1070" y="358" font-size="23" fill="#c0caf5">Commentary muted; partial/final answers stay normal.</text>
+<text x="1070" y="393" font-size="23" fill="#c0caf5">Completed tool work shows a valid elapsed duration.</text>
+</g>
+<g><rect x="65" y="515" width="875" height="190" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="90" y="560" font-size="26" fill="#f7768e">Imports show the date of the copy</text>
+<text x="90" y="603" font-size="23" fill="#c0caf5">Original native timestamps never reach the row.</text>
+<text x="90" y="638" font-size="23" fill="#c0caf5">Source record dates are replaced by import time.</text>
+</g>
+<g><rect x="1045" y="515" width="875" height="190" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1070" y="560" font-size="26" fill="#9ece6a">source_created_at is a separate nullable column</text>
+<text x="1070" y="603" font-size="23" fill="#c0caf5">PortalMeta carries the original display clock.</text>
+<text x="1070" y="638" font-size="23" fill="#c0caf5">created_at remains server ingestion and replay.</text>
+</g>
+<g><rect x="65" y="760" width="875" height="190" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="90" y="805" font-size="26" fill="#f7768e">Restores overload one clock in two ways</text>
+<text x="90" y="848" font-size="23" fill="#c0caf5">Old created_at can expire a freshly restored row.</text>
+<text x="90" y="883" font-size="23" fill="#c0caf5">Tied NOW() values can scramble random-UUID order.</text>
+</g>
+<g><rect x="1045" y="760" width="875" height="190" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1070" y="805" font-size="26" fill="#9ece6a">NewHistoricalMessage keeps both clocks</text>
+<text x="1070" y="848" font-size="23" fill="#c0caf5">Fresh ordered ingestion times keep replay stable.</text>
+<text x="1070" y="883" font-size="23" fill="#c0caf5">Archive and restore preserve the original date.</text>
+</g>
+<text x="65" y="1010" font-size="23" fill="#a9b1d6">Original time can be older than the retention window.</text>
+<text x="1045" y="1010" font-size="23" fill="#a9b1d6">display_at_iso prefers source; raw_iso stays server.</text>
+<text x="65" y="1050" font-size="23" fill="#a9b1d6">Missing source clocks remain explicitly unknown.</text>
+<text x="1045" y="1050" font-size="23" fill="#a9b1d6">Real DB tests cover order, retention and archives.</text>
+<text x="55" y="1172" font-size="22" fill="#e0af68">Scope: legacy senders without original clocks display server time; existing imported records are not backfilled.</text>
+</g></svg>

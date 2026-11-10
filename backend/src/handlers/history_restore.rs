@@ -330,4 +330,29 @@ mod tests {
         assert!(context.contains("truncated"));
         assert!(context.find("old").unwrap() < context.find("newest request").unwrap());
     }
+    #[test]
+    fn recipe_restore_preserves_source_dates_order_and_fresh_retention_age() {
+        let Some(pool) = crate::test_support::shared_pool() else {
+            return;
+        };
+        let mut conn = pool.get().unwrap();
+        conn.test_transaction::<_, diesel::result::Error, _>(|conn| {
+            let user = crate::test_support::insert_user(conn, "recipe-restore-clock");
+            let draft = crate::test_support::historical_clock_draft(user.id);
+            let id = draft.session_id;
+            let recipe = HistoryRestoreLaunch {
+                source_session_id: Uuid::new_v4(),
+                source_directory: "/test/history".into(),
+                mode: HistoryRestoreMode::Context,
+                context: Some("reference only".into()),
+            };
+            store_restore(
+                conn,
+                draft,
+                &recipe,
+                &crate::test_support::historical_clock_lines(),
+            )?;
+            crate::test_support::assert_historical_clocks(conn, id)
+        });
+    }
 }

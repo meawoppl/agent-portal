@@ -755,15 +755,14 @@ async fn restore_after_deletion_is_atomic_retry_safe_and_preserves_archive() {
         "hello archive"
     );
     use backend::schema::{messages, pending_inputs, session_members};
-    assert_eq!(
-        messages::table
-            .filter(messages::session_id.eq(id))
-            .filter(messages::role.eq("user"))
-            .select(messages::created_at)
-            .first::<chrono::NaiveDateTime>(&mut conn)
-            .unwrap(),
-        original_timestamp
-    );
+    let (ingested_at, source_at) = messages::table
+        .filter(messages::session_id.eq(id))
+        .filter(messages::role.eq("user"))
+        .select((messages::created_at, messages::source_created_at))
+        .first::<(chrono::NaiveDateTime, Option<chrono::NaiveDateTime>)>(&mut conn)
+        .unwrap();
+    assert_eq!(source_at, Some(original_timestamp));
+    assert!(ingested_at > original_timestamp + chrono::Duration::days(4));
     assert_eq!(
         messages::table
             .filter(messages::session_id.eq(id))

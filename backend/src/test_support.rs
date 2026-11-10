@@ -205,3 +205,90 @@ pub fn reply_history_restore(state: &AppState, request_id: Uuid, result: Result<
         shared::LauncherToServer::CheckHistoryRestoreResult { request_id, result },
     );
 }
+
+#[cfg(test)]
+pub(crate) fn historical_clock_draft(
+    user_id: Uuid,
+) -> crate::db::session_lifecycle::DesiredSessionDraft {
+    crate::db::session_lifecycle::DesiredSessionDraft {
+        session_id: Uuid::new_v4(),
+        user_id,
+        working_directory: "/test/history".into(),
+        session_name: "Clock restoration".into(),
+        hostname: "test-host".into(),
+        launcher_id: None,
+        client_version: None,
+        launcher_version: None,
+        agent_type: shared::AgentType::Codex,
+        claude_args: vec![],
+        forked_from_session_id: None,
+        fork_point_turn_id: None,
+        fork_create_worktree: false,
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn historical_clock_lines() -> Vec<archive_format::ArchiveMessageLine> {
+    let archived = chrono::DateTime::from_timestamp(1_600_000_000, 0).unwrap();
+    let native = chrono::DateTime::from_timestamp(1_500_000_000, 0).unwrap();
+    [None, Some(native)]
+        .into_iter()
+        .enumerate()
+        .map(|(index, original)| archive_format::ArchiveMessageLine {
+            source_created_at: original,
+            id: Uuid::new_v4(),
+            role: "user".into(),
+            created_at: archived.naive_utc() + chrono::Duration::seconds(index as i64),
+            agent_type: "codex".into(),
+            content: serde_json::Value::String(if index == 0 { "first" } else { "second" }.into()),
+        })
+        .collect()
+}
+
+#[cfg(test)]
+pub(crate) fn assert_historical_clocks(
+    conn: &mut PgConnection,
+    session_id: Uuid,
+) -> diesel::QueryResult<()> {
+    use crate::schema::messages;
+    let rows: Vec<crate::models::Message> = messages::table
+        .filter(messages::session_id.eq(session_id))
+        .order((messages::created_at.asc(), messages::id.asc()))
+        .load(conn)?;
+    assert_eq!(rows.len(), 3);
+    assert_eq!(
+        (rows[0].content.as_str(), rows[1].content.as_str()),
+        ("first", "second")
+    );
+    assert!(
+        rows.windows(2)
+            .all(|pair| pair[0].created_at < pair[1].created_at),
+        "strict replay cursors require distinct ingestion times"
+    );
+    let fixture = historical_clock_lines();
+    assert_eq!(rows[0].source_created_at, Some(fixture[0].created_at));
+    assert_eq!(
+        rows[1].source_created_at,
+        Some(fixture[1].source_created_at.unwrap().naive_utc())
+    );
+    assert!(rows[0].created_at > fixture[0].created_at + chrono::Duration::days(365));
+    assert!(
+        rows[2].source_created_at.is_none(),
+        "fresh restore notice has no original clock"
+    );
+    let meta = rows[0].portal_meta(None);
+    assert_eq!(meta.created_at, Some(rows[0].created_at_iso()));
+    assert_ne!(
+        shared::created_at_iso(Some(&meta)),
+        shared::display_at_iso(Some(&meta))
+    );
+    crate::handlers::retention::delete_old_messages(
+        conn,
+        crate::handlers::retention::RetentionConfig::new(2000, 30),
+        1000,
+        &std::collections::HashSet::new(),
+    )?;
+    assert_eq!(messages::table.filter(messages::session_id.eq(session_id)).count().get_result::<i64>(conn)?, 3,
+        "old originals must not immediately expire a newly restored transcript when archiving is disabled");
+    Ok(())
+}
