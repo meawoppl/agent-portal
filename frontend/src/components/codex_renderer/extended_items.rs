@@ -72,7 +72,11 @@ fn dynamic_output_preview(items: &[DynamicToolCallOutputContentItem]) -> String 
     preview
 }
 
-pub(super) fn render_extended_item(item: &ThreadItemPayload, completed: bool) -> Html {
+pub(super) fn render_extended_item(
+    item: &ThreadItemPayload,
+    completed: bool,
+    media: Option<&shared::codex_media::CodexImageMedia>,
+) -> Html {
     match item {
         ThreadItemPayload::ImageGeneration {
             status,
@@ -98,7 +102,23 @@ pub(super) fn render_extended_item(item: &ThreadItemPayload, completed: bool) ->
                     <>
                         { revised_prompt.as_ref().map(|prompt| html! { <pre class="tool-input-content">{ text_preview(prompt) }</pre> }).unwrap_or_default() }
                         { failure.as_ref().map(|failure| html! { <pre class="tool-result error">{ json_preview(failure) }</pre> }).unwrap_or_default() }
-                        <div class="tool-meta">{ source }</div>
+                        {
+                        match media {
+                            Some(media) if media.uploaded => html! { <div class="tool-meta">{ "Image saved in the media message." }</div> },
+                            Some(media) => html! {
+                                <div class="tool-result error">
+                                    <div>{ media.error.as_deref().unwrap_or("Generated image could not be uploaded.") }</div>
+                                    { media.recovery_path.as_ref().map(|path| html! {
+                                        <>
+                                            <pre class="tool-input-content">{ text_preview(path) }</pre>
+                                            <div class="tool-meta">{ "Recovery file: copy it promptly or upload it with agent-portal show. Temporary recovery files expire after 24 hours or when the recovery budget fills. Decode .base64 files before uploading." }</div>
+                                        </>
+                                    }).unwrap_or_default() }
+                                </div>
+                            },
+                            None => html! { <div class="tool-meta">{ source }</div> },
+                        }
+                    }
                         { saved_path.as_ref().map(|path| html! { <div class="tool-meta">{ text_preview(&path.0) }</div> }).unwrap_or_default() }
                     </>
                 },

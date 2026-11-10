@@ -86,7 +86,27 @@ pub enum CodexItem {
     /// App-server item wrapper for item variants that the exec-level helper
     /// model intentionally does not expose yet, such as `contextCompaction`,
     /// `collabAgentToolCall`, and reasoning carried as `summary`/`content`.
-    AppServer(Box<codex_codes::protocol::ThreadItem>),
+    AppServer(Box<CodexAppServerItem>),
+}
+
+/// Portal extensions accompany the SDK item without changing provider file IDs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodexAppServerItem {
+    #[serde(flatten)]
+    pub item: codex_codes::protocol::ThreadItem,
+    #[serde(
+        default,
+        rename = "portalMedia",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub portal_media: Option<shared::codex_media::CodexImageMedia>,
+}
+
+impl std::ops::Deref for CodexAppServerItem {
+    type Target = codex_codes::protocol::ThreadItem;
+    fn deref(&self) -> &Self::Target {
+        &self.item
+    }
 }
 
 impl<'de> Deserialize<'de> for CodexItem {
@@ -102,7 +122,7 @@ impl<'de> Deserialize<'de> for CodexItem {
                 return Ok(Self::Thread(item));
             }
         }
-        serde_json::from_value::<codex_codes::protocol::ThreadItem>(value)
+        serde_json::from_value::<CodexAppServerItem>(value)
             .map(|item| Self::AppServer(Box::new(item)))
             .map_err(serde::de::Error::custom)
     }

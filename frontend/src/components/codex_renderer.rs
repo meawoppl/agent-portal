@@ -185,7 +185,11 @@ fn render_item(item: Option<&CodexItem>, completed: bool, session_id: Uuid) -> O
                 agents_states,
                 completed,
             )),
-            item => Some(extended_items::render_extended_item(item, completed)),
+            payload => Some(extended_items::render_extended_item(
+                payload,
+                completed,
+                item.portal_media.as_ref(),
+            )),
         },
     }
 }
