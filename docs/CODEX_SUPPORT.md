@@ -347,3 +347,25 @@ Can be developed and tested with static fixture data before the proxy supports C
 4. **Wiggum mode**: The iterative autonomous loop currently checks Claude's `ResultMessage` for "DONE". The Codex equivalent would check `AgentMessage` text in `TurnCompleted` events.
 
 5. **Mixed sessions**: Should a single portal user be able to run Claude and Codex sessions simultaneously? Probably yes — sessions are already independent.
+
+
+## Generated images
+
+Generated images use the Portal media upload endpoint, so the transcript stores
+an authenticated media reference and the archive receives the image bytes when media archiving is enabled.
+The generation card keeps status, revised prompt and provider failures; the
+adjacent media message displays the actual image. Provider attachment IDs are
+kept distinct from Portal media IDs.
+
+Inline base64 is removed before the item enters the output queue or database.
+Uploads accept images up to 10 MiB and time out after 15 seconds. An upload
+failure is visible on the generation card and preserves Codex's saved file, or
+writes a private temporary recovery file. Use `agent-portal show` to upload a
+recovered image; decode `.base64` recovery files first. The recovery spool is
+limited to 32 files, approximately 14 MiB per file and 64 MiB total, with a
+24-hour lifetime. Copy important files promptly: oldest files are removed when
+the budget fills. Oversized images remain recoverable from their native Codex
+saved file or history. The small per-turn media-reference cache is also capped.
+
+Provider-only attachment IDs without inline bytes or a local saved path remain
+visible as metadata; the Portal does not fetch attachments from the provider.

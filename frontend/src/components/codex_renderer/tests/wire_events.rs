@@ -352,3 +352,19 @@ fn error_frames_keep_retry_and_action_metadata_with_legacy_fallback() {
     assert!(!error.will_retry);
     assert_eq!(error.message.as_deref(), Some("old failure"));
 }
+
+#[test]
+fn normalized_image_keeps_portal_media_separate_from_provider_reference() {
+    let event: CodexEvent = serde_json::from_str(r#"{"type":"item.completed","item":{"type":"imageGeneration","id":"img","result":"","status":"completed","portalMedia":{"image_id":"01890000-0000-7000-8000-000000000001","uploaded":true}}}"#).unwrap();
+    let CodexEvent::ItemCompleted {
+        item: Some(CodexItem::AppServer(item)),
+    } = event
+    else {
+        panic!("expected normalized image")
+    };
+    assert!(item.portal_media.as_ref().unwrap().uploaded);
+    assert!(item.portal_media.as_ref().unwrap().image_id.is_some());
+    assert!(
+        matches!(&item.payload, AppServerThreadItem::ImageGeneration { image: codex_codes::GeneratedImageRef::Inline { result }, .. } if result.is_empty())
+    );
+}

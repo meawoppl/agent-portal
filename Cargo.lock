@@ -1278,9 +1278,11 @@ name = "codex-session-lib"
 version = "2.15.17"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "chrono",
  "claude-codes",
  "codex-codes",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "session-lib",
