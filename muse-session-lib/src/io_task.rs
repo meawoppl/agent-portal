@@ -157,7 +157,8 @@ async fn run_turn(
 /// `run.usage` totals span all model calls (and children when the wire says
 /// `children_included`), so sum each per-model row once. Cached and reasoning
 /// tokens remain separate diagnostic counters; no separate child breakdown,
-/// cost or context snapshot is available. Older CLIs without a usage frame
+/// cost is available. Only a verified single completed call yields a context
+/// snapshot; multi-call totals are not context occupancy. Older CLIs without a usage frame
 /// retain zero token counters. Model-less echo runs emit no metrics.
 fn finalize_turn_metrics(
     turn_tracker: &mut TurnTracker,
@@ -175,6 +176,28 @@ fn finalize_turn_metrics(
                 sum.saturating_add(i64::try_from(field(row)).unwrap_or(i64::MAX))
             })
     };
+    let model_context_window = model
+        .as_deref()
+        .and_then(|id| muse_codes::MuseModel::from(id).context_limit())
+        .and_then(|tokens| i64::try_from(tokens).ok());
+    let context_snapshot_tokens = usage.and_then(|snapshot| {
+        if snapshot.calls != 1
+            || snapshot.completed_calls != 1
+            || snapshot.failed_calls != 0
+            || snapshot.cancelled_calls != 0
+        {
+            return None;
+        }
+        let [row] = snapshot.models.as_slice() else {
+            return None;
+        };
+        if row.calls != 1 || row.model.as_deref() != model.as_deref() {
+            return None;
+        }
+        i64::try_from(row.input_tokens)
+            .ok()
+            .filter(|tokens| *tokens > 0)
+    });
     let outcome = TurnOutcome {
         agent_type: shared::AgentType::Muse,
         model,
@@ -185,11 +208,11 @@ fn finalize_turn_metrics(
         cache_read_tokens: total(|row| row.cached_tokens),
         thinking_tokens: total(|row| row.reasoning_tokens),
         subagent_tokens: 0,
-        context_snapshot_tokens: None,
+        context_snapshot_tokens,
         stop_reason: Some(terminal.terminal.clone()),
         is_error: terminal.terminal != "completed",
         total_cost_usd: None,
-        model_context_window: None,
+        model_context_window,
     };
     if let Some(metrics) = turn_tracker.finalize(Instant::now(), chrono::Utc::now(), outcome) {
         if metrics.has_known_model() {
@@ -316,7 +339,7 @@ mod tests {
         // No usage snapshot on this older-CLI path.
         assert_eq!(metrics.input_tokens, 0);
         assert_eq!(metrics.total_cost_usd, None);
-        assert_eq!(metrics.model_context_window, None);
+        assert_eq!(metrics.model_context_window, Some(1_007_997));
         assert_eq!(metrics.context_snapshot_tokens, None);
     }
 
@@ -385,7 +408,7 @@ mod tests {
         assert_eq!(metrics.cache_creation_tokens, 0);
         assert_eq!(metrics.total_cost_usd, None);
         assert_eq!(metrics.context_snapshot_tokens, None);
-        assert_eq!(metrics.model_context_window, None);
+        assert_eq!(metrics.model_context_window, Some(1_007_997));
 
         // A later turn without a usage frame must not inherit these totals.
         tracker.start(Instant::now(), chrono::Utc::now());
@@ -402,6 +425,51 @@ mod tests {
         assert_eq!(metrics.input_tokens, 0);
         assert_eq!(metrics.output_tokens, 0);
         assert!(metrics.is_error);
+    }
+
+    #[test]
+    fn context_snapshot_requires_one_completed_call_for_the_configured_model() {
+        let base: RunUsage = serde_json::from_value(serde_json::json!({
+            "kind":"run_usage", "command_id":"cmd-1", "run_stream":{"kind":"run","id":"r-1"},
+            "calls":1, "completed_calls":1, "failed_calls":0, "cancelled_calls":0,
+            "children_included":true, "allowance":null,
+            "models":[{"model":"muse-wonder-1.0", "calls":1, "input_tokens":200, "cached_tokens":50, "output_tokens":10, "reasoning_tokens":1}]
+        })).unwrap();
+        let mut multi = base.clone();
+        multi.calls = 2;
+        multi.completed_calls = 2;
+        let mut failed = base.clone();
+        failed.completed_calls = 0;
+        failed.failed_calls = 1;
+        let mut mismatch = base.clone();
+        mismatch.models[0].model = Some("other-model".into());
+        for (usage, snapshot) in [
+            (&base, Some(200)),
+            (&multi, None),
+            (&failed, None),
+            (&mismatch, None),
+        ] {
+            let (tx, mut rx) = mpsc::unbounded_channel();
+            let mut tracker = TurnTracker::new(uuid::Uuid::nil());
+            tracker.start(Instant::now(), chrono::Utc::now());
+            finalize_turn_metrics(
+                &mut tracker,
+                Some("muse-wonder-1.0".into()),
+                Some(usage),
+                &run_terminal("completed"),
+                &tx,
+            );
+            let IoEvent::TurnMetricsReady(metrics) = rx.try_recv().unwrap() else {
+                panic!("metrics")
+            };
+            assert_eq!(metrics.model_context_window, Some(1_007_997));
+            assert_eq!(metrics.context_snapshot_tokens, snapshot);
+            assert_eq!(metrics.context_fraction().is_some(), snapshot.is_some());
+            assert_eq!(
+                metrics.stream_restarts, 0,
+                "failed calls are not proven stream retries"
+            );
+        }
     }
 
     fn corpus_record(payload_type: &str) -> MuseRecord {

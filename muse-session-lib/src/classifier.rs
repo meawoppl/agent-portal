@@ -62,6 +62,9 @@ pub struct MuseClassifier {
     /// `task.stream.linked` records awaiting their task's `proposed`
     /// (insertion order; nearly always a single entry).
     pending_links: Vec<(String, MuseRecord)>,
+    /// Latest typed usage is projected onto its matching durable terminal.
+    /// Never persist the exec.usage stream's reused native identity.
+    pending_usage: Option<muse_codes::RunUsage>,
 }
 
 impl AgentOutputClassifier for MuseClassifier {
@@ -77,8 +80,46 @@ impl MuseClassifier {
     fn screen(&mut self, record: MuseRecord) -> Vec<AgentOutput> {
         // Wire drift is never screened: a decode failure must persist and
         // be seen even if it happens to belong to a reminder task.
-        if record.typed_payload().is_err() {
-            return vec![classify_record(&record)];
+        let parsed = match record.typed_payload() {
+            Ok(payload) => payload,
+            Err(_) => return vec![classify_record(&record)],
+        };
+
+        match parsed {
+            MusePayload::RunUsage(usage) => {
+                self.pending_usage = Some(usage);
+                return vec![AgentOutput::Noop];
+            }
+            MusePayload::RunTerminal(terminal) => {
+                let matches_usage = self.pending_usage.as_ref().is_some_and(|usage| {
+                    usage.command_id == terminal.command_id
+                        && usage.run_stream == terminal.run_stream
+                });
+                // A child or stale terminal can interleave before this run's
+                // terminal. Only consume telemetry on an identity match.
+                let counts = matches_usage
+                    .then(|| self.pending_usage.take())
+                    .flatten()
+                    .map(|usage| shared::MuseCallCounts {
+                        calls: usage.calls,
+                        completed_calls: usage.completed_calls,
+                        failed_calls: usage.failed_calls,
+                        cancelled_calls: usage.cancelled_calls,
+                    });
+                let value = to_event_with_counts(&record, counts);
+                let decision = match record.durability {
+                    Durability::Durable => AgentOutput::Visible(value),
+                    Durability::Ephemeral => AgentOutput::Ephemeral(value),
+                };
+                // Flush unresolved links before the turn's own terminal.
+                let mut out: Vec<_> = std::mem::take(&mut self.pending_links)
+                    .into_iter()
+                    .map(|(_, link)| classify_record(&link))
+                    .collect();
+                out.push(decision);
+                return out;
+            }
+            _ => {}
         }
 
         let payload = &record.payload;
@@ -168,18 +209,6 @@ impl MuseClassifier {
             return vec![AgentOutput::Noop];
         }
 
-        // Turn boundary: any link whose `proposed` never arrived (crash,
-        // drift) flushes fail-open as visible rather than being held
-        // forever.
-        if record.payload_type.starts_with("run.terminal.") && !self.pending_links.is_empty() {
-            let mut out: Vec<AgentOutput> = std::mem::take(&mut self.pending_links)
-                .into_iter()
-                .map(|(_, link)| classify_record(&link))
-                .collect();
-            out.push(classify_record(&record));
-            return out;
-        }
-
         vec![classify_record(&record)]
     }
 
@@ -246,13 +275,24 @@ fn classify_payload(record: &MuseRecord, payload: &MusePayload) -> AgentOutput {
 
 /// Wire shape the frontend receives for one journal record.
 ///
-/// The envelope is preserved verbatim under `record` so the renderer can
-/// key on `(stream_id, id)`, group by `causation_id`, and order within a
-/// turn by `sequence` — the identity rules measured in MUSE_SUPPORT.md.
+/// The native identity and payload are preserved so the renderer can key on
+/// `(stream_id, id)`, group by `causation_id`, and order within a turn by
+/// `sequence`. A terminal may also carry the portal-owned typed telemetry
+/// projection; its native journal payload and durability remain unchanged.
 /// `payload_type` is lifted to the top level so a renderer can dispatch (or
 /// fall back to a labeled passthrough) without re-parsing.
 fn to_event(record: &MuseRecord) -> serde_json::Value {
+    to_event_with_counts(record, None)
+}
+
+fn to_event_with_counts(
+    record: &MuseRecord,
+    counts: Option<shared::MuseCallCounts>,
+) -> serde_json::Value {
     to_value(&MuseWireEvent {
+        telemetry: shared::MuseTerminalTelemetry {
+            muse_call_counts: counts,
+        },
         kind: "muse_record",
         payload_type: &record.payload_type,
         stream_id: &record.stream.id,
@@ -273,6 +313,8 @@ fn to_event(record: &MuseRecord) -> serde_json::Value {
 /// (UUID-shaped counter), and `sequence` repeats across turns.
 #[derive(Debug, Serialize)]
 struct MuseWireEvent<'a> {
+    #[serde(flatten)]
+    telemetry: shared::MuseTerminalTelemetry,
     #[serde(rename = "type")]
     kind: &'static str,
     payload_type: &'a str,
@@ -332,7 +374,104 @@ struct SerializeFailure {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::Deserialize;
     use serde_json::json;
+
+    #[test]
+    fn usage_counts_are_projected_once_onto_the_matching_durable_terminal() {
+        let mut classifier = MuseClassifier::default();
+        let usage = |calls| {
+            env(
+                "run.usage",
+                "ephemeral",
+                json!({
+                    "kind":"run_usage", "command_id":"cmd-1", "run_stream":{"kind":"run","id":"r-1"},
+                    "calls":calls, "completed_calls":2, "failed_calls":1, "cancelled_calls":1,
+                    "children_included":true, "models":[], "allowance":null
+                }),
+            )
+        };
+        let terminal = |command| {
+            env(
+                "run.terminal.completed",
+                "durable",
+                json!({
+                    "kind":"run_terminal", "command_id":command, "run_stream":{"kind":"run","id":"r-1"},
+                    "terminal":"completed", "reason":null, "text":"done"
+                }),
+            )
+        };
+        assert!(matches!(
+            classifier.classify(usage(3)).as_slice(),
+            [AgentOutput::Noop]
+        ));
+        assert!(matches!(
+            classifier.classify(usage(4)).as_slice(),
+            [AgentOutput::Noop]
+        ));
+        let output = classifier.classify(terminal("cmd-1"));
+        let [AgentOutput::Visible(value)] = output.as_slice() else {
+            panic!("durable terminal")
+        };
+        let projection = shared::MuseTerminalTelemetry::deserialize(value).unwrap();
+        assert_eq!(
+            projection.muse_call_counts,
+            Some(shared::MuseCallCounts {
+                calls: 4,
+                completed_calls: 2,
+                failed_calls: 1,
+                cancelled_calls: 1
+            })
+        );
+
+        // No usage leaks onto the next run or a different command's terminal.
+        let output = classifier.classify(terminal("cmd-2"));
+        let [AgentOutput::Visible(value)] = output.as_slice() else {
+            panic!("durable terminal")
+        };
+        assert_eq!(
+            shared::MuseTerminalTelemetry::deserialize(value)
+                .unwrap()
+                .muse_call_counts,
+            None
+        );
+        classifier.classify(usage(4));
+        let output = classifier.classify(terminal("cmd-2"));
+        let [AgentOutput::Visible(value)] = output.as_slice() else {
+            panic!("durable terminal")
+        };
+        assert_eq!(
+            shared::MuseTerminalTelemetry::deserialize(value)
+                .unwrap()
+                .muse_call_counts,
+            None
+        );
+        let mut other_stream = terminal("cmd-1");
+        other_stream.payload["run_stream"]["id"] = json!("child-run");
+        let output = classifier.classify(other_stream);
+        let [AgentOutput::Visible(value)] = output.as_slice() else {
+            panic!("durable terminal")
+        };
+        assert_eq!(
+            shared::MuseTerminalTelemetry::deserialize(value)
+                .unwrap()
+                .muse_call_counts,
+            None
+        );
+        let output = classifier.classify(terminal("cmd-1"));
+        let [AgentOutput::Visible(value)] = output.as_slice() else {
+            panic!("durable terminal")
+        };
+        assert_eq!(
+            shared::MuseTerminalTelemetry::deserialize(value)
+                .unwrap()
+                .muse_call_counts
+                .unwrap()
+                .calls,
+            4,
+            "unrelated command/child terminals must not consume main-run telemetry"
+        );
+    }
 
     fn record(line: &str) -> MuseRecord {
         serde_json::from_str(line).expect("corpus line parses")

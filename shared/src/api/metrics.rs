@@ -150,24 +150,29 @@ impl TurnMetrics {
     /// - **Codex** reports `input_tokens` as the *whole* prompt, with the
     ///   cached / cache-write counts as subsets already inside it — so summing
     ///   them would double-count. Its occupancy is just `input_tokens`.
-    pub fn context_tokens(&self) -> i64 {
+    /// - **Muse** totals span model calls. Without a supplied single-call
+    ///   snapshot, occupancy is unknown rather than the run-wide token sum.
+    pub fn context_tokens(&self) -> Option<i64> {
         // Prefer the per-request snapshot when the proxy supplied one: for
         // Claude the fields below are a roll-up across the turn's API calls, so
         // a tool-heavy turn re-counts `cache_read` once per call and can read
         // several times the window (#1517).
         if let Some(snapshot) = self.context_snapshot_tokens.filter(|t| *t > 0) {
-            return snapshot;
+            return Some(snapshot);
         }
         match self.agent_type {
             // Preserve the reported input total without adding the separate
             // cache-read diagnostic counter.
-            AgentType::Codex | AgentType::Muse | AgentType::Antigravity => self.input_tokens,
+            AgentType::Codex | AgentType::Antigravity => Some(self.input_tokens),
+            // Muse run totals span multiple model calls. Only a verified
+            // single-call snapshot is an occupancy measurement.
+            AgentType::Muse => None,
             // Claude fallback (older proxy, or no usable assistant usage this
             // turn): the disjoint buckets sum to the prompt. Correct for a
             // single-call turn and an over-count for a multi-call one — the
             // pre-#1517 behavior, kept so an old proxy still shows something.
             AgentType::Claude => {
-                self.input_tokens + self.cache_read_tokens + self.cache_creation_tokens
+                Some(self.input_tokens + self.cache_read_tokens + self.cache_creation_tokens)
             }
         }
     }
@@ -187,10 +192,11 @@ impl TurnMetrics {
 
     /// Fraction of the context window occupied on this turn, `0.0..`. Can
     /// briefly exceed `1.0` right before an auto-compaction; callers clamp for
-    /// display. `None` when the window is unknown.
+    /// display. `None` when the window or occupancy is unknown.
     pub fn context_fraction(&self) -> Option<f64> {
         let window = self.context_window()?;
-        (window > 0).then(|| self.context_tokens() as f64 / window as f64)
+        let tokens = self.context_tokens()?;
+        (window > 0).then_some(tokens as f64 / window as f64)
     }
 }
 
@@ -388,7 +394,7 @@ mod tests {
             800_000,
             40_000,
         );
-        assert_eq!(t.context_tokens(), 900_000, "roll-up over-counts");
+        assert_eq!(t.context_tokens(), Some(900_000), "roll-up over-counts");
         assert!(
             t.context_fraction().unwrap() > 4.0,
             "roll-up would peg the gauge"
@@ -396,7 +402,7 @@ mod tests {
 
         // …but the last request actually held 150k of the 200k window.
         t.context_snapshot_tokens = Some(150_000);
-        assert_eq!(t.context_tokens(), 150_000);
+        assert_eq!(t.context_tokens(), Some(150_000));
         assert_eq!(t.context_fraction(), Some(150_000.0 / 200_000.0));
     }
 
@@ -413,10 +419,10 @@ mod tests {
             3_000,
         );
         assert_eq!(t.context_snapshot_tokens, None);
-        assert_eq!(t.context_tokens(), 43_000);
+        assert_eq!(t.context_tokens(), Some(43_000));
         // A zero snapshot is treated as "no data", not as an empty context.
         t.context_snapshot_tokens = Some(0);
-        assert_eq!(t.context_tokens(), 43_000);
+        assert_eq!(t.context_tokens(), Some(43_000));
     }
 
     #[test]
@@ -430,7 +436,7 @@ mod tests {
             40_000,
             2_000,
         );
-        assert_eq!(t.context_tokens(), 43_000);
+        assert_eq!(t.context_tokens(), Some(43_000));
         // Window derived from the model-name map (200k).
         assert_eq!(t.context_window(), Some(200_000));
         assert_eq!(t.context_fraction(), Some(43_000.0 / 200_000.0));
@@ -448,9 +454,26 @@ mod tests {
             90_000,
             5_000,
         );
-        assert_eq!(t.context_tokens(), 120_000);
+        assert_eq!(t.context_tokens(), Some(120_000));
         assert_eq!(t.context_window(), Some(400_000));
         assert_eq!(t.context_fraction(), Some(120_000.0 / 400_000.0));
+    }
+
+    #[test]
+    fn muse_context_is_unknown_without_a_single_call_snapshot() {
+        let mut t = turn(
+            AgentType::Muse,
+            Some("muse-wonder-1.0"),
+            Some(1_007_997),
+            2_000_000,
+            1_000_000,
+            0,
+        );
+        assert_eq!(t.context_tokens(), None);
+        assert_eq!(t.context_fraction(), None);
+        t.context_snapshot_tokens = Some(100_000);
+        assert_eq!(t.context_tokens(), Some(100_000));
+        assert_eq!(t.context_fraction(), Some(100_000.0 / 1_007_997.0));
     }
 
     #[test]

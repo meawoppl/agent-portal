@@ -144,6 +144,7 @@ pub struct TaskTree {
     /// stream with the canonical final text.
     answer: Option<String>,
     answer_is_terminal: bool,
+    call_counts: Option<shared::MuseCallCounts>,
     /// Count per `payload_type` of records the tree does not render
     /// structurally (`run.model.configured`, `command.received`, future
     /// vocabulary). Surfaced as a muted footer so nothing on the wire silently
@@ -165,12 +166,17 @@ impl TaskTree {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.order.is_empty() && self.answer.is_none()
+        self.order.is_empty() && self.answer.is_none() && self.call_counts.is_none()
     }
 
     /// The run's final answer text, if a terminal record carried one.
     pub fn answer(&self) -> Option<&str> {
         self.answer.as_deref()
+    }
+
+    /// Typed terminal projection survives reload with the durable run record.
+    pub fn call_counts(&self) -> Option<shared::MuseCallCounts> {
+        self.call_counts
     }
 
     /// Look up one node. Used by tests asserting state transitions; the
@@ -227,6 +233,13 @@ impl TaskTree {
             // only that. Last terminal wins, and a blank retry keeps the prior
             // answer (better a stale reply than a blank card) — deliberate.
             t if t.starts_with("run.terminal.") => {
+                use serde::Deserialize;
+                if let Some(counts) = shared::MuseTerminalTelemetry::deserialize(event)
+                    .ok()
+                    .and_then(|telemetry| telemetry.muse_call_counts)
+                {
+                    self.call_counts = Some(counts);
+                }
                 let answer = str_field(payload, "text")
                     .filter(|t| utils::is_non_blank(t))
                     .or_else(|| str_field(payload, "reason").filter(|r| utils::is_non_blank(r)));
@@ -529,6 +542,26 @@ mod tests {
 
     /// The run's final answer text is captured as prose, not dumped into the
     /// footer — this is the whole point of the muse card carrying the reply.
+    #[test]
+    fn terminal_call_counts_survive_history_rebuild_and_legacy_replay() {
+        let event = json!({"payload_type":"run.terminal.completed", "payload":{"terminal":"completed","text":"done"},
+            "muse_call_counts":{"calls":4,"completed_calls":2,"failed_calls":1,"cancelled_calls":1}});
+        let mut rebuilt = TaskTree::default();
+        rebuilt.apply(&event);
+        assert_eq!(
+            rebuilt.call_counts(),
+            Some(shared::MuseCallCounts {
+                calls: 4,
+                completed_calls: 2,
+                failed_calls: 1,
+                cancelled_calls: 1
+            })
+        );
+        rebuilt.apply(&json!({"payload_type":"run.terminal.completed", "payload":{"terminal":"completed","text":"done"}}));
+        assert_eq!(rebuilt.call_counts().unwrap().failed_calls, 1);
+        assert_eq!(rebuilt.answer(), Some("done"));
+    }
+
     #[test]
     fn terminal_text_becomes_the_answer_not_a_footer_count() {
         let mut tree = TaskTree::new();
