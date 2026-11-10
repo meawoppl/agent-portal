@@ -157,7 +157,8 @@ async fn run_turn(
         let _ = delivered.send(Ok(()));
     }
 
-    let mut latest_usage = client.initialize_response().cumulative_usage.clone();
+    let initial_usage = client.initialize_response().cumulative_usage.clone();
+    let mut latest_usage = initial_usage.clone();
     let mut stop_reason = None;
     let mut is_error = false;
 
@@ -306,6 +307,7 @@ async fn run_turn(
         turn_tracker,
         &model,
         latest_usage.as_ref(),
+        initial_usage.as_ref(),
         stop_reason.clone(),
         is_error,
         event_tx,
@@ -633,15 +635,26 @@ fn finalize_turn_metrics(
     turn_tracker: &mut TurnTracker,
     model: &str,
     usage: Option<&UsageMetadata>,
+    baseline: Option<&UsageMetadata>,
     stop_reason: Option<String>,
     is_error: bool,
     event_tx: &mpsc::UnboundedSender<IoEvent>,
 ) {
     let usage = usage.cloned().unwrap_or_default();
-    let input_tokens = i64_from_u64(usage.prompt_token_count);
-    let cache_read_tokens = i64_from_u64(usage.cached_content_token_count);
-    let output_tokens = i64_from_u64(usage.candidates_token_count);
-    let thinking_tokens = i64_from_u64(usage.thoughts_token_count);
+    // UsageUpdate.total and initialize.cumulative_usage are conversation
+    // counters, not a model-call context snapshot. Subtract the initialized
+    // baseline once per driver turn; missing/reset counters cannot be inferred.
+    let delta = |end: Option<u64>, start: Option<u64>| {
+        i64_from_u64(end.and_then(|end| end.checked_sub(start.unwrap_or(0))))
+    };
+    let initial = baseline.cloned().unwrap_or_default();
+    let input_tokens = delta(usage.prompt_token_count, initial.prompt_token_count);
+    let cache_read_tokens = delta(
+        usage.cached_content_token_count,
+        initial.cached_content_token_count,
+    );
+    let output_tokens = delta(usage.candidates_token_count, initial.candidates_token_count);
+    let thinking_tokens = delta(usage.thoughts_token_count, initial.thoughts_token_count);
     let outcome = TurnOutcome {
         agent_type: shared::AgentType::Antigravity,
         model: Some(model.to_string()),
@@ -652,7 +665,7 @@ fn finalize_turn_metrics(
         cache_read_tokens,
         thinking_tokens,
         subagent_tokens: 0,
-        context_snapshot_tokens: Some(input_tokens),
+        context_snapshot_tokens: None,
         stop_reason,
         is_error,
         total_cost_usd: None,
@@ -673,6 +686,44 @@ fn i64_from_u64(value: Option<u64>) -> i64 {
 mod tests {
     use super::*;
     use antigravity_codes::protocol::{InitializeConversationResponse, StepUpdateState};
+
+    #[test]
+    fn resumed_cumulative_usage_reports_only_this_turn_and_never_a_context_gauge() {
+        let mut tracker = TurnTracker::new(uuid::Uuid::new_v4());
+        tracker.start(Instant::now(), chrono::Utc::now());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let baseline = UsageMetadata {
+            prompt_token_count: Some(10_000),
+            candidates_token_count: Some(200),
+            cached_content_token_count: Some(3000),
+            thoughts_token_count: Some(50),
+            ..Default::default()
+        };
+        let final_usage = UsageMetadata {
+            prompt_token_count: Some(12_000),
+            candidates_token_count: Some(250),
+            cached_content_token_count: Some(3500),
+            thoughts_token_count: Some(60),
+            ..Default::default()
+        };
+        finalize_turn_metrics(
+            &mut tracker,
+            DEFAULT_MODEL,
+            Some(&final_usage),
+            Some(&baseline),
+            None,
+            false,
+            &tx,
+        );
+        let IoEvent::TurnMetricsReady(metrics) = rx.try_recv().unwrap() else {
+            panic!("metrics")
+        };
+        assert_eq!(metrics.input_tokens, 2000);
+        assert_eq!(metrics.output_tokens, 50);
+        assert_eq!(metrics.cache_read_tokens, 500);
+        assert_eq!(metrics.thinking_tokens, 10);
+        assert_eq!(metrics.context_snapshot_tokens, None);
+    }
 
     #[test]
     fn cascade_identity_must_match_before_sending_input() {
@@ -776,6 +827,7 @@ mod tests {
                 service_tier: Some("test-tier".into()),
                 ..Default::default()
             }),
+            None,
             Some("done".into()),
             false,
             &tx,
@@ -788,7 +840,7 @@ mod tests {
         assert_eq!(metrics.cache_read_tokens, 30);
         assert_eq!(metrics.output_tokens, 20);
         assert_eq!(metrics.thinking_tokens, 7);
-        assert_eq!(metrics.context_snapshot_tokens, Some(100));
+        assert_eq!(metrics.context_snapshot_tokens, None);
     }
 
     #[test]

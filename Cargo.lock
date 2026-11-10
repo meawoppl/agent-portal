@@ -212,9 +212,9 @@ dependencies = [
 
 [[package]]
 name = "antigravity-codes"
-version = "0.1.20"
+version = "0.1.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8591efcc5ba5a0a0ae495530025adb4dae67526c916956f3ac6c95a3c69c7f10"
+checksum = "03b138ffac6ece6551f18e3dd9e9d892aa607502d1d8c88dcb3bfdde4155f896"
 dependencies = [
  "base64 0.22.1",
  "futures-util",
@@ -2484,6 +2484,7 @@ dependencies = [
 name = "frontend"
 version = "2.15.17"
 dependencies = [
+ "antigravity-codes",
  "base64 0.22.1",
  "chrono",
  "claude-codes",
