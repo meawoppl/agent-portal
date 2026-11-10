@@ -301,6 +301,11 @@ fn render_usage_window(
     } else {
         0.0
     };
+    let fraction = if window.utilization.is_finite() {
+        window.utilization.clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
     let color = match status {
         "rejected" => shared::palette::ACCENT_RED,
         "allowed_warning" => shared::palette::ACCENT_ORANGE,
@@ -313,7 +318,7 @@ fn render_usage_window(
     html! {
         <span class="rate-limit-window" title={format!("{label}: {status}{threshold}")}>
             <span>{ format!("{label}: {percent:.0}%") }</span>
-            <meter min="0" max="1" value={window.utilization.clamp(0.0, 1.0).to_string()}
+            <meter min="0" max="1" value={fraction.to_string()}
                 style={format!("accent-color: {color}")} aria-label={format!("{label} usage: {percent:.0}% ({status})")} />
             <span>{ status.replace('_', " ") }</span>
         </span>
@@ -440,6 +445,14 @@ pub fn render_local_error(msg: &shared::ErrorMessage, timestamp: Option<&str>) -
 #[cfg(test)]
 mod typed_api_error_tests {
     use super::*;
+
+    #[test]
+    fn typed_card_renders_even_without_assistant_text_and_legacy_frames_stay_unchanged() {
+        let mut message: shared::AssistantMessage = serde_json::from_str(r#"{"session_id":"session","api_error":"usage_limit_reached","api_error_params":{"rate_limit_info":{"status":"rejected","resetsAt":1893456000,"limitScope":"group_pool"}},"message":{"id":"msg","type":"message","role":"assistant","model":"<synthetic>","content":[]}}"#).unwrap();
+        assert!(render_assistant_api_error(&message).is_some());
+        message.api_error = None;
+        assert!(render_assistant_api_error(&message).is_none());
+    }
 
     #[test]
     fn recovery_is_specific_and_unknown_kinds_remain_visible() {
