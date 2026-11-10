@@ -238,6 +238,7 @@ pub(super) fn message_type_tag(m: &ClaudeMessage) -> ActivityTag {
     match m {
         ClaudeMessage::System(_) => ActivityTag::System,
         ClaudeMessage::Assistant(_) => ActivityTag::Assistant,
+        ClaudeMessage::Result(result) if result.is_error => ActivityTag::Error,
         ClaudeMessage::Result(_) => ActivityTag::Result,
         ClaudeMessage::User(_) | ClaudeMessage::OptimisticUser(_) => ActivityTag::User,
         ClaudeMessage::Error(_) => ActivityTag::Error,
@@ -300,13 +301,26 @@ pub(crate) fn is_awaiting(
     messages: impl DoubleEndedIterator<Item = impl AsRef<str>>,
     agent_type: shared::AgentType,
 ) -> bool {
+    latest_turn_activity(messages, agent_type) == Some(TurnActivity::AwaitingInput)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TurnActivity {
+    Working,
+    AwaitingInput,
+}
+
+fn latest_turn_activity(
+    messages: impl DoubleEndedIterator<Item = impl AsRef<str>>,
+    agent_type: shared::AgentType,
+) -> Option<TurnActivity> {
     use crate::components::agent_frame::{AgentFrameKind, AgentFrameRegistry};
 
     for msg in messages.rev() {
         let frame = AgentFrameRegistry::parse(msg.as_ref(), agent_type);
         let kind = frame.kind();
         if kind.is_terminator() {
-            return true;
+            return Some(TurnActivity::AwaitingInput);
         }
         if matches!(
             kind,
@@ -321,10 +335,41 @@ pub(crate) fn is_awaiting(
                 | AgentFrameKind::MuseRecord
                 | AgentFrameKind::AntigravityEvent
         ) {
-            return false;
+            return Some(TurnActivity::Working);
         }
     }
-    false
+    None
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum EditStackDispatch {
+    Busy,
+    Drained,
+    Send(uuid::Uuid),
+}
+
+/// Awaiting input means idle, not busy. Keep no-activity distinct so a fresh
+/// session can receive its first queued prompt even before a turn terminates.
+/// The work-queue buttons and Send All drain use the same dispatch decision.
+pub(super) fn edit_stack_dispatch(
+    messages: impl DoubleEndedIterator<Item = impl AsRef<str>>,
+    agent_type: shared::AgentType,
+    items: &[shared::api::EditStackItem],
+    has_active_item: bool,
+    has_permission: bool,
+    has_pending_send: bool,
+) -> EditStackDispatch {
+    if has_active_item
+        || has_permission
+        || has_pending_send
+        || latest_turn_activity(messages, agent_type) == Some(TurnActivity::Working)
+    {
+        return EditStackDispatch::Busy;
+    }
+    match items.iter().find(|item| item.status == "pending") {
+        Some(item) => EditStackDispatch::Send(item.id),
+        None => EditStackDispatch::Drained,
+    }
 }
 
 /// Parse a server ISO timestamp to epoch-ms, treating a timezone-less string
@@ -359,6 +404,9 @@ pub(super) fn classify_output_msg_type(output: &str) -> ActivityTag {
         let mut tag = match claude_msg.message_type().as_str() {
             "assistant" => ActivityTag::Assistant,
             "user" => ActivityTag::User,
+            "result" if matches!(&claude_msg, shared::ClaudeOutput::Result(result) if result.is_error) => {
+                ActivityTag::Error
+            }
             "result" => ActivityTag::Result,
             "portal" => ActivityTag::Portal,
             "error" => ActivityTag::Error,
@@ -554,9 +602,12 @@ fn classify_codex_event(output: &str) -> Option<ActivityTag> {
                 | ThreadItem::UserMessage(_),
             ) => Some(ActivityTag::Assistant),
         },
-        CodexEvent::TurnCompleted { .. } | CodexEvent::TurnFailed { .. } => {
-            Some(ActivityTag::Result)
-        }
+        CodexEvent::TurnFailed { .. } => Some(ActivityTag::Error),
+        CodexEvent::TurnCompleted {
+            status: Some(status),
+            ..
+        } if status != "completed" => Some(ActivityTag::Error),
+        CodexEvent::TurnCompleted { .. } => Some(ActivityTag::Result),
         // Retry and hook diagnostics are notices, not turn terminators.
         // Error drives edit-stack failure and stops Send all in SessionView.
         CodexEvent::Error { error } if error.will_retry => Some(ActivityTag::System),
@@ -605,10 +656,12 @@ pub(super) fn reconcile_edit_stack_activity(
         ActivityTag::Error => "failed",
         _ => return None,
     };
-    let (item_id, _) = active.take()?;
     if tag == ActivityTag::Error {
+        // Send All can be armed while another turn is still running. A
+        // failure must pause it even when that turn has no local queue item.
         *send_all = false;
     }
+    let (item_id, _) = active.take()?;
     Some((item_id, status))
 }
 
@@ -627,6 +680,8 @@ pub(super) fn reconcile_pending_sends(
     tag: ActivityTag,
     output: &str,
 ) {
+    use crate::components::codex_renderer::CodexEvent;
+
     if pending_sends.is_empty() {
         return;
     }
@@ -653,6 +708,19 @@ pub(super) fn reconcile_pending_sends(
             }
         }
         ActivityTag::Assistant | ActivityTag::Result => {
+            pending_sends.retain(pending_has_client_msg_id);
+        }
+        ActivityTag::Error
+            if matches!(
+                serde_json::from_str::<shared::ClaudeOutput>(output),
+                Ok(shared::ClaudeOutput::Result(_))
+            ) || matches!(
+                serde_json::from_str::<CodexEvent>(output),
+                Ok(CodexEvent::TurnCompleted { .. } | CodexEvent::TurnFailed { .. })
+            ) =>
+        {
+            // A failed result still proves the turn reached the agent. Keep
+            // correlated rows receipt-driven, just as successful results do.
             pending_sends.retain(pending_has_client_msg_id);
         }
         _ => {}
@@ -1418,9 +1486,9 @@ mod tests {
     }
 
     #[test]
-    fn classify_codex_turn_failed_is_result() {
+    fn classify_codex_turn_failed_is_error() {
         let json = r#"{"type":"turn.failed","error":{"message":"oops"}}"#;
-        assert_eq!(classify_output_msg_type(json), ActivityTag::Result);
+        assert_eq!(classify_output_msg_type(json), ActivityTag::Error);
     }
 
     #[test]
@@ -2087,5 +2155,181 @@ mod tests {
         );
         assert!(active.is_none());
         assert!(send_all);
+    }
+}
+
+#[cfg(test)]
+mod edit_stack_dispatch_tests {
+    use super::*;
+
+    fn item() -> shared::api::EditStackItem {
+        shared::api::EditStackItem {
+            id: uuid::Uuid::new_v4(),
+            session_id: uuid::Uuid::nil(),
+            created_by: uuid::Uuid::nil(),
+            created_by_name: None,
+            title: "queued work".into(),
+            body: "do this".into(),
+            source: None,
+            context: None,
+            image_data_url: None,
+            image_url: None,
+            status: "pending".into(),
+            created_at: String::new(),
+            updated_at: String::new(),
+            sent_at: None,
+            sent_client_msg_id: None,
+        }
+    }
+
+    #[test]
+    fn send_all_dispatches_first_work_holds_during_execution_and_advances_on_completion() {
+        let mut items = vec![item(), item()];
+        let mut history = Vec::<String>::new();
+        let agent = shared::AgentType::Codex;
+        assert_eq!(
+            edit_stack_dispatch(history.iter(), agent, &items, false, false, false),
+            EditStackDispatch::Send(items[0].id)
+        );
+        let mut active = Some((items[0].id, uuid::Uuid::new_v4()));
+        let mut send_all = true;
+        items[0].status = "sent".into();
+        history.push(r#"{"type":"turn.started"}"#.into());
+        assert_eq!(
+            edit_stack_dispatch(history.iter(), agent, &items, true, false, false),
+            EditStackDispatch::Busy
+        );
+        // Even without a local active-item marker, provider work blocks dispatch.
+        assert_eq!(
+            edit_stack_dispatch(history.iter(), agent, &items, false, false, false),
+            EditStackDispatch::Busy
+        );
+        let completed = r#"{"type":"turn.completed","status":"completed"}"#;
+        history.push(completed.into());
+        assert_eq!(
+            reconcile_edit_stack_activity(
+                &mut active,
+                &mut send_all,
+                classify_output_msg_type(completed)
+            ),
+            Some((items[0].id, "completed"))
+        );
+        assert!(send_all);
+        assert_eq!(
+            edit_stack_dispatch(
+                history.iter(),
+                agent,
+                &items,
+                active.is_some(),
+                false,
+                false
+            ),
+            EditStackDispatch::Send(items[1].id)
+        );
+        items[1].status = "completed".into();
+        assert_eq!(
+            edit_stack_dispatch(history.iter(), agent, &items, false, false, false),
+            EditStackDispatch::Drained
+        );
+    }
+
+    #[test]
+    fn permission_and_unconfirmed_input_still_block_an_idle_queue() {
+        let items = [item()];
+        let history = [r#"{"type":"turn.completed"}"#];
+        for (active, permission, pending_send) in [
+            (true, false, false),
+            (false, true, false),
+            (false, false, true),
+        ] {
+            assert_eq!(
+                edit_stack_dispatch(
+                    history.iter(),
+                    shared::AgentType::Codex,
+                    &items,
+                    active,
+                    permission,
+                    pending_send
+                ),
+                EditStackDispatch::Busy
+            );
+        }
+        let noise = [r#"{"type":"system","subtype":"init","session_id":"s"}"#];
+        assert_eq!(
+            edit_stack_dispatch(
+                noise.iter(),
+                shared::AgentType::Claude,
+                &items,
+                false,
+                false,
+                false
+            ),
+            EditStackDispatch::Send(items[0].id)
+        );
+    }
+
+    #[test]
+    fn failed_and_throttled_turns_pause_send_all_but_allow_explicit_manual_resume() {
+        let claude_failure = r#"{"type":"result","subtype":"error_during_execution","is_error":true,"duration_ms":1,"duration_api_ms":1,"num_turns":1,"session_id":"s","total_cost_usd":0,"errors":["usage limit"],"api_error_status":429}"#;
+        for (agent, failed) in [
+            (shared::AgentType::Claude, claude_failure),
+            (
+                shared::AgentType::Codex,
+                r#"{"type":"turn.failed","error":{"message":"failed"}}"#,
+            ),
+            (
+                shared::AgentType::Codex,
+                r#"{"type":"turn.completed","status":"failed"}"#,
+            ),
+            (
+                shared::AgentType::Codex,
+                r#"{"type":"turn.completed","status":"interrupted"}"#,
+            ),
+        ] {
+            let items = [item()];
+            let active_id = uuid::Uuid::new_v4();
+            let mut active = Some((active_id, uuid::Uuid::new_v4()));
+            let mut send_all = true;
+            let tag = classify_output_msg_type(failed);
+            assert_eq!(tag, ActivityTag::Error);
+            let mut pending = vec![RenderedMessage::new(
+                r#"{"type":"user","content":"queued"}"#.into(),
+                None,
+            )];
+            reconcile_pending_sends(&mut pending, tag, failed);
+            assert!(
+                pending.is_empty(),
+                "failed terminal still settles a legacy unconfirmed echo"
+            );
+            assert_eq!(
+                reconcile_edit_stack_activity(&mut active, &mut send_all, tag),
+                Some((active_id, "failed"))
+            );
+            assert!(
+                !send_all,
+                "the drain must remain paused after terminal failure/throttle"
+            );
+            send_all = true;
+            assert_eq!(
+                reconcile_edit_stack_activity(&mut active, &mut send_all, tag),
+                None
+            );
+            assert!(
+                !send_all,
+                "an external failed turn must pause an armed queue too"
+            );
+            assert_eq!(
+                edit_stack_dispatch(
+                    [failed].iter(),
+                    agent,
+                    &items,
+                    active.is_some(),
+                    false,
+                    false
+                ),
+                EditStackDispatch::Send(items[0].id),
+                "an explicit Send next can resume from a stopped turn"
+            );
+        }
     }
 }
