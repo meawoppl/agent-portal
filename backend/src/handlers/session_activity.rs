@@ -60,7 +60,7 @@ pub(crate) fn persisted_activity_states(
     let mut unresolved = session_ids.to_vec();
     unresolved.sort_unstable();
     unresolved.dedup();
-    let mut states = HashMap::new();
+    let mut history = ActivityHistory::default();
     let mut cursors = HashMap::<Uuid, (chrono::NaiveDateTime, Uuid)>::new();
     while !unresolved.is_empty() {
         let before_at: Vec<_> = unresolved
@@ -91,24 +91,56 @@ pub(crate) fn persisted_activity_states(
         for row in rows {
             cursors.insert(row.session_id, (row.created_at, row.id));
             *counts.entry(row.session_id).or_default() += 1;
-            if let std::collections::hash_map::Entry::Vacant(entry) = states.entry(row.session_id) {
-                if let Some(state) = activity_signal(&row.agent_type, &row.role, &row.content) {
-                    entry.insert(state);
-                }
-            }
+            history.observe(row.session_id, &row.agent_type, &row.role, &row.content);
         }
         unresolved.retain(|id| {
-            if states.contains_key(id) {
+            if history.states.contains_key(id) {
                 false
             } else if counts.get(id).copied().unwrap_or(0) < PAGE {
-                states.insert(*id, SessionActivityState::Idle);
+                history.states.insert(*id, SessionActivityState::Idle);
                 false
             } else {
                 true
             }
         });
     }
-    Ok(states)
+    Ok(history.states)
+}
+
+/// A failed Claude result does not carry the preceding assistant's typed API
+/// error. Read back within that turn so its usage-limit classification survives
+/// the generic terminator. Never inherit a throttle across a user/turn boundary;
+/// cap this special lookback independently of the ordinary notice-tail scan.
+#[derive(Default)]
+struct ActivityHistory {
+    states: HashMap<Uuid, SessionActivityState>,
+    failed_claude_turns: HashMap<Uuid, usize>,
+}
+
+impl ActivityHistory {
+    fn observe(&mut self, id: Uuid, agent: &str, role: &str, content: &str) {
+        use SessionActivityState::{Idle, Throttled};
+        if self.states.contains_key(&id) {
+            return;
+        }
+        let signal = activity_signal(agent, role, content);
+        if let Some(scanned) = self.failed_claude_turns.get_mut(&id) {
+            *scanned += 1;
+            if let Some(state) = signal {
+                self.states
+                    .insert(id, if state == Throttled { Throttled } else { Idle });
+            } else if *scanned >= 64 {
+                self.states.insert(id, Idle);
+            }
+        } else if agent == "claude"
+            && role == "result"
+            && serde_json::from_str::<shared::ResultMessage>(content).is_ok_and(|r| r.is_error)
+        {
+            self.failed_claude_turns.insert(id, 0);
+        } else if let Some(state) = signal {
+            self.states.insert(id, state);
+        }
+    }
 }
 
 /// None means no turn-state information, rather than "busy" or "idle".
@@ -159,6 +191,21 @@ pub(crate) fn activity_signal(
             serde_json::from_str::<shared::codex_errors::CodexLifecycleFrame>(content)
         {
             return Some(frame.activity());
+        }
+    }
+    if agent == "claude" && kind == "assistant" {
+        if let Ok(message) = serde_json::from_str::<shared::AssistantMessage>(content) {
+            // Only the top-level assistant's own typed error is a signal.
+            // Subagent limits and quoted content do not throttle this session.
+            if message.parent_tool_use_id.is_none()
+                && message.agent_id.is_none()
+                && matches!(
+                    message.api_error.as_deref(),
+                    Some("usage_limit_reached" | "model_requires_usage_credits")
+                )
+            {
+                return Some(Throttled);
+            }
         }
     }
     match (agent, kind) {
@@ -361,5 +408,60 @@ mod tests {
             assert_eq!(states[&empty], Idle);
             Ok(())
         });
+    }
+    fn typed_limit_frame() -> String {
+        r#"{"type":"assistant","session_id":"session","api_error":"usage_limit_reached","message":{"id":"msg","type":"message","role":"assistant","model":"<synthetic>","content":[]}}"#.to_string()
+    }
+
+    fn failed_result() -> &'static str {
+        r#"{"type":"result","subtype":"error_during_execution","is_error":true,"duration_ms":0,"duration_api_ms":0,"num_turns":1,"total_cost_usd":0,"session_id":"session"}"#
+    }
+
+    #[test]
+    fn typed_usage_limit_survives_error_result_but_not_a_new_turn() {
+        let id = Uuid::nil();
+        assert_eq!(
+            activity_signal("claude", "assistant", &typed_limit_frame()),
+            Some(Throttled)
+        );
+        let mut scan = ActivityHistory::default();
+        scan.observe(id, "claude", "result", failed_result());
+        scan.observe(id, "claude", "assistant", &typed_limit_frame());
+        assert_eq!(scan.states[&id], Throttled);
+
+        for boundary in [
+            ("user", "continue"),
+            ("result", r#"{"type":"result"}"#),
+            ("assistant", r#"{"type":"assistant"}"#),
+        ] {
+            let mut scan = ActivityHistory::default();
+            scan.observe(id, "claude", "result", failed_result());
+            scan.observe(id, "claude", boundary.0, boundary.1);
+            scan.observe(id, "claude", "assistant", &typed_limit_frame());
+            assert_eq!(scan.states[&id], Idle, "boundary: {boundary:?}");
+        }
+        let mut scan = ActivityHistory::default();
+        scan.observe(id, "claude", "user", "continue");
+        scan.observe(id, "claude", "result", failed_result());
+        scan.observe(id, "claude", "assistant", &typed_limit_frame());
+        assert_eq!(scan.states[&id], Busy);
+    }
+
+    #[test]
+    fn failed_result_lookback_is_bounded_and_subagent_limit_is_not_session_limit() {
+        let id = Uuid::nil();
+        let mut scan = ActivityHistory::default();
+        scan.observe(id, "claude", "result", failed_result());
+        for _ in 0..64 {
+            scan.observe(id, "claude", "unknown", "malformed historical notice");
+        }
+        scan.observe(id, "claude", "assistant", &typed_limit_frame());
+        assert_eq!(scan.states[&id], Idle);
+        let mut subagent: serde_json::Value = serde_json::from_str(&typed_limit_frame()).unwrap();
+        subagent["parent_tool_use_id"] = "toolu_123".into();
+        assert_eq!(
+            activity_signal("claude", "assistant", &subagent.to_string()),
+            Some(Busy)
+        );
     }
 }

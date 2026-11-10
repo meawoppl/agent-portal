@@ -2002,3 +2002,26 @@
     padding: 0 0.75rem 0.5rem;
     font-size: 0.85rem;
 }
+
+/* Usage windows are separate observations, not separate session states. */
+.rate-limit-windows {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    padding: 0.4rem 0.75rem;
+}
+
+.rate-limit-window {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.8rem;
+}
+
+.rate-limit-window meter {
+    width: 5rem;
+}
+
+.typed-api-error {
+    margin-bottom: 0.5rem;
+}

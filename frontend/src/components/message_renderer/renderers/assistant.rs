@@ -215,12 +215,21 @@ pub fn render_assistant_message_content(
     let login = super::errors::render_claude_login_action(
         msg.error
             .as_ref()
-            .is_some_and(|error| error.as_str() == "authentication_failed"),
+            .is_some_and(|error| error.as_str() == "authentication_failed")
+            || msg.api_error.as_deref() == Some("stored_login_refused"),
         on_claude_login,
     );
     let completion_states = AssistantCompletionState::for_message(msg);
-    let content = render_content_blocks(&msg.message.content, session_id);
-    if completion_states.is_empty() && content.is_none() && login.is_none() {
+    let api_error = super::errors::render_assistant_api_error(msg);
+    let content = if msg.api_error_origin.as_deref() == Some("first_party") && api_error.is_some() {
+        // The stamp identifies the endpoint, not trusted markup from it.
+        Some(
+            html! { <div class="error-text">{ content_blocks_to_text(&msg.message.content) }</div> },
+        )
+    } else {
+        render_content_blocks(&msg.message.content, session_id)
+    };
+    if completion_states.is_empty() && content.is_none() && login.is_none() && api_error.is_none() {
         return None;
     }
 
@@ -229,6 +238,7 @@ pub fn render_assistant_message_content(
             if !completion_states.is_empty() {
                 { render_completion_states(msg) }
             }
+            { api_error.unwrap_or_default() }
             { content.unwrap_or_default() }
             { login.unwrap_or_default() }
         </>

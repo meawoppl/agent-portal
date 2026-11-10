@@ -763,19 +763,18 @@ pub(crate) async fn claude_io_task(
                                         turn_tracker.record_tool_call();
                                     }
                                 }
-                                for text in asst.message.content.iter().filter_map(|block| {
-                                    if let ContentBlock::Text(text) = block {
-                                        Some(text.text.as_str())
-                                    } else {
-                                        None
-                                    }
-                                }) {
-                                    if text.starts_with(RATE_LIMIT_TEXT_PREFIX) {
-                                        state.note_rate_limited_turn();
-                                    }
-                                    if let Some(reset_at) = parse_usage_limit_reset(text) {
-                                        state.note_session_limit(reset_at, text.to_string());
-                                        break;
+                                if let Some((reset_at, source_message)) = assistant_usage_limit(asst) {
+                                    state.note_session_limit(reset_at, source_message);
+                                }
+                                // Account limits wait for their exact reset; they
+                                // must not enter the short upstream-429 retry loop.
+                                if !matches!(asst.api_error.as_deref(), Some("usage_limit_reached" | "model_requires_usage_credits")) {
+                                    for block in &asst.message.content {
+                                        if let ContentBlock::Text(text) = block {
+                                            if text.text.starts_with(RATE_LIMIT_TEXT_PREFIX) {
+                                                state.note_rate_limited_turn();
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1088,6 +1087,50 @@ pub(crate) async fn claude_io_task(
             }
         }
     }
+}
+
+/// Typed account-limit timestamps are authoritative, including dates beyond
+/// tomorrow. The text parser exists only for transcripts from older CLIs.
+fn assistant_usage_limit(asst: &claude_codes::AssistantMessage) -> Option<(String, String)> {
+    if asst.parent_tool_use_id.is_some() || asst.agent_id.is_some() {
+        return None;
+    }
+    let texts: Vec<_> = asst
+        .message
+        .content
+        .iter()
+        .filter_map(|block| match block {
+            ContentBlock::Text(text) => Some(text.text.as_str()),
+            _ => None,
+        })
+        .collect();
+    if matches!(
+        asst.api_error.as_deref(),
+        Some("usage_limit_reached" | "model_requires_usage_credits")
+    ) {
+        let epoch = asst
+            .api_error_params
+            .as_ref()
+            .and_then(|params| params.rate_limit_info.as_ref())
+            .and_then(|info| info.resets_at)
+            .and_then(|seconds| i64::try_from(seconds).ok());
+        if let Some(reset) = epoch.and_then(|seconds| chrono::DateTime::from_timestamp(seconds, 0))
+        {
+            let source = if texts.is_empty() {
+                "Claude usage limit reached".to_string()
+            } else {
+                texts.join("\n")
+            };
+            return Some((reset.to_rfc3339(), source));
+        }
+    } else if asst.api_error.is_some() {
+        // Do not mistake a quoted legacy banner in another typed error for
+        // an account limit.
+        return None;
+    }
+    texts
+        .into_iter()
+        .find_map(|text| parse_usage_limit_reset(text).map(|reset| (reset, text.to_string())))
 }
 
 fn parse_usage_limit_reset(text: &str) -> Option<String> {
@@ -1428,6 +1471,41 @@ mod tests {
         // Unique per call, so a second interrupt can't be mistaken for a replay.
         let other = serde_json::to_value(interrupt_input()).expect("serialize");
         assert_ne!(value["request_id"], other["request_id"]);
+    }
+
+    #[test]
+    fn typed_usage_reset_wins_over_text_and_needs_no_banner() {
+        let mut frame = assistant_frame(
+            "claude-opus-4-8",
+            Some("New limit wording; resets 5pm (America/Los_Angeles)"),
+            false,
+        );
+        frame["api_error"] = serde_json::Value::String("usage_limit_reached".into());
+        frame["api_error_params"] = serde_json::from_str(
+            r#"{"rate_limit_info":{"status":"rejected","resetsAt":1893456000}}"#,
+        )
+        .unwrap();
+        let asst = parse_assistant(frame.clone());
+        assert_eq!(
+            assistant_usage_limit(&asst).unwrap().0,
+            "2030-01-01T00:00:00+00:00"
+        );
+        frame["message"]["content"] = serde_json::Value::Array(vec![]);
+        assert_eq!(
+            assistant_usage_limit(&parse_assistant(frame)).unwrap().0,
+            "2030-01-01T00:00:00+00:00"
+        );
+    }
+
+    #[test]
+    fn typed_other_error_cannot_schedule_a_quoted_usage_banner() {
+        let mut frame = assistant_frame(
+            "claude-opus-4-8",
+            Some("You've hit your limit · resets 5pm (America/Los_Angeles)"),
+            false,
+        );
+        frame["api_error"] = serde_json::Value::String("media_removed".into());
+        assert!(assistant_usage_limit(&parse_assistant(frame)).is_none());
     }
 
     fn assistant_frame(model: &str, text: Option<&str>, usage: bool) -> serde_json::Value {

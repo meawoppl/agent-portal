@@ -203,6 +203,7 @@ pub fn render_rate_limit_event(msg: &shared::RateLimitEvent, timestamp: Option<&
                 <span class="message-type-badge rate-limit">{ "Rate Limit" }</span>
                 <span class="rate-limit-inline">
                     <span class="rate-limit-status">{ status }</span>
+                    <span class="rate-limit-detail">{ limit_scope_label(info.limit_scope.as_ref()) }</span>
                     <span class="rate-limit-detail">{ format_type }</span>
                     if let Some(text) = reset_text {
                         <span class="rate-limit-detail">{ text }</span>
@@ -215,7 +216,107 @@ pub fn render_rate_limit_event(msg: &shared::RateLimitEvent, timestamp: Option<&
                     }
                 </span>
             </div>
+            if let Some(windows) = &info.unified_windows {
+                <div class="rate-limit-windows">
+                    { render_usage_window("5h", windows.five_hour.as_ref()) }
+                    { render_usage_window("7d", windows.seven_day.as_ref()) }
+                    { render_usage_window("7d with overage", windows.seven_day_overage_included.as_ref()) }
+                </div>
+            }
         </div>
+    }
+}
+
+/// The SDK's open error-kind string is intentional: new provider gates remain
+/// visible, while actions are offered only for kinds whose recovery we know.
+fn assistant_error_guidance(kind: &str) -> (&str, &str) {
+    match kind {
+        "usage_limit_reached" => ("Usage limit reached", "Wait for the usage window to reset. If a reset time is available, use Schedule continue below to resume then."),
+        "model_requires_usage_credits" => ("Usage credits required", "This model needs usage credits. Check your plan or choose an available model before continuing."),
+        "media_removed" => ("Image or document dropped", "Claude omitted media the API could not accept. Reattach a supported or smaller file if it is needed."),
+        "connection_failed" => ("Connection failed", "Check the session computer's network, then send Continue to retry the interrupted work."),
+        "stream_idle_timeout" => ("Response timed out", "The response stream stopped producing data. Send Continue to retry the interrupted work."),
+        "computer_slept" => ("Session computer slept", "Wake the session computer, then send Continue to retry the interrupted work."),
+        "stored_login_refused" => ("Claude sign-in refused", "The stored login was blocked by this computer's or organization's credential policy. Check the administrator's API-key helper/settings before signing in."),
+        "empty_completion" => ("No response content", "Claude's retry returned no visible content. Review the prompt, then send a new message to try again."),
+        "unattended_start_limit" => ("Automatic continuation limit reached", "No request was sent. Review the session and explicitly send your next message; it will not be resent automatically."),
+        "unattended_start_unconfirmed" => ("Automatic continuation could not be checked", "No request was sent. Check connectivity and explicitly send your next message when ready."),
+        _ => ("Claude request failed", "Review the error details below before sending another message."),
+    }
+}
+
+pub(super) fn render_assistant_api_error(msg: &shared::AssistantMessage) -> Option<Html> {
+    let kind = msg.api_error.as_deref()?;
+    let (title, guidance) = assistant_error_guidance(kind);
+    let params = msg.api_error_params.as_ref();
+    let reset = params
+        .and_then(|p| p.rate_limit_info.as_ref())
+        .and_then(|i| i.resets_at)
+        .and_then(|epoch| i64::try_from(epoch).ok())
+        .and_then(|epoch| chrono::DateTime::from_timestamp(epoch, 0));
+    Some(html! {
+        <div class="anthropic-error-content typed-api-error" role="status">
+            <div class="error-details">
+                <div class="error-type-display">{ title }</div>
+                <div class="error-recovery-hint">{ guidance }</div>
+                if let Some(reset) = reset {
+                    <div class="rate-limit-detail">{ format!("Resets {}", reset.format("%Y-%m-%d %H:%M UTC")) }</div>
+                }
+                if let Some(info) = params.and_then(|p| p.rate_limit_info.as_ref()) {
+                    <div class="rate-limit-detail">{ limit_scope_label(info.limit_scope.as_ref()) }</div>
+                }
+                if let Some(reason) = params.and_then(|p| p.media_reason.as_ref()) {
+                    <div class="rate-limit-detail">{ format!("Media reason: {reason}") }</div>
+                }
+                <div class="rate-limit-detail">{ kind.replace('_', " ") }</div>
+            </div>
+        </div>
+    })
+}
+
+fn limit_scope_label(scope: Option<&claude_codes::RateLimitScope>) -> &'static str {
+    match scope.map(|s| s.as_str()) {
+        Some("service") => "Service usage limit",
+        Some("channel") => "Channel usage limit",
+        Some("group_pool") => "Team pool limit",
+        None => "Your usage limit",
+        Some(_) => "Shared usage limit",
+    }
+}
+
+fn render_usage_window(
+    label: &'static str,
+    window: Option<&claude_codes::UnifiedWindowUsage>,
+) -> Html {
+    let Some(window) = window else {
+        return html! {};
+    };
+    let status = window
+        .status
+        .as_ref()
+        .map(|s| s.as_str())
+        .unwrap_or("unknown");
+    let percent = if window.utilization.is_finite() {
+        (window.utilization.max(0.0) * 100.0).round()
+    } else {
+        0.0
+    };
+    let color = match status {
+        "rejected" => shared::palette::ACCENT_RED,
+        "allowed_warning" => shared::palette::ACCENT_ORANGE,
+        _ => shared::palette::ACCENT_BLUE,
+    };
+    let threshold = window
+        .surpassed_threshold
+        .map(|t| format!("; passed {:.0}% threshold", t * 100.0))
+        .unwrap_or_default();
+    html! {
+        <span class="rate-limit-window" title={format!("{label}: {status}{threshold}")}>
+            <span>{ format!("{label}: {percent:.0}%") }</span>
+            <meter min="0" max="1" value={window.utilization.clamp(0.0, 1.0).to_string()}
+                style={format!("accent-color: {color}")} aria-label={format!("{label} usage: {percent:.0}% ({status})")} />
+            <span>{ status.replace('_', " ") }</span>
+        </span>
     }
 }
 
@@ -333,5 +434,44 @@ pub fn render_local_error(msg: &shared::ErrorMessage, timestamp: Option<&str>) -
             </div>
             <div class="error-content">{ &msg.message }</div>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod typed_api_error_tests {
+    use super::*;
+
+    #[test]
+    fn recovery_is_specific_and_unknown_kinds_remain_visible() {
+        for (kind, title, hint) in [
+            (
+                "usage_limit_reached",
+                "Usage limit reached",
+                "Schedule continue",
+            ),
+            ("media_removed", "Image or document dropped", "Reattach"),
+            ("connection_failed", "Connection failed", "network"),
+            ("stream_idle_timeout", "Response timed out", "Continue"),
+            (
+                "stored_login_refused",
+                "Claude sign-in refused",
+                "administrator",
+            ),
+            (
+                "unattended_start_limit",
+                "Automatic continuation limit reached",
+                "not be resent",
+            ),
+            ("future_gate", "Claude request failed", "Review"),
+        ] {
+            let actual = assistant_error_guidance(kind);
+            assert_eq!(actual.0, title);
+            assert!(actual.1.contains(hint), "{kind}");
+        }
+        assert_eq!(
+            limit_scope_label(Some(&claude_codes::RateLimitScope::GroupPool)),
+            "Team pool limit"
+        );
+        assert_eq!(limit_scope_label(None), "Your usage limit");
     }
 }
