@@ -37,8 +37,8 @@ pub type ModelUsage = BTreeMap<String, ModelUsageEntry>;
 ///     before broadcast.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TurnMetrics {
-    /// DB row id. None on the proxy-emit side; populated by the backend
-    /// after insert and present on the broadcast frame.
+    /// Stable metric identity. Current Codex drivers assign it before delivery
+    /// for replay-safe accounting. Legacy drivers omit it; the DB assigns one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<Uuid>,
 
@@ -104,9 +104,8 @@ pub struct TurnMetrics {
     #[serde(default)]
     pub stream_restarts: i32,
 
-    /// Cost in USD. Claude provides this on `Result.total_cost_usd`; Codex
-    /// does not surface cost on its wire today, so for codex turns this stays
-    /// `None`.
+    /// Per-turn cost in USD: Claude disjoint result costs or a native Codex
+    /// thread-billing counter delta. Missing native billing stays unknown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub total_cost_usd: Option<f64>,
 

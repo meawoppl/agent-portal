@@ -757,6 +757,7 @@ impl TurnMetric {
 #[derive(Debug, Insertable)]
 #[diesel(table_name = crate::schema::turn_metrics)]
 pub struct NewTurnMetric {
+    pub id: Option<Uuid>,
     pub session_id: Uuid,
     pub user_id: Uuid,
     pub user_message_id: Option<Uuid>,

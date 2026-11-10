@@ -12,6 +12,7 @@
 pub mod agent;
 pub mod auth;
 mod classifier;
+mod cost;
 mod events;
 mod generated_media;
 mod handler;
