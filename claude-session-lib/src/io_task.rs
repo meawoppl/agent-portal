@@ -149,6 +149,79 @@ async fn send_claude_user_input(
     result.map(|_| input)
 }
 
+/// Preserve normal output processing while the main receive loop waits for a
+/// settings acknowledgement. A successful stdin write is not CLI acceptance.
+async fn prepare_claude_user_input(
+    args: ClaudeUserInputSend<'_>,
+    effort: Option<shared::ReasoningEffort>,
+    controller: &mut crate::effort::EffortController,
+) -> Result<Option<ClaudeInput>, claude_codes::Error> {
+    let ClaudeUserInputSend {
+        client,
+        session_id,
+        text,
+        delivered,
+        display_event,
+        event_tx,
+        pending_echo_drops,
+        synthesize_visible_echo,
+    } = args;
+    let prepared = controller.prepare(
+        crate::effort::UserInput {
+            text,
+            delivered,
+            display_event,
+        },
+        effort,
+    );
+    match prepared {
+        Ok(crate::effort::PreparedInput::Direct(input)) => {
+            send_claude_user_input(ClaudeUserInputSend {
+                client,
+                session_id,
+                text: input.text,
+                delivered: input.delivered,
+                display_event: input.display_event,
+                event_tx,
+                pending_echo_drops,
+                synthesize_visible_echo,
+            })
+            .await
+            .map(Some)
+        }
+        Ok(crate::effort::PreparedInput::Configure(request)) => {
+            if let Err(error) = client.send(&request).await {
+                controller.cancel(&error.to_string());
+                return Err(error);
+            }
+            Ok(None)
+        }
+        Err(reason) => {
+            let _ = event_tx.send(IoEvent::RawOutput(PortalMessage::text(reason).to_json()));
+            Ok(None)
+        }
+    }
+}
+
+#[derive(serde::Serialize)]
+struct EffortCapableOutput<'a> {
+    #[serde(flatten)]
+    output: &'a ClaudeOutput,
+    #[serde(flatten)]
+    capability: shared::claude_effort::ClaudeEffortCapability,
+}
+
+fn effort_capable_output(output: &ClaudeOutput) -> serde_json::Value {
+    let is_init = matches!(output, ClaudeOutput::System(system) if system.as_init().is_some());
+    serde_json::to_value(EffortCapableOutput {
+        output,
+        capability: shared::claude_effort::ClaudeEffortCapability {
+            portal_effort_control: is_init,
+        },
+    })
+    .unwrap_or_default()
+}
+
 fn automated_display_input(value: &serde_json::Value) -> bool {
     if let Ok(portal) = serde_json::from_value::<shared::PortalMessage>(value.clone()) {
         if portal.message_type == shared::PortalMessage::MESSAGE_TYPE {
@@ -593,6 +666,7 @@ pub(crate) async fn claude_io_task(
     // `ClaudeOutput::Result`. See `session_lib::turn_tracker`.
     let mut turn_tracker = TurnTracker::new(session_id);
     let mut cost_tracker = shared::claude_cost::ClaudeTurnCostTracker::default();
+    let mut effort_controller = crate::effort::EffortController::default();
     // Model + service tier observed for the current turn. Picked up from
     // `ClaudeOutput::System(Init)` (issued at session start) and the
     // assistant message's `model` field (per-message); the tracker doesn't
@@ -621,25 +695,30 @@ pub(crate) async fn claude_io_task(
     let mut saw_user_input = resume;
 
     loop {
+        let effort_deadline = effort_controller.deadline();
         tokio::select! {
+            _ = async {
+                if let Some(deadline) = effort_deadline {
+                    tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
+                } else { std::future::pending::<()>().await; }
+            } => {
+                let reason = "Claude did not acknowledge the effort change. The prompt was not sent; retry with Auto or restart the session.";
+                if effort_controller.cancel(reason) {
+                    let _ = event_tx.send(IoEvent::RawOutput(PortalMessage::text(reason.to_string()).to_json()));
+                }
+            }
             // Handle incoming commands (input to send to Claude).
             Some(cmd) = command_rx.recv() => {
                 let result = match cmd {
                     IoCommand::UserInput {
                         text,
-                        reasoning_effort: _,
+                        reasoning_effort,
                         delivered,
                         display_event,
                     } => {
-                        saw_user_input = true;
                         // Each fresh user input gets its own retry budget.
                         state.reset_turn_retry_state();
-                        subagent_tokens_at_turn_start = subagent_rollup.subagent_tokens as i64;
-                        // Begin per-turn metrics capture. Wall-clock UTC is
-                        // chrono::Utc::now(); the monotonic instant is the
-                        // anchor for TTFT / total / gap durations.
-                        turn_tracker.start(Instant::now(), chrono::Utc::now());
-                        let r = send_claude_user_input(ClaudeUserInputSend {
+                        let r = prepare_claude_user_input(ClaudeUserInputSend {
                             client: &mut client,
                             session_id,
                             text,
@@ -648,9 +727,12 @@ pub(crate) async fn claude_io_task(
                             event_tx: &event_tx,
                             pending_echo_drops: &mut state.pending_echo_drops,
                             synthesize_visible_echo: true,
-                        })
+                        }, reasoning_effort, &mut effort_controller)
                         .await;
-                        if let Ok(input) = &r {
+                        if let Ok(Some(input)) = &r {
+                            saw_user_input = true;
+                            subagent_tokens_at_turn_start = subagent_rollup.subagent_tokens as i64;
+                            turn_tracker.start(Instant::now(), chrono::Utc::now());
                             state.set_last_input(input.clone());
                         }
                         r.map(|_| ())
@@ -663,6 +745,7 @@ pub(crate) async fn claude_io_task(
                         client.send_control_response(response).await
                     }
                     IoCommand::Interrupt => {
+                        effort_controller.cancel("Input cancelled before its effort setting was acknowledged.");
                         // Cancel claude's in-flight turn. Sent as a wrapped
                         // `control_request` (see `interrupt_input`); a no-op on
                         // the CLI side when no turn is active.
@@ -682,6 +765,27 @@ pub(crate) async fn claude_io_task(
             result = client.receive() => {
                 match result {
                     Ok(output) => {
+                        if let Some(acknowledgement) = effort_controller.acknowledge(&output) {
+                            match acknowledgement {
+                                Ok(input) => {
+                                    saw_user_input = true;
+                                    subagent_tokens_at_turn_start = subagent_rollup.subagent_tokens as i64;
+                                    turn_tracker.start(Instant::now(), chrono::Utc::now());
+                                    let sent = send_claude_user_input(ClaudeUserInputSend {
+                                        client: &mut client, session_id, text: input.text,
+                                        delivered: input.delivered, display_event: input.display_event,
+                                        event_tx: &event_tx, pending_echo_drops: &mut state.pending_echo_drops,
+                                        synthesize_visible_echo: true,
+                                    }).await;
+                                    match sent {
+                                        Ok(input) => state.set_last_input(input),
+                                        Err(error) => { let _ = event_tx.send(IoEvent::Error(SessionError::Agent(error.to_string()))); }
+                                    }
+                                }
+                                Err(reason) => { let _ = event_tx.send(IoEvent::RawOutput(PortalMessage::text(reason).to_json())); }
+                            }
+                            continue;
+                        }
                         if !saw_user_input && should_drop_fresh_start_output(&output) {
                             tracing::warn!(
                                 "Dropping Claude output before first user input for fresh session {}: {}",
@@ -861,7 +965,8 @@ pub(crate) async fn claude_io_task(
                         let terminator_is_error =
                             matches!(&output, ClaudeOutput::Result(r) if r.is_error);
                         let is_rate_limit_terminator =
-                            terminator_is_error && state.current_turn_was_rate_limited();
+                            terminator_is_error && state.current_turn_was_rate_limited()
+                                && effort_controller.deadline().is_none();
                         let is_session_limit_terminator =
                             terminator_is_error && state.has_pending_session_limit();
 
@@ -869,7 +974,7 @@ pub(crate) async fn claude_io_task(
                         // boundary that keeps `Session` free of `ClaudeOutput`)
                         // and forward each. `Session` buffers every `Visible`
                         // value before emitting it, preserving ordering.
-                        let value = serde_json::to_value(&output).unwrap_or_default();
+                        let value = effort_capable_output(&output);
                         let mut classifier = ClaudeAdapter;
                         let mut send_failed = false;
                         for decision in classifier.classify(value) {
@@ -960,7 +1065,7 @@ pub(crate) async fn claude_io_task(
                                 match cmd {
                                     IoCommand::UserInput {
                                         text,
-                                        reasoning_effort: _,
+                                        reasoning_effort,
                                         delivered,
                                         display_event,
                                     } => {
@@ -970,9 +1075,7 @@ pub(crate) async fn claude_io_task(
                                         // rate-limit latch was already cleared by
                                         // `on_rate_limit_terminator`.)
                                         state.reset_turn_retry_state();
-                                        subagent_tokens_at_turn_start = subagent_rollup.subagent_tokens as i64;
-                                        turn_tracker.start(Instant::now(), chrono::Utc::now());
-                                        let r = send_claude_user_input(ClaudeUserInputSend {
+                                        let r = prepare_claude_user_input(ClaudeUserInputSend {
                                             client: &mut client,
                                             session_id,
                                             text,
@@ -981,12 +1084,15 @@ pub(crate) async fn claude_io_task(
                                             event_tx: &event_tx,
                                             pending_echo_drops: &mut state.pending_echo_drops,
                                             synthesize_visible_echo: true,
-                                        })
+                                        }, reasoning_effort, &mut effort_controller)
                                         .await;
                                         match r {
-                                            Ok(new_input) => {
+                                            Ok(Some(new_input)) => {
+                                                subagent_tokens_at_turn_start = subagent_rollup.subagent_tokens as i64;
+                                                turn_tracker.start(Instant::now(), chrono::Utc::now());
                                                 state.set_last_input(new_input);
                                             }
+                                            Ok(None) => {}
                                             Err(e) => {
                                                 let _ = event_tx.send(IoEvent::Error(
                                                     SessionError::Agent(e.to_string()),
@@ -1252,6 +1358,105 @@ async fn read_stderr(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn effort_change_is_acknowledged_before_prompt_and_auto_restores_default() {
+        use std::process::Stdio;
+        let script = r#"
+import sys, json, select, os
+def read_frame():
+    data = bytearray()
+    while True:
+        byte = os.read(0, 1)
+        if not byte:
+            raise EOFError('stdin closed')
+        if byte == b'\n':
+            return json.loads(data)
+        data.extend(byte)
+for level, text in [('high', 'first'), (None, 'auto')]:
+    request = read_frame()
+    assert request['type'] == 'control_request', request
+    assert request['request']['subtype'] == 'apply_flag_settings', request
+    assert request['request']['settings'] == {'effortLevel': level}, request
+    print(json.dumps({'type':'system','subtype':'init','session_id':'s','uuid':'u','model':'claude-opus-4-8','effort':level or 'medium','ultrathink_available':True}), flush=True)
+    if select.select([sys.stdin], [], [], 0.1)[0]:
+        raise RuntimeError('prompt arrived before acknowledgement')
+    print(json.dumps({'type':'control_response','response':{'subtype':'success','request_id':request['request_id']}}), flush=True)
+    user = read_frame()
+    assert user['type'] == 'user', user
+    assert user['message']['content'][0]['text'] == text, user
+    print(json.dumps({'type':'result','subtype':'success','is_error':False,'duration_ms':1,'duration_api_ms':1,'num_turns':1,'session_id':'s','total_cost_usd':0,'result':text}), flush=True)
+"#;
+        let child = tokio::process::Command::new("python3")
+            .args(["-u", "-c", script])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let client = ClaudeAsyncClient::new(child).unwrap();
+        let (command_tx, command_rx) = mpsc::unbounded_channel();
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let task = tokio::spawn(claude_io_task(
+            Uuid::new_v4(),
+            false,
+            client,
+            command_rx,
+            event_tx,
+        ));
+        for (text, effort) in [
+            ("first", Some(shared::ReasoningEffort::High)),
+            ("auto", None),
+        ] {
+            let (delivered, delivery) = oneshot::channel();
+            command_tx
+                .send(IoCommand::UserInput {
+                    text: text.into(),
+                    reasoning_effort: effort,
+                    delivered: Some(delivered),
+                    display_event: None,
+                })
+                .unwrap();
+            tokio::time::timeout(Duration::from_secs(5), delivery)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            tokio::time::timeout(Duration::from_secs(5), async {
+                let mut saw_capability = false;
+                while let Some(event) = event_rx.recv().await {
+                    if let IoEvent::Classified(session_lib::AgentOutput::Visible(value)) = event {
+                        if value.get("type").and_then(|kind| kind.as_str()) == Some("system") {
+                            let capability: shared::claude_effort::ClaudeEffortCapability =
+                                serde_json::from_value(value.clone()).unwrap();
+                            assert!(capability.portal_effort_control);
+                            saw_capability = true;
+                        }
+                        if value.get("type").and_then(|kind| kind.as_str()) == Some("result") {
+                            assert!(
+                                saw_capability,
+                                "init capability must survive classification"
+                            );
+                            assert_eq!(
+                                value.get("result").and_then(|value| value.as_str()),
+                                Some(text)
+                            );
+                            return;
+                        }
+                    }
+                }
+                panic!("result not received");
+            })
+            .await
+            .unwrap();
+        }
+        tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .unwrap()
+            .unwrap();
+    }
 
     // --- claude_control_response: neutral PermissionDecision → ControlResponse.
     // Ported from the deleted `ClaudeAdapter::permission_response` tests; this is
