@@ -249,6 +249,7 @@ pub(crate) async fn codex_io_task(
     event_tx: mpsc::UnboundedSender<IoEvent>,
 ) {
     let session_id = config.session_id;
+    let mut generated_media = crate::generated_media::GeneratedMediaNormalizer::new(&config);
     let codex_path = config.claude_path.as_deref().unwrap_or(Path::new("codex"));
 
     // Parse the user-supplied extra_args into (a) global `-c key=value`
@@ -480,7 +481,7 @@ pub(crate) async fn codex_io_task(
             tokio::select! {
                 result = client.next_message() => {
                     match result {
-                        Ok(Some(msg)) => {
+                        Ok(Some(mut msg)) => {
                             if let Err(e) = settle_unsupported_request(&mut client, &msg).await {
                                 let _ = event_tx.send(IoEvent::Error(
                                     SessionError::CommunicationError(e.to_string()),
@@ -680,12 +681,16 @@ pub(crate) async fn codex_io_task(
                                 } else {
                                     None
                                 };
-                            let (ok, turn_ended) =
+                            let generated = generated_media.normalize(&mut msg).await;
+                            let (ok, turn_ended) = if let Some(output) = generated {
+                                (event_tx.send(IoEvent::Classified(session_lib::AgentOutput::Visible(output))).is_ok(), false)
+                            } else {
                                 handle_codex_server_message(
                                     msg,
                                     &event_tx,
                                     latest_usage_for_msg,
-                                );
+                                )
+                            };
                             if turn_ended {
                                 // Turn ended: `on_turn_ended` marks the state
                                 // idle and drains at most one queued prompt.
@@ -991,7 +996,7 @@ pub(crate) async fn codex_io_task(
             tokio::select! {
                 result = client.next_message() => {
                     match result {
-                        Ok(Some(msg)) => {
+                        Ok(Some(mut msg)) => {
                             if let Err(e) = settle_unsupported_request(&mut client, &msg).await {
                                 let _ = event_tx.send(IoEvent::Error(
                                     SessionError::CommunicationError(e.to_string()),
@@ -1013,8 +1018,12 @@ pub(crate) async fn codex_io_task(
                                 state.set_turn_id(&p.turn.id);
                             }
 
-                            let (ok, turn_ended) =
-                                handle_codex_server_message(msg, &event_tx, None);
+                            let generated = generated_media.normalize(&mut msg).await;
+                            let (ok, turn_ended) = if let Some(output) = generated {
+                                (event_tx.send(IoEvent::Classified(session_lib::AgentOutput::Visible(output))).is_ok(), false)
+                            } else {
+                                handle_codex_server_message(msg, &event_tx, None)
+                            };
                             if turn_ended {
                                 state.set_turn_active(false);
                                 state.clear_turn_id();

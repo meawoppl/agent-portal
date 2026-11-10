@@ -13,6 +13,7 @@ pub mod agent;
 pub mod auth;
 mod classifier;
 mod events;
+mod generated_media;
 mod handler;
 mod helpers;
 pub mod imports;

@@ -666,6 +666,7 @@ pub async fn show_media(
     );
 
     Ok(Json(ShowMediaResponse {
+        media_id: Some(media_id),
         session_name: session.session_name,
         content_type,
         persisted,

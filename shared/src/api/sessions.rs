@@ -364,6 +364,10 @@ pub struct SendAgentMessageResponse {
 /// CLI displays media in a session's transcript.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ShowMediaResponse {
+    /// Portal-owned media identity, distinct from an agent provider file id.
+    /// Optional so clients also accept responses from older backends.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_id: Option<Uuid>,
     /// The recipient session's display name, for the CLI confirmation line.
     pub session_name: String,
     /// The stored media's declared content type (e.g. `image/png`, `video/mp4`).
