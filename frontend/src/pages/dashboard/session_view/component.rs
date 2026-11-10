@@ -35,11 +35,11 @@ use yew::prelude::*;
 use super::forward_chips::ForwardChips;
 use super::forward_surface::ForwardSurface;
 use super::helpers::{
-    autoscroll_transition, classify_output_msg_type, clear_completed_tools,
+    autoscroll_transition, classify_output_msg_type, clear_completed_tools, edit_stack_dispatch,
     enrich_codex_file_change_permission, ephemeral_summary, format_tool_elapsed, is_awaiting,
     parse_iso_ms_utc, reconcile_edit_stack_activity, reconcile_pending_sends, running_tool_key,
     update_pending_send_delivery, upsert_tool_progress, ActiveToolProgress, ActivityTag,
-    MuseLiveTurn,
+    EditStackDispatch, MuseLiveTurn,
 };
 use super::input_bar::{InputBar, InputBarInbound};
 use super::outbox::Outbox;
@@ -2292,26 +2292,20 @@ impl SessionView {
         if !self.edit_stack_send_all {
             return;
         }
-        if self.edit_stack_active.is_some()
-            || self.has_pending_permission
-            || !self.pending_sends.is_empty()
-            || is_awaiting(
-                self.messages.iter().map(|message| &message.content),
-                ctx.props().session.agent_type,
-            )
-        {
-            return;
+        match edit_stack_dispatch(
+            self.messages.iter().map(|message| &message.content),
+            ctx.props().session.agent_type,
+            &self.edit_stack_items,
+            self.edit_stack_active.is_some(),
+            self.has_pending_permission,
+            !self.pending_sends.is_empty(),
+        ) {
+            EditStackDispatch::Busy => {}
+            EditStackDispatch::Drained => self.edit_stack_send_all = false,
+            EditStackDispatch::Send(next_id) => {
+                self.send_edit_stack_item(ctx, next_id);
+            }
         }
-        let Some(next_id) = self
-            .edit_stack_items
-            .iter()
-            .find(|item| item.status == "pending")
-            .map(|item| item.id)
-        else {
-            self.edit_stack_send_all = false;
-            return;
-        };
-        self.send_edit_stack_item(ctx, next_id);
     }
 
     fn mark_edit_stack_item_sent(
@@ -2852,13 +2846,17 @@ impl SessionView {
             .collect::<HashSet<_>>()
             .len();
         let show_creator = creator_count > 1;
-        let busy = self.edit_stack_active.is_some()
-            || self.has_pending_permission
-            || !self.pending_sends.is_empty()
-            || is_awaiting(
+        let busy = matches!(
+            edit_stack_dispatch(
                 self.messages.iter().map(|message| &message.content),
                 ctx.props().session.agent_type,
-            );
+                &self.edit_stack_items,
+                self.edit_stack_active.is_some(),
+                self.has_pending_permission,
+                !self.pending_sends.is_empty(),
+            ),
+            EditStackDispatch::Busy
+        );
         let active_item = self.edit_stack_active.map(|(item_id, _)| item_id);
         let send_next = ctx
             .link()
