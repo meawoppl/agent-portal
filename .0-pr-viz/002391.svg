@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="monospace" font-size="24" fill="#a9b1d6">PR #2391 · Live permission checks and clear hook outcomes</text>
+<text x="55" y="108" font-family="monospace" font-size="34" fill="#e6e9f5">Permission-check pairs leave the transcript; hook outcomes retain their explanation.</text>
+<path d="M1000 190V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="55" y="225" font-family="monospace" font-size="24" fill="#f7768e">BEFORE</text>
+<text x="1055" y="225" font-family="monospace" font-size="24" fill="#9ece6a">AFTER</text>
+<g><rect x="55" y="285" width="885" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="340" font-family="monospace" font-size="28" fill="#7aa2f7">ClaudeAdapter</text>
+<text x="80" y="393" font-family="monospace" font-size="25" fill="#c0caf5">permission_check_status =&gt; Visible</text>
+</g>
+<g><rect x="55" y="530" width="885" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="585" font-family="monospace" font-size="28" fill="#7aa2f7">Transcript history</text>
+<text x="80" y="638" font-family="monospace" font-size="25" fill="#c0caf5">Checking/done pairs persist as badges</text>
+</g>
+<g><rect x="55" y="775" width="885" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="830" font-family="monospace" font-size="28" fill="#7aa2f7">Informational messages</text>
+<text x="80" y="883" font-family="monospace" font-size="25" fill="#c0caf5">Hook reasons hidden behind subtype badge</text>
+</g>
+<g><rect x="1055" y="285" width="885" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1080" y="340" font-family="monospace" font-size="28" fill="#7aa2f7">ClaudeAdapter</text>
+<text x="1080" y="393" font-family="monospace" font-size="25" fill="#c0caf5">permission_check_status =&gt; Ephemeral</text>
+</g>
+<g><rect x="1055" y="530" width="885" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1080" y="585" font-family="monospace" font-size="28" fill="#7aa2f7">PermissionCheck live state</text>
+<text x="1080" y="638" font-family="monospace" font-size="25" fill="#c0caf5">Tool + agent keys; done/result clears</text>
+</g>
+<g><rect x="1055" y="775" width="885" height="170" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1080" y="830" font-family="monospace" font-size="28" fill="#7aa2f7">Plain-text informational card</text>
+<text x="1080" y="883" font-family="monospace" font-size="25" fill="#c0caf5">Hook outcome, reason and prompt retention</text>
+</g>
+<text x="55" y="1172" font-family="monospace" font-size="22" fill="#e0af68">Permission status is display-only, not an approval decision. Unknown system notices remain visible and durable.</text>
+</svg>
