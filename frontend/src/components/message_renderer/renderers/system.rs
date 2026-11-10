@@ -309,7 +309,10 @@ fn render_task_started(msg: &shared::SystemMessage, timestamp: Option<&str>) -> 
 fn render_task_notification(msg: &shared::SystemMessage, timestamp: Option<&str>) -> Html {
     let notif = msg.as_task_notification();
 
-    let summary_text = notif.as_ref().map(|n| n.summary.as_str());
+    let report = notif
+        .as_ref()
+        .map(crate::components::task_report::TaskReport::from_notification);
+    let summary_text = report.as_ref().and_then(|report| report.text);
     let task_id = notif.as_ref().map(|n| n.task_id.as_str()).unwrap_or("");
     let duration = notif
         .as_ref()
@@ -337,6 +340,9 @@ fn render_task_notification(msg: &shared::SystemMessage, timestamp: Option<&str>
                 <span class={classes!("message-type-badge", "task", status_class)}>
                     { if is_failed { "Task Failed" } else { "Task Completed" } }
                 </span>
+                if let Some(label) = report.as_ref().and_then(|report| report.label) {
+                    <span class="task-report-status">{ label }</span>
+                }
                 {
                     if let Some(ms) = duration {
                         html! { <span class="task-stat">{ format_duration(ms) }</span> }
@@ -353,6 +359,9 @@ fn render_task_notification(msg: &shared::SystemMessage, timestamp: Option<&str>
                     } else { html! {} }
                 }
             </div>
+            if let Some(warning) = report.as_ref().and_then(|report| report.warning) {
+                <div class="task-handback-warning" role="alert">{ warning }</div>
+            }
             {
                 if let Some(summary) = summary_text {
                     let body = if looks_like_shell_command(summary) {

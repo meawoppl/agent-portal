@@ -12,19 +12,37 @@
 
 use crate::components::turn_metrics_display::compact_labeled;
 use gloo::timers::callback::Interval;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
 /// A task's own id (from `system.task_started.task_id`).
 ///
 /// Distinct from [`ToolUseId`] so the reverse index below cannot be indexed
-/// with the wrong kind of id: `active_tasks` is keyed by `TaskId`, the reverse
-/// index maps `ToolUseId → TaskId`, and the compiler now rejects looking one up
+/// with the wrong kind of id: `active_tasks` is keyed by [`TaskKey`], whose
+/// task-id component is a `TaskId`. The reverse index maps `ToolUseId` to
+/// specific task runs, and the compiler rejects looking one up
 /// with the other. Both were bare `String` (#921); a `tool_use_to_task.get(task_id)`
 /// slip used to compile and silently miss.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TaskId(pub String);
+
+/// A resumed subagent keeps its task id but opens a distinct run. Missing run
+/// ids remain a separate legacy identity, never aliases for a newer run.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct TaskKey {
+    task_id: TaskId,
+    run_id: Option<String>,
+}
+
+impl TaskKey {
+    fn new(task_id: impl Into<String>, run_id: Option<String>) -> Self {
+        Self {
+            task_id: TaskId(task_id.into()),
+            run_id,
+        }
+    }
+}
 
 /// The `tool_use_id` a task is spawned under, used to close the task when its
 /// `tool_result` arrives in `--print` mode (which skips `task_notification`).
@@ -52,6 +70,11 @@ pub struct TaskEntry {
     pub completed_at: Option<f64>,
     pub current_activity: Option<String>,
     pub last_tool_name: Option<String>,
+    pub parent_task_id: Option<TaskId>,
+    pub awaited: bool,
+    pub report: Option<String>,
+    pub warning: Option<String>,
+    pub handback_label: Option<String>,
 }
 
 impl TaskEntry {
@@ -75,6 +98,11 @@ impl TaskEntry {
             completed_at: None,
             current_activity: None,
             last_tool_name: None,
+            parent_task_id: None,
+            awaited: false,
+            report: None,
+            warning: None,
+            handback_label: None,
         }
     }
 }
@@ -88,8 +116,10 @@ pub enum TaskEvent {
     /// row's server-assigned `created_at` when present, falling back to
     /// `js_sys::Date::now()` only for live frames without metadata.
     Started {
-        task_id: TaskId,
-        tool_use_id: ToolUseId,
+        task_id: TaskKey,
+        tool_use_id: Option<ToolUseId>,
+        parent_task_id: Option<TaskId>,
+        awaited: bool,
         task_type: String,
         description: String,
         started_at: f64,
@@ -99,7 +129,7 @@ pub enum TaskEvent {
     /// (an out-of-order replay or a progress that arrived before its
     /// `started` cousin).
     Progress {
-        task_id: TaskId,
+        task_id: TaskKey,
         description: String,
         last_tool_name: String,
         duration_ms: u64,
@@ -113,8 +143,11 @@ pub enum TaskEvent {
     /// any matching `Started`, the panel inserts a placeholder so the row
     /// still shows up.
     Notification {
-        task_id: TaskId,
+        task_id: TaskKey,
         summary: String,
+        report: Option<String>,
+        warning: Option<String>,
+        handback_label: Option<String>,
         status: TaskStatus,
         completed_at: f64,
         /// `(duration_ms, tool_uses, total_tokens)` — only present when
@@ -171,11 +204,17 @@ pub enum TasksPanelMsg {
     FinishDeparture,
 }
 
+/// A corrupted/reused-id stream must not grow an unbounded UI-side tombstone
+/// set. Beyond this cap, require explicit task notifications for completion.
+const MAX_AMBIGUOUS_TOOL_IDS: usize = 1024;
+
 pub struct TasksPanel {
-    active_tasks: HashMap<TaskId, TaskEntry>,
+    active_tasks: HashMap<TaskKey, TaskEntry>,
     /// Maps `tool_use_id → task_id` so a `ToolResult` event can find its
     /// task without the parent having to thread the mapping.
-    tool_use_to_task: HashMap<ToolUseId, TaskId>,
+    tool_use_to_task: HashMap<ToolUseId, TaskKey>,
+    ambiguous_tool_uses: HashSet<ToolUseId>,
+    tool_result_fallback_disabled: bool,
     tasks_panel_open: bool,
     task_tick_handle: Option<Interval>,
     /// Animation state for the tasks tab: "entering", "progress", or
@@ -199,6 +238,8 @@ impl Component for TasksPanel {
         Self {
             active_tasks: HashMap::new(),
             tool_use_to_task: HashMap::new(),
+            ambiguous_tool_uses: HashSet::new(),
+            tool_result_fallback_disabled: false,
             tasks_panel_open: false,
             task_tick_handle: None,
             tab_anim: None,
@@ -211,6 +252,8 @@ impl Component for TasksPanel {
             TasksPanelMsg::Inbound(TasksInbound::ClearForReplay) => {
                 self.active_tasks.clear();
                 self.tool_use_to_task.clear();
+                self.ambiguous_tool_uses.clear();
+                self.tool_result_fallback_disabled = false;
                 true
             }
             TasksPanelMsg::Inbound(TasksInbound::Replay(event)) => {
@@ -230,12 +273,7 @@ impl Component for TasksPanel {
             }
             TasksPanelMsg::TaskTick => {
                 let now = js_sys::Date::now();
-                // Drop completed tasks older than 10 s — matches the
-                // pre-extraction behavior.
-                self.active_tasks.retain(|_, task| match task.completed_at {
-                    Some(t) => now - t < 10_000.0,
-                    None => true,
-                });
+                self.prune_completed(now);
                 if self.active_tasks.is_empty() {
                     self.task_tick_handle = None;
                 }
@@ -282,11 +320,7 @@ impl Component for TasksPanel {
             classes.push(anim);
         }
 
-        let mut tasks: Vec<_> = self.active_tasks.iter().collect();
-        // `total_cmp` is a panic-free total order; `partial_cmp` + Equal on
-        // NaN is not (NaN would compare Equal to everything while finite
-        // values order among themselves).
-        tasks.sort_by(|a, b| a.1.started_at.total_cmp(&b.1.started_at));
+        let tasks = ordered_tasks(&self.active_tasks);
 
         html! {
             <div class={classes.join(" ")}>
@@ -296,7 +330,12 @@ impl Component for TasksPanel {
                 </div>
                 <div class="tasks-sidebar-panel">
                     <div class="tasks-sidebar-list">
-                        { for tasks.iter().map(|(_, task)| render_task_pill(task)) }
+                        { for tasks.iter().map(|(key, task, depth)| html! {
+                            <div key={format!("{key:?}")} class="task-tree-entry"
+                                style={format!("margin-left: {}px", (*depth).min(8) * 12)}>
+                                { render_task_pill(task) }
+                            </div>
+                        }) }
                     </div>
                 </div>
             </div>
@@ -305,6 +344,39 @@ impl Component for TasksPanel {
 }
 
 impl TasksPanel {
+    fn prune_completed(&mut self, now: f64) {
+        self.active_tasks.retain(|_, task| match task.completed_at {
+            Some(t) => now - t < 10_000.0,
+            None => true,
+        });
+        self.tool_use_to_task
+            .retain(|_, key| self.active_tasks.contains_key(key));
+        // Ambiguity is sticky for this hydrated panel lifetime: pruning an
+        // old run cannot make its late result identify the new run.
+    }
+
+    fn register_tool_run(&mut self, tool: ToolUseId, key: TaskKey) {
+        if self.tool_result_fallback_disabled || self.ambiguous_tool_uses.contains(&tool) {
+            return;
+        }
+        if self
+            .tool_use_to_task
+            .get(&tool)
+            .is_some_and(|existing| existing != &key)
+        {
+            self.tool_use_to_task.remove(&tool);
+            if self.ambiguous_tool_uses.len() < MAX_AMBIGUOUS_TOOL_IDS {
+                self.ambiguous_tool_uses.insert(tool);
+            } else {
+                self.tool_result_fallback_disabled = true;
+                self.tool_use_to_task.clear();
+                self.ambiguous_tool_uses.clear();
+            }
+        } else {
+            self.tool_use_to_task.insert(tool, key);
+        }
+    }
+
     fn running_count(&self) -> usize {
         self.active_tasks
             .values()
@@ -379,15 +451,25 @@ impl TasksPanel {
             TaskEvent::Started {
                 task_id,
                 tool_use_id,
+                parent_task_id,
+                awaited,
                 task_type,
                 description,
                 started_at,
             } => {
-                self.active_tasks.insert(
-                    task_id.clone(),
-                    TaskEntry::with_started_at(task_type, description, started_at),
-                );
-                self.tool_use_to_task.insert(tool_use_id, task_id);
+                // A delayed Started frame fills in a placeholder without
+                // erasing progress or a terminal notification already seen.
+                let entry = self.active_tasks.entry(task_id.clone()).or_insert_with(|| {
+                    TaskEntry::with_started_at(task_type.clone(), description.clone(), started_at)
+                });
+                entry.task_type = task_type;
+                entry.description = description;
+                entry.started_at = started_at;
+                entry.parent_task_id = parent_task_id;
+                entry.awaited = awaited;
+                if let Some(tool_use_id) = tool_use_id {
+                    self.register_tool_run(tool_use_id, task_id);
+                }
             }
             TaskEvent::Progress {
                 task_id,
@@ -414,6 +496,9 @@ impl TasksPanel {
             TaskEvent::Notification {
                 task_id,
                 summary,
+                report,
+                warning,
+                handback_label,
                 status,
                 completed_at,
                 usage,
@@ -422,6 +507,9 @@ impl TasksPanel {
                     TaskEntry::with_started_at("local_agent", summary, completed_at)
                 });
                 entry.status = status;
+                entry.report = report;
+                entry.warning = warning;
+                entry.handback_label = handback_label;
                 entry.completed_at = Some(completed_at);
                 if let Some((duration_ms, tool_uses, total_tokens)) = usage {
                     entry.duration_ms = Some(duration_ms);
@@ -433,6 +521,11 @@ impl TasksPanel {
                 tool_use_id,
                 completed_at,
             } => {
+                if self.tool_result_fallback_disabled
+                    || self.ambiguous_tool_uses.contains(&tool_use_id)
+                {
+                    return;
+                }
                 let Some(task_id) = self.tool_use_to_task.get(&tool_use_id).cloned() else {
                     return;
                 };
@@ -446,6 +539,62 @@ impl TasksPanel {
             }
         }
     }
+}
+
+/// Build a deterministic, cycle-safe tree. A child's parent id does not name a
+/// run, so associate it with the latest known parent run opened by the child's
+/// start time. Missing/pruned parents remain roots instead of hiding the child.
+fn ordered_tasks(tasks: &HashMap<TaskKey, TaskEntry>) -> Vec<(&TaskKey, &TaskEntry, usize)> {
+    let mut sorted: Vec<_> = tasks.iter().collect();
+    sorted.sort_by(|a, b| {
+        a.1.started_at
+            .total_cmp(&b.1.started_at)
+            .then_with(|| a.0.cmp(b.0))
+    });
+    let mut children = vec![Vec::new(); sorted.len()];
+    let mut roots = Vec::new();
+    for (index, (key, task)) in sorted.iter().enumerate() {
+        let parent = task.parent_task_id.as_ref().and_then(|id| {
+            sorted
+                .iter()
+                .enumerate()
+                .filter(|(_, (candidate, entry))| {
+                    candidate != key
+                        && &candidate.task_id == id
+                        && entry.started_at <= task.started_at
+                })
+                .max_by(|(_, a), (_, b)| {
+                    a.1.started_at
+                        .total_cmp(&b.1.started_at)
+                        .then_with(|| a.0.run_id.cmp(&b.0.run_id))
+                })
+                .map(|(index, _)| index)
+        });
+        if let Some(parent) = parent {
+            children[parent].push(index);
+        } else {
+            roots.push(index);
+        }
+    }
+    let mut ordered = Vec::with_capacity(sorted.len());
+    let mut visited = HashSet::new();
+    // The second pass includes orphaned cyclic components exactly once.
+    for root in roots.into_iter().chain(0..sorted.len()) {
+        let mut stack = vec![(root, 0)];
+        while let Some((index, depth)) = stack.pop() {
+            if !visited.insert(index) {
+                continue;
+            }
+            ordered.push((sorted[index].0, sorted[index].1, depth));
+            stack.extend(
+                children[index]
+                    .iter()
+                    .rev()
+                    .map(|child| (*child, depth + 1)),
+            );
+        }
+    }
+    ordered
 }
 
 fn render_task_pill(task: &TaskEntry) -> Html {
@@ -474,6 +623,12 @@ fn render_task_pill(task: &TaskEntry) -> Html {
             <div class="task-pill-header">
                 <span class={format!("task-status-dot {}", status_class)} />
                 <span class="task-type-pill">{ type_label }</span>
+                if task.awaited {
+                    <span class="task-tool-badge">{ "Caller waiting" }</span>
+                }
+                if let Some(label) = &task.handback_label {
+                    <span class="task-report-status">{ label }</span>
+                }
                 {
                     if let Some(ref tool) = task.last_tool_name {
                         html! { <span class="task-tool-badge">{ tool }</span> }
@@ -483,6 +638,12 @@ fn render_task_pill(task: &TaskEntry) -> Html {
                 }
             </div>
             <div class="task-pill-description">{ &task.description }</div>
+            if let Some(warning) = &task.warning {
+                <div class="task-handback-warning" role="alert">{ warning }</div>
+            }
+            if let Some(report) = &task.report {
+                <div class="task-pill-report">{ report }</div>
+            }
             {
                 if let Some(ref activity) = task.current_activity {
                     html! { <div class="task-pill-activity">{ activity }</div> }
@@ -570,15 +731,17 @@ pub(super) fn derive_task_events(
                     .unwrap_or("unknown")
                     .to_string();
                 events.push(TaskEvent::Started {
-                    task_id: TaskId(task.task_id.clone()),
-                    tool_use_id: ToolUseId(task.tool_use_id.clone().unwrap_or_default()),
+                    task_id: TaskKey::new(task.task_id.clone(), task.run_id.clone()),
+                    tool_use_id: task.tool_use_id.clone().map(ToolUseId),
+                    parent_task_id: task.parent_task_id.clone().map(TaskId),
+                    awaited: task.awaited.unwrap_or(false),
                     task_type,
                     description: task.description.clone(),
                     started_at: resolve_ts(),
                 });
             } else if let Some(progress) = sys.as_task_progress() {
                 events.push(TaskEvent::Progress {
-                    task_id: TaskId(progress.task_id.clone()),
+                    task_id: TaskKey::new(progress.task_id.clone(), progress.run_id.clone()),
                     description: progress.description.clone(),
                     // Option in 2.1.160; empty string renders as "no tool yet".
                     last_tool_name: progress.last_tool_name.clone().unwrap_or_default(),
@@ -604,9 +767,18 @@ pub(super) fn derive_task_events(
                         .usage
                         .as_ref()
                         .map(|u| (u.duration_ms, u.tool_uses, u.total_tokens));
+                    let report =
+                        crate::components::task_report::TaskReport::from_notification(&notif);
                     events.push(TaskEvent::Notification {
-                        task_id: TaskId(notif.task_id.clone()),
-                        summary: notif.summary.clone(),
+                        task_id: TaskKey::new(notif.task_id.clone(), notif.run_id.clone()),
+                        summary: if report.label.is_some() {
+                            "Subagent report".to_string()
+                        } else {
+                            notif.summary.clone()
+                        },
+                        report: report.text.map(str::to_string),
+                        warning: report.warning.map(str::to_string),
+                        handback_label: report.label.map(str::to_string),
                         status,
                         completed_at: resolve_ts(),
                         usage,
@@ -641,6 +813,8 @@ mod tests {
         TasksPanel {
             active_tasks: HashMap::new(),
             tool_use_to_task: HashMap::new(),
+            ambiguous_tool_uses: HashSet::new(),
+            tool_result_fallback_disabled: false,
             tasks_panel_open: false,
             task_tick_handle: None,
             tab_anim: None,
@@ -650,8 +824,10 @@ mod tests {
 
     fn started(task_id: &str, tool_use_id: &str, started_at: f64) -> TaskEvent {
         TaskEvent::Started {
-            task_id: TaskId(task_id.to_string()),
-            tool_use_id: ToolUseId(tool_use_id.to_string()),
+            task_id: TaskKey::new(task_id, None),
+            tool_use_id: Some(ToolUseId(tool_use_id.to_string())),
+            parent_task_id: None,
+            awaited: false,
             task_type: "local_agent".to_string(),
             description: format!("desc-{task_id}"),
             started_at,
@@ -660,7 +836,7 @@ mod tests {
 
     fn progress(task_id: &str, last_tool_name: &str, started_at: f64) -> TaskEvent {
         TaskEvent::Progress {
-            task_id: TaskId(task_id.to_string()),
+            task_id: TaskKey::new(task_id, None),
             description: format!("progress-{task_id}"),
             last_tool_name: last_tool_name.to_string(),
             duration_ms: 2_500,
@@ -672,8 +848,11 @@ mod tests {
 
     fn notification(task_id: &str, status: TaskStatus, completed_at: f64) -> TaskEvent {
         TaskEvent::Notification {
-            task_id: TaskId(task_id.to_string()),
+            task_id: TaskKey::new(task_id, None),
             summary: format!("notif-{task_id}"),
+            report: Some(format!("report-{task_id}")),
+            warning: None,
+            handback_label: None,
             status,
             completed_at,
             usage: Some((3_000, 5, 2_000)),
@@ -696,18 +875,18 @@ mod tests {
         panel.apply_event(started("t1", "tu1", 1_000.0));
         let e = panel
             .active_tasks
-            .get(&TaskId("t1".to_string()))
+            .get(&TaskKey::new("t1", None))
             .expect("task missing after start");
         assert_eq!(e.status, TaskStatus::Running);
         assert_eq!(e.started_at, 1_000.0);
         assert_eq!(e.task_type, "local_agent");
         assert_eq!(
             panel.tool_use_to_task.get(&ToolUseId("tu1".to_string())),
-            Some(&TaskId("t1".to_string()))
+            Some(&TaskKey::new("t1", None))
         );
 
         panel.apply_event(progress("t1", "Bash", 1_000.0));
-        let e = panel.active_tasks.get(&TaskId("t1".to_string())).unwrap();
+        let e = panel.active_tasks.get(&TaskKey::new("t1", None)).unwrap();
         assert_eq!(e.last_tool_name.as_deref(), Some("Bash"));
         assert_eq!(e.tool_uses, Some(4));
         assert_eq!(e.duration_ms, Some(2_500));
@@ -717,7 +896,7 @@ mod tests {
         assert_eq!(e.started_at, 1_000.0);
 
         panel.apply_event(notification("t1", TaskStatus::Completed, 5_000.0));
-        let e = panel.active_tasks.get(&TaskId("t1".to_string())).unwrap();
+        let e = panel.active_tasks.get(&TaskKey::new("t1", None)).unwrap();
         assert_eq!(e.status, TaskStatus::Completed);
         assert_eq!(e.completed_at, Some(5_000.0));
         // Notification usage payload overrode the progress numbers.
@@ -737,7 +916,7 @@ mod tests {
         panel.apply_event(progress("t1", "Bash", 1_500.0));
         let e = panel
             .active_tasks
-            .get(&TaskId("t1".to_string()))
+            .get(&TaskKey::new("t1", None))
             .expect("placeholder missing");
         assert_eq!(e.status, TaskStatus::Running);
         assert_eq!(e.started_at, 1_500.0);
@@ -754,7 +933,7 @@ mod tests {
         panel.apply_event(notification("t1", TaskStatus::Failed, 7_777.0));
         let e = panel
             .active_tasks
-            .get(&TaskId("t1".to_string()))
+            .get(&TaskKey::new("t1", None))
             .expect("placeholder missing");
         assert_eq!(e.status, TaskStatus::Failed);
         assert_eq!(e.started_at, 7_777.0);
@@ -780,7 +959,7 @@ mod tests {
         let mut panel = mk_panel();
         panel.apply_event(started("t1", "tu1", 1_000.0));
         panel.apply_event(tool_result("tu1", 4_000.0));
-        let e = panel.active_tasks.get(&TaskId("t1".to_string())).unwrap();
+        let e = panel.active_tasks.get(&TaskKey::new("t1", None)).unwrap();
         assert_eq!(e.status, TaskStatus::Completed);
         assert_eq!(e.completed_at, Some(4_000.0));
     }
@@ -796,7 +975,7 @@ mod tests {
         panel.apply_event(notification("t1", TaskStatus::Completed, 4_000.0));
         // Now a stray duplicate tool_result for the same tool_use.
         panel.apply_event(tool_result("tu1", 9_999.0));
-        let e = panel.active_tasks.get(&TaskId("t1".to_string())).unwrap();
+        let e = panel.active_tasks.get(&TaskKey::new("t1", None)).unwrap();
         assert_eq!(
             e.completed_at,
             Some(4_000.0),
@@ -896,5 +1075,150 @@ mod tests {
         panel.apply_event(notification("t2", TaskStatus::Completed, 5_000.0));
         panel.apply_event(notification("t3", TaskStatus::Failed, 5_000.0));
         assert_eq!(panel.running_count(), 1);
+    }
+    fn with_run(mut event: TaskEvent, run: &str) -> TaskEvent {
+        match &mut event {
+            TaskEvent::Started { task_id, .. }
+            | TaskEvent::Progress { task_id, .. }
+            | TaskEvent::Notification { task_id, .. } => task_id.run_id = Some(run.into()),
+            _ => panic!("expected task event"),
+        }
+        event
+    }
+
+    #[test]
+    fn resumed_runs_keep_progress_notifications_and_tool_results_separate() {
+        let mut panel = mk_panel();
+        panel.apply_event(with_run(started("task", "old-tool", 1_000.0), "run-1"));
+        panel.apply_event(with_run(started("task", "new-tool", 2_000.0), "run-2"));
+        panel.apply_event(with_run(progress("task", "Read", 2_000.0), "run-2"));
+        panel.apply_event(tool_result("old-tool", 3_000.0));
+        let old = TaskKey::new("task", Some("run-1".into()));
+        let new = TaskKey::new("task", Some("run-2".into()));
+        assert_eq!(panel.active_tasks[&old].status, TaskStatus::Completed);
+        assert_eq!(panel.active_tasks[&new].status, TaskStatus::Running);
+        assert_eq!(
+            panel.active_tasks[&new].last_tool_name.as_deref(),
+            Some("Read")
+        );
+        panel.apply_event(with_run(
+            notification("task", TaskStatus::Failed, 4_000.0),
+            "run-1",
+        ));
+        assert_eq!(panel.active_tasks[&old].status, TaskStatus::Failed);
+        assert_eq!(panel.active_tasks[&new].status, TaskStatus::Running);
+    }
+
+    #[test]
+    fn ambiguous_tool_results_do_not_close_a_resumed_run() {
+        let mut panel = mk_panel();
+        panel.apply_event(with_run(started("task", "shared-tool", 1_000.0), "run-1"));
+        panel.apply_event(with_run(started("task", "shared-tool", 2_000.0), "run-2"));
+        panel.apply_event(tool_result("shared-tool", 3_000.0));
+        assert_eq!(panel.running_count(), 2);
+    }
+
+    #[test]
+    fn ambiguity_survives_pruning_and_progress_does_not_resurrect_completed_runs() {
+        let mut panel = mk_panel();
+        panel.apply_event(with_run(started("task", "shared-tool", 1_000.0), "run-1"));
+        panel.apply_event(with_run(started("task", "shared-tool", 2_000.0), "run-2"));
+        panel.apply_event(with_run(
+            notification("task", TaskStatus::Completed, 3_000.0),
+            "run-1",
+        ));
+        panel.apply_event(with_run(progress("task", "Read", 4_000.0), "run-1"));
+        let old = TaskKey::new("task", Some("run-1".into()));
+        let new = TaskKey::new("task", Some("run-2".into()));
+        assert_eq!(panel.active_tasks[&old].status, TaskStatus::Completed);
+        panel.prune_completed(14_000.0);
+        assert!(!panel.active_tasks.contains_key(&old));
+        panel.apply_event(tool_result("shared-tool", 15_000.0));
+        assert_eq!(panel.active_tasks[&new].status, TaskStatus::Running);
+        assert!(panel
+            .ambiguous_tool_uses
+            .contains(&ToolUseId("shared-tool".into())));
+    }
+
+    #[test]
+    fn ambiguity_tombstones_have_a_bounded_memory_cost() {
+        let mut panel = mk_panel();
+        for index in 0..=MAX_AMBIGUOUS_TOOL_IDS {
+            let tool = ToolUseId(format!("tool-{index}"));
+            panel.register_tool_run(tool.clone(), TaskKey::new("task", Some("run-1".into())));
+            panel.register_tool_run(tool, TaskKey::new("task", Some("run-2".into())));
+        }
+        assert!(panel.tool_result_fallback_disabled);
+        assert!(panel.tool_use_to_task.is_empty());
+        assert!(panel.ambiguous_tool_uses.is_empty());
+    }
+
+    #[test]
+    fn late_start_does_not_resurrect_completed_run_or_lose_warning() {
+        let mut panel = mk_panel();
+        let mut completion = notification("task", TaskStatus::Completed, 4_000.0);
+        if let TaskEvent::Notification {
+            warning,
+            handback_label,
+            ..
+        } = &mut completion
+        {
+            *warning = Some("Review could not run".into());
+            *handback_label = Some("Report flagged".into());
+        }
+        panel.apply_event(completion);
+        panel.apply_event(started("task", "tool", 1_000.0));
+        let entry = &panel.active_tasks[&TaskKey::new("task", None)];
+        assert_eq!(entry.status, TaskStatus::Completed);
+        assert_eq!(entry.warning.as_deref(), Some("Review could not run"));
+        assert_eq!(entry.report.as_deref(), Some("report-task"));
+        assert_eq!(entry.started_at, 1_000.0);
+    }
+
+    #[test]
+    fn tree_uses_parent_run_at_child_start_and_keeps_orphans_and_cycles_visible() {
+        let mut tasks = HashMap::new();
+        let old_parent = TaskKey::new("parent", Some("run-1".into()));
+        let new_parent = TaskKey::new("parent", Some("run-2".into()));
+        let child = TaskKey::new("child", Some("run-1".into()));
+        let orphan = TaskKey::new("orphan", None);
+        tasks.insert(
+            old_parent.clone(),
+            TaskEntry::with_started_at("local_agent", "parent", 1_000.0),
+        );
+        tasks.insert(
+            new_parent.clone(),
+            TaskEntry::with_started_at("local_agent", "parent resumed", 3_000.0),
+        );
+        let mut entry = TaskEntry::with_started_at("local_agent", "child", 2_000.0);
+        entry.parent_task_id = Some(TaskId("parent".into()));
+        tasks.insert(child.clone(), entry);
+        let mut entry = TaskEntry::with_started_at("local_agent", "orphan", 4_000.0);
+        entry.parent_task_id = Some(TaskId("missing".into()));
+        tasks.insert(orphan.clone(), entry);
+        let ordered: Vec<_> = ordered_tasks(&tasks)
+            .into_iter()
+            .map(|(key, _, depth)| (key.clone(), depth))
+            .collect();
+        assert_eq!(
+            ordered,
+            vec![(old_parent, 0), (child, 1), (new_parent, 0), (orphan, 0)]
+        );
+
+        for (id, parent) in [("cycle-a", "cycle-b"), ("cycle-b", "cycle-a")] {
+            let mut entry = TaskEntry::with_started_at("local_agent", id, 5_000.0);
+            entry.parent_task_id = Some(TaskId(parent.into()));
+            tasks.insert(TaskKey::new(id, None), entry);
+        }
+        let ordered = ordered_tasks(&tasks);
+        assert_eq!(ordered.len(), tasks.len());
+        assert_eq!(
+            ordered
+                .iter()
+                .map(|(key, _, _)| *key)
+                .collect::<HashSet<_>>()
+                .len(),
+            tasks.len()
+        );
     }
 }

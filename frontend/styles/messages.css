@@ -2025,3 +2025,16 @@
 .typed-api-error {
     margin-bottom: 0.5rem;
 }
+
+.task-handback-warning {
+    border-left: 3px solid var(--warning-color, #e0af68);
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 0.5rem;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.task-report-status {
+    font-size: 0.8rem;
+    font-weight: 600;
+}
