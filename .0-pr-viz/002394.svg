@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="Arial, sans-serif">
+<text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2394 · Explain Claude permissions, thinking and scheduler activity</text>
+<text x="55" y="105" font-size="34" fill="#e6e9f5">Typed Claude metadata was stored but invisible in the transcript.</text>
+<text x="55" y="147" font-size="34" fill="#e6e9f5">Readers now see approval provenance, thinking time and what woke the agent.</text>
+<path d="M55 178 H1945 M1000 190 V1140" stroke="#565f89" stroke-width="2" stroke-dasharray="7 7"/>
+<text x="55" y="225" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1040" y="225" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="55" y="275" width="900" height="210" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="79" y="320" font-size="26" fill="#7aa2f7">User / Assistant renderers</text>
+<text x="79" y="375" font-size="23" fill="#c0caf5">Approval actor and thinking time are absent.</text>
+<text x="79" y="428" font-size="23" fill="#f7768e">Empty tool output also hides approval context.</text>
+<rect x="1040" y="275" width="900" height="210" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1064" y="320" font-size="26" fill="#7aa2f7">render_tool_result_permission</text>
+<text x="1064" y="375" font-size="23" fill="#c0caf5">Join tool_result_meta to the matching tool id.</text>
+<text x="1064" y="428" font-size="23" fill="#9ece6a">Show approval chips and per-frame thinking time.</text>
+<rect x="55" y="540" width="900" height="210" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="79" y="585" font-size="26" fill="#7aa2f7">CommandLifecycle</text>
+<text x="79" y="640" font-size="23" fill="#c0caf5">Every lifecycle frame is omitted.</text>
+<text x="79" y="693" font-size="23" fill="#f7768e">A scheduler fire looks like an unexplained turn.</text>
+<rect x="1040" y="540" width="900" height="210" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1064" y="585" font-size="26" fill="#7aa2f7">command_wakeup_label</text>
+<text x="1064" y="640" font-size="23" fill="#c0caf5">Only started scheduler commands make dividers.</text>
+<text x="1064" y="693" font-size="23" fill="#9ece6a">Duplicate command ids do not repeat the marker.</text>
+<rect x="55" y="805" width="900" height="210" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="79" y="850" font-size="26" fill="#7aa2f7">Result / Init renderers</text>
+<text x="79" y="905" font-size="23" fill="#c0caf5">Safety-stop totals and extra folders are hidden.</text>
+<text x="79" y="958" font-size="23" fill="#f7768e">Missing fields cannot explain session context.</text>
+<rect x="1040" y="805" width="900" height="210" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1064" y="850" font-size="26" fill="#7aa2f7">safety_stops / render_init_directories</text>
+<text x="1064" y="905" font-size="23" fill="#c0caf5">Label safety stops as a process running total.</text>
+<text x="1064" y="958" font-size="23" fill="#9ece6a">Folders distinguish unknown from an empty list.</text>
+<text x="55" y="1172" font-size="22" fill="#a9b1d6">Scope: existing compaction grouping is unchanged; repeated compacting statuses need a live fixture before deduplication.</text>
+</g>
+</svg>

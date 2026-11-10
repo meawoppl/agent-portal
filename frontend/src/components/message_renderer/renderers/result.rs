@@ -73,6 +73,11 @@ pub fn render_result_message(
 
     let extra_badges = html! {
         <>
+            if let Some(stops) = msg.safety_stops.filter(|count| *count > 0) {
+                <span class="stat-item safety-stops" title="Running safety-stop total for this agent process, including subagents and internal calls; not a count for this turn.">
+                    { format!("safety stops: {stops}") }
+                </span>
+            }
             {
                 if msg.stop_reason.as_deref() == Some("max_tokens") {
                     html! {
@@ -207,5 +212,27 @@ pub fn render_result_message(
             </div>
             { metrics_footer }
         </div>
+    }
+}
+
+#[cfg(test)]
+mod transcript_metadata_tests {
+    use super::*;
+
+    #[test]
+    fn safety_stop_badge_is_optional_and_uses_the_reported_running_total() {
+        let mut result: shared::ResultMessage = serde_json::from_str(r#"{"subtype":"success","is_error":false,"duration_ms":0,"duration_api_ms":0,"num_turns":1,"session_id":"session","total_cost_usd":0,"safety_stops":3}"#).unwrap();
+        let text = super::super::visible_text(&render_result_message(&result, None, None));
+        assert!(text.contains("safety stops: 3"));
+        result.safety_stops = Some(0);
+        assert!(
+            !super::super::visible_text(&render_result_message(&result, None, None))
+                .contains("safety stops")
+        );
+        result.safety_stops = None;
+        assert!(
+            !super::super::visible_text(&render_result_message(&result, None, None))
+                .contains("safety stops")
+        );
     }
 }

@@ -193,14 +193,29 @@ fn render_upload_preview(name: &str, session_id: Uuid) -> Html {
 pub fn render_user_message_content(msg: &shared::UserMessage, session_id: Uuid) -> Option<Html> {
     if let Some(Ok(input)) = msg.tool_use_result_as::<shared::AskUserQuestionInput>() {
         if has_askuserquestion_answers(&input) {
-            return Some(render_askuserquestion_result(&input));
+            let approvals = msg.message.content.iter().filter_map(|block| match block {
+                shared::ContentBlock::ToolResult(result) => {
+                    render_tool_result_permission(msg, &result.tool_use_id)
+                }
+                _ => None,
+            });
+            return Some(html! { <>{ for approvals }{ render_askuserquestion_result(&input) }</> });
         }
     }
 
     let (text_content, has_tool_results) = user_message_text_and_tool_results(msg);
 
     if has_tool_results {
-        render_content_blocks(&msg.message.content, session_id)
+        let rendered: Vec<_> = msg.message.content.iter().filter_map(|block| {
+            let body = render_content_blocks(std::slice::from_ref(block), session_id);
+            let permission = match block {
+                shared::ContentBlock::ToolResult(result) => render_tool_result_permission(msg, &result.tool_use_id),
+                _ => None,
+            };
+            if body.is_none() && permission.is_none() { return None; }
+            Some(html! { <div class="tool-result-with-permission">{ permission.unwrap_or_default() }{ body.unwrap_or_default() }</div> })
+        }).collect();
+        (!rendered.is_empty()).then(|| html! { <>{ for rendered }</> })
     } else if text_content.is_empty() {
         None
     } else if let Some(notice) = split_upload_notice(&text_content) {
@@ -210,6 +225,64 @@ pub fn render_user_message_content(msg: &shared::UserMessage, session_id: Uuid) 
             <div class="user-text">{ render_markdown_for_session(&preserve_user_newlines(&text_content), session_id) }</div>
         })
     }
+}
+
+fn permission_decision_label(decision: &claude_codes::ToolPermissionDecision) -> String {
+    use claude_codes::PermissionDecisionOutcome;
+    let action = match &decision.decision {
+        PermissionDecisionOutcome::Accept => "Allowed",
+        PermissionDecisionOutcome::Reject => "Denied",
+        PermissionDecisionOutcome::Cancelled => return "Permission cancelled".into(),
+        PermissionDecisionOutcome::Unknown(kind) => return format!("Permission: {kind}"),
+    };
+    let reason = decision
+        .reason_type
+        .as_ref()
+        .and_then(|reason| match reason {
+            claude_codes::io::PermissionDecisionReasonType::Other
+            | claude_codes::io::PermissionDecisionReasonType::Unknown(_) => None,
+            known => Some(known.as_str()),
+        });
+    let origin = match decision.source.as_str() {
+        "hook" | "classifier" | "user_temporary" | "user_permanent" | "user_reject"
+        | "user_abort" => decision.source.as_str(),
+        source => reason.unwrap_or(source),
+    };
+    if matches!(decision.decision, PermissionDecisionOutcome::Accept) && origin == "classifier" {
+        return "Auto-approved (classifier)".into();
+    }
+    let origin = match origin {
+        "user_temporary" | "user_permanent" | "user_reject" | "user_abort" => "user".to_string(),
+        "config" => "configuration".to_string(),
+        other => other.replace('_', " "),
+    };
+    format!("{action} by {origin}")
+}
+
+fn render_tool_result_permission(msg: &shared::UserMessage, tool_use_id: &str) -> Option<Html> {
+    // Join by id, never by array position: one user wrapper may answer
+    // several calls and metadata can be partial or arrive in another order.
+    let metadata = msg
+        .tool_result_meta
+        .as_deref()?
+        .iter()
+        .find(|meta| meta.id == tool_use_id)?;
+    let decision = metadata.permission_decision.as_ref();
+    if decision.is_none() && metadata.non_execution_kind.is_none() {
+        return None;
+    }
+    Some(html! {
+        <div class="tool-permission-details">
+            if let Some(decision) = decision {
+                <span class="tool-permission-chip" title={format!("Permission outcome: {}; source: {}; reason: {}. This describes approval, not whether execution completed.", decision.decision, decision.source, decision.reason_type.as_ref().map(|r| r.as_str()).unwrap_or("not reported"))}>
+                    { permission_decision_label(decision) }
+                </span>
+            }
+            if let Some(reason) = &metadata.non_execution_kind {
+                <span class="tool-permission-chip">{ format!("Not executed: {}", reason.replace('_', " ")) }</span>
+            }
+        </div>
+    })
 }
 
 fn render_delivery_progress(delivery: Option<&shared::DeliveryMeta>) -> Html {
@@ -280,5 +353,45 @@ fn human_label(meta: Option<&shared::PortalMeta>, current_user_id: Option<&str>)
             name.clone()
         }
         _ => "You".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod transcript_metadata_tests {
+    use super::*;
+
+    #[test]
+    fn permission_chips_join_results_by_id_and_render_without_tool_output() {
+        let mut message: shared::UserMessage = serde_json::from_str(r#"{"session_id":"00000000-0000-0000-0000-000000000000","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool-a"}]},"tool_result_meta":[{"id":"tool-b","permission_decision":{"decision":"accept","source":"classifier","reason_type":"classifier"}},{"id":"tool-a","permission_decision":{"decision":"reject","source":"hook","reason_type":"hook"}}]}"#).unwrap();
+        let text =
+            super::super::visible_text(&render_tool_result_permission(&message, "tool-a").unwrap());
+        assert!(text.contains("Denied by hook"));
+        assert!(!text.contains("Auto-approved"));
+        assert!(render_user_message_content(&message, Uuid::nil()).is_some());
+        assert!(render_tool_result_permission(&message, "missing").is_none());
+        message.tool_result_meta = None;
+        assert!(render_user_message_content(&message, Uuid::nil()).is_none());
+    }
+
+    #[test]
+    fn approval_labels_preserve_outcome_and_dont_claim_execution() {
+        for (outcome, source, reason, expected) in [
+            (
+                "accept",
+                "config",
+                "classifier",
+                "Auto-approved (classifier)",
+            ),
+            ("accept", "config", "rule", "Allowed by rule"),
+            ("reject", "config", "classifier", "Denied by classifier"),
+            ("cancelled", "user_abort", "other", "Permission cancelled"),
+            ("future", "future", "future", "Permission: future"),
+        ] {
+            let json = format!(
+                r#"{{"decision":"{outcome}","source":"{source}","reason_type":"{reason}"}}"#
+            );
+            let decision = serde_json::from_str(&json).unwrap();
+            assert_eq!(permission_decision_label(&decision), expected);
+        }
     }
 }

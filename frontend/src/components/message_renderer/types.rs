@@ -63,8 +63,8 @@ pub enum ClaudeMessage {
     RateLimitEvent(Box<shared::RateLimitEvent>),
     /// Claude's delivery bookkeeping for an input carrying a client-supplied
     /// UUID. It is typed so it never falls through to the raw-JSON renderer,
-    /// but it has no transcript body: queued/started/terminal states describe
-    /// command transport, not conversation content (#1913).
+    /// with scheduler starts rendered as wakeup markers. Ordinary queued,
+    /// started and terminal states remain hidden command transport state.
     CommandLifecycle(shared::CommandLifecycleMessage),
     /// `/clear`. Worth its own variant rather than falling to `Unknown`: it is
     /// the visible seam between two conversations in one session, and it also
