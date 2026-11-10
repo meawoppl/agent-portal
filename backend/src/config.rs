@@ -264,18 +264,14 @@ pub struct ServerConfig {
     /// Long-term session archive settings (#1258). `None` = disabled (the
     /// default, including on hosted deployments).
     pub archive: Option<crate::archive::ArchiveConfig>,
-    /// VAPID application-server public key served to Web Push clients
-    /// (`GET /api/push/vapid-key`). `None` = push unconfigured; the endpoint
-    /// 404s and the frontend degrades to "push unavailable".
+    /// Optional administrator override, validated against the private key.
+    /// When absent, startup derives the public key from the resolved identity.
     pub vapid_public_key: Option<String>,
     /// Native APNs/FCM push settings (mobile-apps plan C7). Missing provider
     /// groups disable that provider; partial APNs config fails fast.
     pub native_push: crate::push::NativePushConfig,
-    /// VAPID application-server private key for Web Push (mobile-apps plan
-    /// §8.3, C3). URL-safe base64 (no padding) or a PEM/DER private key.
-    /// `None` = Web Push disabled; the dispatcher keeps the log-only transport.
-    /// The matching public half is `PORTAL_VAPID_PUBLIC_KEY`, served to browsers
-    /// as the `applicationServerKey`.
+    /// Optional VAPID private-key override: URL-safe base64 (no padding) or PEM.
+    /// When absent, startup loads or generates the persistent database identity.
     pub vapid_private_key: Option<String>,
     /// Native mobile app-link association payload configuration.
     pub mobile_app_links: MobileAppLinksConfig,
@@ -486,10 +482,8 @@ impl ServerConfig {
             None => tracing::info!("Port forwarding disabled (PORTAL_FORWARD_DOMAIN unset)"),
         }
 
-        // VAPID public key for Web Push. Only the public half lives here — it
-        // is served to browsers; the private key (PORTAL_VAPID_PRIVATE_KEY) is
-        // read by the Web Push sender, never by this endpoint. Unset = push
-        // disabled (the vapid-key endpoint 404s).
+        // Optional explicit identity. Startup resolves the database default
+        // and validates any configured public/private pair before serving.
         let vapid_public_key = match env::var("PORTAL_VAPID_PUBLIC_KEY") {
             Ok(v) if shared::strings::is_non_blank(&v) => {
                 log_source("PORTAL_VAPID_PUBLIC_KEY", true);
@@ -500,10 +494,6 @@ impl ServerConfig {
                 None
             }
         };
-        match &vapid_public_key {
-            Some(_) => tracing::info!("Web Push VAPID public key configured"),
-            None => tracing::info!("Web Push disabled (PORTAL_VAPID_PUBLIC_KEY unset)"),
-        }
 
         let native_push = native_push_config_from_env(&mut errors);
         let mobile_app_links = mobile_app_links_config_from_env();
@@ -537,10 +527,7 @@ impl ServerConfig {
             ),
         }
 
-        // VAPID private key for Web Push (mobile-apps plan §8.3). Only the
-        // private half lives here — the public half (PORTAL_VAPID_PUBLIC_KEY)
-        // is served to browsers. Unset = Web Push disabled (log-only transport);
-        // never a hard error, so the server still boots without push configured.
+        // Private overrides stay in the backend, never in an API response.
         let vapid_private_key = match env::var("PORTAL_VAPID_PRIVATE_KEY") {
             Ok(v) => {
                 log_source("PORTAL_VAPID_PRIVATE_KEY", true);

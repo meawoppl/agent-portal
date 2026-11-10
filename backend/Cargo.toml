@@ -39,6 +39,8 @@ reqwest = { version = "0.12", features = ["json", "multipart", "native-tls-alpn"
 
 # Web Push transport (VAPID + RFC8291); sent over the reqwest client above.
 web-push = { workspace = true }
+# Generate the persistent Web Push identity with the existing TLS/ECE library.
+openssl = "0.10"
 
 # Environment variables
 dotenvy = { workspace = true }

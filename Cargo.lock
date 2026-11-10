@@ -669,6 +669,7 @@ dependencies = [
  "muse-codes",
  "oauth2",
  "object_store",
+ "openssl",
  "portal-stt",
  "portal-sysmon",
  "rand 0.8.8",

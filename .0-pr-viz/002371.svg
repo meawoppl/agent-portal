@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-labelledby="title desc">
+  <title id="title">PR #2371: Enable browser push without manual server keys</title>
+  <desc id="desc">Before: absent environment keys prevent browser push setup. After: startup creates or reuses one PostgreSQL identity, preserving subscriptions across restarts and replicas.</desc>
+  <rect width="2000" height="1200" fill="#1a1b26"/>
+  <g font-family="Arial, sans-serif">
+    <text x="55" y="52" font-size="24" fill="#a9b1d6" letter-spacing="1">PR #2371 · Enable browser push without manual server keys</text>
+    <text x="55" y="105" font-size="34" fill="#e6e9f5">Browser push required manual server keys.</text>
+    <text x="55" y="148" font-size="34" fill="#e6e9f5">Startup now persists one shared identity so device setup is Enable, Allow, Test.</text>
+    <path d="M55 175 H1945" stroke="#3d4666"/>
+    <path d="M1000 190 V1140" stroke="#565f89" stroke-dasharray="8 10"/>
+    <text x="55" y="220" font-size="22" font-weight="bold" fill="#f7768e" letter-spacing="4">BEFORE</text>
+    <text x="1055" y="220" font-size="22" font-weight="bold" fill="#9ece6a" letter-spacing="4">AFTER</text>
+
+    <g>
+      <rect x="55" y="250" width="890" height="140" rx="14" fill="#1e202e" stroke="#3d4666"/>
+      <text x="80" y="292" font-size="26" fill="#7aa2f7">Administrator generates and deploys keys</text>
+      <text x="80" y="333" font-size="23" fill="#c0caf5">generate-vapid-keys.sh</text>
+      <text x="80" y="365" font-size="23" fill="#c0caf5">PORTAL_VAPID_PRIVATE_KEY + PORTAL_VAPID_PUBLIC_KEY</text>
+    </g>
+    <path d="M500 390 V430 M490 420 L500 430 L510 420" fill="none" stroke="#565f89" stroke-width="3"/>
+    <g>
+      <rect x="55" y="430" width="890" height="140" rx="14" fill="#1e202e" stroke="#f7768e"/>
+      <text x="80" y="472" font-size="26" fill="#f7768e">No keys configured at startup</text>
+      <text x="80" y="513" font-size="23" fill="#c0caf5">vapid_public_key = None</text>
+      <text x="80" y="545" font-size="23" fill="#c0caf5">Web Push transport absent</text>
+    </g>
+    <path d="M500 570 V650 M490 640 L500 650 L510 640" fill="none" stroke="#f7768e" stroke-width="3"/>
+    <g>
+      <rect x="55" y="650" width="890" height="140" rx="14" fill="#1e202e" stroke="#f7768e"/>
+      <text x="80" y="692" font-size="26" fill="#7aa2f7">GET /api/push/vapid-key</text>
+      <text x="80" y="733" font-size="23" fill="#f7768e">404: push not configured</text>
+      <text x="80" y="765" font-size="23" fill="#c0caf5">The browser cannot create a subscription.</text>
+    </g>
+    <path d="M500 790 V870 M490 860 L500 870 L510 860" fill="none" stroke="#f7768e" stroke-width="3"/>
+    <g>
+      <rect x="55" y="870" width="890" height="140" rx="14" fill="#1e202e" stroke="#f7768e"/>
+      <text x="80" y="912" font-size="26" fill="#f7768e">Phone setup blocked by server configuration</text>
+      <text x="80" y="953" font-size="23" fill="#c0caf5">Generating keys and restarting the server</text>
+      <text x="80" y="985" font-size="23" fill="#c0caf5">become prerequisites for enabling notifications.</text>
+    </g>
+
+    <g>
+      <rect x="1055" y="250" width="890" height="140" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+      <text x="1080" y="292" font-size="26" fill="#7aa2f7">push::vapid::resolve at startup</text>
+      <text x="1080" y="333" font-size="23" fill="#c0caf5">Custom private key supplied? Derive its public key.</text>
+      <text x="1080" y="365" font-size="23" fill="#c0caf5">Reject a mismatched public-key override.</text>
+    </g>
+    <path d="M1500 390 V430 M1490 420 L1500 430 L1510 420" fill="none" stroke="#9ece6a" stroke-width="3"/>
+    <g>
+      <rect x="1055" y="430" width="890" height="140" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+      <text x="1080" y="472" font-size="26" fill="#7aa2f7">Default identity: web_push_keys</text>
+      <text x="1080" y="513" font-size="23" fill="#c0caf5">Load saved private key, or generate and insert once.</text>
+      <text x="1080" y="545" font-size="23" fill="#9ece6a">Concurrent starts all use the winning database row.</text>
+    </g>
+    <path d="M1500 570 V650 M1490 640 L1500 650 L1510 640" fill="none" stroke="#9ece6a" stroke-width="3"/>
+    <g>
+      <rect x="1055" y="650" width="890" height="140" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+      <text x="1080" y="692" font-size="26" fill="#9ece6a">One matching identity for signing and subscribing</text>
+      <text x="1080" y="733" font-size="23" fill="#c0caf5">WebPushTransport signs with the private key.</text>
+      <text x="1080" y="765" font-size="23" fill="#c0caf5">/api/push/vapid-key exposes only the public half.</text>
+    </g>
+    <path d="M1500 790 V870 M1490 860 L1500 870 L1510 860" fill="none" stroke="#9ece6a" stroke-width="3"/>
+    <g>
+      <rect x="1055" y="870" width="890" height="140" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+      <text x="1080" y="912" font-size="26" fill="#9ece6a">Enable notifications, allow permission, send test</text>
+      <text x="1080" y="953" font-size="23" fill="#c0caf5">Restarts and replicas preserve browser subscriptions.</text>
+      <text x="1080" y="985" font-size="23" fill="#e0af68">Preserve the identity with database backups.</text>
+    </g>
+    <text x="55" y="1172" font-size="22" fill="#a9b1d6">HTTPS, browser permission, and deployed update required. Native APNs/FCM still require credentials.</text>
+  </g>
+</svg>

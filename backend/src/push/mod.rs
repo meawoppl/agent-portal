@@ -9,13 +9,14 @@
 //! and fans the surviving event out to every non-disabled push subscription
 //! via a [`PushTransport`].
 //!
-//! v1 ships only the [`transport::LogTransport`] (logs delivery intent); real
-//! Web Push / APNs / FCM transports land in C3 / C7 behind the same trait.
+//! Web Push uses an automatically persisted VAPID identity by default. Native
+//! APNs / FCM transports require their platform credentials.
 
 pub mod apns;
 pub mod dispatcher;
 pub mod fcm;
 pub mod transport;
+pub(crate) mod vapid;
 pub mod webpush;
 
 pub use dispatcher::spawn_dispatcher;

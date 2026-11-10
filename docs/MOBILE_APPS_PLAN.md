@@ -532,8 +532,8 @@ session list).
   the shell WebView) already launches sessions on connected launchers; no
   mobile-specific work needed for v1.
 
-**Still gated on Matt (ops, not decisions):** VAPID keys on the deploy
-(`scripts/generate-vapid-keys.sh` → `PORTAL_VAPID_*`); a Firebase project +
+Web Push provisions and persists its VAPID identity automatically at startup.
+**Native push still gated on Matt (ops, not decisions):** a Firebase project +
 `google-services.json` + service account for E5/FCM; Apple developer account
 + APNs p8 key whenever iOS native push should go live.
 
