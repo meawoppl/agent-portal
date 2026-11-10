@@ -37,8 +37,8 @@ pub enum AgentFrameKind {
     ClaudeUser,
     ClaudeError,
     ClaudeRateLimitEvent,
-    /// Command transport bookkeeping. Recognized but omitted from the
-    /// transcript; see the grouping filter for #1913.
+    /// Command lifecycle. Ordinary queue/ack frames stay hidden; scheduler
+    /// starts explain automatic turns with a wakeup marker.
     ClaudeCommandLifecycle,
     Portal,
     OptimisticUser,

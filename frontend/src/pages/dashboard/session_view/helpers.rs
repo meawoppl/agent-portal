@@ -2077,5 +2077,15 @@ mod tests {
         );
         assert!(active.is_none());
         assert!(!send_all);
+
+        active = Some((item, prompt));
+        send_all = true;
+        let completed = classify_output_msg_type(r#"{"type":"turn.completed"}"#);
+        assert_eq!(
+            reconcile_edit_stack_activity(&mut active, &mut send_all, completed),
+            Some((item, "completed"))
+        );
+        assert!(active.is_none());
+        assert!(send_all);
     }
 }
