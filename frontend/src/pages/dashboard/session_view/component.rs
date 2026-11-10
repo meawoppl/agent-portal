@@ -3045,6 +3045,7 @@ impl SessionView {
         html! {
             <InputBar
                 session_id={ctx.props().session.id}
+                agent_type={ctx.props().session.agent_type}
                 focused={ctx.props().focused}
                 ws_connected={self.ws_connected}
                 stt_enabled={ctx.props().stt_enabled}

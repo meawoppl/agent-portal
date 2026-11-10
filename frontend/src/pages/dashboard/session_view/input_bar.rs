@@ -44,6 +44,8 @@ pub struct InputBarProps {
     /// Session this bar is for. Used to seed the command-history localStorage
     /// key.
     pub session_id: Uuid,
+    /// Composer overrides are available only for drivers that apply them.
+    pub agent_type: shared::AgentType,
     /// Whether the parent session is currently focused. When `true`, the bar
     /// grabs textarea focus on transitions.
     pub focused: bool,
@@ -110,6 +112,20 @@ fn composer_placeholder() -> &'static str {
         "Type your message..."
     } else {
         "Type your message... (Shift+Enter for new line)"
+    }
+}
+
+/// Only Codex currently applies per-turn effort. Hiding unsupported controls
+/// also requires filtering persisted preferences on every submission path:
+/// otherwise a previously saved override would keep riding on hidden inputs.
+fn supported_reasoning_effort(
+    agent: shared::AgentType,
+    effort: Option<ReasoningEffort>,
+) -> Option<ReasoningEffort> {
+    if agent == shared::AgentType::Codex {
+        effort
+    } else {
+        None
     }
 }
 
@@ -901,7 +917,7 @@ impl Component for InputBar {
                             onclick={link.callback(|_| InputBarMsg::AcceptSuggestion)}
                         >{ "Tab" }</button>
                     }
-                    { self.render_reasoning_effort_select(handle_effort_change) }
+                    { self.render_reasoning_effort_select(ctx.props().agent_type, handle_effort_change) }
                     { self.render_voice_input(ctx) }
                     { self.render_send_button(ctx) }
                     <div class="drop-hint">{ "Drop files here to upload" }</div>
@@ -978,7 +994,7 @@ impl InputBar {
         ctx.props().on_message_sent.emit(());
         ctx.props()
             .on_send_text
-            .emit((agent_input, mode, self.reasoning_effort));
+            .emit((agent_input, mode, self.effective_reasoning_effort(ctx)));
     }
 
     /// Drive the chunk-upload pipeline. Reads the current textarea as
@@ -1041,9 +1057,11 @@ impl InputBar {
                     },
                 ));
         }
-        ctx.props()
-            .on_secret_drop
-            .emit((upload_id, total_size, self.reasoning_effort));
+        ctx.props().on_secret_drop.emit((
+            upload_id,
+            total_size,
+            self.effective_reasoning_effort(ctx),
+        ));
         ctx.link()
             .send_message(InputBarMsg::FileUploaded("secret file".to_string()));
     }
@@ -1078,7 +1096,7 @@ impl InputBar {
         let on_send_frame = ctx.props().on_send_frame.clone();
         let on_upload_prompt = ctx.props().on_upload_prompt.clone();
         let on_upload_error = ctx.props().on_upload_error.clone();
-        let reasoning_effort = self.reasoning_effort;
+        let reasoning_effort = self.effective_reasoning_effort(ctx);
 
         spawn_local(async move {
             let mut uploaded_files: Vec<(String, u64)> = Vec::new();
@@ -1203,7 +1221,18 @@ impl InputBar {
         html! { <div class="interim-transcription">{ preview }</div> }
     }
 
-    fn render_reasoning_effort_select(&self, onchange: Callback<Event>) -> Html {
+    fn effective_reasoning_effort(&self, ctx: &Context<Self>) -> Option<ReasoningEffort> {
+        supported_reasoning_effort(ctx.props().agent_type, self.reasoning_effort)
+    }
+
+    fn render_reasoning_effort_select(
+        &self,
+        agent: shared::AgentType,
+        onchange: Callback<Event>,
+    ) -> Html {
+        if agent != shared::AgentType::Codex {
+            return Html::default();
+        }
         let selected = self
             .reasoning_effort
             .map(|effort| effort.as_str())
@@ -1471,6 +1500,26 @@ mod tests {
             "agent-portal-reasoning-effort-00000000-0000-0000-0000-000000000001"
         );
         assert_ne!(reasoning_effort_key(first), reasoning_effort_key(second));
+    }
+
+    #[test]
+    fn persisted_effort_is_not_sent_to_unsupported_drivers() {
+        let saved = Some(ReasoningEffort::Xhigh);
+        for agent in [
+            shared::AgentType::Claude,
+            shared::AgentType::Muse,
+            shared::AgentType::Antigravity,
+        ] {
+            assert_eq!(supported_reasoning_effort(agent, saved), None);
+        }
+        assert_eq!(
+            supported_reasoning_effort(shared::AgentType::Codex, saved),
+            saved
+        );
+        assert_eq!(
+            supported_reasoning_effort(shared::AgentType::Codex, None),
+            None
+        );
     }
 
     #[test]
