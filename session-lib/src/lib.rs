@@ -23,6 +23,7 @@
 pub mod adapter;
 pub mod agent;
 pub mod buffer;
+pub mod connect;
 pub mod context_inbox;
 pub mod error;
 /// Throwaway git repositories for tests. Behind a feature so consumers can opt
