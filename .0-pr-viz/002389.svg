@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="Arial, sans-serif">
+<text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2389 · Show subagent handback warnings and separate task runs</text>
+<text x="55" y="105" font-size="34" fill="#e6e9f5">Task summaries hid handback warnings and merged resumed runs.</text>
+<text x="55" y="147" font-size="34" fill="#e6e9f5">User reports and warnings now stay visible; task/run keys preserve separate lifecycles.</text>
+<path d="M55 178 H1945 M1000 190 V1140" stroke="#565f89" stroke-width="2" stroke-dasharray="7 7"/>
+<text x="55" y="225" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1040" y="225" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="55" y="275" width="900" height="210" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="79" y="320" font-size="26" fill="#7aa2f7">render_task_notification</text>
+<text x="79" y="375" font-size="23" fill="#c0caf5">summary is always shown to the user.</text>
+<text x="79" y="428" font-size="23" fill="#f7768e">Handback model notes replace the intended report.</text>
+<rect x="1040" y="275" width="900" height="210" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1064" y="320" font-size="26" fill="#7aa2f7">TaskReport::from_notification</text>
+<text x="1064" y="375" font-size="23" fill="#c0caf5">handback_report.text replaces model notes.</text>
+<text x="1064" y="428" font-size="23" fill="#9ece6a">Warning above report; withheld reports stay hidden.</text>
+<rect x="55" y="540" width="900" height="210" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="79" y="585" font-size="26" fill="#7aa2f7">active_tasks: HashMap&lt;TaskId, TaskEntry&gt;</text>
+<text x="79" y="640" font-size="23" fill="#c0caf5">A resumed run reuses the same task id.</text>
+<text x="79" y="693" font-size="23" fill="#f7768e">Late completion can overwrite the resumed task.</text>
+<rect x="1040" y="540" width="900" height="210" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1064" y="585" font-size="26" fill="#7aa2f7">TaskKey { task_id, run_id }</text>
+<text x="1064" y="640" font-size="23" fill="#c0caf5">Progress and completion target one run.</text>
+<text x="1064" y="693" font-size="23" fill="#9ece6a">Tool results retain the originating run identity.</text>
+<rect x="55" y="805" width="900" height="210" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="79" y="850" font-size="26" fill="#7aa2f7">TasksPanel</text>
+<text x="79" y="905" font-size="23" fill="#c0caf5">Tasks render in a flat start-time list.</text>
+<text x="79" y="958" font-size="23" fill="#f7768e">Parent/child relationships are invisible.</text>
+<rect x="1040" y="805" width="900" height="210" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1064" y="850" font-size="26" fill="#7aa2f7">ordered_tasks</text>
+<text x="1064" y="905" font-size="23" fill="#c0caf5">Choose the known parent run at child start.</text>
+<text x="1064" y="958" font-size="23" fill="#9ece6a">Orphans remain visible; cycles cannot loop forever.</text>
+<text x="55" y="1172" font-size="22" fill="#a9b1d6">Scope: parent ids do not identify runs; nesting uses known start times. Missing parent records stay at the root.</text>
+</g>
+</svg>
