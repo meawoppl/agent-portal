@@ -2066,3 +2066,15 @@
     white-space: pre-wrap;
     overflow-wrap: anywhere;
 }
+
+/* Commentary narrates tool work; final and partial answers keep normal weight. */
+.codex-commentary .assistant-text {
+    color: var(--text-muted);
+    font-size: 0.95em;
+}
+.codex-item-duration {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    text-align: right;
+    padding: 0.2rem 0.75rem;
+}

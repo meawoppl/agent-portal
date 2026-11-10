@@ -135,7 +135,7 @@ pub use endpoints::*;
 
 // Portal metadata sidecar helpers
 pub mod message_metadata;
-pub use message_metadata::{content_value_or_fallback, created_at_iso};
+pub use message_metadata::{content_value_or_fallback, created_at_iso, display_at_iso};
 
 // Media-type policy shared by the `agent-portal show` CLI and backend
 pub mod media;

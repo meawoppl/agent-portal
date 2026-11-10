@@ -115,6 +115,7 @@ diesel::table! {
         provenance_session_id -> Nullable<Uuid>,
         #[max_length = 16]
         provenance_agent_type -> Nullable<Varchar>,
+        source_created_at -> Nullable<Timestamp>,
     }
 }
 

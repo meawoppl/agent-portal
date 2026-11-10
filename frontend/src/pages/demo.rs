@@ -1234,6 +1234,7 @@ fn raw_unknown(created_at: &str, message_type: &str) -> DemoMessage {
 
 fn meta(created_at: &str, source: Option<MessageSource>) -> PortalMeta {
     PortalMeta {
+        source_created_at: None,
         created_at: Some(created_at.to_string()),
         source,
         delivery: None,

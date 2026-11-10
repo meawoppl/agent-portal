@@ -74,7 +74,7 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
         } => {
             let ts = messages
                 .first()
-                .and_then(|message| message.raw_iso())
+                .and_then(|message| message.display_iso())
                 .and_then(local_timestamp);
 
             // A run of `thinking_tokens` markers collapses to a single compact

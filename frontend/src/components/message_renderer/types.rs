@@ -40,6 +40,12 @@ impl RenderedMessage {
         shared::created_at_iso(self.meta.as_ref())
     }
 
+    /// Display-only original clock, falling back to the server clock. Keep
+    /// raw_iso as the server timestamp for keys, acknowledgements and replay.
+    pub fn display_iso(&self) -> Option<&str> {
+        shared::display_at_iso(self.meta.as_ref())
+    }
+
     pub fn delivery(&self) -> Option<&shared::DeliveryMeta> {
         self.meta.as_ref()?.delivery.as_ref()
     }

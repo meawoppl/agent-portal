@@ -51,6 +51,9 @@ pub struct ImportSessionResponse {
 /// run tools, or contribute to Portal's live usage accounting.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImportedMessage {
+    /// Native record clock, when available. Missing on older launchers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<chrono::DateTime<chrono::Utc>>,
     pub role: String,
     pub content: serde_json::Value,
 }
@@ -73,6 +76,14 @@ pub fn imported_session_id(user: Uuid, launcher: Uuid, agent: AgentType, source:
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn messages_from_older_launchers_decode_without_a_timestamp() {
+        let message: ImportedMessage =
+            serde_json::from_str(r#"{"role":"assistant","content":{"type":"item.completed"}}"#)
+                .unwrap();
+        assert!(message.timestamp.is_none());
+    }
+
     #[test]
     fn import_identity_is_retry_safe_and_owner_host_agent_scoped() {
         let user = Uuid::new_v4();

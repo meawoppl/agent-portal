@@ -9,6 +9,16 @@ pub fn created_at_iso(meta: Option<&PortalMeta>) -> Option<&str> {
     meta.and_then(PortalMeta::created_at_iso)
 }
 
+/// Presentation clock only. The server-created clock remains the cursor for
+/// replay, retention and identity even when the source event is years old.
+#[must_use]
+pub fn display_at_iso(meta: Option<&PortalMeta>) -> Option<&str> {
+    let meta = meta?;
+    meta.source_created_at
+        .as_deref()
+        .or_else(|| meta.created_at_iso())
+}
+
 /// Parse stored message content as JSON, falling back to a typed envelope when
 /// the persisted row predates strict JSON storage or contains raw text.
 #[must_use]
@@ -60,6 +70,7 @@ mod tests {
     #[test]
     fn created_at_iso_reads_present_timestamp() {
         let meta = PortalMeta {
+            source_created_at: None,
             created_at: Some("2026-07-19T00:00:00.000000".to_string()),
             ..PortalMeta::default()
         };
@@ -81,6 +92,7 @@ mod tests {
     fn source_reads_sender_metadata() {
         let account_id = Uuid::from_u128(42);
         let meta = PortalMeta {
+            source_created_at: None,
             source: Some(MessageSource::Human {
                 account_id,
                 name: "Matt".to_string(),
@@ -116,11 +128,38 @@ mod tests {
         let entry = HistoryEntry {
             content: serde_json::Value::Null,
             meta: Some(PortalMeta {
+                source_created_at: None,
                 created_at: Some("2026-07-19T01:02:03.000000".to_string()),
                 ..PortalMeta::default()
             }),
         };
 
         assert_eq!(entry.created_at_iso(), Some("2026-07-19T01:02:03.000000"));
+    }
+}
+
+#[cfg(test)]
+mod original_clock_tests {
+    use super::*;
+    #[test]
+    fn source_clock_changes_display_but_never_replay_timestamp() {
+        let meta = PortalMeta {
+            created_at: Some("2026-11-10T01:00:00.000000".into()),
+            source_created_at: Some("2023-11-14T22:13:23.200000Z".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            created_at_iso(Some(&meta)),
+            Some("2026-11-10T01:00:00.000000")
+        );
+        assert_eq!(
+            display_at_iso(Some(&meta)),
+            Some("2023-11-14T22:13:23.200000Z")
+        );
+        let legacy = PortalMeta {
+            source_created_at: None,
+            ..meta
+        };
+        assert_eq!(display_at_iso(Some(&legacy)), created_at_iso(Some(&legacy)));
     }
 }

@@ -216,6 +216,7 @@ fn to_rendered(line: &HistoryMessageLine, user: &str, session: &str) -> Rendered
     let raw = serde_json::to_string(&line.content).unwrap_or_else(|_| "{}".to_string());
     let content = rewrite_media_urls(&raw, user, session);
     let meta = shared::PortalMeta {
+        source_created_at: line.source_created_at.clone(),
         created_at: (!line.created_at.is_empty()).then(|| line.created_at.clone()),
         ..Default::default()
     };

@@ -302,7 +302,14 @@ pub async fn download_agent_history(
         None
     };
 
-    type MessageRow = (Uuid, String, String, chrono::NaiveDateTime, String);
+    type MessageRow = (
+        Uuid,
+        String,
+        String,
+        chrono::NaiveDateTime,
+        String,
+        Option<chrono::NaiveDateTime>,
+    );
     let rows: Vec<MessageRow> = messages::table
         .filter(messages::session_id.eq(target_id))
         .order(messages::created_at.asc())
@@ -312,18 +319,22 @@ pub async fn download_agent_history(
             messages::content,
             messages::created_at,
             messages::agent_type,
+            messages::source_created_at,
         ))
         .load(&mut conn)?;
     let current = rows
         .into_iter()
         .map(
-            |(id, role, content, created_at, agent_type)| archive_format::ArchiveMessageLine {
-                id,
-                role,
-                created_at,
-                agent_type,
-                content: serde_json::from_str(&content)
-                    .unwrap_or(serde_json::Value::String(content)),
+            |(id, role, content, created_at, agent_type, source_created_at)| {
+                archive_format::ArchiveMessageLine {
+                    source_created_at: source_created_at.map(|time| time.and_utc()),
+                    id,
+                    role,
+                    created_at,
+                    agent_type,
+                    content: serde_json::from_str(&content)
+                        .unwrap_or(serde_json::Value::String(content)),
+                }
             },
         )
         .collect();

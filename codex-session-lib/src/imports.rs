@@ -174,7 +174,35 @@ fn append_turns(
         if turn.status == codex_codes::TurnStatus::InProgress {
             bail!("A turn is still in progress. Finish it and close the original client before importing.");
         }
+        // Codex turn clocks are Unix seconds; item lifecycle clocks are
+        // Unix milliseconds. Keep their unit boundary explicit on import.
+        let turn_start = turn
+            .started_at
+            .and_then(|time| chrono::DateTime::from_timestamp(time, 0))
+            .or_else(|| {
+                turn.items
+                    .iter()
+                    .filter_map(|item| item.started_at_ms.or(item.completed_at_ms))
+                    .min()
+                    .and_then(chrono::DateTime::from_timestamp_millis)
+            });
+        let turn_end = turn
+            .completed_at
+            .and_then(|time| chrono::DateTime::from_timestamp(time, 0))
+            .or_else(|| {
+                turn.items
+                    .iter()
+                    .filter_map(|item| item.completed_at_ms.or(item.started_at_ms))
+                    .max()
+                    .and_then(chrono::DateTime::from_timestamp_millis)
+            })
+            .or(turn_start);
         for item in turn.items {
+            let timestamp = item
+                .completed_at_ms
+                .or(item.started_at_ms)
+                .and_then(chrono::DateTime::from_timestamp_millis)
+                .or(turn_start);
             let (role, content) = match item.payload {
                 codex_codes::protocol::ThreadItemPayload::UserMessage { content, .. } => {
                     let text = content
@@ -192,7 +220,7 @@ fn append_turns(
                     )?))?,
                 ),
             };
-            push_message(messages, bytes, role, content)?;
+            push_message(messages, bytes, role, content, timestamp)?;
         }
         push_message(
             messages,
@@ -204,6 +232,7 @@ fn append_turns(
                 turn.duration_ms,
                 None,
             ))?,
+            turn_end,
         )?;
     }
     Ok(())
@@ -214,15 +243,19 @@ fn push_message(
     bytes: &mut usize,
     role: &str,
     content: serde_json::Value,
+    timestamp: Option<chrono::DateTime<chrono::Utc>>,
 ) -> Result<()> {
-    *bytes += serde_json::to_vec(&content)?.len();
+    let message = ImportedMessage {
+        timestamp,
+        role: role.into(),
+        content,
+    };
+    // The optional original clock is part of the control-plane record budget.
+    *bytes = bytes.saturating_add(serde_json::to_vec(&message)?.len());
     if *bytes > MAX_IMPORT_HISTORY_BYTES || messages.len() >= MAX_IMPORT_MESSAGES {
         bail!("This history exceeds Portal's import limit. Uncheck 'Copy conversation history' to import the full native context without copying scrollback.");
     }
-    messages.push(ImportedMessage {
-        role: role.into(),
-        content,
-    });
+    messages.push(message);
     Ok(())
 }
 
@@ -293,6 +326,29 @@ mod tests {
         assert_eq!(messages[2].content["status"], "completed");
         assert!(messages[2].content.get("usage").is_none());
     }
+    #[test]
+    fn native_item_milliseconds_and_turn_seconds_are_imported_as_utc_clocks() {
+        let mut source = turn(codex_codes::TurnStatus::Completed);
+        source.started_at = Some(1_700_000_000);
+        source.completed_at = Some(1_700_000_004);
+        source.items[1].started_at_ms = Some(1_700_000_001_000);
+        source.items[1].completed_at_ms = Some(1_700_000_003_200);
+        let mut messages = Vec::new();
+        append_turns(&mut messages, &mut 0, vec![source]).unwrap();
+        assert_eq!(
+            messages[0].timestamp.unwrap().timestamp_millis(),
+            1_700_000_000_000
+        );
+        assert_eq!(
+            messages[1].timestamp.unwrap().timestamp_millis(),
+            1_700_000_003_200
+        );
+        assert_eq!(
+            messages[2].timestamp.unwrap().timestamp_millis(),
+            1_700_000_004_000
+        );
+    }
+
     #[test]
     fn active_turns_and_oversized_history_fail_without_truncation() {
         assert!(append_turns(

@@ -515,6 +515,7 @@ mod tests {
             content: serde_json::json!({"type": "assistant", "text": "hi"}),
             agent_type: shared::AgentType::Claude,
             meta: Some(shared::PortalMeta {
+                source_created_at: None,
                 created_at: Some(server_ts.clone()),
                 source: None,
                 delivery: None,
@@ -558,6 +559,7 @@ mod tests {
             }),
             agent_type: shared::AgentType::Codex,
             meta: Some(shared::PortalMeta {
+                source_created_at: None,
                 created_at: None,
                 source: Some(shared::MessageSource::Agent {
                     session_id: from_session_id,
@@ -625,6 +627,7 @@ mod tests {
             entries: vec![shared::HistoryEntry {
                 content: serde_json::json!({"type": "assistant"}),
                 meta: Some(shared::PortalMeta {
+                    source_created_at: None,
                     created_at: Some(ts.clone()),
                     source: None,
                     delivery: None,

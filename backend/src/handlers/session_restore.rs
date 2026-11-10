@@ -217,31 +217,33 @@ fn store_restore(
     conn.transaction(|conn| {
         create_desired_session(conn, draft)?;
         crate::db::session_lifecycle::pause(conn, id)?;
-        let mut rows: Vec<_> = lines
-            .into_iter()
-            .map(|line| crate::models::NewMessage {
-                session_id: id,
-                user_id: user,
-                role: line.role,
-                content: stored_content(line.content),
-                agent_type: line.agent_type,
-                provenance_kind: None,
-                provenance_session_id: None,
-                provenance_agent_type: None,
-            })
-            .collect();
+        let ingested_at = sessions::table.find(id).select(sessions::created_at).first::<chrono::NaiveDateTime>(conn)?;
+        let row_count = lines.len() as i64;
+        let mut rows: Vec<_> = lines.into_iter().enumerate().map(|(index, line)| crate::models::NewHistoricalMessage {
+            created_at: ingested_at - chrono::Duration::microseconds(row_count - index as i64),
+            // A legacy archive still has a known original display clock: its
+            // server-created timestamp. Never reuse it as the new replay clock.
+            source_created_at: Some(line.source_created_at.map(|time| time.naive_utc()).unwrap_or(line.created_at)),
+            message: crate::models::NewMessage {
+                session_id: id, user_id: user, role: line.role, content: stored_content(line.content), agent_type: line.agent_type,
+                provenance_kind: None, provenance_session_id: None, provenance_agent_type: None,
+            },
+        }).collect();
         let scrollback = if trimmed {
             "The most recent part of the transcript was copied; the agent still has the whole conversation."
         } else {
             "The transcript was copied from history."
         };
-        rows.push(crate::models::NewMessage {
+        rows.push(crate::models::NewHistoricalMessage {
+            created_at: ingested_at,
+            source_created_at: None,
+            message: crate::models::NewMessage {
             session_id: id,
             user_id: user,
             role: "assistant".into(),
             agent_type: rows
                 .last()
-                .map(|row| row.agent_type.clone())
+                .map(|row| row.message.agent_type.clone())
                 .unwrap_or_default(),
             content: shared::PortalMessage::text(format!(
                 "**Restored from history** (session `{}`)\n\n{scrollback} This session is paused; use **Resume** to continue the original conversation.",
@@ -252,6 +254,7 @@ fn store_restore(
             provenance_kind: None,
             provenance_session_id: None,
             provenance_agent_type: None,
+            },
         });
         // Stay below PostgreSQL's bind-parameter limit on long transcripts.
         for chunk in rows.chunks(500) {
@@ -269,6 +272,7 @@ mod tests {
 
     fn line(text: &str) -> ArchiveMessageLine {
         ArchiveMessageLine {
+            source_created_at: None,
             id: Uuid::new_v4(),
             role: "user".into(),
             created_at: chrono::NaiveDateTime::default(),
@@ -303,5 +307,24 @@ mod tests {
             stored_content(serde_json::Value::String("raw".into())),
             "raw"
         );
+    }
+    #[test]
+    fn native_restore_preserves_source_dates_order_and_fresh_retention_age() {
+        let Some(pool) = crate::test_support::shared_pool() else {
+            return;
+        };
+        let mut conn = pool.get().unwrap();
+        conn.test_transaction::<_, diesel::result::Error, _>(|conn| {
+            let user = crate::test_support::insert_user(conn, "native-restore-clock");
+            let draft = crate::test_support::historical_clock_draft(user.id);
+            let id = draft.session_id;
+            store_restore(
+                conn,
+                draft,
+                Uuid::new_v4(),
+                crate::test_support::historical_clock_lines(),
+            )?;
+            crate::test_support::assert_historical_clocks(conn, id)
+        });
     }
 }

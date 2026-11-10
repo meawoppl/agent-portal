@@ -944,6 +944,7 @@ fn portal_meta_default_omits_empty_fields_and_roundtrips() {
     let empty = PortalMeta::default();
     assert_eq!(serde_json::to_value(&empty).unwrap(), json!({}));
     let m = PortalMeta {
+        source_created_at: None,
         created_at: Some("2026-06-26T12:00:00.000000".into()),
         source: Some(crate::endpoints::client::MessageSource::Portal),
         delivery: Some(DeliveryMeta {

@@ -187,6 +187,8 @@ pub struct HistoryManifest {
 /// of the archived `ArchiveMessageLine`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HistoryMessageLine {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_created_at: Option<String>,
     #[serde(default)]
     pub id: String,
     #[serde(default)]

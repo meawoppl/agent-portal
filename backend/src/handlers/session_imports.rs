@@ -187,11 +187,13 @@ fn validate_prepared(
             "Launcher returned a different conversation",
         ));
     }
-    let bytes: usize = prepared
+    let bytes = prepared
         .messages
         .iter()
-        .map(|m| m.content.to_string().len())
-        .sum();
+        .try_fold(0usize, |total, message| {
+            serde_json::to_vec(message).map(|wire| total.saturating_add(wire.len()))
+        })
+        .map_err(|_| AppError::BadGateway("Invalid imported message"))?;
     if bytes > MAX_IMPORT_HISTORY_BYTES || prepared.messages.len() > MAX_IMPORT_MESSAGES {
         return Err(AppError::PayloadTooLarge(
             "Imported history exceeds the limit; retry without copying history".into(),
@@ -219,16 +221,27 @@ fn store_import(
         create_desired_session(conn, draft)?;
         crate::db::session_lifecycle::pause(conn, id)?;
         diesel::update(sessions::table.find(id)).set(sessions::last_model.eq(prepared.session.model)).execute(conn)?;
-        let mut rows: Vec<_> = prepared.messages.into_iter().map(|m| crate::models::NewMessage {
-            session_id: id, user_id: user, role: m.role, content: m.content.to_string(), agent_type: "codex".into(),
-            provenance_kind: None, provenance_session_id: None, provenance_agent_type: None,
+        let imported_at = sessions::table.find(id).select(sessions::created_at).first::<chrono::NaiveDateTime>(conn)?;
+        let row_count = prepared.messages.len() as i64;
+        let mut rows: Vec<_> = prepared.messages.into_iter().enumerate().map(|(index, m)| crate::models::NewHistoricalMessage {
+            // Cursor/retention clock is ingestion, not the native event date.
+            created_at: imported_at - chrono::Duration::microseconds(row_count - index as i64),
+            source_created_at: m.timestamp.map(|time| time.naive_utc()),
+            message: crate::models::NewMessage {
+                session_id: id, user_id: user, role: m.role, content: m.content.to_string(), agent_type: "codex".into(),
+                provenance_kind: None, provenance_session_id: None, provenance_agent_type: None,
+            },
         }).collect();
         let history = if include_history { "Saved conversation history was copied. Attachments remain in Codex; local media is shown as a reference." }
             else { "Earlier messages were not copied into Portal. The complete saved context remains in Codex." };
-        rows.push(crate::models::NewMessage {
-            session_id: id, user_id: user, role: "assistant".into(), agent_type: "codex".into(),
-            content: shared::PortalMessage::text(format!("**Imported Codex conversation**\n\n{history}\n\nThis session is paused. Finish any work in the original client and close that conversation, then use **Resume** here. Running commands are not transferred.")).to_json().to_string(),
-            provenance_kind: None, provenance_session_id: None, provenance_agent_type: None,
+        rows.push(crate::models::NewHistoricalMessage {
+            created_at: imported_at,
+            source_created_at: None,
+            message: crate::models::NewMessage {
+                session_id: id, user_id: user, role: "assistant".into(), agent_type: "codex".into(),
+                content: shared::PortalMessage::text(format!("**Imported Codex conversation**\n\n{history}\n\nThis session is paused. Finish any work in the original client and close that conversation, then use **Resume** here. Running commands are not transferred.")).to_json().to_string(),
+                provenance_kind: None, provenance_session_id: None, provenance_agent_type: None,
+            },
         });
         // Stay below PostgreSQL's bind-parameter limit on large conversations.
         for chunk in rows.chunks(500) { diesel::insert_into(messages::table).values(chunk).execute(conn)?; }
@@ -253,6 +266,7 @@ mod tests {
                 portal_session_id: None,
             },
             messages: vec![ImportedMessage {
+                timestamp: None,
                 role: "user".into(),
                 content: serde_json::Value::String("saved message".into()),
             }],
@@ -289,7 +303,41 @@ mod tests {
                 fork_point_turn_id: None,
                 fork_create_worktree: false,
             };
-            store_import(conn, draft(), prepared(), true)?;
+            let mut source = prepared();
+            let native_time = chrono::DateTime::from_timestamp_millis(1_700_000_003_200).unwrap();
+            source.messages[0].timestamp = Some(native_time);
+            source
+                .messages
+                .extend(["second", "third"].map(|text| ImportedMessage {
+                    timestamp: None,
+                    role: "user".into(),
+                    content: serde_json::Value::String(text.into()),
+                }));
+            store_import(conn, draft(), source, true)?;
+            let persisted_time = messages::table
+                .filter(messages::session_id.eq(id))
+                .filter(messages::role.eq("user"))
+                .filter(messages::content.eq("\"saved message\""))
+                .select((messages::created_at, messages::source_created_at))
+                .first::<(chrono::NaiveDateTime, Option<chrono::NaiveDateTime>)>(conn)?;
+            assert_eq!(persisted_time.1, Some(native_time.naive_utc()));
+            assert!(persisted_time.0 > native_time.naive_utc() + chrono::Duration::days(365));
+            crate::handlers::retention::delete_old_messages(
+                conn,
+                crate::handlers::retention::RetentionConfig::new(2000, 30),
+                1000,
+                &std::collections::HashSet::new(),
+            )?;
+            // Other committed test fixtures may be age-eligible; these freshly
+            // ingested imported rows must survive even with archiving disabled.
+            let ordered: Vec<String> = messages::table
+                .filter(messages::session_id.eq(id))
+                .filter(messages::role.eq("user"))
+                .order((messages::created_at.asc(), messages::id.asc()))
+                .select(messages::content)
+                .load(conn)?;
+            assert_eq!(ordered, ["\"saved message\"", "\"second\"", "\"third\""]);
+
             let session = sessions::table
                 .find(id)
                 .first::<crate::models::Session>(conn)?;
@@ -302,7 +350,7 @@ mod tests {
                     .filter(messages::session_id.eq(id))
                     .count()
                     .get_result::<i64>(conn)?,
-                2
+                4
             );
             use crate::schema::{pending_inputs, session_members};
             assert_eq!(
@@ -325,7 +373,7 @@ mod tests {
                     .filter(messages::session_id.eq(id))
                     .count()
                     .get_result::<i64>(conn)?,
-                2
+                4
             );
             Ok(())
         });

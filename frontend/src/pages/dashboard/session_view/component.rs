@@ -181,6 +181,7 @@ fn optimistic_user_message(
     RenderedMessage::local(
         shared::LocalFrame::user(content),
         Some(PortalMeta {
+            source_created_at: None,
             created_at: Some(created_at.to_string()),
             source: None,
             delivery: Some(DeliveryMeta {
