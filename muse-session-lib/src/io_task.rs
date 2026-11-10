@@ -68,7 +68,7 @@ pub async fn muse_io_task(
                 // run without emitting the typed acceptance record. Current
                 // Muse releases resolve this earlier at `turn.input.user`.
                 if let Some(tx) = delivered {
-                    let _ = tx.send(outcome.map_err(|e| e.to_string()));
+                    let _ = tx.send(outcome.map_err(|e| e.to_string().into()));
                 }
             }
             // Muse decides tool policy itself in headless runs — there is no
@@ -106,7 +106,7 @@ async fn run_turn(
     classifier: &mut MuseClassifier,
     turn_tracker: &mut TurnTracker,
     event_tx: &mpsc::UnboundedSender<IoEvent>,
-    delivered: &mut Option<oneshot::Sender<Result<(), String>>>,
+    delivered: &mut Option<oneshot::Sender<session_lib::io::InputDeliveryResult>>,
 ) -> Result<(), muse_codes::Error> {
     let builder = build_exec_builder(config, text);
 
@@ -229,7 +229,7 @@ fn finalize_turn_metrics(
 /// stream — the same boundary represented by `AgentAccepted` for other agents.
 fn acknowledge_delivery_if_accepted(
     record: &MuseRecord,
-    delivered: &mut Option<oneshot::Sender<Result<(), String>>>,
+    delivered: &mut Option<oneshot::Sender<session_lib::io::InputDeliveryResult>>,
 ) -> bool {
     if !matches!(record.typed_payload(), Ok(MusePayload::TurnInputUser(_))) {
         return false;

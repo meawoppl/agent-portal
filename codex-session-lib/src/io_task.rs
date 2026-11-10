@@ -93,7 +93,7 @@ fn codex_approval_result(
     result.unwrap_or(serde_json::Value::Null)
 }
 
-type DeliveryAck = oneshot::Sender<Result<(), String>>;
+type DeliveryAck = oneshot::Sender<session_lib::io::InputDeliveryResult>;
 /// Queued user prompt: (agent-facing prompt text, delivery ack, optional typed
 /// display event). The display event — when present — is an inter-agent
 /// `PortalContent::AgentMessage` envelope the synthetic echo emits verbatim so
@@ -1243,7 +1243,7 @@ async fn start_codex_turn_request(
             let event = TurnFailedEvent::new(message.clone());
             let _ = event_tx.send(IoEvent::RawOutput(to_raw_output(&event)));
             if let Some(delivered) = delivered {
-                let _ = delivered.send(Err(message));
+                let _ = delivered.send(Err(message.into()));
             }
             false
         }

@@ -445,7 +445,7 @@ impl<A: Agent> Session<A> {
                     "I/O task closed before accepting input".to_string(),
                 )
             })?
-            .map_err(SessionError::Agent)
+            .map_err(|error| SessionError::Agent(error.to_string()))
     }
 
     /// Queue user input to the agent and return a receiver that resolves when
@@ -460,7 +460,7 @@ impl<A: Agent> Session<A> {
         content: serde_json::Value,
         display_event: Option<serde_json::Value>,
         reasoning_effort: Option<shared::ReasoningEffort>,
-    ) -> Result<oneshot::Receiver<Result<(), String>>, SessionError> {
+    ) -> Result<oneshot::Receiver<crate::io::InputDeliveryResult>, SessionError> {
         if let SessionState::Exited { code } = self.state {
             return Err(SessionError::AlreadyExited(code));
         }

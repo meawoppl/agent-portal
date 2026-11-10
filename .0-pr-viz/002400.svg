@@ -34,9 +34,9 @@
 <text x="1081" y="668" font-size="23" fill="#c0caf5">Only its matching success ACK releases the user input.</text>
 </g>
 <g><rect x="1055" y="805" width="890" height="180" rx="14" fill="#1e202e" stroke="#9ece6a"/>
-<text x="1081" y="849" font-size="26" fill="#9ece6a">Auto and capability changes</text>
-<text x="1081" y="893" font-size="23" fill="#c0caf5">Auto clears effortLevel with typed null settings.</text>
-<text x="1081" y="928" font-size="23" fill="#c0caf5">per_turn_effort_changed disables XHigh until next init.</text>
+<text x="1081" y="849" font-size="26" fill="#9ece6a">Auto / InputAck.rejected_seq</text>
+<text x="1081" y="893" font-size="23" fill="#c0caf5">Auto null-clears flags; rejection removes one queue row.</text>
+<text x="1081" y="928" font-size="23" fill="#c0caf5">Unknown delivery stays replayable; XHigh follows native init.</text>
 </g>
-<text x="55" y="1172" font-size="22" fill="#e0af68">Rejected or timed-out settings leave the prompt unsent. The CLI may cap requested effort; its reported value remains visible.</text>
+<text x="55" y="1172" font-size="22" fill="#e0af68">Old backends ignore rejected_seq; use a current backend. Lost rejection frames retain existing at-least-once delivery limits.</text>
 </g></svg>

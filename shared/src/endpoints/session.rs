@@ -102,7 +102,15 @@ pub enum ProxyToServer {
     },
 
     /// Acknowledge receipt of input messages
-    InputAck { session_id: Uuid, ack_seq: i64 },
+    InputAck {
+        session_id: Uuid,
+        ack_seq: i64,
+        /// A definitively unsent input to remove individually. Must accompany
+        /// ack_seq=0; it never acknowledges earlier uncertain deliveries.
+        /// Older backends ignore this and ack zero, leaving rows untouched.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rejected_seq: Option<i64>,
+    },
 
     /// Delivery-progress signal for a client-correlated input (#939). Emitted
     /// by the proxy at `ProxyReceived` (on `SequencedInput` receipt) and

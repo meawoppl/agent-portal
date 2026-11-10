@@ -105,7 +105,7 @@ struct ClaudeUserInputSend<'a> {
     client: &'a mut ClaudeAsyncClient,
     session_id: Uuid,
     text: String,
-    delivered: Option<oneshot::Sender<Result<(), String>>>,
+    delivered: Option<oneshot::Sender<session_lib::io::InputDeliveryResult>>,
     display_event: Option<Box<serde_json::Value>>,
     event_tx: &'a mpsc::UnboundedSender<IoEvent>,
     pending_echo_drops: &'a mut VecDeque<EchoDropMarker>,
@@ -143,7 +143,12 @@ async fn send_claude_user_input(
     }
 
     if let Some(delivered) = delivered {
-        let _ = delivered.send(result.as_ref().map(|_| ()).map_err(|e| e.to_string()));
+        let _ = delivered.send(
+            result
+                .as_ref()
+                .map(|_| ())
+                .map_err(|e| e.to_string().into()),
+        );
     }
 
     result.map(|_| input)

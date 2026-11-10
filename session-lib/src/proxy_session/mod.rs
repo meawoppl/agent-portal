@@ -133,9 +133,27 @@ pub async fn ack_portal_input(ws_write: &SharedWsWrite, ack: Option<PortalInputA
     let msg = ProxyToServer::InputAck {
         session_id: ack.session_id,
         ack_seq: ack.seq,
+        rejected_seq: None,
     };
     let mut ws = ws_write.lock().await;
     if let Err(error) = ws.send(msg).await {
         tracing::error!("Failed to send InputAck: {error}");
+    }
+}
+
+/// Clear exactly one input proven not to have reached the agent. Cumulative
+/// ack remains zero so older backends cannot delete earlier queued inputs.
+pub async fn reject_portal_input(ws_write: &SharedWsWrite, ack: Option<PortalInputAck>) {
+    let Some(ack) = ack else { return };
+    let mut ws = ws_write.lock().await;
+    if let Err(error) = ws
+        .send(ProxyToServer::InputAck {
+            session_id: ack.session_id,
+            ack_seq: 0,
+            rejected_seq: Some(ack.seq),
+        })
+        .await
+    {
+        tracing::error!("Failed to send terminal input rejection: {error}");
     }
 }

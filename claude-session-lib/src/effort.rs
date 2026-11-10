@@ -10,14 +10,16 @@ pub(crate) const EFFORT_ACK_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub(crate) struct UserInput {
     pub text: String,
-    pub delivered: Option<oneshot::Sender<Result<(), String>>>,
+    pub delivered: Option<oneshot::Sender<session_lib::io::InputDeliveryResult>>,
     pub display_event: Option<Box<serde_json::Value>>,
 }
 
 impl UserInput {
     pub fn reject(self, reason: &str) {
         if let Some(delivered) = self.delivered {
-            let _ = delivered.send(Err(reason.to_string()));
+            let _ = delivered.send(Err(
+                session_lib::io::InputDeliveryError::RejectedBeforeSend(reason.to_string()),
+            ));
         }
     }
 }
@@ -32,7 +34,7 @@ struct Pending {
 
 pub(crate) enum PreparedInput {
     Direct(UserInput),
-    Configure(ClaudeInput),
+    Configure(Box<ClaudeInput>),
 }
 
 #[derive(Default)]
@@ -89,7 +91,7 @@ impl EffortController {
             previously_touched: self.flag_touched,
         });
         self.flag_touched = true;
-        Ok(PreparedInput::Configure(request))
+        Ok(PreparedInput::Configure(Box::new(request)))
     }
 
     pub fn deadline(&self) -> Option<Instant> {
@@ -144,8 +146,11 @@ mod tests {
     }
 
     fn request_id(action: PreparedInput) -> String {
-        let PreparedInput::Configure(ClaudeInput::ControlRequest(request)) = action else {
+        let PreparedInput::Configure(input) = action else {
             panic!("settings request")
+        };
+        let ClaudeInput::ControlRequest(request) = *input else {
+            panic!("control request")
         };
         request.request_id
     }
@@ -196,7 +201,7 @@ mod tests {
             .as_object()
             .unwrap()
             .contains_key("effortLevel"));
-        let ClaudeInput::ControlRequest(request) = request else {
+        let ClaudeInput::ControlRequest(request) = *request else {
             panic!("control request")
         };
         controller
@@ -234,6 +239,7 @@ mod tests {
             .try_recv()
             .unwrap()
             .unwrap_err()
+            .to_string()
             .contains("prompt was not sent"));
         assert!(matches!(
             controller.prepare(input("Auto"), None).unwrap(),

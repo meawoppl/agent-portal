@@ -36,6 +36,11 @@ pub const COST_ACCOUNTING_PERSIST_FAILED: &str = "COST_ACCOUNTING_PERSIST_FAILED
 /// indicate database/schema failures; inspect DB health and retained billing
 /// evidence before reconciliation. Reports are best effort, not a durable outbox.
 pub const TURN_METRICS_PERSIST_FAILED: &str = "TURN_METRICS_PERSIST_FAILED";
+/// A definitely-unsent input could not be removed from the durable queue.
+/// Repeated failures indicate DB/schema trouble; the rejected prompt can replay
+/// on reconnect. Restore DB health and remove the identified session/sequence
+/// before retrying the user's prompt. A single failure can be transient.
+pub const INPUT_REJECTION_PERSIST_FAILED: &str = "INPUT_REJECTION_PERSIST_FAILED";
 
 /// Emitted when a browser/agent input could **not be persisted** to the
 /// `pending_inputs` table — either the INSERT failed or no DB connection was
@@ -212,6 +217,7 @@ mod tests {
         ATTENTION_PERSIST_FAILED,
         COST_ACCOUNTING_PERSIST_FAILED,
         TURN_METRICS_PERSIST_FAILED,
+        INPUT_REJECTION_PERSIST_FAILED,
         SPAWN_LIFECYCLE_FAILED,
         PENDING_INPUT_PERSIST_FAILED,
         INPUT_SEQ_BUMP_FAILED,
@@ -266,6 +272,7 @@ mod tests {
             include_str!("background.rs"),
             include_str!("handlers/websocket/message_handlers.rs"),
             include_str!("handlers/websocket/turn_metrics.rs"),
+            include_str!("handlers/websocket/proxy_socket.rs"),
             include_str!("handlers/websocket/permissions.rs"),
             include_str!("push/dispatcher.rs"),
             include_str!("handlers/websocket/session_manager/input_queue.rs"),

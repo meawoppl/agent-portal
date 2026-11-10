@@ -1143,3 +1143,27 @@ fn version_rejection_remains_decodable_by_pre_version_launchers() {
     assert!(old.error.unwrap().contains("update"));
     assert!(old.reject_reason.is_none());
 }
+
+#[test]
+fn definitive_rejection_is_additive_and_never_cumulatively_acknowledges_inputs() {
+    let session_id = Uuid::nil();
+    let legacy: ProxyToServer =
+        serde_json::from_value(json!({"type":"InputAck","session_id":session_id,"ack_seq":3}))
+            .unwrap();
+    assert!(matches!(
+        legacy,
+        ProxyToServer::InputAck {
+            ack_seq: 3,
+            rejected_seq: None,
+            ..
+        }
+    ));
+    let rejected = ProxyToServer::InputAck {
+        session_id,
+        ack_seq: 0,
+        rejected_seq: Some(2),
+    };
+    let wire = serde_json::to_value(rejected).unwrap();
+    assert_eq!(wire["ack_seq"], 0);
+    assert_eq!(wire["rejected_seq"], 2);
+}

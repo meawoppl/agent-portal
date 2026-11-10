@@ -143,7 +143,7 @@ fn fresh_plugin_context(current: Option<String>, launch: Option<&str>) -> String
 /// A change carried by an input is done only once the agent accepted that
 /// input; a rejected or dropped delivery leaves it pending for the next one.
 fn settle_context_update(
-    outcome: &Result<Result<(), String>, oneshot::error::RecvError>,
+    outcome: &Result<crate::io::InputDeliveryResult, oneshot::error::RecvError>,
     inbox: &crate::ContextInbox,
     update: &crate::ContextUpdate,
 ) {
@@ -157,7 +157,7 @@ fn spawn_delivery_completion(
     session_id: Uuid,
     client_msg_id: Option<Uuid>,
     ack: Option<PortalInputAck>,
-    delivered: oneshot::Receiver<Result<(), String>>,
+    delivered: oneshot::Receiver<crate::io::InputDeliveryResult>,
     context: Option<(crate::ContextInbox, crate::ContextUpdate)>,
 ) {
     tokio::spawn(async move {
@@ -177,6 +177,11 @@ fn spawn_delivery_completion(
                 )
                 .await;
                 ack_portal_input(&ws_write, ack).await;
+            }
+            Ok(Err(crate::io::InputDeliveryError::RejectedBeforeSend(message))) => {
+                error!("Input definitively rejected before send: {}", message);
+                emit_input_failure(&ws_write, session_id, client_msg_id, AGENT_REJECTED).await;
+                super::reject_portal_input(&ws_write, ack).await;
             }
             Ok(Err(message)) => {
                 // The agent's own error stays in the log (and, for Codex, in
@@ -237,7 +242,7 @@ mod tests {
         settle_context_update(&Ok(Err("busy".into())), &inbox, &update);
         assert!(inbox.is_pending(), "a rejected input leaves it pending");
 
-        let (sender, receiver) = oneshot::channel::<Result<(), String>>();
+        let (sender, receiver) = oneshot::channel::<crate::io::InputDeliveryResult>();
         drop(sender);
         settle_context_update(&receiver.await, &inbox, &update);
         assert!(inbox.is_pending(), "a dropped delivery leaves it pending");

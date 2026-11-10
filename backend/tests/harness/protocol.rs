@@ -81,6 +81,7 @@ async fn turn_permission_delivery_and_reconnect_replay() {
         .send(ProxyToServer::InputAck {
             session_id,
             ack_seq: seq,
+            rejected_seq: None,
         })
         .await
         .unwrap();
@@ -301,6 +302,7 @@ async fn unacknowledged_input_replays_when_proxy_reconnects() {
         .send(ProxyToServer::InputAck {
             session_id: fields.session_id,
             ack_seq: seq,
+            rejected_seq: None,
         })
         .await
         .unwrap();
@@ -391,6 +393,7 @@ async fn offline_input_is_queued_then_replayed_on_registration() {
         .send(ProxyToServer::InputAck {
             session_id,
             ack_seq: seq,
+            rejected_seq: None,
         })
         .await
         .unwrap();
