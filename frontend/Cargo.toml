@@ -23,6 +23,9 @@ claude-codes = { workspace = true }
 # Typed Muse journal payloads (types-only so the frontend remains WASM-safe).
 muse-codes = { workspace = true }
 
+# Typed Antigravity actions, with the workspace types-only WASM features.
+antigravity-codes = { workspace = true }
+
 # Yew framework
 yew = { workspace = true }
 yew-router = { workspace = true }

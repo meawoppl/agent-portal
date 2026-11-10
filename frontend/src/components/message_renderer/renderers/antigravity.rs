@@ -90,13 +90,22 @@ fn render_step_update(value: &Value) -> Html {
     }
 }
 
+#[derive(serde::Deserialize, Default)]
+struct TrajectoryDetails {
+    state: Option<String>,
+    error: Option<String>,
+    error_code: Option<String>,
+}
+
 fn render_trajectory_update(value: &Value) -> Html {
-    let state = text(value, "state").unwrap_or("STATE_UNSPECIFIED");
-    let err = text(value, "error").filter(|s| shared::strings::is_non_empty(s));
+    let details: TrajectoryDetails = serde_json::from_value(value.clone()).unwrap_or_default();
     html! {
         <div class="antigravity-trajectory">
-            <span>{ state }</span>
-            if let Some(err) = err {
+            <span>{ details.state.as_deref().unwrap_or("STATE_UNSPECIFIED") }</span>
+            if let Some(code) = details.error_code.filter(|s| !s.is_empty()) {
+                <span class="antigravity-error">{ code }</span>
+            }
+            if let Some(err) = details.error.filter(|s| !s.is_empty()) {
                 <span class="antigravity-error">{ err }</span>
             }
         </div>
@@ -123,36 +132,36 @@ fn status_chip(value: &Value) -> Html {
 }
 
 fn action_summary(value: &Value) -> Option<String> {
-    let update = value.get("update")?;
-    if let Some(cmd) = update
-        .get("runCommand")
-        .or_else(|| update.get("run_command"))
-        .and_then(|v| v.get("commandLine").or_else(|| v.get("command_line")))
-        .and_then(Value::as_str)
-    {
-        return Some(format!("$ {cmd}"));
+    #[derive(serde::Deserialize)]
+    struct StepDetails {
+        update: antigravity_codes::protocol::StepUpdate,
     }
-    for (field, label, key) in [
-        ("viewFile", "view", "filePath"),
-        ("view_file", "view", "file_path"),
-        ("editFile", "edit", "filePath"),
-        ("edit_file", "edit", "file_path"),
-        ("createFile", "create", "filePath"),
-        ("create_file", "create", "file_path"),
-        ("listDirectory", "list", "directory"),
-        ("list_directory", "list", "directory"),
-        ("searchDirectory", "search", "query"),
-        ("search_directory", "search", "query"),
-        ("findFile", "find", "pattern"),
-        ("find_file", "find", "pattern"),
+    let details: StepDetails = serde_json::from_value(value.clone()).ok()?;
+    let update = details.update;
+    if let Some(command) = update.run_command.and_then(|action| action.command_line) {
+        return Some(format!("$ {command}"));
+    }
+    if let Some(action) = update.read_url_content {
+        return match (
+            action.title.filter(|s| !s.is_empty()),
+            action.url.filter(|s| !s.is_empty()),
+        ) {
+            (Some(title), Some(url)) => Some(format!("fetch: {title} ({url})")),
+            (Some(title), None) => Some(format!("fetch: {title}")),
+            (None, Some(url)) => Some(format!("fetch: {url}")),
+            (None, None) => Some("fetch URL content".into()),
+        };
+    }
+    for (label, value) in [
+        ("view", update.view_file.and_then(|a| a.file_path)),
+        ("edit", update.edit_file.and_then(|a| a.file_path)),
+        ("create", update.create_file.and_then(|a| a.file_path)),
+        ("list", update.list_directory.and_then(|a| a.directory_path)),
+        ("search", update.search_directory.and_then(|a| a.query)),
+        ("find", update.find_file.and_then(|a| a.query)),
     ] {
-        if let Some(arg) = update
-            .get(field)
-            .and_then(|v| v.get(key))
-            .and_then(Value::as_str)
-            .filter(|s| shared::strings::is_non_empty(s))
-        {
-            return Some(format!("{label}: {arg}"));
+        if let Some(value) = value.filter(|s| !s.is_empty()) {
+            return Some(format!("{label}: {value}"));
         }
     }
     None
@@ -167,4 +176,29 @@ fn compact_state(state: &str) -> String {
 
 fn text<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
     value.get(key).and_then(Value::as_str)
+}
+
+#[cfg(test)]
+mod typed_activity_tests {
+    use super::*;
+    #[test]
+    fn url_fetch_summary_accepts_typed_camel_and_snake_case() {
+        for wire in [
+            r#"{"update":{"readUrlContent":{"url":"https://example.com","title":"Reference"}}}"#,
+            r#"{"update":{"read_url_content":{"url":"https://example.com","title":"Reference"}}}"#,
+        ] {
+            assert_eq!(
+                action_summary(&serde_json::from_str(wire).unwrap()).as_deref(),
+                Some("fetch: Reference (https://example.com)")
+            );
+        }
+    }
+    #[test]
+    fn trajectory_keeps_machine_error_code_without_human_message() {
+        let details: TrajectoryDetails =
+            serde_json::from_str(r#"{"state":"CANCELLED","error_code":"CAPACITY_UNAVAILABLE"}"#)
+                .unwrap();
+        assert_eq!(details.error_code.as_deref(), Some("CAPACITY_UNAVAILABLE"));
+        assert!(details.error.is_none());
+    }
 }
