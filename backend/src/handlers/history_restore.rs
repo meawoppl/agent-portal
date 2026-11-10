@@ -260,7 +260,7 @@ fn store_restore(
             .execute(conn)?;
         // Copy original timestamps: defaulting every row to transaction time
         // destroys chronological scrollback. Fresh IDs keep archives independent.
-        let row = |role: String, content: String, agent_type: String, created_at| {
+        let row = |role: String, content: String, agent_type: String, created_at, source_created_at: Option<chrono::NaiveDateTime>| {
             (
                 messages::session_id.eq(id),
                 messages::user_id.eq(user),
@@ -268,6 +268,7 @@ fn store_restore(
                 messages::content.eq(content),
                 messages::agent_type.eq(agent_type),
                 messages::created_at.eq(created_at),
+                messages::source_created_at.eq(source_created_at),
             )
         };
         let mut selected = Vec::new();
@@ -280,7 +281,7 @@ fn store_restore(
                 break;
             }
             bytes += content.len();
-            selected.push(row(line.role.clone(), content, line.agent_type.clone(), line.created_at));
+            selected.push(row(line.role.clone(), content, line.agent_type.clone(), line.created_at, line.source_created_at.map(|time| time.naive_utc())));
         }
         selected.reverse();
         let mode = match recipe.mode {
@@ -293,6 +294,7 @@ fn store_restore(
             shared::PortalMessage::text(notice).to_json().to_string(),
             agent.as_str().into(),
             chrono::Utc::now().naive_utc(),
+            None,
         ));
         for chunk in selected.chunks(500) {
             diesel::insert_into(messages::table).values(chunk).execute(conn)?;
@@ -316,6 +318,7 @@ mod tests {
     use super::*;
     fn line(text: &str) -> ArchiveMessageLine {
         ArchiveMessageLine {
+            source_created_at: None,
             id: Uuid::new_v4(),
             role: "user".into(),
             created_at: chrono::Utc::now().naive_utc(),

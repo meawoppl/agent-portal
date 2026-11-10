@@ -398,6 +398,7 @@ mod tests {
 
     fn bundle_with_one_line(u: Uuid, s: Uuid) -> (SessionArchiveManifest, SessionArchiveBundle) {
         let line = ArchiveMessageLine {
+            source_created_at: None,
             id: Uuid::from_u128(11),
             role: "user".into(),
             created_at: chrono::NaiveDate::from_ymd_opt(2026, 7, 11)
@@ -498,6 +499,7 @@ mod tests {
             .and_hms_opt(0, 0, 0)
             .unwrap();
         let line = |id: u128, secs: u32, text: &str| ArchiveMessageLine {
+            source_created_at: None,
             id: Uuid::from_u128(id),
             role: "user".into(),
             created_at: t0 + chrono::Duration::seconds(secs as i64),
@@ -527,6 +529,7 @@ mod tests {
 
     fn clone_line(l: &ArchiveMessageLine) -> ArchiveMessageLine {
         ArchiveMessageLine {
+            source_created_at: l.source_created_at,
             id: l.id,
             role: l.role.clone(),
             created_at: l.created_at,

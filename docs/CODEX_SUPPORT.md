@@ -385,3 +385,17 @@ disabled until the approval path can verify fresh matched human decisions across
 reconnects and restarts. [Issue #2396](https://github.com/meawoppl/agent-portal/issues/2396)
 tracks the request-matching, provenance, and capability-gating work needed before
 enabling them.
+
+
+## Item timing and imported clocks
+
+Codex item start/completion clocks and message phases survive display
+normalization. Completed command, MCP and reasoning cards show their recorded
+duration; commentary is muted, while partial and final answers keep normal
+answer styling. Invalid or absent durations do not produce a timing label.
+
+Imported scrollback uses the native record time when it is available, with
+turn clocks as a fallback for undated items. The original clock is stored as
+`source_created_at` for display and archived with the record. Portal ingestion
+time remains the replay cursor and retention age. Old launchers and records
+without a source clock continue to display the ingestion time.

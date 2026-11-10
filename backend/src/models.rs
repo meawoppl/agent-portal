@@ -210,6 +210,9 @@ pub struct Message {
     pub provenance_kind: Option<String>,
     pub provenance_session_id: Option<Uuid>,
     pub provenance_agent_type: Option<String>,
+    /// Original agent record clock; display only, never replay/retention.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_created_at: Option<NaiveDateTime>,
 }
 
 impl Message {
@@ -247,9 +250,13 @@ impl Message {
     }
 
     /// Build the typed [`shared::PortalMeta`] sidecar for this row. The backend
-    /// only ever populates `created_at` + `source`; `delivery` is frontend-owned.
+    /// populates persisted clocks and attribution; `delivery` is frontend-owned.
     pub fn portal_meta(&self, sender_name: Option<String>) -> shared::PortalMeta {
         shared::PortalMeta {
+            source_created_at: self.source_created_at.map(|time| {
+                time.and_utc()
+                    .to_rfc3339_opts(chrono::SecondsFormat::Micros, true)
+            }),
             created_at: Some(self.created_at_iso()),
             source: self.message_source(sender_name),
             delivery: None,
@@ -268,6 +275,16 @@ pub struct NewMessage {
     pub provenance_kind: Option<String>,
     pub provenance_session_id: Option<Uuid>,
     pub provenance_agent_type: Option<String>,
+}
+
+/// Historical records can carry an original clock without changing ordinary
+/// live inserts, whose missing source time remains explicitly unknown.
+#[derive(Debug, Insertable)]
+#[diesel(table_name = crate::schema::messages)]
+pub struct NewSourcedMessage {
+    #[diesel(embed)]
+    pub message: NewMessage,
+    pub source_created_at: Option<NaiveDateTime>,
 }
 
 #[derive(Debug, Queryable, Selectable, Serialize, Deserialize, Clone)]
@@ -792,6 +809,7 @@ mod tests {
 
     fn msg(role: &str, provenance_kind: Option<&str>) -> Message {
         Message {
+            source_created_at: None,
             id: Uuid::nil(),
             session_id: Uuid::nil(),
             role: role.to_string(),
@@ -835,7 +853,25 @@ mod tests {
     }
 
     #[test]
-    fn portal_meta_carries_created_at_and_source_only() {
+    fn native_display_clock_is_separate_from_server_replay_clock() {
+        let mut message = msg("assistant", None);
+        let native = chrono::DateTime::from_timestamp_millis(1_700_000_003_200).unwrap();
+        message.created_at = chrono::Utc::now().naive_utc();
+        message.source_created_at = Some(native.naive_utc());
+        let meta = message.portal_meta(None);
+        assert_eq!(meta.created_at, Some(message.created_at_iso()));
+        assert_eq!(
+            meta.source_created_at,
+            Some(native.to_rfc3339_opts(chrono::SecondsFormat::Micros, true))
+        );
+        assert_ne!(
+            shared::created_at_iso(Some(&meta)),
+            shared::display_at_iso(Some(&meta))
+        );
+    }
+
+    #[test]
+    fn portal_meta_carries_persisted_clocks_and_source() {
         let meta = msg("user", None).portal_meta(Some("Matt".to_string()));
         assert!(meta.created_at.is_some());
         assert!(meta.source.is_some());

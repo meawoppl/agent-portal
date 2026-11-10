@@ -153,3 +153,26 @@ fn unknown_wire_events_and_items_keep_raw_json_route() {
         ));
     }
 }
+
+#[test]
+fn commentary_and_answer_phases_keep_visible_group_content_and_style() {
+    use yew::virtual_dom::VNode;
+    for (phase, class) in [
+        ("commentary", "codex-commentary"),
+        ("partial_answer", "codex-answer"),
+        ("final_answer", "codex-answer"),
+    ] {
+        let wire = format!(
+            r#"{{"type":"item.completed","item":{{"type":"agentMessage","id":"x","text":"visible content","phase":"{phase}"}}}}"#
+        );
+        let event: CodexEvent = serde_json::from_str(&wire).unwrap();
+        let node = render_codex_frame_content(&event, Uuid::nil()).unwrap();
+        let VNode::VTag(tag) = node else {
+            panic!("expected phase wrapper")
+        };
+        assert!(tag
+            .attributes
+            .iter()
+            .any(|(key, value)| key == "class" && value.contains(class)));
+    }
+}

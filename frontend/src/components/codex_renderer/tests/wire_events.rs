@@ -368,3 +368,23 @@ fn normalized_image_keeps_portal_media_separate_from_provider_reference() {
         matches!(&item.payload, AppServerThreadItem::ImageGeneration { image: codex_codes::GeneratedImageRef::Inline { result }, .. } if result.is_empty())
     );
 }
+
+#[test]
+fn exec_compatible_items_keep_app_server_phase_and_clocks() {
+    for item in [
+        r#"{"type":"agentMessage","id":"x","text":"next step","phase":"commentary","startedAtMs":1000,"completedAtMs":4200}"#,
+        r#"{"type":"commandExecution","id":"x","command":"ls","status":"completed","durationMs":3200,"startedAtMs":1000,"completedAtMs":4200}"#,
+        r#"{"type":"mcpToolCall","id":"x","server":"docs","tool":"read","arguments":{},"status":"completed","durationMs":3200,"startedAtMs":1000,"completedAtMs":4200}"#,
+    ] {
+        let parsed: CodexItem = serde_json::from_str(item).unwrap();
+        let CodexItem::ThreadWithMetadata { metadata, .. } = &parsed else {
+            panic!("metadata discarded: {parsed:?}")
+        };
+        assert_eq!(metadata.started_at_ms, Some(1000));
+        assert_eq!(metadata.completed_at_ms, Some(4200));
+        assert_eq!(metadata.elapsed_ms(), Some(3200));
+        let encoded = serde_json::to_string(&parsed).unwrap();
+        let roundtrip: CodexItem = serde_json::from_str(&encoded).unwrap();
+        assert!(matches!(roundtrip, CodexItem::ThreadWithMetadata { .. }));
+    }
+}

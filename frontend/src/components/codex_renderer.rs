@@ -5,6 +5,8 @@ use yew::prelude::*;
 mod events;
 mod extended_items;
 mod hooks;
+
+mod item_metadata;
 mod lifecycle;
 mod messages;
 mod patch;
@@ -72,20 +74,8 @@ fn render_codex_event(
             turn_metrics,
         )),
         CodexEvent::TurnFailed { error } => Some(render_turn_failed(error.as_ref(), turn_metrics)),
-        CodexEvent::ItemStarted { item } | CodexEvent::ItemUpdated { item } => {
-            match item.as_ref() {
-                Some(CodexItem::Thread(ThreadItem::AgentMessage(it))) if bare_agent_message => {
-                    render_agent_message_content(&it.text, session_id)
-                }
-                item => render_item(item, false, session_id),
-            }
-        }
-        CodexEvent::ItemCompleted { item } => match item.as_ref() {
-            Some(CodexItem::Thread(ThreadItem::AgentMessage(it))) if bare_agent_message => {
-                render_agent_message_content(&it.text, session_id)
-            }
-            item => render_item(item, true, session_id),
-        },
+        CodexEvent::ItemStarted { item } | CodexEvent::ItemUpdated { item } => render_item(item.as_ref(), false, session_id, bare_agent_message),
+        CodexEvent::ItemCompleted { item } => render_item(item.as_ref(), true, session_id, bare_agent_message),
         CodexEvent::Error { error } => Some(messages::render_codex_error(error)),
         CodexEvent::HookCompleted { params } => hooks::render_hook_failure(params),
         CodexEvent::FileChangePatchUpdated { params } => Some(render_file_change_patch(
@@ -145,53 +135,97 @@ fn item_card_classes(completed: bool) -> &'static str {
     }
 }
 
-fn render_item(item: Option<&CodexItem>, completed: bool, session_id: Uuid) -> Option<Html> {
+fn render_thread_item(
+    item: &ThreadItem,
+    completed: bool,
+    session_id: Uuid,
+    bare_agent_message: bool,
+) -> Option<Html> {
+    match item {
+        ThreadItem::AgentMessage(it) if bare_agent_message => {
+            render_agent_message_content(&it.text, session_id)
+        }
+        ThreadItem::AgentMessage(it) => render_agent_message(&it.text, completed, session_id),
+        ThreadItem::Reasoning(it) => render_reasoning(&it.text, completed),
+        ThreadItem::CommandExecution(it) => Some(render_command_execution(it, completed)),
+        ThreadItem::FileChange(it) => Some(render_file_change(it, completed)),
+        ThreadItem::McpToolCall(it) => Some(render_mcp_tool_call(it, completed)),
+        ThreadItem::WebSearch(it) => Some(render_web_search(&it.query, completed)),
+        ThreadItem::TodoList(it) => Some(render_todo_list(&it.items, completed)),
+        ThreadItem::Error(it) => Some(render_error_block(Some(&it.message))),
+        // UserMessage is the user's prompt for the turn — emitted by the
+        // app-server protocol as the first item; the portal renders the
+        // user-typed prompt out-of-band (Claude wire shape), so suppress
+        // here to avoid duplication.
+        ThreadItem::UserMessage(_) => None,
+    }
+}
+
+fn render_item(
+    item: Option<&CodexItem>,
+    completed: bool,
+    session_id: Uuid,
+    bare_agent_message: bool,
+) -> Option<Html> {
     let item = item?;
     match item {
-        CodexItem::Thread(item) => match item {
-            ThreadItem::AgentMessage(it) => render_agent_message(&it.text, completed, session_id),
-            ThreadItem::Reasoning(it) => render_reasoning(&it.text, completed),
-            ThreadItem::CommandExecution(it) => Some(render_command_execution(it, completed)),
-            ThreadItem::FileChange(it) => Some(render_file_change(it, completed)),
-            ThreadItem::McpToolCall(it) => Some(render_mcp_tool_call(it, completed)),
-            ThreadItem::WebSearch(it) => Some(render_web_search(&it.query, completed)),
-            ThreadItem::TodoList(it) => Some(render_todo_list(&it.items, completed)),
-            ThreadItem::Error(it) => Some(render_error_block(Some(&it.message))),
-            // UserMessage is the user's prompt for the turn — emitted by the
-            // app-server protocol as the first item; the portal renders the
-            // user-typed prompt out-of-band (Claude wire shape), so suppress
-            // here to avoid duplication.
-            ThreadItem::UserMessage(_) => None,
-        },
-        CodexItem::AppServer(item) => match &item.payload {
-            AppServerThreadItem::ContextCompaction { .. } => {
-                Some(render_context_compaction_item(completed))
-            }
-            AppServerThreadItem::Reasoning {
-                summary, content, ..
-            } => render_reasoning(&reasoning_trace(summary, content), completed),
-            AppServerThreadItem::CollabAgentToolCall {
-                agents_states,
-                model,
-                prompt,
-                reasoning_effort,
-                status,
-                tool,
-                ..
-            } => Some(render_collab_agent_tool_call(
-                tool,
-                model.as_deref(),
-                reasoning_effort.as_ref(),
-                status,
-                prompt.as_deref(),
-                agents_states,
+        CodexItem::Thread(item) => {
+            render_thread_item(item, completed, session_id, bare_agent_message)
+        }
+        CodexItem::ThreadWithMetadata { item, metadata } => {
+            let show_duration = matches!(
+                item,
+                ThreadItem::Reasoning(_)
+                    | ThreadItem::CommandExecution(_)
+                    | ThreadItem::McpToolCall(_)
+            );
+            item_metadata::with_item_metadata(
+                render_thread_item(item, completed, session_id, bare_agent_message),
+                metadata,
                 completed,
-            )),
-            payload => Some(extended_items::render_extended_item(
-                payload,
-                completed,
-                item.portal_media.as_ref(),
-            )),
-        },
+                show_duration,
+            )
+        }
+        CodexItem::AppServer(item) => {
+            let metadata = item_metadata::CodexItemMetadata::from_app_server(item);
+            let show_duration = !matches!(
+                &item.payload,
+                AppServerThreadItem::UserMessage { .. }
+                    | AppServerThreadItem::AgentMessage { .. }
+                    | AppServerThreadItem::Plan { .. }
+                    | AppServerThreadItem::HookPrompt { .. }
+            );
+            let body = match &item.payload {
+                AppServerThreadItem::ContextCompaction { .. } => {
+                    Some(render_context_compaction_item(completed))
+                }
+                AppServerThreadItem::Reasoning {
+                    summary, content, ..
+                } => render_reasoning(&reasoning_trace(summary, content), completed),
+                AppServerThreadItem::CollabAgentToolCall {
+                    agents_states,
+                    model,
+                    prompt,
+                    reasoning_effort,
+                    status,
+                    tool,
+                    ..
+                } => Some(render_collab_agent_tool_call(
+                    tool,
+                    model.as_deref(),
+                    reasoning_effort.as_ref(),
+                    status,
+                    prompt.as_deref(),
+                    agents_states,
+                    completed,
+                )),
+                payload => Some(extended_items::render_extended_item(
+                    payload,
+                    completed,
+                    item.portal_media.as_ref(),
+                )),
+            };
+            item_metadata::with_item_metadata(body, &metadata, completed, show_duration)
+        }
     }
 }

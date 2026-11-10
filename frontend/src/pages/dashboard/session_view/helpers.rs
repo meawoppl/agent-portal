@@ -110,13 +110,34 @@ fn codex_file_change_paths_for_item(messages: &[RenderedMessage], item_id: &str)
         };
         match event {
             CodexEvent::ItemStarted {
-                item: Some(CodexItem::Thread(ThreadItem::FileChange(file_change))),
+                item:
+                    Some(
+                        CodexItem::Thread(ThreadItem::FileChange(file_change))
+                        | CodexItem::ThreadWithMetadata {
+                            item: ThreadItem::FileChange(file_change),
+                            ..
+                        },
+                    ),
             }
             | CodexEvent::ItemUpdated {
-                item: Some(CodexItem::Thread(ThreadItem::FileChange(file_change))),
+                item:
+                    Some(
+                        CodexItem::Thread(ThreadItem::FileChange(file_change))
+                        | CodexItem::ThreadWithMetadata {
+                            item: ThreadItem::FileChange(file_change),
+                            ..
+                        },
+                    ),
             }
             | CodexEvent::ItemCompleted {
-                item: Some(CodexItem::Thread(ThreadItem::FileChange(file_change))),
+                item:
+                    Some(
+                        CodexItem::Thread(ThreadItem::FileChange(file_change))
+                        | CodexItem::ThreadWithMetadata {
+                            item: ThreadItem::FileChange(file_change),
+                            ..
+                        },
+                    ),
             } if file_change.id == item_id => {
                 push_file_change_paths(&mut paths, &mut seen, &file_change.changes);
             }
@@ -537,13 +558,13 @@ fn classify_codex_event(output: &str) -> Option<ActivityTag> {
                 // a bounded diagnostic fallback, so visible work gets a tick.
                 _ => Some(ActivityTag::Assistant),
             },
-            CodexItem::Thread(ThreadItem::Error(_)) => Some(ActivityTag::Error),
-            CodexItem::Thread(ThreadItem::CommandExecution(ref it))
-                if command_execution_reads_file(&it.command) =>
-            {
-                Some(ActivityTag::Read)
-            }
-            CodexItem::Thread(
+            CodexItem::Thread(item) | CodexItem::ThreadWithMetadata { item, .. } => match item {
+                ThreadItem::Error(_) => Some(ActivityTag::Error),
+                ThreadItem::CommandExecution(ref it)
+                    if command_execution_reads_file(&it.command) =>
+                {
+                    Some(ActivityTag::Read)
+                }
                 ThreadItem::AgentMessage(_)
                 | ThreadItem::Reasoning(_)
                 | ThreadItem::CommandExecution(_)
@@ -551,8 +572,8 @@ fn classify_codex_event(output: &str) -> Option<ActivityTag> {
                 | ThreadItem::McpToolCall(_)
                 | ThreadItem::WebSearch(_)
                 | ThreadItem::TodoList(_)
-                | ThreadItem::UserMessage(_),
-            ) => Some(ActivityTag::Assistant),
+                | ThreadItem::UserMessage(_) => Some(ActivityTag::Assistant),
+            },
         },
         CodexEvent::TurnCompleted { .. } | CodexEvent::TurnFailed { .. } => {
             Some(ActivityTag::Result)
@@ -1177,6 +1198,7 @@ mod tests {
         RenderedMessage::new(
             format!(r#"{{"type":"user","content":"{content}"}}"#),
             Some(shared::PortalMeta {
+                source_created_at: None,
                 created_at: None,
                 source: None,
                 delivery: Some(shared::DeliveryMeta {

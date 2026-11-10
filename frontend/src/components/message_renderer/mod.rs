@@ -16,8 +16,8 @@ use dispatch::FrameRenderContext;
 pub use group_renderer::MessageGroupRenderer;
 pub use grouping::{group_is_turn_terminator, group_messages, thinking_chip_starts};
 
-/// Format an already-extracted `PortalMeta.created_at` ISO string as local time.
-/// Takes an already-extracted `PortalMeta.created_at` value rather than raw
+/// Format the typed sidecar's display clock as local time.
+/// Takes an already-extracted timestamp rather than raw
 /// message JSON so the renderer only reads the typed sidecar once.
 pub(super) fn local_timestamp(iso: &str) -> Option<String> {
     let ms = js_sys::Date::parse(iso);
@@ -62,8 +62,7 @@ pub struct MessageRendererProps {
 
 #[function_component(MessageRenderer)]
 pub fn message_renderer(props: &MessageRendererProps) -> Html {
-    let raw_iso = props.message.raw_iso();
-    let ts = raw_iso.and_then(local_timestamp);
+    let ts = props.message.display_iso().and_then(local_timestamp);
     dispatch::render_frame(FrameRenderContext {
         message: &props.message,
         agent_type: props.agent_type,

@@ -219,7 +219,9 @@ fn store_restore(
         crate::db::session_lifecycle::pause(conn, id)?;
         let mut rows: Vec<_> = lines
             .into_iter()
-            .map(|line| crate::models::NewMessage {
+            .map(|line| crate::models::NewSourcedMessage {
+                source_created_at: line.source_created_at.map(|time| time.naive_utc()),
+                message: crate::models::NewMessage {
                 session_id: id,
                 user_id: user,
                 role: line.role,
@@ -228,6 +230,7 @@ fn store_restore(
                 provenance_kind: None,
                 provenance_session_id: None,
                 provenance_agent_type: None,
+                },
             })
             .collect();
         let scrollback = if trimmed {
@@ -235,13 +238,15 @@ fn store_restore(
         } else {
             "The transcript was copied from history."
         };
-        rows.push(crate::models::NewMessage {
+        rows.push(crate::models::NewSourcedMessage {
+            source_created_at: None,
+            message: crate::models::NewMessage {
             session_id: id,
             user_id: user,
             role: "assistant".into(),
             agent_type: rows
                 .last()
-                .map(|row| row.agent_type.clone())
+                .map(|row| row.message.agent_type.clone())
                 .unwrap_or_default(),
             content: shared::PortalMessage::text(format!(
                 "**Restored from history** (session `{}`)\n\n{scrollback} This session is paused; use **Resume** to continue the original conversation.",
@@ -252,6 +257,7 @@ fn store_restore(
             provenance_kind: None,
             provenance_session_id: None,
             provenance_agent_type: None,
+            },
         });
         // Stay below PostgreSQL's bind-parameter limit on long transcripts.
         for chunk in rows.chunks(500) {
@@ -269,6 +275,7 @@ mod tests {
 
     fn line(text: &str) -> ArchiveMessageLine {
         ArchiveMessageLine {
+            source_created_at: None,
             id: Uuid::new_v4(),
             role: "user".into(),
             created_at: chrono::NaiveDateTime::default(),

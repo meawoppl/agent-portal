@@ -357,14 +357,28 @@ fn archive_one_session(
     let rows = messages::table
         .filter(messages::id.eq_any(&hot_ids))
         .order((messages::created_at.asc(), messages::id.asc()))
-        .select((messages::id, messages::role, messages::content,
-            messages::created_at, messages::agent_type))
-        .load_iter::<(uuid::Uuid, String, String, chrono::NaiveDateTime, String),
-            diesel::pg::PgRowByRowLoadingMode>(conn)?;
+        .select((
+            messages::id,
+            messages::role,
+            messages::content,
+            messages::created_at,
+            messages::agent_type,
+            messages::source_created_at,
+        ))
+        .load_iter::<(
+            uuid::Uuid,
+            String,
+            String,
+            chrono::NaiveDateTime,
+            String,
+            Option<chrono::NaiveDateTime>,
+        ), diesel::pg::PgRowByRowLoadingMode>(conn)?;
     let current = rows.map(|row| {
-        let (id, role, content, created_at, agent_type) = row.map_err(std::io::Error::other)?;
+        let (id, role, content, created_at, agent_type, source_created_at) =
+            row.map_err(std::io::Error::other)?;
         let content = serde_json::from_str(&content).unwrap_or(serde_json::Value::String(content));
         Ok(ArchiveMessageLine {
+            source_created_at: source_created_at.map(|time| time.and_utc()),
             id,
             role,
             content,
@@ -1335,7 +1349,11 @@ mod retention_archive_hold_tests {
             let user = crate::test_support::insert_user(&mut *conn, "retention-local-ok");
             let sid = make_session(&mut *conn, user.id);
             let old = chrono::Utc::now().naive_utc() - chrono::Duration::days(40);
-            insert_old_message(&mut *conn, sid, user.id, old);
+            let mid = insert_old_message(&mut *conn, sid, user.id, old);
+            let native = chrono::DateTime::from_timestamp_millis(1_700_000_003_200).unwrap();
+            diesel::update(messages::table.find(mid))
+                .set(messages::source_created_at.eq(Some(native.naive_utc())))
+                .execute(conn)?;
 
             let tmp = tempfile::tempdir().expect("tmp");
             let cfg = ArchiveConfig {
@@ -1353,6 +1371,16 @@ mod retention_archive_hold_tests {
             assert!(
                 held.is_empty(),
                 "successful local archive should not hold trim, got {held:?}"
+            );
+            let archived = runtime
+                .store
+                .read_transcript_lines(user.id, sid)
+                .unwrap()
+                .unwrap();
+            assert_eq!(archived[0].source_created_at, Some(native));
+            assert_eq!(
+                archived[0].created_at.and_utc().timestamp_micros(),
+                old.and_utc().timestamp_micros()
             );
             Ok(())
         });

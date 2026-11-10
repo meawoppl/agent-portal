@@ -77,6 +77,14 @@ pub fn imported_session_id(user: Uuid, launcher: Uuid, agent: AgentType, source:
 mod tests {
     use super::*;
     #[test]
+    fn messages_from_older_launchers_decode_without_a_timestamp() {
+        let message: ImportedMessage =
+            serde_json::from_str(r#"{"role":"assistant","content":{"type":"item.completed"}}"#)
+                .unwrap();
+        assert!(message.timestamp.is_none());
+    }
+
+    #[test]
     fn import_identity_is_retry_safe_and_owner_host_agent_scoped() {
         let user = Uuid::new_v4();
         let host = Uuid::new_v4();

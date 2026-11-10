@@ -141,6 +141,7 @@ fn build_fixture(pool: backend::db::DbPool) -> Fixture {
     );
     m1.message_counts.insert("user".into(), 1);
     let line = archive_format::ArchiveMessageLine {
+        source_created_at: None,
         id: Uuid::new_v4(),
         role: "user".to_string(),
         created_at: day(14),

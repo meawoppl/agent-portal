@@ -1,3 +1,4 @@
+use super::item_metadata::CodexItemMetadata;
 use codex_codes::{
     io::items::{FileUpdateChange, ThreadItem},
     protocol::ThreadItemPayload as AppServerThreadItem,
@@ -87,6 +88,13 @@ pub enum CodexEvent {
 pub enum CodexItem {
     /// Exec-level item wrapper used by the stable codex renderer paths.
     Thread(ThreadItem),
+    /// Exec-compatible display payload with app-server timing/phase preserved.
+    ThreadWithMetadata {
+        #[serde(flatten)]
+        item: ThreadItem,
+        #[serde(flatten)]
+        metadata: CodexItemMetadata,
+    },
     /// App-server item wrapper for item variants that the exec-level helper
     /// model intentionally does not expose yet, such as `contextCompaction`,
     /// `collabAgentToolCall`, and reasoning carried as `summary`/`content`.
@@ -116,6 +124,9 @@ impl std::ops::Deref for CodexAppServerItem {
 impl<'de> Deserialize<'de> for CodexItem {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = serde_json::Value::deserialize(deserializer)?;
+        // Parse metadata before normalizing the payload, including older
+        // exec-compatible records that lack newer app-server required fields.
+        let metadata = CodexItemMetadata::deserialize(&value).map_err(serde::de::Error::custom)?;
         // App-server reasoning puts its trace in `summary`/`content`. The
         // exec-level item only has `text`, so trying it first would parse
         // successfully and silently throw the trace away.
@@ -123,7 +134,11 @@ impl<'de> Deserialize<'de> for CodexItem {
             && (value.get("summary").is_some() || value.get("content").is_some());
         if !app_server_reasoning {
             if let Ok(item) = serde_json::from_value::<ThreadItem>(value.clone()) {
-                return Ok(Self::Thread(item));
+                return Ok(if metadata.has_values() {
+                    Self::ThreadWithMetadata { item, metadata }
+                } else {
+                    Self::Thread(item)
+                });
             }
         }
         serde_json::from_value::<CodexAppServerItem>(value)
@@ -308,7 +323,9 @@ pub fn thread_item_id(item: &ThreadItem) -> &str {
 
 pub fn codex_item_id(item: &CodexItem) -> Option<&str> {
     match item {
-        CodexItem::Thread(it) => Some(thread_item_id(it)),
+        CodexItem::Thread(it) | CodexItem::ThreadWithMetadata { item: it, .. } => {
+            Some(thread_item_id(it))
+        }
         CodexItem::AppServer(item) => match &item.payload {
             AppServerThreadItem::UserMessage { id, .. }
             | AppServerThreadItem::HookPrompt { id, .. }

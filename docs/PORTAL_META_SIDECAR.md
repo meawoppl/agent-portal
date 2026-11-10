@@ -78,6 +78,9 @@ pub struct PortalMeta {
     /// Server-assigned persisted-row timestamp (ISO-8601 µs); reconnect watermark.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<String>,
+    /// Original agent record clock, display-only; never replay or retention.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_created_at: Option<String>,
     /// Who produced the message (folds old sender + origin into one sum type).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<MessageSource>,
@@ -251,3 +254,15 @@ contract. Land/agree it first; both sides build against it.
 3. Flat fields + `_`-injection are removed only in slice 5, after the frontend
    reads `meta` in production.
 4. Each PR bumps `[workspace.package] version`; coordinate numbers in chat.
+
+
+## Message clocks
+
+`created_at` is the server ingestion clock and remains the reconnect cursor,
+retention age and stable render-key input. Imported native records may also
+carry `source_created_at`, stored in its own nullable message column and
+preserved in archives. Renderers use `display_at_iso` to prefer that original
+clock; replay and ordering continue to use `created_at_iso`. A missing original
+clock stays unknown and display falls back to the server clock. Importing old
+records therefore does not immediately age them out of hot retention or move
+the reconnect watermark into the past.

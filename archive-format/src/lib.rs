@@ -297,6 +297,9 @@ pub struct ArchivedMediaMeta {
 /// never shrink the archived transcript).
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ArchiveMessageLine {
+    /// Optional original agent clock, separate from the server archive order.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_created_at: Option<chrono::DateTime<chrono::Utc>>,
     pub id: Uuid,
     pub role: String,
     pub created_at: NaiveDateTime,
@@ -510,6 +513,7 @@ mod tests {
             .and_hms_opt(0, 0, 0)
             .unwrap();
         let line = |id: u128, secs: u32, text: &str| ArchiveMessageLine {
+            source_created_at: None,
             id: Uuid::from_u128(id),
             role: "user".into(),
             created_at: t0 + chrono::Duration::seconds(secs as i64),
@@ -544,6 +548,7 @@ mod tests {
             .and_hms_opt(0, 0, 0)
             .unwrap();
         let line = |id, text: &str| ArchiveMessageLine {
+            source_created_at: None,
             id: Uuid::from_u128(id),
             role: "user".into(),
             created_at: t,
@@ -591,6 +596,7 @@ mod tests {
 
     pub(crate) fn clone_line(l: &ArchiveMessageLine) -> ArchiveMessageLine {
         ArchiveMessageLine {
+            source_created_at: l.source_created_at,
             id: l.id,
             role: l.role.clone(),
             created_at: l.created_at,
@@ -685,5 +691,30 @@ mod tests {
         assert_eq!(parsed.scheduled_task_id, None);
         assert!(parsed.claude_args.is_empty());
         assert_eq!(parsed.archived_by_version, None);
+    }
+}
+
+#[cfg(test)]
+mod original_clock_tests {
+    use super::*;
+    #[test]
+    fn archive_roundtrip_preserves_display_clock_and_accepts_legacy_lines() {
+        let clock = chrono::DateTime::from_timestamp_millis(1_700_000_003_200).unwrap();
+        let line = ArchiveMessageLine {
+            source_created_at: Some(clock),
+            id: Uuid::nil(),
+            role: "assistant".into(),
+            created_at: chrono::DateTime::from_timestamp(1_800_000_000, 0)
+                .unwrap()
+                .naive_utc(),
+            agent_type: "codex".into(),
+            content: serde_json::Value::Null,
+        };
+        let encoded = serde_json::to_vec(&line).unwrap();
+        let decoded: ArchiveMessageLine = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(decoded.source_created_at, Some(clock));
+        assert_eq!(decoded.created_at, line.created_at);
+        let legacy: ArchiveMessageLine = serde_json::from_str(r#"{"id":"00000000-0000-0000-0000-000000000000","role":"assistant","created_at":"2026-11-10T01:00:00","agent_type":"codex","content":null}"#).unwrap();
+        assert!(legacy.source_created_at.is_none());
     }
 }

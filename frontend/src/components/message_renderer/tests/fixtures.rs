@@ -136,6 +136,7 @@ pub(super) fn plain_user_text_from_sender(
     RenderedMessage::new(
         content,
         Some(shared::PortalMeta {
+            source_created_at: None,
             created_at: Some("2026-05-17T10:00:00.000Z".to_string()),
             source: Some(shared::MessageSource::Human {
                 account_id: user_id,
@@ -154,6 +155,7 @@ pub(super) fn tool_result_from_sender(
     RenderedMessage::new(
         read_tool_result_user_message(tool_use_id),
         Some(shared::PortalMeta {
+            source_created_at: None,
             created_at: Some("2026-05-17T10:00:00.000Z".to_string()),
             source: Some(shared::MessageSource::Human {
                 account_id: user_id,
