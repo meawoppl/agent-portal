@@ -352,7 +352,7 @@ Can be developed and tested with static fixture data before the proxy supports C
 ## Generated images
 
 Generated images use the Portal media upload endpoint, so the transcript stores
-an authenticated media reference and the archive receives the image bytes.
+an authenticated media reference and the archive receives the image bytes when media archiving is enabled.
 The generation card keeps status, revised prompt and provider failures; the
 adjacent media message displays the actual image. Provider attachment IDs are
 kept distinct from Portal media IDs.
@@ -366,3 +366,6 @@ limited to 32 files, approximately 14 MiB per file and 64 MiB total, with a
 24-hour lifetime. Copy important files promptly: oldest files are removed when
 the budget fills. Oversized images remain recoverable from their native Codex
 saved file or history. The small per-turn media-reference cache is also capped.
+
+Provider-only attachment IDs without inline bytes or a local saved path remain
+visible as metadata; the Portal does not fetch attachments from the provider.

@@ -569,4 +569,18 @@ mod tests {
         );
         assert_eq!(tokio::fs::read(&image_path).await.unwrap(), png());
     }
+    #[tokio::test]
+    async fn child_turn_starts_do_not_discard_parent_image_references() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut normalizer = normalizer(dir.path(), None);
+        normalizer.set_main_thread("parent");
+        normalizer
+            .references
+            .insert("image".into(), CodexImageMedia::default());
+        for (thread, count) in [("child", 1), ("parent", 0)] {
+            let mut msg = ServerMessage::from_json_str(&format!(r#"{{"method":"turn/started","params":{{"threadId":"{thread}","turn":{{"id":"turn","status":"inProgress","items":[]}}}}}}"#)).unwrap();
+            assert!(normalizer.normalize(&mut msg).await.is_none());
+            assert_eq!(normalizer.references.len(), count);
+        }
+    }
 }
