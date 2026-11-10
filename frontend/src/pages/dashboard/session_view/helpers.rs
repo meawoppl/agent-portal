@@ -680,7 +680,7 @@ pub(super) fn reconcile_pending_sends(
     tag: ActivityTag,
     output: &str,
 ) {
-    use crate::components::codex_renderer::events::CodexEvent;
+    use crate::components::codex_renderer::CodexEvent;
 
     if pending_sends.is_empty() {
         return;
@@ -715,13 +715,8 @@ pub(super) fn reconcile_pending_sends(
                 serde_json::from_str::<shared::ClaudeOutput>(output),
                 Ok(shared::ClaudeOutput::Result(_))
             ) || matches!(
-                serde_json::from_str::<crate::components::codex_renderer::events::CodexEvent>(
-                    output
-                ),
-                Ok(
-                    crate::components::codex_renderer::events::CodexEvent::TurnCompleted { .. }
-                        | crate::components::codex_renderer::events::CodexEvent::TurnFailed { .. }
-                )
+                serde_json::from_str::<CodexEvent>(output),
+                Ok(CodexEvent::TurnCompleted { .. } | CodexEvent::TurnFailed { .. })
             ) =>
         {
             // A failed result still proves the turn reached the agent. Keep
