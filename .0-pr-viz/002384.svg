@@ -38,7 +38,9 @@
 <text x="1070" y="775" font-size="26" fill="#9ece6a">Completion preserves capacity state</text>
 <text x="1070" y="818" font-size="23" fill="#c0caf5">Dashboard and follow agree on Throttled.</text>
 <text x="1070" y="855" font-size="23" fill="#c0caf5">Successful completion returns to Idle.</text></g>
-<text x="65" y="990" font-size="25" fill="#c0caf5">Regression coverage: retry metadata, completion ordering, follow state, edit stack and rendering.</text>
-<text x="65" y="1035" font-size="23" fill="#a9b1d6">Old message-only archives remain terminal errors; future SDK codes keep a generic visible fallback.</text>
+<text x="65" y="990" font-size="25" fill="#c0caf5">Old message-only archives remain terminal.</text>
+<text x="1045" y="990" font-size="25" fill="#c0caf5">Tests cover metadata and completion ordering.</text>
+<text x="65" y="1035" font-size="23" fill="#a9b1d6">Future codes retain a generic visible fallback.</text>
+<text x="1045" y="1035" font-size="23" fill="#a9b1d6">Follow, queue release and rendering are covered.</text>
 <text x="55" y="1172" font-size="22" fill="#e0af68">Scope: preserves provider signals; does not add automatic retries or change the provider's capacity limits.</text>
 </g></svg>
