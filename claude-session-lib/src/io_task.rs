@@ -1091,7 +1091,7 @@ pub(crate) async fn claude_io_task(
 
 /// Typed account-limit timestamps are authoritative, including dates beyond
 /// tomorrow. The text parser exists only for transcripts from older CLIs.
-fn assistant_usage_limit(asst: &claude_codes::AssistantMessage) -> Option<(String, String)> {
+fn assistant_usage_limit(asst: &claude_codes::io::AssistantMessage) -> Option<(String, String)> {
     if asst.parent_tool_use_id.is_some() || asst.agent_id.is_some() {
         return None;
     }
