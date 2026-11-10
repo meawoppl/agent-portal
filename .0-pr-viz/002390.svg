@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200"><rect width="2000" height="1200" fill="#1a1b26"/><g font-family="Arial, sans-serif">
+<text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2390 · Show Codex image, subagent and dynamic tool activity</text>
+<text x="55" y="106" font-size="34" fill="#e6e9f5">Typed Codex items disappeared; visible cards now preserve their lifecycle identity.</text>
+<text x="55" y="150" font-size="28" fill="#c0caf5">New tool work receives matching activity ticks and tool-call metrics.</text>
+<path d="M55 177H1945" stroke="#3d4666"/>
+<path d="M1000 190V1140" stroke="#565f89" stroke-dasharray="9 9"/>
+<text x="65" y="230" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1045" y="230" font-size="22" fill="#9ece6a">AFTER</text>
+<g><rect x="65" y="270" width="875" height="190" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="90" y="315" font-size="26" fill="#f7768e">render_item: AppServer falls through to None</text>
+<text x="90" y="358" font-size="23" fill="#c0caf5">ImageGeneration, SubAgentActivity, DynamicToolCall</text>
+<text x="90" y="393" font-size="23" fill="#c0caf5">and other valid items silently disappear.</text>
+</g>
+<g><rect x="1045" y="270" width="875" height="190" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1070" y="315" font-size="26" fill="#9ece6a">render_extended_item: cards or diagnostics</text>
+<text x="1070" y="358" font-size="23" fill="#c0caf5">Image, sub-agent, dynamic tool and plan cards.</text>
+<text x="1070" y="393" font-size="23" fill="#c0caf5">Other typed items get a bounded JSON preview.</text>
+</g>
+<g><rect x="65" y="515" width="875" height="190" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="90" y="560" font-size="26" fill="#f7768e">codex_item_id recognizes only three variants</text>
+<text x="90" y="603" font-size="23" fill="#c0caf5">New cards would repeat started/completed stages.</text>
+<text x="90" y="638" font-size="23" fill="#c0caf5">A raw fallback alone cannot fix grouping.</text>
+</g>
+<g><rect x="1045" y="515" width="875" height="190" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1070" y="560" font-size="26" fill="#9ece6a">Every typed item retains its id</text>
+<text x="1070" y="603" font-size="23" fill="#c0caf5">Lifecycle dedup keeps the final item card.</text>
+<text x="1070" y="638" font-size="23" fill="#c0caf5">Unknown wire variants keep RawJson routing.</text>
+</g>
+<g><rect x="65" y="760" width="875" height="190" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="90" y="805" font-size="26" fill="#f7768e">Visible work is missing from activity and metrics</text>
+<text x="90" y="848" font-size="23" fill="#c0caf5">WebSearch omitted from tool-call count.</text>
+<text x="90" y="883" font-size="23" fill="#c0caf5">App-server-only items have no sparkline tick.</text>
+</g>
+<g><rect x="1045" y="760" width="875" height="190" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1070" y="805" font-size="26" fill="#9ece6a">item_counts_as_tool covers new tool work</text>
+<text x="1070" y="848" font-size="23" fill="#c0caf5">Sub-agent starts count; later status updates do not.</text>
+<text x="1070" y="883" font-size="23" fill="#c0caf5">Visible app-server cards get activity ticks.</text>
+</g>
+<text x="65" y="1030" font-size="23" fill="#a9b1d6">Image bytes do not enter diagnostic previews.</text>
+<text x="1045" y="1030" font-size="23" fill="#a9b1d6">Preview serialization stops after 4096 bytes.</text>
+<text x="55" y="1172" font-size="22" fill="#e0af68">Scope: image-generation status is visible; uploading image bytes and durable media references remain a separate follow-up.</text>
+</g></svg>
