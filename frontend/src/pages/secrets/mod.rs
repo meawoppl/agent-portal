@@ -23,25 +23,13 @@ use yew_router::prelude::*;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
-    Personal,
-    Shared,
-    Organization,
+    Active,
     Deleted,
 }
 impl Tab {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Personal => "Personal",
-            Self::Shared => "Shared with me",
-            Self::Organization => "Organization",
-            Self::Deleted => "Deleted",
-        }
-    }
     fn query(self) -> &'static str {
         match self {
-            Self::Personal => "scope=personal",
-            Self::Shared => "scope=shared",
-            Self::Organization => "scope=organization",
+            Self::Active => "deleted=false",
             Self::Deleted => "deleted=true",
         }
     }
@@ -66,6 +54,8 @@ fn audience(secret: &SecretMetadata) -> String {
 pub struct SecretsProps {
     #[prop_or_default]
     pub job_id: Option<String>,
+    #[prop_or_default]
+    pub embedded: bool,
 }
 pub enum Msg {
     Load,
@@ -154,7 +144,7 @@ impl Component for SecretsPage {
             ctx.link().send_message(Msg::RefreshJob);
         }
         Self {
-            tab: Tab::Personal,
+            tab: Tab::Active,
             response: None,
             selected: None,
             versions: None,
@@ -529,27 +519,95 @@ impl Component for SecretsPage {
             .response
             .as_ref()
             .is_some_and(|r| r.can_manage_organization);
-        html! {<main class="secrets-page"><header class="secrets-heading"><div><h1>{"Secrets"}</h1><p>{"Manage access without revealing saved values."}</p></div><Link<Route> to={Route::Dashboard}>{"Back to sessions"}</Link<Route>></header>
-            <p class="secrets-notice">{"Saved values always show Configured. No current or historical saved value can be revealed or copied in this page."}</p>
-            <nav class="secrets-tabs" aria-label="Secret views">{for [Tab::Personal,Tab::Shared,Tab::Organization,Tab::Deleted].map(|tab|html!{<button type="button" aria-pressed={(self.tab==tab).to_string()} disabled={self.busy} onclick={ctx.link().callback(move |_|Msg::Tab(tab))}>{tab.label()}</button>})}</nav>
-            if let Some(error)=&self.error {<p role="alert" class="secrets-error">{error}</p>}
-            <div class="secrets-actions"><button disabled={self.busy} onclick={ctx.link().callback(|_|Msg::Load)}>{"Refresh"}</button>if self.tab==Tab::Personal || (self.tab==Tab::Organization && can_publish){<button disabled={self.busy} onclick={ctx.link().callback(|_|Msg::Create)}>{"Create secret"}</button>}</div>
-            if self.tab==Tab::Organization {<p>{"Organization secrets are available to every active member, including future members. Portal administrators are the designated organization-secret curators. Personal grants remain separate."}</p>}
-            if self.tab==Tab::Deleted {<p>{"Deleted secrets keep their name reserved and retain every encrypted version. Reads and execution remain disabled until an authorized restore."}</p>}
-            if let Some(replacing)=self.editing {<ValueForm key={format!("{}-{replacing}",self.selected.map(|id|id.to_string()).unwrap_or_default())} {replacing} can_publish={can_publish} on_submit={ctx.link().callback(Msg::Save)} on_cancel={ctx.link().callback(|_|Msg::Cancel)} />}
-            <div class="secrets-layout"><section aria-label="Secrets">{match &self.response{None=>html!{<p>{"Loading secrets…"}</p>},Some(response)=>{let rows:Vec<_>=response.secrets.iter().filter(|s|visible(s,self.tab)).collect();if rows.is_empty(){html!{<p>{"No secrets in this view."}</p>}}else{html!{<ul class="secrets-list">{for rows.into_iter().map(|secret|{let id=secret.id;metadata_card(secret,ctx.link().callback(move |_|Msg::Select(id)))})}</ul>}}}}}</section>
-            {self.detail(ctx)}
+        let on_view = ctx.link().callback(|event: Event| {
+            let value = event
+                .target_unchecked_into::<web_sys::HtmlSelectElement>()
+                .value();
+            Msg::Tab(if value == "deleted" {
+                Tab::Deleted
+            } else {
+                Tab::Active
+            })
+        });
+        let on_action = ctx.link().callback(|event: Event| {
+            let input = event.target_unchecked_into::<web_sys::HtmlSelectElement>();
+            let value = input.value();
+            input.set_value("");
+            if value == "create" {
+                Msg::Create
+            } else {
+                Msg::Load
+            }
+        });
+        html! {<section class={classes!("secrets-page",ctx.props().embedded.then_some("secrets-embedded"))} aria-label="Secrets management">
+            <header class="secrets-heading"><div>
+                if ctx.props().embedded {<h2>{"Secrets"}</h2>} else {<h1>{"Secrets"}</h1>}
+                <p>{"Manage access and versions. Saved values stay hidden."}</p>
             </div>
+            if !ctx.props().embedded {<Link<Route> to={Route::Dashboard}>{"Back to sessions"}</Link<Route>>}
+            </header>
+            <div class="secrets-toolbar">
+                <label>{"View"}<select value={if self.tab==Tab::Deleted{"deleted"}else{"active"}} disabled={self.busy} onchange={on_view}>
+                    <option value="active">{"Active secrets"}</option><option value="deleted">{"Deleted secrets"}</option>
+                </select></label>
+                <label>{"Actions"}<select value="" disabled={self.busy} onchange={on_action}>
+                    <option value="" disabled=true>{"Choose an action…"}</option>
+                    if self.tab==Tab::Active {<option value="create">{"Create secret"}</option>}
+                    <option value="refresh">{"Refresh"}</option>
+                </select></label>
+            </div>
+            if let Some(error)=&self.error {<p role="alert" class="secrets-error">{error}</p>}
+            if self.tab==Tab::Deleted {<p class="secrets-notice">{"Deleted secrets retain all versions and reserve their names. Restore is required before use."}</p>}
+            if let Some(replacing)=self.editing {<ValueForm key={format!("{}-{replacing}",self.selected.map(|id|id.to_string()).unwrap_or_default())} {replacing} can_publish={can_publish} on_submit={ctx.link().callback(Msg::Save)} on_cancel={ctx.link().callback(|_|Msg::Cancel)} />}
+            {self.namespace_table(ctx, SecretNamespace::Personal)}
+            <hr class="secrets-divider"/>
+            {self.namespace_table(ctx, SecretNamespace::Organization)}
+            {self.detail(ctx)}
             {self.credentials_view(ctx)}
             if let Some(job)=&self.job {{render_job(job,ctx.link().callback(|_|Msg::RefreshJob))}}
-        </main>}
+        </section>}
     }
 }
 
 impl SecretsPage {
+    fn namespace_table(&self, ctx: &Context<Self>, namespace: SecretNamespace) -> Html {
+        let (title, description) = match namespace {
+            SecretNamespace::Personal => (
+                "Personal",
+                "Your personal secrets and those shared with you.",
+            ),
+            SecretNamespace::Organization => (
+                "Organization",
+                "Available to all active organization members, including future members.",
+            ),
+        };
+        let rows = self.response.as_ref().map(|response| {
+            response
+                .secrets
+                .iter()
+                .filter(|secret| secret.namespace == namespace && visible(secret, self.tab))
+                .collect::<Vec<_>>()
+        });
+        html! {<section class="secrets-namespace" aria-label={format!("{title} secrets")}>
+            <header><h3>{title}</h3><p>{description}</p></header>
+            <div class="secrets-table-scroll"><table class="secrets-table" aria-label={format!("{title} secrets")}>
+                <thead><tr><th scope="col">{"Name"}</th><th scope="col">{"Value"}</th><th scope="col">{"Version"}</th><th scope="col">{"Owner"}</th><th scope="col">{"Updated"}</th></tr></thead>
+                <tbody>{match rows {
+                    None => html!{<tr><td colspan="5">{if self.error.is_some(){"Secrets could not be loaded."}else{"Loading secrets…"}}</td></tr>},
+                    Some(rows) if rows.is_empty() => html!{<tr><td colspan="5" class="secrets-empty">{format!("No {}{} secrets.",if self.tab==Tab::Deleted{"deleted "}else{""},title.to_lowercase())}</td></tr>},
+                    Some(rows) => html!{<>{for rows.into_iter().map(|secret| {
+                        let id=secret.id;
+                        let owner=self.members.iter().find(|member|member.user_id==secret.owner_user_id)
+                            .map(compact_member_label).unwrap_or_else(||secret.owner_user_id.to_string());
+                        metadata_row(secret, &owner, self.selected==Some(id), &utils::format_timestamp(&secret.updated_at), ctx.link().callback(move |_|Msg::Select(id)))
+                    })}</>},
+                }}</tbody>
+            </table></div>
+        </section>}
+    }
     fn detail(&self, ctx: &Context<Self>) -> Html {
         let Some(secret) = self.current() else {
-            return html! {<section><p>{"Select a secret to manage its access and version history."}</p></section>};
+            return html! {};
         };
         html! {<section class="secrets-detail" aria-label="Secret details"><h2>{&secret.name}</h2><span class="secrets-configured">{"Configured"}</span><p>{&secret.description}</p>
             <dl><dt>{"Audience"}</dt><dd>{audience(secret)}</dd><dt>{"Owner"}</dt><dd>{self.member_label(secret.owner_user_id)}</dd><dt>{"Updated"}</dt><dd>{utils::format_timestamp(&secret.updated_at)}</dd><dt>{"Reference"}</dt><dd><code>{format!("id/{}",secret.id)}</code></dd></dl>
@@ -660,8 +718,36 @@ fn restore_request(secret: &SecretMetadata, confirmed: bool) -> Option<SecretRes
         confirm_sharing: true,
     })
 }
-fn metadata_card(secret: &SecretMetadata, onclick: Callback<MouseEvent>) -> Html {
-    html! {<li key={secret.id.to_string()}><button class="secrets-row" {onclick}><strong>{&secret.name}</strong><span class="secrets-configured">{"Configured"}</span><span>{&secret.description}</span><small>{format!("Version {} · {}",secret.current_version,audience(secret))}</small></button></li>}
+fn metadata_row(
+    secret: &SecretMetadata,
+    owner: &str,
+    selected: bool,
+    updated: &str,
+    onclick: Callback<MouseEvent>,
+) -> Html {
+    html! {<tr key={secret.id.to_string()} class={classes!(selected.then_some("is-selected"))}>
+        <th scope="row"><button type="button" class="secret-name" aria-expanded={selected.to_string()} {onclick}>{&secret.name}</button>
+            if !secret.description.is_empty(){<small class="secrets-description">{&secret.description}</small>}
+        </th>
+        <td><span class="secrets-configured">{"Configured"}</span></td>
+        <td>{secret.current_version}</td><td class="secrets-owner">{owner}</td>
+        <td><time datetime={secret.updated_at.clone()}>{updated}</time></td>
+    </tr>}
+}
+fn compact_member_label(member: &SecretMember) -> String {
+    for identity in &member.identities {
+        if identity.provider == "github" {
+            if let Some(handle) = &identity.handle {
+                return format!("{handle}@github");
+            }
+        }
+        if identity.email_verified {
+            if let Some(email) = &identity.email {
+                return email.clone();
+            }
+        }
+    }
+    member.display_name.clone()
 }
 
 #[cfg(test)]
@@ -735,9 +821,21 @@ mod tests {
     #[test]
     fn active_and_deleted_saved_values_render_same_fixed_indicator() {
         let mut secret = fixture();
-        let active = text(&metadata_card(&secret, Callback::noop()));
+        let active = text(&metadata_row(
+            &secret,
+            "Owner",
+            false,
+            "2026-11-10",
+            Callback::noop(),
+        ));
         secret.tags.push("deleted".into());
-        let removed = text(&metadata_card(&secret, Callback::noop()));
+        let removed = text(&metadata_row(
+            &secret,
+            "Owner",
+            false,
+            "2026-11-10",
+            Callback::noop(),
+        ));
         assert_eq!(active, removed);
         assert_eq!(active.matches("Configured").count(), 1);
         assert!(!active.contains("Reveal"));
@@ -747,7 +845,13 @@ mod tests {
         wire["value"] = "NEVER_RENDER_THIS".into();
         wire["value_length"] = 12345.into();
         let parsed: SecretMetadata = serde_json::from_value(wire).unwrap();
-        let rendered = text(&metadata_card(&parsed, Callback::noop()));
+        let rendered = text(&metadata_row(
+            &parsed,
+            "Owner",
+            false,
+            "2026-11-10",
+            Callback::noop(),
+        ));
         assert!(!rendered.contains("NEVER_RENDER_THIS"));
         assert!(!rendered.contains("12345"));
     }
@@ -755,9 +859,7 @@ mod tests {
     fn exact_deleted_tag_is_excluded_from_every_active_view() {
         let mut secret = fixture();
         secret.tags.push("deleted".into());
-        for tab in [Tab::Personal, Tab::Shared, Tab::Organization] {
-            assert!(!visible(&secret, tab));
-        }
+        assert!(!visible(&secret, Tab::Active));
         assert!(visible(&secret, Tab::Deleted));
         secret.tags = vec!["not-deleted".into()];
         assert!(!visible(&secret, Tab::Deleted));
