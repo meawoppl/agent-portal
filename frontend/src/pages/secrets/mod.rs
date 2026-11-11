@@ -100,6 +100,8 @@ pub struct SecretsPage {
     share_user: Option<Uuid>,
     job: Option<SecretExpungeJob>,
     credentials: Option<Vec<SecretCredentialMetadata>>,
+    heading_ref: NodeRef,
+    focus_heading: bool,
 }
 impl SecretsPage {
     fn current(&self) -> Option<&SecretMetadata> {
@@ -158,6 +160,17 @@ impl Component for SecretsPage {
             share_user: None,
             job: None,
             credentials: None,
+            heading_ref: NodeRef::default(),
+            focus_heading: false,
+        }
+    }
+    fn rendered(&mut self, _ctx: &Context<Self>, _first_render: bool) {
+        // View changes replace the inventory, so move focus to its new title.
+        if self.focus_heading {
+            self.focus_heading = false;
+            if let Some(heading) = self.heading_ref.cast::<web_sys::HtmlElement>() {
+                let _ = heading.focus();
+            }
         }
     }
     fn changed(&mut self, ctx: &Context<Self>, old: &Self::Properties) -> bool {
@@ -235,6 +248,7 @@ impl Component for SecretsPage {
                 true
             }
             Msg::Tab(tab) => {
+                self.focus_heading = true;
                 self.tab = tab;
                 self.response = None;
                 self.selected = None;
@@ -519,50 +533,38 @@ impl Component for SecretsPage {
             .response
             .as_ref()
             .is_some_and(|r| r.can_manage_organization);
-        let on_view = ctx.link().callback(|event: Event| {
-            let value = event
-                .target_unchecked_into::<web_sys::HtmlSelectElement>()
-                .value();
-            Msg::Tab(if value == "deleted" {
-                Tab::Deleted
-            } else {
-                Tab::Active
-            })
-        });
-        let on_action = ctx.link().callback(|event: Event| {
-            let input = event.target_unchecked_into::<web_sys::HtmlSelectElement>();
-            let value = input.value();
-            input.set_value("");
-            if value == "create" {
-                Msg::Create
-            } else {
-                Msg::Load
-            }
-        });
+        let title = if self.tab == Tab::Deleted {
+            "Deleted secrets"
+        } else {
+            "Active secrets"
+        };
         html! {<section class={classes!("secrets-page",ctx.props().embedded.then_some("secrets-embedded"))} aria-label="Secrets management">
             <header class="secrets-heading"><div>
-                if ctx.props().embedded {<h2>{"Secrets"}</h2>} else {<h1>{"Secrets"}</h1>}
+                if ctx.props().embedded {<h2 ref={self.heading_ref.clone()} tabindex="-1">{title}</h2>} else {<h1 ref={self.heading_ref.clone()} tabindex="-1">{title}</h1>}
                 <p>{"Manage access and versions. Saved values stay hidden."}</p>
             </div>
             if !ctx.props().embedded {<Link<Route> to={Route::Dashboard}>{"Back to sessions"}</Link<Route>>}
-            </header>
             <div class="secrets-toolbar">
-                <label>{"View"}<select value={if self.tab==Tab::Deleted{"deleted"}else{"active"}} disabled={self.busy} onchange={on_view}>
-                    <option value="active">{"Active secrets"}</option><option value="deleted">{"Deleted secrets"}</option>
-                </select></label>
-                <label>{"Actions"}<select value="" disabled={self.busy} onchange={on_action}>
-                    <option value="" disabled=true>{"Choose an action…"}</option>
-                    if self.tab==Tab::Active {<option value="create">{"Create secret"}</option>}
-                    <option value="refresh">{"Refresh"}</option>
-                </select></label>
+                if self.tab==Tab::Deleted {
+                    <button type="button" disabled={self.busy} onclick={ctx.link().callback(|_|Msg::Tab(Tab::Active))}>{"Back to active secrets"}</button>
+                } else {
+                    <button type="button" class="secrets-add" disabled={self.busy} onclick={ctx.link().callback(|_|Msg::Create)}>{"Add secret"}</button>
+                }
+                <button type="button" disabled={self.busy} onclick={ctx.link().callback(|_|Msg::Load)}>{"Refresh"}</button>
             </div>
+            </header>
             if let Some(error)=&self.error {<p role="alert" class="secrets-error">{error}</p>}
-            if self.tab==Tab::Deleted {<p class="secrets-notice">{"Deleted secrets retain all versions and reserve their names. Restore is required before use."}</p>}
+            if self.tab==Tab::Deleted {<p class="secrets-notice">{"Deleted secrets cannot be used. Restore to enable access again. All versions are retained and names stay reserved."}</p>}
             if let Some(replacing)=self.editing {<ValueForm key={format!("{}-{replacing}",self.selected.map(|id|id.to_string()).unwrap_or_default())} {replacing} can_publish={can_publish} on_submit={ctx.link().callback(Msg::Save)} on_cancel={ctx.link().callback(|_|Msg::Cancel)} />}
             {self.namespace_table(ctx, SecretNamespace::Personal)}
             <hr class="secrets-divider"/>
             {self.namespace_table(ctx, SecretNamespace::Organization)}
             {self.detail(ctx)}
+            if self.tab==Tab::Active {
+                <footer class="secrets-deleted-navigation">
+                    <button type="button" disabled={self.busy} onclick={ctx.link().callback(|_|Msg::Tab(Tab::Deleted))}>{"Show deleted secrets"}</button>
+                </footer>
+            }
             {self.credentials_view(ctx)}
             if let Some(job)=&self.job {{render_job(job,ctx.link().callback(|_|Msg::RefreshJob))}}
         </section>}
@@ -580,6 +582,14 @@ impl SecretsPage {
                 "Organization",
                 "Available to all active organization members, including future members.",
             ),
+        };
+        let description = if self.tab == Tab::Deleted {
+            match namespace {
+                SecretNamespace::Personal => "Deleted personal secrets and those shared with you.",
+                SecretNamespace::Organization => "Organization secrets retained for restoration. Audience is confirmed when restoring.",
+            }
+        } else {
+            description
         };
         let rows = self.response.as_ref().map(|response| {
             response
@@ -609,7 +619,7 @@ impl SecretsPage {
         let Some(secret) = self.current() else {
             return html! {};
         };
-        html! {<section class="secrets-detail" aria-label="Secret details"><h2>{&secret.name}</h2><span class="secrets-configured">{"Configured"}</span><p>{&secret.description}</p>
+        html! {<section class="secrets-detail" aria-label="Secret details"><h2>{&secret.name}</h2><span class="secrets-configured">{if self.tab==Tab::Deleted {"Deleted / unavailable"}else{"Configured"}}</span><p>{&secret.description}</p>
             <dl><dt>{"Audience"}</dt><dd>{audience(secret)}</dd><dt>{"Owner"}</dt><dd>{self.member_label(secret.owner_user_id)}</dd><dt>{"Updated"}</dt><dd>{utils::format_timestamp(&secret.updated_at)}</dd><dt>{"Reference"}</dt><dd><code>{format!("id/{}",secret.id)}</code></dd></dl>
             if deleted(secret) {
                 <p>{format!("Deleted {} by {}",secret.deleted_at.as_deref().map(utils::format_timestamp).unwrap_or_else(||"at an unknown time".into()),secret.deleted_by.map(|id|id.to_string()).unwrap_or_else(||"an unavailable user".into()))}</p>
@@ -640,7 +650,7 @@ impl SecretsPage {
         </section>}
     }
     fn credentials_view(&self, ctx: &Context<Self>) -> Html {
-        html! {<section class="secrets-job" aria-label="Approved CLI access"><h2>{"Approved CLI access"}</h2><p>{"These computers can access your secrets within your current grants. Revoking access stops future requests, but cannot recall values already delivered. Approval and revocation require a sign-in within the last 10 minutes."}</p><p><a href="/api/auth/logout">{"Sign out and sign in again"}</a>{" if a fresh sign-in is required."}</p><button disabled={self.busy} onclick={ctx.link().callback(|_|Msg::RefreshCredentials)}>{"Refresh CLI access"}</button>
+        html! {<section class="secrets-job" aria-label="Approved CLI access"><h3>{"Approved CLI access"}</h3><p>{"Computers authorized to access secrets within your grants."}</p><details><summary>{"About approval and revocation"}</summary><p>{"Revoking access stops future requests, but cannot recall values already delivered. Approval and revocation require a sign-in within the last 10 minutes."}</p><p><a href="/api/auth/logout">{"Sign out and sign in again"}</a>{" if a fresh sign-in is required."}</p></details><button disabled={self.busy} onclick={ctx.link().callback(|_|Msg::RefreshCredentials)}>{"Refresh CLI access"}</button>
             {match &self.credentials {None=>html!{<p>{"Loading approved CLI access…"}</p>},Some(credentials) if credentials.is_empty()=>html!{<p>{"No approved CLI credentials."}</p>},Some(credentials)=>html!{<ul class="secrets-credentials">{for credentials.iter().map(|credential|{let id=credential.id;html!{<li key={id.to_string()}><strong>{&credential.label}</strong><small>{format!("Created {} · Expires {}",utils::format_timestamp(&credential.created_at),utils::format_timestamp(&credential.expires_at))}</small>if let Some(time)=&credential.revoked_at {<span>{format!("Revoked {}",utils::format_timestamp(time))}</span>}else{<button disabled={self.busy} onclick={ctx.link().callback(move |_|Msg::RevokeCredential(id))}>{"Revoke CLI access"}</button>}</li>}})}</ul>}}}
         </section>}
     }
@@ -729,7 +739,7 @@ fn metadata_row(
         <th scope="row"><button type="button" class="secret-name" aria-expanded={selected.to_string()} {onclick}>{&secret.name}</button>
             if !secret.description.is_empty(){<small class="secrets-description">{&secret.description}</small>}
         </th>
-        <td><span class="secrets-configured">{"Configured"}</span></td>
+        <td><span class="secrets-configured">{if secret.tags.iter().any(|tag|tag=="deleted"){"Deleted / unavailable"}else{"Configured"}}</span></td>
         <td>{secret.current_version}</td><td class="secrets-owner">{owner}</td>
         <td><time datetime={secret.updated_at.clone()}>{updated}</time></td>
     </tr>}
@@ -819,7 +829,7 @@ mod tests {
         assert!(label.contains(&id.to_string()));
     }
     #[test]
-    fn active_and_deleted_saved_values_render_same_fixed_indicator() {
+    fn active_and_deleted_saved_values_render_fixed_status_indicators() {
         let mut secret = fixture();
         let active = text(&metadata_row(
             &secret,
@@ -836,7 +846,8 @@ mod tests {
             "2026-11-10",
             Callback::noop(),
         ));
-        assert_eq!(active, removed);
+        assert!(removed.contains("Deleted / unavailable"));
+        assert!(!removed.contains("Configured"));
         assert_eq!(active.matches("Configured").count(), 1);
         assert!(!active.contains("Reveal"));
         assert!(!active.contains("Copy"));
