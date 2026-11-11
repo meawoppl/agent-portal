@@ -97,9 +97,9 @@ pub fn render_askuserquestion_tool(input: &Value) -> Html {
                                             let label = opt.label.as_str();
                                             let description = opt.description.as_deref().unwrap_or("");
 
-                                            let is_selected = answer.map(|a| {
-                                                a.split(',').map(|s| s.trim()).any(|s| s == label)
-                                            }).unwrap_or(false);
+                                            let is_selected = answer.is_some_and(|answer| {
+                                                answer_selects_option(answer, label, multi_select)
+                                            });
 
                                             let option_class = if is_selected { "option-item selected" } else { "option-item" };
                                             let icon = if is_selected {
@@ -147,6 +147,14 @@ pub fn render_askuserquestion_tool(input: &Value) -> Html {
             </div>
         </div>
     }
+}
+
+/// Single-select answers are literal labels: punctuation such as the comma in
+/// "Yes, ship it" is part of the answer, not a selection separator. Only the
+/// legacy multi-select answer format uses comma-separated labels.
+fn answer_selects_option(answer: &str, label: &str, multi_select: bool) -> bool {
+    answer == label
+        || (multi_select && answer.split(',').any(|selection| selection.trim() == label))
 }
 
 pub fn render_askuserquestion_result(input: &AskUserQuestionInput) -> Html {
@@ -209,5 +217,37 @@ pub fn render_exitplanmode_tool(input: &Value) -> Html {
                 }
             }
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::answer_selects_option;
+
+    #[test]
+    fn completed_single_choice_preserves_commas_in_labels() {
+        assert!(answer_selects_option("Yes, ship it", "Yes, ship it", false));
+        assert!(!answer_selects_option("Yes, ship it", "Not yet", false));
+        assert!(!answer_selects_option("Yes, ship it", "Yes", false));
+        assert!(!answer_selects_option("Yes, ship it", "ship it", false));
+        assert!(answer_selects_option("Unlocked now", "Unlocked now", false));
+    }
+
+    #[test]
+    fn completed_multi_choice_keeps_each_selected_option_highlighted() {
+        assert!(answer_selects_option("Build, Test", "Build", true));
+        assert!(answer_selects_option("Build, Test", "Test", true));
+        assert!(!answer_selects_option("Build, Test", "Deploy", true));
+        assert!(answer_selects_option("Yes, ship it", "Yes, ship it", true));
+    }
+
+    #[test]
+    fn custom_answer_does_not_select_a_partial_label() {
+        assert!(!answer_selects_option(
+            "Maybe, after review",
+            "Maybe",
+            false
+        ));
+        assert!(!answer_selects_option("", "Not yet", false));
     }
 }
