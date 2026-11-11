@@ -506,6 +506,8 @@ fn handle_agent_output_inner(
                 &inserted.content,
             ) == Some(shared::api::SessionActivityState::Idle)
             {
+                // Attention is part of this fenced transaction: failure must
+                // abort output, rather than log and continue with partial state.
                 notify_reply = crate::handlers::attention::record_reply(conn, &inserted)?;
             }
             broadcast_meta =

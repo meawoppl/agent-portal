@@ -17,7 +17,7 @@
 //!   **operator action**.
 //! - Adding a new logged-and-continue failure on a durable-loss path? Add a
 //!   const here (with the doc treatment) *and* a row to the marker table in
-//!   `CLAUDE.md` ("Operational log markers"). The `markers` unit test enforces
+//!   `AGENTS.md` ("Operational log markers"). The `markers` unit test enforces
 //!   uniqueness and naming.
 
 /// Redaction before input/output persistence or fanout could not use current
@@ -33,11 +33,6 @@ pub const SECRET_EXPUNGE_FAILED: &str = "SECRET_EXPUNGE_FAILED";
 /// KMS or database access is unhealthy; restore access and check generation
 /// refresh. Protected content is held while a current snapshot is unavailable.
 pub const SECRETS_REDACTION_REFRESH_FAILED: &str = "SECRETS_REDACTION_REFRESH_FAILED";
-
-/// A completed response could not be recorded in the Ready queue. Repeated
-/// failures indicate database or migration trouble; check session_attention.
-/// A single occurrence can be a transient connection failure.
-pub const ATTENTION_PERSIST_FAILED: &str = "ATTENTION_PERSIST_FAILED";
 
 /// A persisted Claude result could not update its durable cost ledger/total.
 /// A burst indicates database or migration failure; inspect the ledger schema
@@ -228,7 +223,9 @@ mod tests {
     /// the tests below can enforce uniqueness, naming, and that each is wired to
     /// a real emit site.
     const ALL_MARKERS: &[&str] = &[
-        ATTENTION_PERSIST_FAILED,
+        SECRET_REDACTION_FAILED,
+        SECRET_EXPUNGE_FAILED,
+        SECRETS_REDACTION_REFRESH_FAILED,
         COST_ACCOUNTING_PERSIST_FAILED,
         TURN_METRICS_PERSIST_FAILED,
         INPUT_REJECTION_PERSIST_FAILED,
@@ -246,6 +243,20 @@ mod tests {
         PLUGIN_COMMAND_RECORD_FAILED,
         MEMBER_STATUS_FANOUT_FAILED,
     ];
+
+    #[test]
+    fn every_marker_constant_is_registered() {
+        let declared: std::collections::BTreeSet<_> = include_str!("markers.rs")
+            .lines()
+            .filter_map(|line| line.strip_prefix("pub const "))
+            .filter_map(|declaration| declaration.split_once(':').map(|(name, _)| name.trim()))
+            .collect();
+        let registered: std::collections::BTreeSet<_> = ALL_MARKERS.iter().copied().collect();
+        assert_eq!(
+            declared, registered,
+            "Every public marker must be named exactly as its value and included in the registry"
+        );
+    }
 
     #[test]
     fn markers_are_unique() {
@@ -284,6 +295,10 @@ mod tests {
     fn every_marker_is_referenced_by_an_emit_site() {
         let sources: &[&str] = &[
             include_str!("background.rs"),
+            include_str!("lib.rs"),
+            include_str!("secrets/mod.rs"),
+            include_str!("secrets/redaction.rs"),
+            include_str!("secrets/expunge.rs"),
             include_str!("handlers/websocket/message_handlers.rs"),
             include_str!("handlers/websocket/turn_metrics.rs"),
             include_str!("handlers/websocket/proxy_socket.rs"),

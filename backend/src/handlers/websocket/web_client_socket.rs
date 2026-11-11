@@ -1087,7 +1087,7 @@ mod queued_input_tests {
     /// bump never claims it.
     #[test]
     fn offline_input_is_queued_only_when_durably_stored() {
-        use shared::InputDeliveryStage::ServerReceived;
+        use shared::InputDeliveryStage::{Failed, ServerReceived};
         let Some(pool) = shared_pool() else { return };
         let state = test_app_state(pool);
         let mut conn = state.conn().unwrap();
@@ -1108,7 +1108,8 @@ mod queued_input_tests {
         assert!(!std::iter::from_fn(|| other_rx.try_recv().ok())
             .any(|frame| matches!(frame, ServerToClient::InputProgress { queued: true, .. })));
 
-        // Occupy the next sequence: the bump succeeds, the insert conflicts.
+        // Occupy the next sequence: a conflicting insert must roll back its
+        // sequence bump and explicitly reject the input, never claim delivery.
         let next: i64 = sessions::table
             .find(session.id)
             .select(sessions::input_seq)
@@ -1125,8 +1126,34 @@ mod queued_input_tests {
             })
             .execute(&mut conn)
             .unwrap();
-        send_input(&state, &tx, owner.id, session.id, Uuid::new_v4());
-        assert_eq!(stages(&mut rx), [(ServerReceived, false)]);
+        let rejected_id = Uuid::new_v4();
+        send_input(&state, &tx, owner.id, session.id, rejected_id);
+        assert_eq!(stages(&mut rx), [(ServerReceived, false), (Failed, false)]);
+        assert_eq!(
+            sessions::table
+                .find(session.id)
+                .select(sessions::input_seq)
+                .first::<i64>(&mut conn)
+                .unwrap(),
+            next
+        );
+        assert_eq!(
+            pending_inputs::table
+                .filter(pending_inputs::session_id.eq(session.id))
+                .count()
+                .get_result::<i64>(&mut conn)
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            pending_inputs::table
+                .filter(pending_inputs::session_id.eq(session.id))
+                .filter(pending_inputs::client_msg_id.eq(Some(rejected_id)))
+                .count()
+                .get_result::<i64>(&mut conn)
+                .unwrap(),
+            0
+        );
     }
 }
 

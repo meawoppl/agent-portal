@@ -45,14 +45,15 @@ fn redact_session_metadata(session: &mut Session, rules: &crate::secrets::redact
     session.session_name = rules.redact_str(&session.session_name);
     session.working_directory = rules.redact_str(&session.working_directory);
     session.hostname = rules.redact_str(&session.hostname);
-    for value in [
+    for text in [
         &mut session.git_branch,
         &mut session.pr_url,
         &mut session.repo_url,
-    ] {
-        if let Some(text) = value {
-            *text = rules.redact_str(text);
-        }
+    ]
+    .into_iter()
+    .flatten()
+    {
+        *text = rules.redact_str(text);
     }
     for arg in &mut session.claude_args.0 {
         *arg = rules.redact_str(arg);
