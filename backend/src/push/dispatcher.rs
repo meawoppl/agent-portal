@@ -193,12 +193,14 @@ fn resolve_recipient(
             sessions::session_name,
             users::notification_prefs,
         ))
-        .first::<(Uuid, String, Option<serde_json::Value>)>(conn)
+        .first::<(
+            Uuid,
+            String,
+            Option<crate::db::jsonb::NotificationPrefsJson>,
+        )>(conn)
         .optional()?;
     Ok(row.map(|(user_id, name, stored)| {
-        let prefs = stored
-            .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_default();
+        let prefs = stored.map(|v| v.0).unwrap_or_default();
         (user_id, name, prefs)
     }))
 }
