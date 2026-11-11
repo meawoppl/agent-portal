@@ -34,6 +34,8 @@ One Portal deployment is one organization, containing its active local users. Or
 
 Grants are attached to stable Portal user IDs. Login identities remain keyed by the provider and immutable provider subject, so linked Google/GitHub logins and renamed GitHub accounts do not move grants. Select recipients using a Portal UUID, `google:matt@cosmicfrontier.org`, a verified unambiguous email, or `meawoppl@github` / `github:meawoppl`. Display names are not accepted as selectors. GitHub handles are checked against GitHub's current immutable ID before resolution; stale, reassigned, ambiguous and unregistered selections are refused. Resolution never creates or links an account.
 
+Member discovery (`agent-portal secret members`, `GET /api/secrets/members`, and `POST /api/secrets/members/resolve`) requires `ALLOWED_EMAIL_DOMAIN` and a verified provider email in that domain for the caller. Open-signup portals, email-only allowlists, unverified/legacy profile addresses, and out-of-domain allowlist exceptions receive 403. Exact lookup has the same restriction so it cannot enumerate accounts. Administrators retain their separate admin-only user-management endpoint. Direct grants to an already-known Portal UUID remain available; this restriction does not change secret access rights.
+
 Legacy provider assertions have no fabricated verification timestamp. Sign in again to refresh a provider-qualified email/handle; the Portal UUID remains available for existing users. The browser directory labels provider identities and marks unverified addresses.
 
 ## Human CLI access

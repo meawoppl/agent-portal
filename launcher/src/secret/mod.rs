@@ -163,6 +163,11 @@ fn value(stdin: bool, trim: bool) -> anyhow::Result<SecretValue> {
     Ok(SecretValue(text.as_str().to_owned()))
 }
 async fn member(client: &client::Client, selector: &str) -> anyhow::Result<uuid::Uuid> {
+    // A known opaque UUID needs no directory lookup. The grant endpoint still
+    // validates the recipient and the caller's authority over the secret.
+    if let Ok(user_id) = selector.trim().parse::<uuid::Uuid>() {
+        return Ok(user_id);
+    }
     let member: SecretMember = client
         .request(
             Method::POST,

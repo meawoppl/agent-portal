@@ -200,15 +200,51 @@ fn select_member(
     }
 }
 
+/// An open-signup portal is not a trusted organization directory. Exact
+/// resolution is gated too, otherwise it becomes an account-enumeration oracle.
+/// Login allowlist exceptions and legacy profile emails do not establish domain
+/// membership: require a verified provider assertion for this caller.
+fn require_directory(
+    state: &AppState,
+    conn: &mut crate::db::DbConnection,
+    principal: Principal,
+) -> Result<(), AppError> {
+    if !principal.metadata {
+        return Err(AppError::Forbidden);
+    }
+    let domain = state
+        .allowed_email_domain
+        .as_deref()
+        .filter(|domain| {
+            !domain.is_empty() && !domain.contains('@') && !domain.chars().any(char::is_whitespace)
+        })
+        .ok_or(AppError::Forbidden)?;
+    store::active_user(conn, principal.user)?;
+    use crate::schema::user_identities;
+    let emails = user_identities::table
+        .filter(user_identities::user_id.eq(principal.user))
+        .filter(user_identities::email_verified.eq(true))
+        .select(user_identities::email)
+        .load::<Option<String>>(conn)?;
+    if emails.into_iter().flatten().any(|email| {
+        email
+            .split_once('@')
+            .is_some_and(|(local, asserted_domain)| {
+                !local.is_empty() && asserted_domain.eq_ignore_ascii_case(domain)
+            })
+    }) {
+        Ok(())
+    } else {
+        Err(AppError::Forbidden)
+    }
+}
+
 pub(super) async fn list(
     State(state): State<Arc<AppState>>,
     SecretPrincipal(principal): SecretPrincipal,
 ) -> Result<Json<SecretMembersResponse>, AppError> {
-    if !principal.metadata {
-        return Err(AppError::Forbidden);
-    }
     let mut conn = state.conn()?;
-    store::active_user(&mut conn, principal.user)?;
+    require_directory(&state, &mut conn, principal)?;
     Ok(Json(SecretMembersResponse {
         members: members(&mut conn)?,
     }))
@@ -218,15 +254,13 @@ pub(super) async fn resolve(
     SecretPrincipal(principal): SecretPrincipal,
     Json(request): Json<SecretMemberResolveRequest>,
 ) -> Result<Json<SecretMember>, AppError> {
-    if !principal.metadata {
-        return Err(AppError::Forbidden);
+    // Authorize before parsing a selector or making external requests.
+    {
+        let mut conn = state.conn()?;
+        require_directory(&state, &mut conn, principal)?;
     }
     let selector = parse_selector(&request.selector)?;
     // Do not hold a DB connection during public-provider network I/O.
-    {
-        let mut conn = state.conn()?;
-        store::active_user(&mut conn, principal.user)?;
-    }
     let github = if let Selector::Github(handle) = &selector {
         static GITHUB_LOOKUPS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
         let _lookup = GITHUB_LOOKUPS.try_acquire().map_err(|_| {
@@ -246,7 +280,7 @@ pub(super) async fn resolve(
         None
     };
     let mut conn = state.conn()?;
-    store::active_user(&mut conn, principal.user)?;
+    require_directory(&state, &mut conn, principal)?;
     Ok(Json(select_member(
         &members(&mut conn)?,
         &selector,
@@ -480,6 +514,115 @@ mod tests {
             .execute(conn)
             .unwrap();
     }
+    #[tokio::test]
+    async fn directory_routes_require_a_verified_locked_domain_for_browser_and_cli() {
+        use crate::handlers::secrets::tests::{credential, Database};
+        use crate::schema::{user_identities, users};
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+        let Some(db) = Database::new() else {
+            return;
+        };
+        let user = crate::test_support::insert_user(&mut db.pool.get().unwrap(), "directory-gate");
+        let identity = crate::models::NewUserIdentity {
+            user_id: user.id,
+            provider: "google".into(),
+            subject: Uuid::new_v4().to_string(),
+            email: Some("member@company.test".into()),
+            handle: None,
+            email_verified: true,
+            last_seen_at: None,
+        };
+        diesel::insert_into(user_identities::table)
+            .values(&identity)
+            .execute(&mut db.pool.get().unwrap())
+            .unwrap();
+        // Profile email is deliberately trusted-looking in every case. Only
+        // provider assertions, not this legacy field or login exceptions, count.
+        diesel::update(users::table.find(user.id))
+            .set(users::email.eq("profile@company.test"))
+            .execute(&mut db.pool.get().unwrap())
+            .unwrap();
+        for (domain, email, verified, allowed) in [
+            (None, "member@company.test", true, false),
+            (Some(""), "member@company.test", true, false),
+            (Some("company.test"), "member@company.test", false, false),
+            (Some("company.test"), "rando@gmail.com", true, false),
+            (Some("company.test"), "member@evilcompany.test", true, false),
+            (
+                Some("company.test"),
+                "member@company.test.evil",
+                true,
+                false,
+            ),
+            (Some("company.test"), "member@company.test", true, true),
+            (Some("COMPANY.TEST"), "member@Company.Test", true, true),
+        ] {
+            let mut state = crate::test_support::test_app_state(db.pool.clone());
+            state.allowed_email_domain = domain.map(str::to_owned);
+            state.allowed_emails = Some(vec!["rando@gmail.com".into()]);
+            let state = Arc::new(state);
+            diesel::update(user_identities::table.filter(user_identities::user_id.eq(user.id)))
+                .set((
+                    user_identities::email.eq(Some(email)),
+                    user_identities::email_verified.eq(verified),
+                ))
+                .execute(&mut db.pool.get().unwrap())
+                .unwrap();
+            let token = credential(&state, user.id, "directory-gate");
+            let cookies = tower_cookies::Cookies::default();
+            cookies
+                .signed(&state.cookie_key)
+                .add(tower_cookies::Cookie::new(
+                    shared::protocol::SESSION_COOKIE_NAME,
+                    user.id.to_string(),
+                ));
+            let cookie = cookies
+                .list()
+                .iter()
+                .map(|c| format!("{}={}", c.name(), c.value()))
+                .collect::<Vec<_>>()
+                .join("; ");
+            let router = Router::new()
+                .route("/members", get(list))
+                .route("/resolve", post(resolve))
+                .layer(tower_cookies::CookieManagerLayer::new())
+                .with_state(state);
+            for browser in [true, false] {
+                for (method, path, body) in [
+                    ("GET", "/members", String::new()),
+                    (
+                        "POST",
+                        "/resolve",
+                        serde_json::json!({"selector":user.id.to_string()}).to_string(),
+                    ),
+                ] {
+                    let mut request = Request::builder()
+                        .method(method)
+                        .uri(path)
+                        .header("content-type", "application/json");
+                    request = if browser {
+                        request.header("cookie", &cookie)
+                    } else {
+                        request.header("authorization", format!("Bearer {token}"))
+                    };
+                    let response = router
+                        .clone()
+                        .oneshot(request.body(axum::body::Body::from(body)).unwrap())
+                        .await
+                        .unwrap();
+                    assert_eq!(response.status(), if allowed {StatusCode::OK} else {StatusCode::FORBIDDEN}, "domain={domain:?}, email={email}, verified={verified}, browser={browser}, path={path}");
+                    if !allowed {
+                        let body = axum::body::to_bytes(response.into_body(), 8192)
+                            .await
+                            .unwrap();
+                        assert!(!String::from_utf8_lossy(&body).contains("profile@company.test"));
+                    }
+                }
+            }
+        }
+    }
+
     #[tokio::test]
     async fn github_lookup_checks_live_handle_and_never_sends_portal_bearer() {
         use std::io::{Read, Write};
