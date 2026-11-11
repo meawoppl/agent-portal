@@ -44,8 +44,10 @@ openssl = "0.10"
 zeroize = "1"
 aho-corasick = "1"
 aws-config = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio", "credentials-process"] }
-aws-sdk-kms = "1"
-aws-sdk-s3 = "1"
+# Use the current HTTPS client and regional SigV4 only. SDK legacy TLS and
+# optional multi-region SigV4a bring obsolete cryptography into the lockfile.
+aws-sdk-kms = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
+aws-sdk-s3 = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio", "http-1x"] }
 
 # Environment variables
 dotenvy = { workspace = true }
