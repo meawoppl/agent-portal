@@ -583,6 +583,14 @@ impl SecretsPage {
                 "Available to all active organization members, including future members.",
             ),
         };
+        let description = if self.tab == Tab::Deleted {
+            match namespace {
+                SecretNamespace::Personal => "Deleted personal secrets and those shared with you.",
+                SecretNamespace::Organization => "Organization secrets retained for restoration. Audience is confirmed when restoring.",
+            }
+        } else {
+            description
+        };
         let rows = self.response.as_ref().map(|response| {
             response
                 .secrets
