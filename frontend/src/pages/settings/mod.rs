@@ -68,6 +68,8 @@ fn initial_tab() -> SettingsTab {
 
 #[derive(Properties, PartialEq)]
 pub struct SettingsPageProps {
+    #[prop_or_default]
+    pub secret_job_id: Option<String>,
     pub on_close: Callback<()>,
 }
 
@@ -206,7 +208,7 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
                     <TokensPanel on_tokens_loaded={on_tokens_loaded} />
                 }
                 if *active_tab == SettingsTab::Secrets {
-                    <crate::pages::secrets::SecretsPage embedded={true} />
+                    <crate::pages::secrets::SecretsPage embedded={true} job_id={props.secret_job_id.clone()} />
                 }
                 if *active_tab == SettingsTab::Notifications {
                     <NotificationsPanel />
