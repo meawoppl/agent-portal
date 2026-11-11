@@ -79,6 +79,20 @@ Delete adds the exact reserved `deleted` system tag, records the actor/time, and
 
 ## Approved session execution
 
+Agents can ask for access directly in the session thread:
+
+```sh
+agent-portal secret request personal/DEPLOY_TOKEN --env DEPLOY_TOKEN --expires-in 900 --wait
+# After the owner approves, the metadata response includes binding_id:
+agent-portal secret run --binding BINDING_UUID -- deploy-tool
+```
+
+The request uses only the injected session credential; it cannot fall back to a human's CLI vault credential. It creates a durable **Approve / Deny** card in that session. The card fetches authenticated server metadata rather than trusting transcript text, and shows the exact secret/version, owner, target session/launcher, environment variable and requested duration. It never retrieves a saved value. Only the local browser-authenticated session owner can decide; approval also requires a recent sign-in. Session viewers, editors, linked users, launchers and the requesting agent cannot approve themselves.
+
+Requests expire after ten minutes. Approval creates one binding pinned to the requesting process, secret version and ACL generation; approval does not expose a value to the browser. A rotation, deletion, revoked credential, replaced process or changed access cannot silently revive a stale request. Denial and expiry grant nothing. Repeated requests with the same request UUID replay the original outcome without creating duplicate cards or bindings. Use `--request-id UUID` when retrying a command whose response was lost. Archive and linked-portal views show inert history; reconnecting live threads fetch current server state before enabling controls.
+
+Approving lets the agent access the value in its process environment: it is not a promise that an agent controlling a child process cannot print or copy it. The requested approval lasts at most one hour and can be revoked through the existing binding controls.
+
 A human with read/use rights may approve an existing owned session and connected owned launcher:
 
 ```sh

@@ -244,6 +244,28 @@ diesel::table! {
 }
 
 diesel::table! {
+    secret_access_requests (id) {
+        id -> Uuid,
+        owner_user_id -> Uuid,
+        session_id -> Uuid,
+        launcher_id -> Uuid,
+        proxy_token_id -> Uuid,
+        secret_id -> Uuid,
+        version_id -> Uuid,
+        generation -> Int8,
+        reference -> Text,
+        requested_version -> Nullable<Int4>,
+        env_name -> Text,
+        lifetime_seconds -> Int4,
+        state -> Text,
+        binding_id -> Nullable<Uuid>,
+        notice_message_id -> Nullable<Uuid>,
+        created_at -> Timestamptz,
+        expires_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
     secret_acl_history (id) {
         id -> Uuid,
         secret_id -> Uuid,
@@ -726,6 +748,12 @@ diesel::joinable!(proxy_auth_tokens -> sessions (session_id));
 diesel::joinable!(proxy_auth_tokens -> users (user_id));
 diesel::joinable!(push_subscriptions -> users (user_id));
 diesel::joinable!(scheduled_tasks -> users (user_id));
+diesel::joinable!(secret_access_requests -> messages (notice_message_id));
+diesel::joinable!(secret_access_requests -> proxy_auth_tokens (proxy_token_id));
+diesel::joinable!(secret_access_requests -> secret_bindings (binding_id));
+diesel::joinable!(secret_access_requests -> secrets (secret_id));
+diesel::joinable!(secret_access_requests -> sessions (session_id));
+diesel::joinable!(secret_access_requests -> users (owner_user_id));
 diesel::joinable!(secret_acl_history -> secrets (secret_id));
 diesel::joinable!(secret_audit_events -> secrets (secret_id));
 diesel::joinable!(secret_audit_events -> users (actor_user_id));
@@ -784,6 +812,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     proxy_auth_tokens,
     push_subscriptions,
     scheduled_tasks,
+    secret_access_requests,
     secret_acl_history,
     secret_audit_events,
     secret_bindings,

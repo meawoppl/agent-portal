@@ -8,6 +8,7 @@ mod lightbox_gesture;
 mod media;
 mod portal;
 mod result;
+mod secret_access;
 mod system;
 mod tools;
 mod user;

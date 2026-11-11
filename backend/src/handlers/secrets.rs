@@ -22,6 +22,7 @@ use diesel::prelude::*;
 use shared::api::*;
 use std::sync::Arc;
 use uuid::Uuid;
+mod access_requests;
 mod bindings;
 mod enrollment;
 mod idempotency;
@@ -940,6 +941,7 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
                 get(crate::secrets::expunge::get_job),
             )
             .merge(enrollment::router())
+            .merge(access_requests::router())
             .layer(DefaultBodyLimit::max(400_000)),
         state,
     )

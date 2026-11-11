@@ -1,5 +1,5 @@
-//! An approved binding is the only secret path accepting an agent credential.
-//! Its client can request and redeem one ticket; ordinary reads still require
+//! The injected agent identity can request approval and execute approved bindings.
+//! Plaintext access requires a binding ticket; ordinary reads still require
 //! the separately enrolled human capability and never fall back to this token.
 use super::sensitive::SecretString;
 use super::{client, input, output, resolve};
@@ -47,11 +47,12 @@ pub(super) async fn create(client: &client::Client, args: BindArgs) -> anyhow::R
     output(&binding)
 }
 
-struct BoundAgent {
-    client: client::Client,
+pub(super) struct BoundAgent {
+    pub(super) client: client::Client,
+    pub(super) session_id: Uuid,
 }
 impl BoundAgent {
-    fn from_values(
+    pub(super) fn from_values(
         backend: Option<String>,
         token: Option<String>,
         session: Option<String>,
@@ -61,15 +62,16 @@ impl BoundAgent {
             "Bound execution requires PORTAL_SESSION_BACKEND; no launcher credential fallback",
         )?;
         let token = SecretString::new(token.filter(|value| !value.is_empty()).context("Bound execution requires PORTAL_SESSION_TOKEN; no launcher or human-secret credential fallback")?);
-        let _session: Uuid = session
+        let session_id: Uuid = session
             .context("Bound execution requires PORTAL_SESSION_ID")?
             .parse()
             .map_err(|_| anyhow::anyhow!("Invalid bound session context"))?;
         Ok(Self {
             client: client::Client::new(&backend, dev, Some(token))?,
+            session_id,
         })
     }
-    fn from_env(dev: bool) -> anyhow::Result<Self> {
+    pub(super) fn from_env(dev: bool) -> anyhow::Result<Self> {
         Self::from_values(
             std::env::var("PORTAL_SESSION_BACKEND").ok(),
             std::env::var("PORTAL_SESSION_TOKEN").ok(),

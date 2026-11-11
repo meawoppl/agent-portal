@@ -92,6 +92,9 @@ fn policy(
     if !rights.read || !rights.use_value {
         return Err(AppError::Forbidden);
     };
+    if Some(current_process(conn, user, row.session_id)?) != row.proxy_token_id {
+        return Err(AppError::Forbidden);
+    }
     session_audience(state, conn, row, user)?;
     Ok(secret)
 }
@@ -118,6 +121,181 @@ fn proxy(
     policy(state, conn, binding, verified.user_id)?;
     Ok(verified)
 }
+#[derive(Clone)]
+pub(super) struct ProcessAudience {
+    pub user: Uuid,
+    pub session: Uuid,
+    pub launcher: Uuid,
+    pub token: Uuid,
+}
+pub(super) fn current_process(
+    conn: &mut PgConnection,
+    user: Uuid,
+    session: Uuid,
+) -> Result<Uuid, AppError> {
+    use crate::schema::proxy_auth_tokens as tokens;
+    tokens::table
+        .filter(tokens::session_id.eq(Some(session)))
+        .filter(tokens::user_id.eq(user))
+        .filter(tokens::name.eq(crate::handlers::proxy_tokens::LAUNCH_TOKEN_NAME))
+        .filter(tokens::revoked.eq(false))
+        .filter(tokens::scope.is_null())
+        .filter(tokens::linked_grant_id.is_null())
+        .filter(
+            tokens::expires_at
+                .is_null()
+                .or(tokens::expires_at.gt(Utc::now().naive_utc())),
+        )
+        .order((tokens::created_at.desc(), tokens::id.desc()))
+        .select(tokens::id)
+        .first::<Uuid>(conn)
+        .map_err(|_| AppError::Forbidden)
+}
+pub(super) fn authenticated_process(
+    state: &AppState,
+    conn: &mut PgConnection,
+    headers: &HeaderMap,
+) -> Result<ProcessAudience, AppError> {
+    let raw = crate::auth::bearer_token(headers).ok_or(AppError::Unauthorized)?;
+    if raw.starts_with("aps_secret_")
+        || raw.starts_with(crate::handlers::federation::LINKED_TOKEN_PREFIX)
+    {
+        return Err(AppError::Forbidden);
+    }
+    let verified = crate::handlers::proxy_tokens::verify_and_get_user_with_token(state, conn, raw)?;
+    let session = verified.token.session_id.ok_or(AppError::Forbidden)?;
+    if verified.token.name != crate::handlers::proxy_tokens::LAUNCH_TOKEN_NAME
+        || current_process(conn, verified.user_id, session)? != verified.token.id
+    {
+        return Err(AppError::Forbidden);
+    }
+    store::active_user(conn, verified.user_id)?;
+    let row = sessions::table
+        .find(session)
+        .first::<crate::models::Session>(conn)
+        .map_err(|_| AppError::Forbidden)?;
+    if row.user_id != verified.user_id {
+        return Err(AppError::Forbidden);
+    }
+    Ok(ProcessAudience {
+        user: verified.user_id,
+        session,
+        launcher: row.launcher_id.ok_or(AppError::Forbidden)?,
+        token: verified.token.id,
+    })
+}
+pub(super) fn validate_terms(env: &str, lifetime: u64) -> Result<(), AppError> {
+    if lifetime == 0
+        || lifetime > 3600
+        || env.is_empty()
+        || env.len() > 128
+        || !env
+            .bytes()
+            .enumerate()
+            .all(|(i, c)| c == b'_' || c.is_ascii_alphabetic() || (i > 0 && c.is_ascii_digit()))
+    {
+        return Err(AppError::BadRequest(
+            "Binding needs a valid environment name and lifetime of 1 to 3600 seconds",
+        ));
+    }
+    Ok(())
+}
+pub(super) struct Approval {
+    pub id: Uuid,
+    pub secret_id: Uuid,
+    pub session_id: Uuid,
+    pub launcher_id: Uuid,
+    pub owner_user_id: Uuid,
+    pub version_id: Uuid,
+    pub proxy_token_id: Uuid,
+    pub generation: i64,
+    pub env_name: String,
+    pub lifetime_seconds: u64,
+}
+/// Both human binding and in-thread approval use this transaction-local policy
+/// and insertion path. No caller can weaken the version/process audience pin.
+pub(super) fn approve(
+    state: &AppState,
+    conn: &mut PgConnection,
+    approval: Approval,
+) -> Result<SecretBindingMetadata, AppError> {
+    validate_terms(&approval.env_name, approval.lifetime_seconds)?;
+    let row = secrets::table
+        .find(approval.secret_id)
+        .for_share()
+        .first::<SecretRow>(conn)?;
+    store::require_live(&row)?;
+    store::require_generation(&row, approval.generation)?;
+    let rights = store::rights(conn, &row, approval.owner_user_id)?;
+    if !rights.read || !rights.use_value {
+        return Err(AppError::Forbidden);
+    }
+    crate::schema::users::table
+        .find(approval.owner_user_id)
+        .for_update()
+        .select(crate::schema::users::id)
+        .first::<Uuid>(conn)?;
+    if current_process(conn, approval.owner_user_id, approval.session_id)?
+        != approval.proxy_token_id
+    {
+        return Err(AppError::Forbidden);
+    }
+    let version = secret_versions::table
+        .find(approval.version_id)
+        .filter(secret_versions::secret_id.eq(row.id))
+        .first::<VersionRow>(conn)?;
+    let candidate = Binding {
+        id: approval.id,
+        secret_id: row.id,
+        session_id: approval.session_id,
+        launcher_id: approval.launcher_id,
+        created_by: approval.owner_user_id,
+        operation: "env".into(),
+        expires_at: Utc::now() + chrono::Duration::seconds(approval.lifetime_seconds as i64),
+        generation: approval.generation,
+        revoked_at: None,
+        version_id: version.id,
+        env_name: approval.env_name,
+        proxy_token_id: Some(approval.proxy_token_id),
+    };
+    session_audience(state, conn, &candidate, approval.owner_user_id)?;
+    diesel::delete(
+        bindings::table.filter(bindings::expires_at.lt(Utc::now() - chrono::Duration::days(1))),
+    )
+    .execute(conn)?;
+    let count = bindings::table
+        .filter(bindings::created_by.eq(approval.owner_user_id))
+        .filter(bindings::revoked_at.is_null())
+        .filter(bindings::expires_at.gt(Utc::now()))
+        .count()
+        .get_result::<i64>(conn)?;
+    if count >= 64 || bindings::table.count().get_result::<i64>(conn)? > 10000 {
+        return Err(AppError::Conflict("Execution binding quota reached"));
+    }
+    diesel::insert_into(bindings::table)
+        .values((
+            bindings::id.eq(candidate.id),
+            bindings::secret_id.eq(candidate.secret_id),
+            bindings::session_id.eq(candidate.session_id),
+            bindings::launcher_id.eq(candidate.launcher_id),
+            bindings::created_by.eq(candidate.created_by),
+            bindings::operation.eq("env"),
+            bindings::expires_at.eq(candidate.expires_at),
+            bindings::generation.eq(candidate.generation),
+            bindings::version_id.eq(candidate.version_id),
+            bindings::env_name.eq(&candidate.env_name),
+            bindings::proxy_token_id.eq(candidate.proxy_token_id),
+        ))
+        .execute(conn)?;
+    store::audit(
+        conn,
+        candidate.created_by,
+        Some(row.id),
+        "binding_created",
+        "allowed",
+    )?;
+    metadata(conn, &candidate)
+}
 pub(super) async fn create(
     State(state): State<Arc<AppState>>,
     SecretPrincipal(principal): SecretPrincipal,
@@ -132,27 +310,11 @@ pub(super) async fn create(
     if !principal.browser && !principal.read {
         return Err(AppError::Forbidden);
     };
-    if request.expires_in_seconds == 0
-        || request.expires_in_seconds > 3600
-        || request.env_name.is_empty()
-        || request.env_name.len() > 128
-        || !request.env_name.bytes().enumerate().all(|(index, c)| {
-            c == b'_' || c.is_ascii_alphabetic() || (index > 0 && c.is_ascii_digit())
-        })
-    {
-        return Err(AppError::BadRequest(
-            "Binding needs a valid environment name and lifetime of 1 to 3600 seconds",
-        ));
-    };
+    validate_terms(&request.env_name, request.expires_in_seconds)?;
     state.secrets.crypto()?;
     let id = Uuid::new_v5(&principal.user, idempotency::key(&headers)?.as_bytes());
     let mut conn = state.conn()?;
     conn.transaction::<_, AppError, _>(|conn| {
-        crate::schema::users::table
-            .find(principal.user)
-            .for_update()
-            .select(crate::schema::users::id)
-            .first::<Uuid>(conn)?;
         let row = store::load(conn, request.secret_id)?;
         store::require_live(&row)?;
         store::require_generation(&row, request.expected_generation)?;
@@ -184,75 +346,23 @@ pub(super) async fn create(
                 .first::<Uuid>(conn)
         }
         .map_err(|_| AppError::NotFound("Secret version not found"))?;
-        use crate::schema::proxy_auth_tokens as tokens;
-        let approved_process = tokens::table
-            .filter(tokens::session_id.eq(Some(request.session_id)))
-            .filter(tokens::user_id.eq(principal.user))
-            .filter(tokens::name.eq(crate::handlers::proxy_tokens::LAUNCH_TOKEN_NAME))
-            .filter(tokens::revoked.eq(false))
-            .filter(tokens::scope.is_null())
-            .filter(
-                tokens::expires_at
-                    .is_null()
-                    .or(tokens::expires_at.gt(Utc::now().naive_utc())),
-            )
-            .order(tokens::created_at.desc())
-            .select(tokens::id)
-            .first::<Uuid>(conn)
-            .map_err(|_| {
-                AppError::Conflict("Target session needs a connected bound proxy process")
-            })?;
-        let candidate = Binding {
-            id,
-            secret_id: row.id,
-            session_id: request.session_id,
-            launcher_id: request.launcher_id,
-            created_by: principal.user,
-            operation: "env".into(),
-            expires_at: Utc::now() + chrono::Duration::seconds(request.expires_in_seconds as i64),
-            generation: row.acl_generation,
-            revoked_at: None,
-            version_id: version,
-            env_name: request.env_name,
-            proxy_token_id: Some(approved_process),
-        };
-        session_audience(&state, conn, &candidate, principal.user)?;
-        diesel::delete(
-            bindings::table.filter(bindings::expires_at.lt(Utc::now() - chrono::Duration::days(1))),
-        )
-        .execute(conn)?;
-        let count = bindings::table
-            .filter(bindings::created_by.eq(principal.user))
-            .filter(bindings::revoked_at.is_null())
-            .filter(bindings::expires_at.gt(Utc::now()))
-            .count()
-            .get_result::<i64>(conn)?;
-        if count >= 64 || bindings::table.count().get_result::<i64>(conn)? > 10000 {
-            return Err(AppError::Conflict("Execution binding quota reached"));
-        };
-        diesel::insert_into(bindings::table)
-            .values((
-                bindings::id.eq(id),
-                bindings::secret_id.eq(candidate.secret_id),
-                bindings::session_id.eq(candidate.session_id),
-                bindings::launcher_id.eq(candidate.launcher_id),
-                bindings::created_by.eq(principal.user),
-                bindings::operation.eq("env"),
-                bindings::expires_at.eq(candidate.expires_at),
-                bindings::generation.eq(candidate.generation),
-                bindings::version_id.eq(candidate.version_id),
-                bindings::env_name.eq(&candidate.env_name),
-                bindings::proxy_token_id.eq(candidate.proxy_token_id),
-            ))
-            .execute(conn)?;
-        store::audit(
+        let approved_process = current_process(conn, principal.user, request.session_id)?;
+        Ok(Json(approve(
+            state.as_ref(),
             conn,
-            principal.user,
-            Some(row.id),
-            "binding_created",
-            "allowed",
-        )?;
-        Ok(Json(metadata(conn, &candidate)?))
+            Approval {
+                id,
+                secret_id: row.id,
+                session_id: request.session_id,
+                launcher_id: request.launcher_id,
+                owner_user_id: principal.user,
+                version_id: version,
+                proxy_token_id: approved_process,
+                generation: row.acl_generation,
+                env_name: request.env_name,
+                lifetime_seconds: request.expires_in_seconds,
+            },
+        )?))
     })
 }
 pub(super) async fn list(
@@ -758,7 +868,30 @@ mod tests {
             Uuid::new_v4(),
         )
         .await;
+        let previous_token = bound.clone();
         bound = proxy_token(&state, owner, Some(session.id));
+        // Even a missed revocation cannot authorize a superseded process.
+        diesel::update(
+            crate::schema::proxy_auth_tokens::table.filter(
+                crate::schema::proxy_auth_tokens::token_hash
+                    .eq(crate::jwt::hash_token(&previous_token)),
+            ),
+        )
+        .set(crate::schema::proxy_auth_tokens::revoked.eq(false))
+        .execute(&mut state.conn().unwrap())
+        .unwrap();
+        for (path, body) in [
+            (&ticket_path, serde_json::Value::Null),
+            (
+                &redeem_path,
+                serde_json::json!({"ticket":previous_process["ticket"]}),
+            ),
+        ] {
+            let (status, _) =
+                request(&router, &previous_token, "POST", path, body, Uuid::new_v4()).await;
+            assert_eq!(status, axum::http::StatusCode::FORBIDDEN);
+        }
+
         let (status, _) = request(
             &router,
             &bound,

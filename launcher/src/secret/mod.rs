@@ -3,6 +3,7 @@ mod bindings;
 mod client;
 mod credentials;
 mod input;
+mod requests;
 mod sensitive;
 use anyhow::{bail, Context};
 use clap::Subcommand;
@@ -49,6 +50,8 @@ pub enum Action {
         #[arg(long)]
         json: bool,
     },
+    /// Ask the human in this session to approve a pinned secret binding.
+    Request(requests::RequestArgs),
     /// Approve a short-lived, pinned secret binding for one session and launcher.
     Bind(bindings::BindArgs),
     /// List your approved bindings (metadata only).
@@ -201,6 +204,12 @@ fn provider_labels(member: &SecretMember) -> Vec<String> {
 }
 
 pub async fn run(action: Action, backend: Option<String>, dev: bool) -> anyhow::Result<()> {
+    if let Action::Request(args) = &action {
+        if backend.is_some() {
+            bail!("Secret requests use PORTAL_SESSION_BACKEND; --backend-url cannot override the bound context");
+        }
+        return requests::run(args, dev).await;
+    }
     if let Action::Run {
         binding: Some(id),
         command,
@@ -298,6 +307,7 @@ pub async fn run(action: Action, backend: Option<String>, dev: bool) -> anyhow::
                 Ok(())
             }
         }
+        Action::Request(_) => unreachable!(),
         Action::Bind(request) => bindings::create(&client, request).await,
         Action::Bindings => {
             let response: SecretBindingListResponse = client

@@ -515,3 +515,20 @@
     font-size: 0.85rem;
     font-style: italic;
 }
+
+.secret-access-request dl {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 0.25rem 0.75rem;
+}
+
+.secret-access-request dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.secret-access-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}

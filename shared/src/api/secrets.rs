@@ -274,3 +274,64 @@ pub struct SecretBindingRedeemResponse {
     pub env_name: String,
     pub version: i32,
 }
+
+/// Server-owned state for a request to let one bound agent use a pinned value.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SecretAccessState {
+    Pending,
+    Approved,
+    Denied,
+    Expired,
+    Invalidated,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretAccessCreateRequest {
+    pub request_id: Uuid,
+    pub reference: String,
+    pub env_name: String,
+    pub version: Option<i32>,
+    pub expires_in_seconds: u64,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretAccessDecisionRequest {
+    pub approve: bool,
+}
+/// Values and tickets never appear in the request card or its history marker.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SecretAccessRequestInfo {
+    pub id: Uuid,
+    pub secret_id: Uuid,
+    pub owner_user_id: Uuid,
+    pub namespace: SecretNamespace,
+    pub name: String,
+    pub version: i32,
+    pub session_id: Uuid,
+    pub launcher_id: Uuid,
+    pub env_name: String,
+    pub expires_in_seconds: u64,
+    pub state: SecretAccessState,
+    pub created_at: String,
+    pub expires_at: String,
+    pub binding_id: Option<Uuid>,
+}
+
+#[cfg(test)]
+mod access_request_tests {
+    use super::*;
+    #[test]
+    fn marker_is_only_a_pointer_and_unknown_states_fail_closed() {
+        let id = Uuid::new_v4();
+        let content = crate::PortalContent::SecretAccessRequest { request_id: id };
+        let wire = serde_json::to_value(&content).unwrap();
+        assert_eq!(
+            wire,
+            serde_json::json!({"type":"secret_access_request","request_id":id})
+        );
+        let parsed: crate::PortalContent = serde_json::from_value(wire).unwrap();
+        assert!(
+            matches!(parsed, crate::PortalContent::SecretAccessRequest { request_id } if request_id == id)
+        );
+        assert!(serde_json::from_str::<SecretAccessState>("\"anything_else\"").is_err());
+    }
+}

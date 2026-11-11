@@ -24,8 +24,8 @@
 </g>
 <g><rect x="1065" y="510" width="870" height="210" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
 <text x="1091" y="554" font-family="sans-serif" font-size="28" fill="#9ece6a">CLI approval + masked web management</text>
-<text x="1091" y="601" font-family="sans-serif" font-size="24" fill="#c0caf5">agent-portal secret: separate approved credential.</text>
-<text x="1091" y="638" font-family="sans-serif" font-size="24" fill="#c0caf5">Execution tickets pin process, version and expiry.</text>
+<text x="1091" y="601" font-family="sans-serif" font-size="24" fill="#c0caf5">CLI enrollment + in-thread agent approval cards.</text>
+<text x="1091" y="638" font-family="sans-serif" font-size="24" fill="#c0caf5">Tickets pin process, secret version and expiry.</text>
 <text x="1091" y="675" font-family="sans-serif" font-size="24" fill="#c0caf5">Delete tags the key; restore confirms sharing.</text>
 </g>
 <g><rect x="65" y="755" width="870" height="210" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>

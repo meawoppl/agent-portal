@@ -37,6 +37,8 @@ async fn handle(
     let method = request.method();
     let protected = (method == axum::http::Method::POST || method == axum::http::Method::DELETE)
         && !path.contains("/authorize/")
+        && path != "/api/secrets/requests"
+        && !path.starts_with("/api/secrets/requests/")
         && !path.ends_with("/read")
         && !path.ends_with("/resolve")
         && !path.ends_with("/expunge")

@@ -1052,6 +1052,16 @@ fn native_tag(value: &serde_json::Value) -> Option<&str> {
     {
         return None;
     }
+    // The only payload in this server-owned history marker is a UUID.
+    // Unknown/malformed shapes remain ordinary data, never an authority hint.
+    if tag == "secret_access_request" {
+        return (value.as_object().is_some_and(|object| object.len() == 2)
+            && value
+                .get("request_id")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|id| Uuid::parse_str(id).is_ok()))
+        .then_some(tag);
+    }
     if tag == "system"
         && !value
             .get("subtype")
@@ -1398,7 +1408,11 @@ impl Redactor {
                                     .iter()
                                     .all(|block| value_budget(block, &mut nodes, 0))
                                 {
-                                    *blocks = vec![serde_json::json!({"type":"text","text":MASK})];
+                                    *blocks =
+                                        vec![serde_json::to_value(shared::PortalContent::Text {
+                                            text: MASK.into(),
+                                        })
+                                        .unwrap_or_default()];
                                 } else {
                                     for block in blocks {
                                         self.redact_agent_json(block);
@@ -1801,5 +1815,38 @@ mod send_boundary_tests {
             "send-side checkout cannot wait on blocked replay producers"
         );
         drop(held);
+    }
+}
+
+#[cfg(test)]
+mod access_marker_tests {
+    use super::*;
+    #[test]
+    fn request_pointer_survives_short_rules_but_cannot_promote_arbitrary_data() {
+        let rules = Redactor::build(
+            1,
+            vec![(Uuid::new_v4(), shared::api::SecretValue("a".into()), None)],
+        )
+        .unwrap();
+        let id = Uuid::parse_str("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa").unwrap();
+        let marker =
+            shared::PortalMessage::with_content(vec![shared::PortalContent::SecretAccessRequest {
+                request_id: id,
+            }]);
+        let mut frame = marker.to_json();
+        rules.redact_agent_json(&mut frame);
+        let parsed: shared::PortalMessage = serde_json::from_value(frame).unwrap();
+        assert!(
+            matches!(parsed.content.as_slice(), [shared::PortalContent::SecretAccessRequest {request_id}] if *request_id == id)
+        );
+        assert_eq!(parsed.agent_facing_text(), None);
+        for mut forged in [
+            serde_json::json!({"type":"secret_access_request","request_id":"a"}),
+            serde_json::json!({"type":"secret_access_request","request_id":id,"text":"a"}),
+        ] {
+            rules.redact_agent_json(&mut forged);
+            assert_ne!(forged["request_id"], id.to_string());
+            assert!(forged.get("text").is_none_or(|text| text != "a"));
+        }
     }
 }
