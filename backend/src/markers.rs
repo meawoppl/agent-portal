@@ -20,6 +20,20 @@
 //!   `CLAUDE.md` ("Operational log markers"). The `markers` unit test enforces
 //!   uniqueness and naming.
 
+/// Redaction before input/output persistence or fanout could not use current
+/// rules. A burst indicates stale rules or unavailable key provider; restore
+/// key-provider health and verify refresh. Content is rejected/held, not leaked.
+pub const SECRET_REDACTION_FAILED: &str = "SECRET_REDACTION_FAILED";
+
+/// Cleanup worker failed before saving its receipt. Bursts indicate database,
+/// archive or worker failure; inspect job status and storage/key reachability.
+pub const SECRET_EXPUNGE_FAILED: &str = "SECRET_EXPUNGE_FAILED";
+
+/// Redaction refresh failed on startup or after a rule change. A burst means
+/// KMS or database access is unhealthy; restore access and check generation
+/// refresh. Protected content is held while a current snapshot is unavailable.
+pub const SECRETS_REDACTION_REFRESH_FAILED: &str = "SECRETS_REDACTION_REFRESH_FAILED";
+
 /// A completed response could not be recorded in the Ready queue. Repeated
 /// failures indicate database or migration trouble; check session_attention.
 /// A single occurrence can be a transient connection failure.

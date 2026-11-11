@@ -49,6 +49,7 @@ use crate::AppState;
 pub fn test_app_state(pool: DbPool) -> AppState {
     let session_manager = SessionManager::new();
     AppState {
+        secrets: std::sync::Arc::new(crate::secrets::SecretsService::disabled()),
         dev_mode: false,
         db_pool: pool,
         forward_http_client: crate::handlers::forward_client::ForwardHttpClient::new(

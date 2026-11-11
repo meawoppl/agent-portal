@@ -70,6 +70,10 @@ impl<T> Clone for ConnSender<T> {
     }
 }
 impl<T> ConnSender<T> {
+    /// Stop both socket halves when a failed durable operation requires replay.
+    pub fn cancel(&self) {
+        self.cancel.cancel();
+    }
     pub fn same_channel(&self, other: &Self) -> bool {
         self.tx.same_channel(&other.tx)
     }

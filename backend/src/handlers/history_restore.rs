@@ -3,13 +3,7 @@ use super::{
     history::{archive_runtime, on_blocking, verify_history_reader},
     launcher_rpc::{launcher_rpc, require_launcher_owner},
 };
-use crate::{
-    auth::extract_user,
-    errors::AppError,
-    models::Session,
-    schema::{messages, sessions},
-    AppState,
-};
+use crate::{auth::extract_user, errors::AppError, models::Session, schema::sessions, AppState};
 use archive_format::{ArchiveMessageLine, SessionArchiveManifest};
 use axum::{
     extract::{Path, State},
@@ -291,7 +285,7 @@ fn store_restore(
                 provenance_kind: None, provenance_session_id: None, provenance_agent_type: None,
             },
         });
-        for chunk in rows.chunks(500) { diesel::insert_into(messages::table).values(chunk).execute(conn)?; }
+        crate::secrets::redaction::insert_historical(conn,rows).map_err(|_|diesel::result::Error::RollbackTransaction)?;
         Ok(())
     })
 }

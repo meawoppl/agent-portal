@@ -41,6 +41,11 @@ reqwest = { version = "0.12", features = ["json", "multipart", "native-tls-alpn"
 web-push = { workspace = true }
 # Generate the persistent Web Push identity with the existing TLS/ECE library.
 openssl = "0.10"
+zeroize = "1"
+aho-corasick = "1"
+aws-config = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio", "credentials-process"] }
+aws-sdk-kms = "1"
+aws-sdk-s3 = "1"
 
 # Environment variables
 dotenvy = { workspace = true }

@@ -1,6 +1,6 @@
 //! Completion state survives refresh, message retention and backend restarts.
 //! Receipts belong to the reader; a shared session never marks another user's reply read.
-use crate::{auth::CurrentUserId, db::DbConnection, errors::AppError, AppState};
+use crate::{auth::CurrentUserId, errors::AppError, AppState};
 use axum::{
     extract::{Path, State},
     Json,
@@ -79,7 +79,7 @@ pub async fn update(
 }
 
 pub(crate) fn update_receipt(
-    conn: &mut DbConnection,
+    conn: &mut diesel::PgConnection,
     user: Uuid,
     session: Uuid,
     req: &UpdateSessionAttention,
@@ -116,7 +116,7 @@ pub(crate) fn update_receipt(
 /// Called only after durable output insertion. Replays already rejected by the
 /// sequence gate never get here; timestamp/id ordering protects delayed records.
 pub(crate) fn record_reply(
-    conn: &mut DbConnection,
+    conn: &mut diesel::PgConnection,
     row: &crate::models::Message,
 ) -> QueryResult<bool> {
     let preview = latest_reply_preview(conn, row)?;
@@ -130,7 +130,7 @@ pub(crate) fn record_reply(
     Ok(count > 0)
 }
 fn latest_reply_preview(
-    conn: &mut DbConnection,
+    conn: &mut diesel::PgConnection,
     terminal: &crate::models::Message,
 ) -> QueryResult<String> {
     use crate::schema::messages;
@@ -165,7 +165,7 @@ struct DeliveryPolicy {
     viewing: bool,
 }
 pub(crate) fn push_suppressed(
-    conn: &mut DbConnection,
+    conn: &mut diesel::PgConnection,
     user: Uuid,
     session: Uuid,
     always: bool,
@@ -183,7 +183,7 @@ mod tests {
     use crate::models::{Message, NewMessage};
     use crate::test_support::{insert_session, insert_user, shared_pool, test_app_state};
 
-    fn member(conn: &mut DbConnection, session: Uuid, user: Uuid) {
+    fn member(conn: &mut diesel::PgConnection, session: Uuid, user: Uuid) {
         use crate::schema::session_members as m;
         diesel::insert_into(m::table)
             .values((
@@ -195,7 +195,7 @@ mod tests {
             .execute(conn)
             .unwrap();
     }
-    fn reply(conn: &mut DbConnection, session: Uuid, user: Uuid) -> Message {
+    fn reply(conn: &mut diesel::PgConnection, session: Uuid, user: Uuid) -> Message {
         diesel::insert_into(crate::schema::messages::table).values(NewMessage {
             session_id:session,user_id:user,role:"unknown".into(),agent_type:"codex".into(),content:r#"{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1,"cached_input_tokens":0}}"#.into(),
             provenance_kind:None,provenance_session_id:None,provenance_agent_type:None,

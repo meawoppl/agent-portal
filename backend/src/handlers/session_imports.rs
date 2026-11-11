@@ -2,7 +2,7 @@
 //! A paused session, its owner membership and scrollback commit atomically.
 use crate::db::session_lifecycle::{create_desired_session, DesiredSessionDraft};
 use crate::handlers::launcher_rpc::{launcher_rpc, require_launcher_owner};
-use crate::schema::{messages, sessions};
+use crate::schema::sessions;
 use crate::{auth::CurrentUserId, errors::AppError, AppState};
 use axum::{
     extract::{Path, Query, State},
@@ -273,7 +273,7 @@ fn store_import(
             },
         });
         // Stay below PostgreSQL's bind-parameter limit on large conversations.
-        for chunk in rows.chunks(500) { diesel::insert_into(messages::table).values(chunk).execute(conn)?; }
+        crate::secrets::redaction::insert_historical(conn,rows).map_err(|_|diesel::result::Error::RollbackTransaction)?;
         Ok(())
     })
 }
@@ -281,6 +281,7 @@ fn store_import(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::schema::messages;
     use crate::test_support::{insert_user, shared_pool};
     use shared::api::{ExternalSession, ImportedMessage};
     fn prepared() -> PreparedSessionImport {

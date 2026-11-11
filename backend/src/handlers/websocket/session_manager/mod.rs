@@ -376,19 +376,19 @@ mod tests {
     }
 
     #[test]
-    fn last_input_sender_take_is_once() {
+    fn last_input_sender_is_consumed_only_after_publication() {
         let mgr = SessionManager::new();
-        let session_id = Uuid::new_v4();
+        let session = Uuid::new_v4();
         let user = Uuid::new_v4();
-
-        assert!(mgr.take_last_input_sender(session_id).is_none());
-        mgr.set_last_input_sender(session_id, user, "Matt".to_string());
-        assert_eq!(
-            mgr.take_last_input_sender(session_id),
-            Some((user, "Matt".to_string()))
-        );
-        // Consumed — a second take is empty.
-        assert!(mgr.take_last_input_sender(session_id).is_none());
+        let sender = (user, "Matt".to_owned());
+        assert!(mgr.peek_last_input_sender(session).is_none());
+        mgr.set_last_input_sender(session, user, sender.1.clone());
+        assert_eq!(mgr.peek_last_input_sender(session), Some(sender.clone()));
+        assert_eq!(mgr.peek_last_input_sender(session), Some(sender.clone()));
+        mgr.consume_last_input_sender(session, &(Uuid::new_v4(), "Other".into()));
+        assert_eq!(mgr.peek_last_input_sender(session), Some(sender.clone()));
+        mgr.consume_last_input_sender(session, &sender);
+        assert!(mgr.peek_last_input_sender(session).is_none());
     }
 
     #[test]

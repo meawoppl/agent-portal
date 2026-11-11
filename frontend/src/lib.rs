@@ -39,6 +39,12 @@ pub enum Route {
     Demo,
     #[at("/settings")]
     Settings,
+    #[at("/secrets")]
+    Secrets,
+    #[at("/secrets/authorize")]
+    SecretAuthorize,
+    #[at("/secrets/jobs/:id")]
+    SecretJob { id: String },
     #[at("/history")]
     History,
     #[at("/history/:user/:session")]
@@ -78,6 +84,9 @@ fn switch(routes: Route) -> Html {
         Route::Demo => html! { <DemoPage /> },
         Route::Aperture => html! { <pages::aperture::AperturePage /> },
         Route::Settings => html! { <SettingsRoute /> },
+        Route::Secrets => html! { <pages::secrets::SecretsPage /> },
+        Route::SecretAuthorize => html! { <pages::secrets::SecretAuthorizePage /> },
+        Route::SecretJob { id } => html! { <pages::secrets::SecretsPage job_id={Some(id)} /> },
         Route::History => html! { <HistoryBrowserPage /> },
         Route::HistorySession { user, session } => html! {
             <HistoryTranscriptPage {user} {session} />

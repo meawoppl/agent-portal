@@ -72,32 +72,43 @@ pub struct MediaWriteThrough {
 /// [`MEDIA_ARCHIVE_FAILED`] marker and recorded in the archive stats. Runs on
 /// the blocking pool (the object-store backend blocks on its async client).
 pub fn write_through(runtime: &ArchiveRuntime, media: MediaWriteThrough) {
-    let meta = ArchivedMediaMeta {
-        media_id: media.media_id,
-        kind: kind_str(media.kind).to_string(),
-        content_type: media.content_type,
-        filename: media.filename,
-        bytes: media.bytes.len() as u64,
-        uploaded_at: chrono::Utc::now().naive_utc(),
-    };
-    match runtime
-        .store
-        .put_media(media.owner_user_id, media.session_id, &meta, &media.bytes)
-    {
-        Ok(()) => {
+    use diesel::Connection;
+    let _guard = shared::sync::lock_recovering_poison(&runtime.manifest_write_lock);
+    let pool = runtime.media_db_pool.read().ok().and_then(|p| p.clone());
+    let result = (|| -> Result<(), crate::errors::AppError> {
+        let write=|rules:Option<&crate::secrets::redaction::Redactor>| -> Result<(),crate::errors::AppError> {
+            if runtime.suppressed_media.read().map_or(true,|ids|ids.contains(&media.media_id)){return Ok(())}
+            if rules.is_some_and(|rules|rules.contains_bytes(&media.bytes)){return Ok(())}
+            let meta=ArchivedMediaMeta{media_id:media.media_id,kind:kind_str(media.kind).into(),content_type:media.content_type.clone(),filename:media.filename.as_ref().map(|name|rules.map_or_else(||name.clone(),|rules|rules.redact_str(name))),bytes:media.bytes.len() as u64,uploaded_at:chrono::Utc::now().naive_utc()};
+            runtime.store.put_media(media.owner_user_id,media.session_id,&meta,&media.bytes)
+                .map_err(|_|crate::errors::AppError::ServiceUnavailable("Media archive write unavailable"))?;
             runtime.stats.record_success(meta.bytes);
-            debug!(
-                "Archived media {} ({} bytes) for session {}",
-                media.media_id, meta.bytes, media.session_id
-            );
+            Ok(())
+        };
+        if let Some(pool) = pool {
+            let mut conn = pool.get()?;
+            conn.transaction(|conn| {
+                crate::secrets::expunge::archive_session_lock(conn, media.session_id)?;
+                if crate::secrets::expunge::media_removed(conn, media.media_id)? {
+                    return Ok(());
+                }
+                crate::secrets::redaction::lock_generation(conn)?;
+                let rules =
+                    crate::secrets::redaction::snapshot_for_user(conn, media.owner_user_id)?;
+                write(Some(&rules))
+            })
+        } else {
+            write(None)
         }
-        Err(e) => {
-            runtime.stats.record_failure(&e.to_string());
-            error!(
-                "{MEDIA_ARCHIVE_FAILED} media={} session={}: {e}",
-                media.media_id, media.session_id
-            );
-        }
+    })();
+    if result.is_err() {
+        runtime
+            .stats
+            .record_failure("Media archive write unavailable");
+        error!(
+            "{MEDIA_ARCHIVE_FAILED} media={} session={}: write held or unavailable",
+            media.media_id, media.session_id
+        );
     }
 }
 
@@ -150,6 +161,20 @@ fn fetch_archived(
     if !runtime.config.media {
         return None;
     }
+    if runtime
+        .suppressed_media
+        .read()
+        .map_or(true, |ids| ids.contains(&media_id))
+    {
+        return None;
+    }
+    if let Some(pool) = runtime.media_db_pool.read().ok().and_then(|p| p.clone()) {
+        let mut conn = pool.get().ok()?;
+        if crate::secrets::expunge::media_removed(&mut conn, media_id).ok()? {
+            return None;
+        }
+    }
+
     let meta = runtime
         .store
         .get_media_meta(owner_user_id, session_id, media_id)

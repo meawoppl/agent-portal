@@ -191,6 +191,7 @@ struct GoogleUserInfo {
 #[derive(Debug, Deserialize)]
 struct GitHubUserInfo {
     id: u64,
+    login: String,
     name: Option<String>,
     avatar_url: Option<String>,
 }
@@ -347,6 +348,8 @@ async fn provider_callback(
         return Ok(banned_redirect(reason).into_response());
     }
 
+    crate::secrets::auth::record_recent_auth(&cookies, &app_state, user.id);
+
     if let Some(device_state) = device_state {
         add_session_cookie(&cookies, &app_state, &user);
 
@@ -415,6 +418,7 @@ async fn google_identity(
     Ok(ProviderIdentity {
         provider: PROVIDER_GOOGLE,
         subject: info.sub,
+        handle: None,
         email: Some(info.email),
         email_verified: info.email_verified,
         name: info.name,
@@ -457,6 +461,7 @@ async fn github_identity(
     Ok(ProviderIdentity {
         provider: PROVIDER_GITHUB,
         subject: info.id.to_string(),
+        handle: Some(info.login),
         email_verified: email.is_some(),
         email,
         name: info.name,
@@ -660,6 +665,7 @@ pub async fn dev_login(
     );
 
     add_session_cookie(&cookies, &app_state, &user);
+    crate::secrets::auth::record_recent_auth(&cookies, &app_state, user.id);
 
     // Redirect to dashboard
     Ok(Redirect::temporary(routes::DASHBOARD))
@@ -852,6 +858,7 @@ mod tests {
         }"#;
         let info: GitHubUserInfo = serde_json::from_str(body).expect("parses /user");
         assert_eq!(info.id.to_string(), "583231");
+        assert_eq!(info.login, "octocat");
         assert_eq!(info.name.as_deref(), Some("The Octocat"));
     }
 

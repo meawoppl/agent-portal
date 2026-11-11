@@ -47,6 +47,8 @@ pub struct ProviderIdentity {
     pub provider: &'static str,
     /// The provider's immutable id for this person.
     pub subject: String,
+    /// Last provider-asserted display handle, never used as the account key.
+    pub handle: Option<String>,
     /// Email as asserted by the provider, if any.
     pub email: Option<String>,
     /// Whether the provider states it has *verified* that address. Only a
@@ -82,6 +84,20 @@ pub fn resolve_user(
         .optional()?;
 
     if let Some(existing) = existing {
+        // Refresh assertions without changing portal identity or linking rules.
+        // A later unverified/absent address must revoke its selector authority.
+        diesel::update(user_identities::table.find(existing.id))
+            .set((
+                user_identities::email.eq(&identity.email),
+                user_identities::handle.eq(&identity.handle),
+                user_identities::email_verified.eq(identity.email_verified
+                    && identity
+                        .email
+                        .as_ref()
+                        .is_some_and(|email| shared::strings::is_non_blank(email))),
+                user_identities::last_seen_at.eq(Some(chrono::Utc::now().naive_utc())),
+            ))
+            .execute(conn)?;
         let user = users::table
             .find(existing.user_id)
             .select(User::as_select())
@@ -141,6 +157,9 @@ pub fn resolve_user(
             provider: identity.provider.to_string(),
             subject: identity.subject.clone(),
             email: identity.email.clone(),
+            handle: identity.handle.clone(),
+            email_verified: identity.email_verified,
+            last_seen_at: Some(chrono::Utc::now().naive_utc()),
         })
         .execute(conn)?;
 
@@ -173,6 +192,7 @@ mod tests {
         ProviderIdentity {
             provider,
             subject: subject.to_string(),
+            handle: None,
             email: Some(email.to_string()),
             email_verified: verified,
             name: Some("Test".to_string()),
@@ -431,5 +451,38 @@ mod tests {
         cleanup(conn, &[a, b]);
 
         assert_ne!(a, b);
+    }
+    #[test]
+    fn known_subject_refreshes_assertions_without_changing_portal_user() {
+        let Some(pool) = crate::test_support::shared_pool() else {
+            return;
+        };
+        let conn = &mut pool.get().unwrap();
+        let n = nonce();
+        let mut assertion = identity(
+            PROVIDER_GITHUB,
+            &format!("github-{n}"),
+            &format!("verified-{n}@example.invalid"),
+            true,
+        );
+        assertion.handle = Some("before-rename".into());
+        let user = resolve_user(conn, &assertion).unwrap().unwrap();
+        assertion.handle = Some("after-rename".into());
+        assertion.email = Some(format!("unverified-{n}@example.invalid"));
+        assertion.email_verified = false;
+        assert_eq!(resolve_user(conn, &assertion).unwrap().unwrap().id, user.id);
+        use crate::schema::user_identities;
+        let saved = user_identities::table
+            .filter(user_identities::user_id.eq(user.id))
+            .select(UserIdentity::as_select())
+            .first::<UserIdentity>(conn)
+            .unwrap();
+        assert_eq!(saved.handle.as_deref(), Some("after-rename"));
+        assert_eq!(saved.email, assertion.email);
+        assert!(!saved.email_verified);
+        assert!(saved.last_seen_at.is_some());
+        assert_eq!(saved.subject, assertion.subject);
+        assert_eq!(saved.user_id, user.id);
+        cleanup(conn, &[user.id]);
     }
 }

@@ -134,6 +134,11 @@ fn read_page(
     if rows.is_empty() && after < head {
         return Err(AppError::Conflict("follow journal gap"));
     }
+    let owner = crate::schema::sessions::table
+        .find(id)
+        .select(crate::schema::sessions::user_id)
+        .first::<Uuid>(&mut conn)?;
+    let rules = crate::secrets::redaction::snapshot_for_user(&mut conn, owner)?;
     let mut cursor = after;
     let mut events = Vec::new();
     for (sequence, message_id, agent, role, content, time) in rows {
@@ -144,6 +149,7 @@ fn read_page(
         if sequence != cursor + 1 {
             return Err(AppError::Conflict("follow cursor gap"));
         }
+        let content = rules.redact_agent_content(&content);
         let summary =
             super::peek_summary::summarize_message(message_id, &agent, &role, &content, time);
         let mut lifecycle = lifecycle::classify(&agent, &content);

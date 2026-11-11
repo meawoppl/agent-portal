@@ -185,6 +185,9 @@ impl ArchiveStore {
         match self {
             Self::Local(store) => match std::fs::File::open(store.object_path(&key)) {
                 Ok(mut source) => {
+                    if source.metadata()?.len() > 8 * 1024 * 1024 * 1024 {
+                        return Err(std::io::Error::other("Archive exceeds disk-spool quota"));
+                    }
                     std::io::copy(&mut source, &mut file)?;
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -200,9 +203,16 @@ impl ArchiveStore {
                 match result {
                     Ok(result) => store.handle.block_on(async {
                         let mut chunks = result.into_stream();
+                        let mut total = 0u64;
                         while let Some(chunk) =
                             chunks.try_next().await.map_err(std::io::Error::from)?
                         {
+                            total = total.saturating_add(chunk.len() as u64);
+                            if total > 8 * 1024 * 1024 * 1024 {
+                                return Err(std::io::Error::other(
+                                    "Archive exceeds disk-spool quota",
+                                ));
+                            }
                             file.write_all(&chunk)?;
                         }
                         Ok::<_, std::io::Error>(())
@@ -775,5 +785,77 @@ mod tests {
 
         std::env::remove_var("PORTAL_SESSION_ARCHIVE_BACKEND");
         std::env::remove_var("PORTAL_SESSION_ARCHIVE_LOCAL_ROOT");
+    }
+}
+
+impl ArchiveStore {
+    /// Remove the current object. Versioned S3 erasure additionally needs the
+    /// backend's explicit version inventory/delete adapter; a delete marker is
+    /// never reported as historical erasure.
+    pub fn delete_object(&self, key: &str) -> std::io::Result<()> {
+        match self {
+            Self::Local(store) => match std::fs::remove_file(store.object_path(key)) {
+                Ok(()) => Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(error) => Err(error),
+            },
+            Self::Object(store) => match store
+                .handle
+                .block_on(store.store.delete(&store.object_path(key)))
+            {
+                Ok(()) | Err(object_store::Error::NotFound { .. }) => Ok(()),
+                Err(error) => Err(error.into()),
+            },
+        }
+    }
+}
+
+impl ArchiveStore {
+    /// Bounded-memory raw-object reader for cleanup. Remote bodies spool to
+    /// disk with a hard quota; local readers never copy whole assets to RAM.
+    pub fn object_reader(
+        &self,
+        key: &str,
+        max_bytes: u64,
+    ) -> std::io::Result<Option<Box<dyn std::io::Read>>> {
+        use std::io::{Read, Seek, Write};
+        match self {
+            Self::Local(store) => match std::fs::File::open(store.object_path(key)) {
+                Ok(file) if file.metadata()?.len() <= max_bytes => Ok(Some(Box::new(file))),
+                Ok(_) => Err(std::io::Error::other(
+                    "Archive object exceeds cleanup quota",
+                )),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(error) => Err(error),
+            },
+            Self::Object(store) => {
+                use futures_util::TryStreamExt;
+                let result = match store
+                    .handle
+                    .block_on(store.store.get(&store.object_path(key)))
+                {
+                    Ok(result) => result,
+                    Err(object_store::Error::NotFound { .. }) => return Ok(None),
+                    Err(error) => return Err(error.into()),
+                };
+                let mut file = tempfile::tempfile()?;
+                store.handle.block_on(async {
+                    let mut total = 0u64;
+                    let mut chunks = result.into_stream();
+                    while let Some(chunk) = chunks.try_next().await.map_err(std::io::Error::from)? {
+                        total = total.saturating_add(chunk.len() as u64);
+                        if total > max_bytes {
+                            return Err(std::io::Error::other(
+                                "Archive object exceeds cleanup quota",
+                            ));
+                        }
+                        file.write_all(&chunk)?;
+                    }
+                    Ok::<_, std::io::Error>(())
+                })?;
+                file.rewind()?;
+                Ok(Some(Box::new(file.take(max_bytes))))
+            }
+        }
     }
 }
