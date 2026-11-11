@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="Arial, sans-serif" font-size="24" fill="#a9b1d6">PR #2420 · Current transcript benchmark</text>
+<text x="55" y="112" font-family="Arial, sans-serif" font-size="34" fill="#e6e9f5">The benchmark negotiates the current protocol and exercises long text.</text>
+<path d="M55 160 H1945 M1000 190 V1130" stroke="#565f89" stroke-dasharray="7 7"/>
+<text x="55" y="220" font-family="Arial, sans-serif" font-size="24" fill="#f7768e">BEFORE</text>
+<rect x="55" y="265" width="900" height="225" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="310" font-family="Arial, sans-serif" font-size="28" fill="#7aa2f7">Fixture version 2</text>
+<text x="80" y="365" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Missing current /api/config response.</text>
+<text x="80" y="410" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Replay waits for registration and times out.</text>
+<rect x="55" y="535" width="900" height="225" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="580" font-family="Arial, sans-serif" font-size="28" fill="#7aa2f7">One text size</text>
+<text x="80" y="635" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">100 counted messages, ~1 KiB each.</text>
+<text x="80" y="680" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">0 or 5,000 thinking markers.</text>
+<rect x="55" y="805" width="900" height="225" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="850" font-family="Arial, sans-serif" font-size="28" fill="#7aa2f7">Profile inferred from label</text>
+<text x="80" y="905" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Older release baseline only.</text>
+<text x="80" y="950" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Easy to compare mismatched builds.</text>
+<text x="1045" y="220" font-family="Arial, sans-serif" font-size="24" fill="#9ece6a">AFTER</text>
+<rect x="1045" y="265" width="900" height="225" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1070" y="310" font-family="Arial, sans-serif" font-size="28" fill="#7aa2f7">Fixture version 3</text>
+<text x="1070" y="365" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Valid config and Hello/HelloAck exchange.</text>
+<text x="1070" y="410" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Replay reaches the typed renderer.</text>
+<rect x="1045" y="535" width="900" height="225" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1070" y="580" font-family="Arial, sans-serif" font-size="28" fill="#7aa2f7">Long-text workload</text>
+<text x="1070" y="635" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">--text-repeat 512: ~16.5 KiB per message.</text>
+<text x="1070" y="680" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">All 100 bodies and grouped markers verified.</text>
+<rect x="1045" y="805" width="900" height="225" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1070" y="850" font-family="Arial, sans-serif" font-size="28" fill="#7aa2f7">Explicit measurement context</text>
+<text x="1070" y="905" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Required --build-profile; browser metadata.</text>
+<text x="1070" y="950" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Current dev samples saved for both sizes.</text>
+<text x="55" y="1172" font-family="Arial, sans-serif" font-size="22" fill="#a9b1d6">Dev-build smoke measurements on a shared host; no production latency claim or rendering change.</text>
+</svg>
