@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2409 · Built-in encrypted secrets</text>
+<text x="55" y="104" font-family="sans-serif" font-size="34" fill="#e6e9f5">Portal had no vault; now values have encrypted, immutable versions,</text>
+<text x="55" y="147" font-family="sans-serif" font-size="34" fill="#e6e9f5">explicit access, masked management and accountable archive cleanup.</text>
+<path d="M55 178 H1945 M1000 190 V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="65" y="229" font-family="sans-serif" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1065" y="229" font-family="sans-serif" font-size="22" fill="#9ece6a">AFTER</text>
+<g><rect x="65" y="265" width="870" height="210" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="91" y="309" font-family="sans-serif" font-size="28" fill="#f7768e">No Portal-managed vault</text>
+<text x="91" y="356" font-family="sans-serif" font-size="24" fill="#c0caf5">Secrets supplied outside Portal tooling.</text>
+<text x="91" y="393" font-family="sans-serif" font-size="24" fill="#c0caf5">No encrypted version history or shared secret ACL.</text>
+</g>
+<g><rect x="1065" y="265" width="870" height="210" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1091" y="309" font-family="sans-serif" font-size="28" fill="#9ece6a">Encrypted versions + stable identities</text>
+<text x="1091" y="356" font-family="sans-serif" font-size="24" fill="#c0caf5">AES-256-GCM per version; AWS KMS wraps keys.</text>
+<text x="1091" y="393" font-family="sans-serif" font-size="24" fill="#c0caf5">personal/NAME, org/NAME and id/UUID.</text>
+<text x="1091" y="430" font-family="sans-serif" font-size="24" fill="#c0caf5">Sharing resolves provider identity to Portal user ID.</text>
+</g>
+<g><rect x="65" y="510" width="870" height="210" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="91" y="554" font-family="sans-serif" font-size="28" fill="#f7768e">No dedicated secret command or masked page</text>
+<text x="91" y="601" font-family="sans-serif" font-size="24" fill="#c0caf5">Ordinary session credentials serve agent activity.</text>
+<text x="91" y="638" font-family="sans-serif" font-size="24" fill="#c0caf5">No separate approval for vault reads or execution.</text>
+</g>
+<g><rect x="1065" y="510" width="870" height="210" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1091" y="554" font-family="sans-serif" font-size="28" fill="#9ece6a">CLI approval + masked web management</text>
+<text x="1091" y="601" font-family="sans-serif" font-size="24" fill="#c0caf5">agent-portal secret: separate approved credential.</text>
+<text x="1091" y="638" font-family="sans-serif" font-size="24" fill="#c0caf5">Execution tickets pin process, version and expiry.</text>
+<text x="1091" y="675" font-family="sans-serif" font-size="24" fill="#c0caf5">Delete tags the key; restore confirms sharing.</text>
+</g>
+<g><rect x="65" y="755" width="870" height="210" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="91" y="799" font-family="sans-serif" font-size="28" fill="#f7768e">Transcript retention preserves prior content</text>
+<text x="91" y="846" font-family="sans-serif" font-size="24" fill="#c0caf5">Archive history can retain leaked values.</text>
+<text x="91" y="883" font-family="sans-serif" font-size="24" fill="#c0caf5">Current-object overwrite leaves old S3 versions.</text>
+</g>
+<g><rect x="1065" y="755" width="870" height="210" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1091" y="799" font-family="sans-serif" font-size="28" fill="#9ece6a">Scoped redaction + expunge receipts</text>
+<text x="1091" y="846" font-family="sans-serif" font-size="24" fill="#c0caf5">Bounded transcript streaming and media removal.</text>
+<text x="1091" y="883" font-family="sans-serif" font-size="24" fill="#c0caf5">Delete superseded S3 versions; verify coverage.</text>
+<text x="1091" y="920" font-family="sans-serif" font-size="24" fill="#c0caf5">Blocked targets and backup limits remain visible.</text>
+</g>
+<text x="65" y="1030" font-family="sans-serif" font-size="25" fill="#a9b1d6">Existing authentication and archives remain.</text>
+<text x="1065" y="1030" font-family="sans-serif" font-size="25" fill="#9ece6a">All encrypted vault versions remain retained.</text>
+<text x="55" y="1172" font-family="sans-serif" font-size="22" fill="#e0af68">Activation needs KMS configuration. Cleanup cannot certify WAL, backups, opaque media or downloaded copies.</text>
+</svg>
