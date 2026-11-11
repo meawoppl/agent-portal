@@ -516,7 +516,7 @@ mod tests {
     }
     #[tokio::test]
     async fn directory_routes_require_a_verified_locked_domain_for_browser_and_cli() {
-        use crate::handlers::secrets::vault_tests::{credential, Database};
+        use crate::handlers::secrets::tests::{credential, Database};
         use crate::schema::{user_identities, users};
         use axum::http::{Request, StatusCode};
         use tower::ServiceExt;
