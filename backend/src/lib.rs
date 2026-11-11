@@ -199,7 +199,7 @@ pub async fn run() -> anyhow::Result<()> {
         config.native_push,
     )?);
 
-    let secrets = Arc::new(secrets::SecretsService::from_env(args.dev_mode).await?);
+    let secrets = Arc::new(secrets::SecretsService::from_env()?);
     // Create app state
     let forward_http_client =
         handlers::forward_client::ForwardHttpClient::new(session_manager.clone());

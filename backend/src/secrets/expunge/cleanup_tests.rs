@@ -31,7 +31,7 @@ impl Fixture {
         let directory = tempfile::tempdir().unwrap();
         let mut state = crate::test_support::test_app_state(database.pool.clone());
         state.secrets = Arc::new(super::super::SecretsService::new(Some(
-            super::super::crypto::EnvelopeCrypto::Development {
+            super::super::crypto::EnvelopeCrypto {
                 key: Arc::new(Zeroizing::new(vec![73; 32])),
             },
         )));

@@ -42,8 +42,8 @@ impl SecretsService {
     pub fn disabled() -> Self {
         Self::new(None)
     }
-    pub async fn from_env(dev: bool) -> anyhow::Result<Self> {
-        Ok(Self::new(EnvelopeCrypto::from_env(dev).await?))
+    pub fn from_env() -> anyhow::Result<Self> {
+        Ok(Self::new(EnvelopeCrypto::from_env()?))
     }
     pub fn crypto(&self) -> Result<&EnvelopeCrypto, AppError> {
         self.crypto.as_ref().ok_or(AppError::ServiceUnavailable(

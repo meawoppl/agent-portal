@@ -13,7 +13,7 @@
 </g>
 <g><rect x="1065" y="265" width="870" height="210" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
 <text x="1091" y="309" font-family="sans-serif" font-size="28" fill="#9ece6a">Encrypted versions + stable identities</text>
-<text x="1091" y="356" font-family="sans-serif" font-size="24" fill="#c0caf5">AES-256-GCM per version; AWS KMS wraps keys.</text>
+<text x="1091" y="356" font-family="sans-serif" font-size="24" fill="#c0caf5">AES-256-GCM; an injected file wraps data keys.</text>
 <text x="1091" y="393" font-family="sans-serif" font-size="24" fill="#c0caf5">personal/NAME, org/NAME and id/UUID.</text>
 <text x="1091" y="430" font-family="sans-serif" font-size="24" fill="#c0caf5">Sharing resolves provider identity to Portal user ID.</text>
 </g>
@@ -41,5 +41,5 @@
 </g>
 <text x="65" y="1030" font-family="sans-serif" font-size="25" fill="#a9b1d6">Existing authentication and archives remain.</text>
 <text x="1065" y="1030" font-family="sans-serif" font-size="25" fill="#9ece6a">All encrypted vault versions remain retained.</text>
-<text x="55" y="1172" font-family="sans-serif" font-size="22" fill="#e0af68">Activation needs KMS configuration. Cleanup cannot certify WAL, backups, opaque media or downloaded copies.</text>
+<text x="55" y="1172" font-family="sans-serif" font-size="22" fill="#e0af68">Activation needs an injected key file. Cleanup cannot certify WAL, backups, opaque media or downloaded copies.</text>
 </svg>

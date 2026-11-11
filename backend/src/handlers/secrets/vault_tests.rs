@@ -94,7 +94,7 @@ pub(crate) async fn request(
 async fn vault_rotation_delete_restore_acl_and_credentials_are_enforced() {
     let Some(db) = Database::new() else { return };
     let mut state = crate::test_support::test_app_state(db.pool.clone());
-    state.secrets = Arc::new(SecretsService::new(Some(EnvelopeCrypto::Development {
+    state.secrets = Arc::new(SecretsService::new(Some(EnvelopeCrypto {
         key: Arc::new(Zeroizing::new(vec![19; 32])),
     })));
     let state = Arc::new(state);
@@ -238,7 +238,7 @@ async fn vault_rotation_delete_restore_acl_and_credentials_are_enforced() {
     // Warm matcher sources never become an offline saved-value cache: a
     // provider/key failure still rejects a read, even with rules installed.
     let mut wrong_service = state.secrets.as_ref().clone();
-    wrong_service.crypto = Some(EnvelopeCrypto::Development {
+    wrong_service.crypto = Some(EnvelopeCrypto {
         key: Arc::new(Zeroizing::new(vec![99; 32])),
     });
     let mut wrong_state = state.as_ref().clone();
@@ -591,7 +591,7 @@ async fn vault_rotation_delete_restore_acl_and_credentials_are_enforced() {
 async fn retained_source_quota_rejects_before_rule_generation_or_value_release() {
     let Some(db) = Database::new() else { return };
     let mut state = crate::test_support::test_app_state(db.pool.clone());
-    state.secrets = Arc::new(SecretsService::new(Some(EnvelopeCrypto::Development {
+    state.secrets = Arc::new(SecretsService::new(Some(EnvelopeCrypto {
         key: Arc::new(Zeroizing::new(vec![44; 32])),
     })));
     let state = Arc::new(state);

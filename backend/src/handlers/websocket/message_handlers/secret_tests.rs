@@ -11,7 +11,7 @@ async fn fixture() -> Option<(Database, Arc<crate::AppState>, crate::models::Ses
     let db = Database::new()?;
     let mut state = crate::test_support::test_app_state(db.pool.clone());
     state.secrets = Arc::new(crate::secrets::SecretsService::new(Some(
-        crate::secrets::crypto::EnvelopeCrypto::Development {
+        crate::secrets::crypto::EnvelopeCrypto {
             key: Arc::new(zeroize::Zeroizing::new(vec![42; 32])),
         },
     )));

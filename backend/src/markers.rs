@@ -30,7 +30,7 @@ pub const SECRET_REDACTION_FAILED: &str = "SECRET_REDACTION_FAILED";
 pub const SECRET_EXPUNGE_FAILED: &str = "SECRET_EXPUNGE_FAILED";
 
 /// Redaction refresh failed on startup or after a rule change. A burst means
-/// KMS or database access is unhealthy; restore access and check generation
+/// Encryption or database access is unhealthy; restore access and check generation
 /// refresh. Protected content is held while a current snapshot is unavailable.
 pub const SECRETS_REDACTION_REFRESH_FAILED: &str = "SECRETS_REDACTION_REFRESH_FAILED";
 
