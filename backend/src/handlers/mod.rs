@@ -51,3 +51,5 @@ pub mod dashboard_rpc;
 pub(crate) mod session_activity;
 
 pub mod secrets;
+
+pub(crate) mod session_stop;

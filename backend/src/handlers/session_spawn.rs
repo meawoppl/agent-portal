@@ -872,13 +872,7 @@ pub(crate) async fn sweep(state: Arc<AppState>) -> Result<(), AppError> {
             .is_some_and(|timeout| (now - last).num_seconds() >= i64::from(timeout))
             && !activity.get(&child.id).is_some_and(|s| s.is_active());
         if parent_ended || idle {
-            crate::db::session_lifecycle::pause(&mut conn, child.id)?;
-            state.session_manager.disconnect_session(child.id);
-            state.session_manager.stop_session_on_launcher(
-                child.id,
-                child.launcher_id,
-                Some(child.working_directory),
-            );
+            super::session_stop::persist_and_stop(&mut conn, &state.session_manager, &child)?;
             tracing::info!(child=%child.id, parent_ended, idle, "Agent child stopped by lifecycle policy");
         }
     }
