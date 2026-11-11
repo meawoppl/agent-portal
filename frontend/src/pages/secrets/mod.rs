@@ -83,7 +83,7 @@ pub enum Msg {
     GlobalCleanup(bool),
     Job(Result<SecretExpungeJob, String>),
     RefreshJob,
-    Members(Result<SecretMembersResponse, String>),
+    Members(Result<SecretMembersResponse, utils::FetchError>),
 }
 pub struct SecretsPage {
     tab: Tab,
@@ -97,6 +97,7 @@ pub struct SecretsPage {
     confirm_restore: bool,
     global_cleanup: bool,
     members: Vec<SecretMember>,
+    directory_restricted: bool,
     share_user: Option<Uuid>,
     job: Option<SecretExpungeJob>,
     credentials: Option<Vec<SecretCredentialMetadata>>,
@@ -136,8 +137,7 @@ impl Component for SecretsPage {
         spawn_local(async move {
             link.send_message(Msg::Members(
                 utils::fetch_json::<SecretMembersResponse>("/api/secrets/members", On401::Ignore)
-                    .await
-                    .map_err(|_| "Member directory unavailable.".into()),
+                    .await,
             ));
         });
         if ctx.props().job_id.is_some() {
@@ -155,6 +155,7 @@ impl Component for SecretsPage {
             confirm_restore: false,
             global_cleanup: false,
             members: vec![],
+            directory_restricted: false,
             share_user: None,
             job: None,
             credentials: None,
@@ -446,8 +447,15 @@ impl Component for SecretsPage {
             }
             Msg::Members(result) => {
                 match result {
-                    Ok(data) => self.members = data.members,
-                    Err(error) => self.error = Some(error),
+                    Ok(data) => {
+                        self.members = data.members;
+                        self.directory_restricted = false;
+                    }
+                    Err(utils::FetchError::Status(403)) => {
+                        self.members.clear();
+                        self.directory_restricted = true;
+                    }
+                    Err(_) => self.error = Some("Member directory unavailable.".into()),
                 }
                 true
             }
@@ -625,8 +633,11 @@ impl SecretsPage {
                     if secret.namespace==SecretNamespace::Personal {
                     <h3>{"Individual access"}</h3><p>{"Sharing grants read and use. Recipients cannot re-share through Portal. Revocation cannot recall a value already copied or delivered to a process."}</p>
                     <ul>{for secret.grants.iter().map(|grant|{let user=grant.user_id;html!{<li key={user.to_string()}>{self.member_label(user)}{format!(" — {}",grant.rights.iter().map(right_label).collect::<Vec<_>>().join(", "))}<button disabled={self.busy} onclick={ctx.link().callback(move |_|Msg::Unshare(user))}>{"Revoke"}</button></li>}})}</ul>
+                    if self.directory_restricted {
+                        <p>{"Member discovery requires a domain-locked Portal and a verified identity in that domain. Sharing by a known Portal user UUID remains available through the CLI."}</p>
+                    } else {
                     <label>{"Existing active member"}<select value={self.share_user.map(|id|id.to_string()).unwrap_or_default()} disabled={self.busy} onchange={ctx.link().callback(|event:Event|Msg::ShareUser(event.target_unchecked_into::<web_sys::HtmlSelectElement>().value()))}><option value="">{"Choose a member"}</option>{for self.members.iter().filter(|member|member.user_id!=secret.owner_user_id).map(|member|html!{<option value={member.user_id.to_string()}>{self.member_label(member.user_id)}</option>})}</select></label>
-                    <button disabled={self.busy||self.share_user.is_none()} onclick={ctx.link().callback(|_|Msg::Share)}>{"Grant read and use"}</button>
+                    <button disabled={self.busy||self.share_user.is_none()} onclick={ctx.link().callback(|_|Msg::Share)}>{"Grant read and use"}</button>}
                     }
                     <h3>{"Delete"}</h3><p>{"Delete adds the deleted tag, disables reads and use, and keeps all encrypted versions. It does not clean up leaked copies. The name stays reserved."}</p>
                     <label class="secrets-check"><input type="checkbox" checked={self.confirm_delete} disabled={self.busy} onchange={ctx.link().callback(|event:Event|Msg::ConfirmDelete(event.target_unchecked_into::<HtmlInputElement>().checked()))}/>{"I understand deletion is reversible and retains the vault history."}</label><button disabled={self.busy||!self.confirm_delete} onclick={ctx.link().callback(|_|Msg::Delete)}>{"Delete secret"}</button>
