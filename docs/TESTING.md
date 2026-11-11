@@ -285,9 +285,9 @@ Build the bundle you intend to compare (release is preferred for performance), t
 
 ```bash
 uv run --with playwright python scripts/benchmark-transcript.py \
-  --label "release, current commit" --repeat 3
+  --build-profile release --label "release, current commit" --repeat 3
 uv run --with playwright python scripts/benchmark-transcript.py \
-  --label "release, current commit, narrow viewport" --width 390 --repeat 3 \
+  --build-profile release --label "release, current commit, narrow viewport" --width 390 --repeat 3 \
   --output builds/transcript-benchmark-mobile.json
 ```
 
@@ -329,3 +329,42 @@ cost without thousands of extra DOM nodes. These measurements include fixture
 serialization/transport and two animation frames, without isolating other host
 activity; they establish a reproducible workload, not a production responsiveness
 claim.
+
+
+### Current-main smoke baseline (2026-11-11)
+
+Fixture version 3 supplies the current `/api/config` response and completes the
+Hello/HelloAck handshake before replay. `--build-profile` is required to avoid
+silently comparing dev and release measurements. `--text-repeat 512` exercises
+16 times the default message text (about 16.5 KiB per message). Each sample uses
+a fresh browser context; replay reuses that hydrated page. The measurements
+exclude WASM download/bootstrap, so this is not a cold-load benchmark.
+
+At source revision `f007f10116fe0449db552ddebbc05c1883391bcf`, a dev bundle at
+1440 x 1000 passed all typed-rendering, retained-window, thinking-group and
+history replacement assertions in three repetitions per case:
+
+| Text per message | Thinking markers | Median hydration | Median replay |
+| --- | ---: | ---: | ---: |
+| ~1 KiB (32 repeats) | 0 | 306 ms | 197 ms |
+| ~1 KiB (32 repeats) | 5,000 | 1,270 ms | 1,053 ms |
+| ~16.5 KiB (512 repeats) | 0 | 1,264 ms | 1,591 ms |
+| ~16.5 KiB (512 repeats) | 5,000 | 2,794 ms | 2,371 ms |
+
+Samples and browser/environment metadata:
+[`ordinary`](benchmarks/transcript-f007f101-dev.json),
+[`long text`](benchmarks/transcript-f007f101-dev-long.json).
+The shared Linux host was not isolated (other builds/browser activity were
+present). These dev-profile results cannot establish a regression against the
+older release baseline or a production latency budget. No rendering rewrite is
+justified by this smoke run. Before choosing virtualization, repeat on matching
+release builds with host contention controlled, then profile parsing versus
+layout. This harness does not assert focus/caret preservation or scroll anchoring.
+
+Reproduce the long-text case after building the intended bundle:
+
+```bash
+uv run --with playwright python scripts/benchmark-transcript.py \
+  --build-profile dev --label "current dev, long text" --text-repeat 512 \
+  --repeat 3 --output builds/transcript-benchmark-long.json
+```

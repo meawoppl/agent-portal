@@ -7,6 +7,8 @@ import asyncio
 import functools
 import http.server
 import json
+import os
+import platform
 from pathlib import Path
 import statistics
 import threading
@@ -26,7 +28,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *_):
         pass
 
-def fixture(markers, prefix):
+def fixture(markers, prefix, text_repeat=32):
     """100 counted rows, with a large free-thinking burst inside the retained tail."""
     rows = []
     for index in range(100):
@@ -37,7 +39,7 @@ def fixture(markers, prefix):
                         for n in range(markers))
         role = 'user' if index % 2 == 0 else 'assistant'
         message = dict(role=role, content=[dict(
-            type='text', text=f'{prefix} item {index:03d}. ' + 'Deterministic transcript content. ' * 32)])
+            type='text', text=f'{prefix} item {index:03d}. ' + 'Deterministic transcript content. ' * text_repeat)])
         if role == 'assistant':
             message.update(id=f'msg_fixture_{prefix}_{index}', model='claude-sonnet-4-5',
                            stop_reason='end_turn')
@@ -87,7 +89,7 @@ async def main(args):
                             observer.observe(document, {subtree:true, childList:true, characterData:true});
                         });
                     };""")
-                    rows = fixture(markers, 'Hydration')
+                    rows = fixture(markers, 'Hydration', args.text_repeat)
                     session = dict(id=SESSION, user_id=USER, session_key=SESSION,
                                    session_name='Benchmark', working_directory='/fixture', status='active',
                                    paused=False, hostname='fixture', agent_type='claude', my_role='owner',
@@ -98,6 +100,7 @@ async def main(args):
                             assert 'render_limit=100' in route.request.url
                             data = dict(total=100000, messages=[dict(role='assistant', content=json.dumps(row), created_at='2026-10-21T00:00:00Z') for row in rows])
                             await page.evaluate("benchmarkStart('hydrationMeasurement', 'Hydration item 099.')")
+                        elif path == '/api/config': data = dict(app_title='Benchmark', server_version='fixture', protocol_version=1)
                         elif path == '/api/auth/me': data = dict(id=USER, email='benchmark@example.invalid', name='Fixture', is_admin=False)
                         elif path == '/api/sessions': data = dict(sessions=[session])
                         elif path == '/api/portal-connections': data = dict(connections=[])
@@ -106,7 +109,11 @@ async def main(args):
                         await route.fulfill(content_type='application/json', body=json.dumps(data))
                     async def ws(route):
                         def message(raw):
-                            if json.loads(raw).get('type') == 'Register':
+                            frame = json.loads(raw)
+                            if frame.get('type') == 'Hello':
+                                assert frame['protocol_version'] == 1
+                                route.send(json.dumps(dict(type='HelloAck', protocol_version=1, success=True)))
+                            elif frame.get('type') == 'Register':
                                 session_sockets.append(route)
                                 registered.set()
                         route.on_message(message)
@@ -117,7 +124,7 @@ async def main(args):
                     hydration = await page.evaluate("window.hydrationMeasurement")
                     await assert_typed_window(page, 'Hydration', markers)
                     await asyncio.wait_for(registered.wait(), timeout=15)
-                    replay = fixture(markers, 'Replay')
+                    replay = fixture(markers, 'Replay', args.text_repeat)
                     await page.evaluate("benchmarkStart('replayMeasurement', 'Replay item 099.')")
                     session_sockets[-1].send(json.dumps(dict(type='HistoryBatch', entries=[dict(content=row) for row in replay], last_created_at='2026-10-21T00:00:01Z')))
                     await expect(page.get_by_text('Replay item 099.', exact=False)).to_be_visible(timeout=60000)
@@ -131,7 +138,7 @@ async def main(args):
     finally:
         server.shutdown()
     report = dict(label=args.label, width=args.width, height=1000, browser_version=browser_version,
-                  fixture_version=2, dist=str(args.dist.resolve()), samples=results,
+                  fixture_version=3, text_repeat=args.text_repeat, environment=dict(system=platform.system(), machine=platform.machine(), logical_cpus=os.cpu_count(), host_isolation="not enforced"), cache_policy='fresh browser context per sample; replay reuses hydrated page', build_profile=args.build_profile, dist=str(args.dist.resolve()), samples=results,
                   medians=[dict(markers=n, hydration_wall_ms=statistics.median(r['hydration_wall_ms'] for r in results if r['markers']==n), replay_wall_ms=statistics.median(r['replay_wall_ms'] for r in results if r['markers']==n)) for n in args.markers])
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2)+'\n')
@@ -141,8 +148,13 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--dist', type=Path, default=ROOT/'frontend/dist')
     parser.add_argument('--label', default='unspecified build; do not compare timings across profiles')
+    parser.add_argument('--text-repeat', type=int, default=32, help='Text repetitions per message; 512 exercises long payloads')
+    parser.add_argument('--build-profile', choices=['dev', 'release'], required=True)
     parser.add_argument('--repeat', type=int, default=3)
     parser.add_argument('--width', type=int, default=1440)
     parser.add_argument('--markers', nargs='+', type=int, default=[0,5000])
     parser.add_argument('--output', type=Path, default=ROOT/'builds/transcript-benchmark.json')
-    asyncio.run(main(parser.parse_args()))
+    args = parser.parse_args()
+    if args.repeat < 1 or args.text_repeat < 1 or args.width < 1 or any(n < 0 for n in args.markers):
+        parser.error("repeat, text-repeat and width must be positive; markers must be nonnegative")
+    asyncio.run(main(args))
