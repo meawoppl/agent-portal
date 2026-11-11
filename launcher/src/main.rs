@@ -22,6 +22,7 @@ mod plugin_validate;
 mod process_manager;
 mod progress;
 mod scheduler;
+mod secret;
 mod seppuku;
 mod service;
 mod session_cgroups;
@@ -35,9 +36,19 @@ use std::path::PathBuf;
 use tracing::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-fn init_tracing() {
+fn init_tracing(secret_command: bool) {
     let env_filter =
         tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
+
+    // Explicit value reads own stdout byte-for-byte, including on the first
+    // launch when legacy config migration emits diagnostic messages.
+    if secret_command {
+        tracing_subscriber::fmt()
+            .with_env_filter(env_filter)
+            .with_writer(std::io::stderr)
+            .init();
+        return;
+    }
 
     #[cfg(target_os = "linux")]
     {
@@ -67,8 +78,10 @@ fn init_tracing() {
                   Report bugs / file issues: https://github.com/meawoppl/agent-portal/issues"
 )]
 struct Args {
-    /// Print version and build information, then exit.
-    #[arg(long, global = true)]
+    /// Print portal version and build information, then exit (before a subcommand).
+    // Secret read/bind use --version for an immutable secret version. A global
+    // bool with the same ID overwrites their i32 matches and panics in clap.
+    #[arg(long)]
     version: bool,
 
     /// Backend WebSocket URL (default: wss://txcl.io in release, ws://localhost:3000 in debug)
@@ -105,6 +118,11 @@ struct Args {
 
 #[derive(Subcommand, Debug)]
 enum Command {
+    /// Manage encrypted secrets using a separately approved credential.
+    Secret {
+        #[command(subcommand)]
+        action: secret::Action,
+    },
     /// Create and manage policy-gated child sessions.
     Session {
         #[command(subcommand)]
@@ -606,7 +624,7 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    init_tracing();
+    init_tracing(matches!(&args.command, Some(Command::Secret { .. })));
 
     // Reconcile the pre-#1591 config location (macOS/Windows `ProjectDirs`)
     // onto the standardized `~/.config/agent-portal` before anything reads
@@ -615,6 +633,9 @@ async fn main() -> anyhow::Result<()> {
 
     // Handle subcommands before the daemon startup path
     match args.command {
+        Some(Command::Secret { action }) => {
+            return secret::run(action, args.backend_url, args.dev).await;
+        }
         Some(Command::Login) => return cmd_login(&args).await,
         Some(Command::Update) => return cmd_update().await,
         Some(Command::Service { action }) => {

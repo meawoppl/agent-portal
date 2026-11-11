@@ -244,6 +244,223 @@ diesel::table! {
 }
 
 diesel::table! {
+    secret_access_requests (id) {
+        id -> Uuid,
+        owner_user_id -> Uuid,
+        session_id -> Uuid,
+        launcher_id -> Uuid,
+        proxy_token_id -> Uuid,
+        secret_id -> Uuid,
+        version_id -> Uuid,
+        generation -> Int8,
+        reference -> Text,
+        requested_version -> Nullable<Int4>,
+        env_name -> Text,
+        lifetime_seconds -> Int4,
+        state -> Text,
+        binding_id -> Nullable<Uuid>,
+        notice_message_id -> Nullable<Uuid>,
+        created_at -> Timestamptz,
+        expires_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    secret_acl_history (id) {
+        id -> Uuid,
+        secret_id -> Uuid,
+        actor_user_id -> Uuid,
+        grantee_user_id -> Uuid,
+        action -> Text,
+        generation -> Int8,
+        can_read -> Bool,
+        can_use -> Bool,
+        can_write -> Bool,
+        can_manage -> Bool,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    secret_audit_events (id) {
+        id -> Uuid,
+        actor_user_id -> Nullable<Uuid>,
+        secret_id -> Nullable<Uuid>,
+        action -> Text,
+        outcome -> Text,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    secret_bindings (id) {
+        id -> Uuid,
+        secret_id -> Uuid,
+        session_id -> Uuid,
+        launcher_id -> Uuid,
+        created_by -> Uuid,
+        operation -> Text,
+        expires_at -> Timestamptz,
+        generation -> Int8,
+        revoked_at -> Nullable<Timestamptz>,
+        created_at -> Timestamptz,
+        version_id -> Uuid,
+        env_name -> Text,
+        proxy_token_id -> Nullable<Uuid>,
+    }
+}
+
+diesel::table! {
+    secret_coverage (object_id) {
+        object_id -> Text,
+        rule_generation -> Int8,
+        object_generation -> Text,
+    }
+}
+
+diesel::table! {
+    secret_credentials (id) {
+        id -> Uuid,
+        user_id -> Uuid,
+        token_hash -> Text,
+        label -> Text,
+        metadata_scope -> Bool,
+        mutation_scope -> Bool,
+        read_scope -> Bool,
+        expires_at -> Timestamptz,
+        revoked_at -> Nullable<Timestamptz>,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    secret_enrollments (id) {
+        id -> Uuid,
+        user_id -> Uuid,
+        device_hash -> Text,
+        user_code -> Text,
+        label -> Text,
+        state -> Text,
+        expires_at -> Timestamptz,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    secret_expunge_jobs (id) {
+        id -> Uuid,
+        organization_id -> Uuid,
+        secret_id -> Uuid,
+        requested_by -> Uuid,
+        state -> Text,
+        generation -> Int8,
+        checkpoint -> Jsonb,
+        receipt -> Jsonb,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    secret_grants (secret_id, grantee_user_id) {
+        secret_id -> Uuid,
+        grantee_user_id -> Uuid,
+        can_read -> Bool,
+        can_use -> Bool,
+        can_write -> Bool,
+        can_manage -> Bool,
+        expires_at -> Nullable<Timestamptz>,
+        generation -> Int8,
+    }
+}
+
+diesel::table! {
+    secret_mutations (actor_user_id, request_id) {
+        actor_user_id -> Uuid,
+        request_id -> Uuid,
+        path -> Text,
+        secret_id -> Uuid,
+        created_at -> Timestamptz,
+        binding_id -> Nullable<Uuid>,
+    }
+}
+
+diesel::table! {
+    secret_occurrences (rule_version_id, record_kind, record_id) {
+        rule_version_id -> Uuid,
+        record_kind -> Text,
+        record_id -> Text,
+        archive_generation -> Int8,
+    }
+}
+
+diesel::table! {
+    secret_outbox (id) {
+        id -> Uuid,
+        kind -> Text,
+        target_id -> Uuid,
+        generation -> Int8,
+        payload -> Jsonb,
+        processed_at -> Nullable<Timestamptz>,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    secret_redemption_tickets (id) {
+        id -> Uuid,
+        binding_id -> Uuid,
+        proxy_token_id -> Uuid,
+        token_hash -> Text,
+        expires_at -> Timestamptz,
+        consumed_at -> Nullable<Timestamptz>,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    secret_versions (id) {
+        id -> Uuid,
+        secret_id -> Uuid,
+        ordinal -> Int4,
+        encrypted_value -> Bytea,
+        nonce -> Bytea,
+        auth_tag -> Bytea,
+        wrapped_dek -> Bytea,
+        wrapping_key_id -> Text,
+        crypto_format -> Int4,
+        created_by -> Uuid,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    secrets (id) {
+        id -> Uuid,
+        organization_id -> Uuid,
+        owner_user_id -> Uuid,
+        namespace -> Text,
+        name -> Text,
+        description -> Text,
+        current_version_id -> Nullable<Uuid>,
+        system_tags -> Array<Nullable<Text>>,
+        deleted_at -> Nullable<Timestamptz>,
+        deleted_by -> Nullable<Uuid>,
+        acl_generation -> Int8,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    secrets_generation (id) {
+        id -> Int2,
+        organization_id -> Uuid,
+        generation -> Int8,
+    }
+}
+
+diesel::table! {
     session_attention (session_id) {
         session_id -> Uuid,
         reply_id -> Uuid,
@@ -479,6 +696,10 @@ diesel::table! {
         #[max_length = 255]
         email -> Nullable<Varchar>,
         created_at -> Timestamp,
+        #[max_length = 255]
+        handle -> Nullable<Varchar>,
+        email_verified -> Bool,
+        last_seen_at -> Nullable<Timestamp>,
     }
 }
 
@@ -527,6 +748,32 @@ diesel::joinable!(proxy_auth_tokens -> sessions (session_id));
 diesel::joinable!(proxy_auth_tokens -> users (user_id));
 diesel::joinable!(push_subscriptions -> users (user_id));
 diesel::joinable!(scheduled_tasks -> users (user_id));
+diesel::joinable!(secret_access_requests -> messages (notice_message_id));
+diesel::joinable!(secret_access_requests -> proxy_auth_tokens (proxy_token_id));
+diesel::joinable!(secret_access_requests -> secret_bindings (binding_id));
+diesel::joinable!(secret_access_requests -> secrets (secret_id));
+diesel::joinable!(secret_access_requests -> sessions (session_id));
+diesel::joinable!(secret_access_requests -> users (owner_user_id));
+diesel::joinable!(secret_acl_history -> secrets (secret_id));
+diesel::joinable!(secret_audit_events -> secrets (secret_id));
+diesel::joinable!(secret_audit_events -> users (actor_user_id));
+diesel::joinable!(secret_bindings -> proxy_auth_tokens (proxy_token_id));
+diesel::joinable!(secret_bindings -> secrets (secret_id));
+diesel::joinable!(secret_bindings -> sessions (session_id));
+diesel::joinable!(secret_bindings -> users (created_by));
+diesel::joinable!(secret_credentials -> users (user_id));
+diesel::joinable!(secret_enrollments -> users (user_id));
+diesel::joinable!(secret_expunge_jobs -> secrets (secret_id));
+diesel::joinable!(secret_expunge_jobs -> users (requested_by));
+diesel::joinable!(secret_grants -> secrets (secret_id));
+diesel::joinable!(secret_grants -> users (grantee_user_id));
+diesel::joinable!(secret_mutations -> secret_bindings (binding_id));
+diesel::joinable!(secret_mutations -> secrets (secret_id));
+diesel::joinable!(secret_mutations -> users (actor_user_id));
+diesel::joinable!(secret_occurrences -> secret_versions (rule_version_id));
+diesel::joinable!(secret_redemption_tickets -> proxy_auth_tokens (proxy_token_id));
+diesel::joinable!(secret_redemption_tickets -> secret_bindings (binding_id));
+diesel::joinable!(secret_versions -> users (created_by));
 diesel::joinable!(session_attention -> sessions (session_id));
 diesel::joinable!(session_attention_receipts -> sessions (session_id));
 diesel::joinable!(session_attention_receipts -> users (user_id));
@@ -565,6 +812,22 @@ diesel::allow_tables_to_appear_in_same_query!(
     proxy_auth_tokens,
     push_subscriptions,
     scheduled_tasks,
+    secret_access_requests,
+    secret_acl_history,
+    secret_audit_events,
+    secret_bindings,
+    secret_coverage,
+    secret_credentials,
+    secret_enrollments,
+    secret_expunge_jobs,
+    secret_grants,
+    secret_mutations,
+    secret_occurrences,
+    secret_outbox,
+    secret_redemption_tickets,
+    secret_versions,
+    secrets,
+    secrets_generation,
     session_attention,
     session_attention_receipts,
     session_attention_views,

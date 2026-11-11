@@ -105,20 +105,24 @@ pub async fn create_message(
     // session-row owner). See `session_access` for the layered rules.
     let session = verify_session_mutator(&mut conn, session_id, current_user_id)?;
 
-    let new_message = NewMessage {
-        session_id,
-        role: req.role,
-        content: req.content,
-        user_id: current_user_id,
-        agent_type: session.agent_type.clone(),
-        provenance_kind: None,
-        provenance_session_id: None,
-        provenance_agent_type: None,
-    };
-
-    let message: Message = diesel::insert_into(messages::table)
-        .values(&new_message)
-        .get_result(&mut conn)?;
+    let message = conn.transaction::<_, AppError, _>(|conn| {
+        crate::secrets::redaction::lock_generation(conn)?;
+        let rules = crate::secrets::redaction::snapshot_for_user(conn, session.user_id)?;
+        let new_message = NewMessage {
+            session_id,
+            role: req.role,
+            content: rules.redact_content(&req.content),
+            user_id: current_user_id,
+            agent_type: session.agent_type.clone(),
+            provenance_kind: None,
+            provenance_session_id: None,
+            provenance_agent_type: None,
+        };
+        diesel::insert_into(messages::table)
+            .values(&new_message)
+            .get_result::<Message>(conn)
+            .map_err(Into::into)
+    })?;
 
     app_state.session_manager.queue_truncation(session_id);
 
@@ -147,7 +151,7 @@ pub async fn list_messages(
 ) -> Result<Json<MessagesListResponse<MessageWithSender>>, AppError> {
     let mut conn = app_state.conn()?;
 
-    let _session = verify_session_reader(&mut conn, session_id, current_user_id)?;
+    let session = verify_session_reader(&mut conn, session_id, current_user_id)?;
 
     // Validate + parse params before touching the DB so a malformed cursor
     // fails fast with `400` rather than e.g. silently returning everything
@@ -220,6 +224,15 @@ pub async fn list_messages(
         newest_first.reverse();
         newest_first
     };
+
+    let rules = crate::secrets::redaction::snapshot_for_user(&mut conn, session.user_id)?;
+    let message_list: Vec<_> = message_list
+        .into_iter()
+        .map(|mut row: Message| {
+            row.content = rules.redact_agent_content(&row.content);
+            row
+        })
+        .collect();
 
     // Look up sender names for user-role messages
     let user_names = sender_names(&mut conn, &message_list);

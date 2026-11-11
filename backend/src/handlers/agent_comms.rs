@@ -186,6 +186,14 @@ pub async fn peek_agent_messages(
         .count()
         .get_result(&mut conn)?;
 
+    let rules = crate::secrets::redaction::snapshot_for_user(&mut conn, session.user_id)?;
+    let rows: Vec<_> = rows
+        .into_iter()
+        .map(|mut row| {
+            row.content = rules.redact_agent_content(&row.content);
+            row
+        })
+        .collect();
     // Newest-first from the query; the wire contract is oldest → newest.
     let summarized = rows
         .into_iter()
@@ -367,6 +375,10 @@ pub async fn download_agent_history(
         merged.drain(..merged.len().saturating_sub(tail));
     }
 
+    let rules = crate::secrets::redaction::snapshot_for_user(&mut conn, session.user_id)?;
+    for line in &mut merged {
+        rules.redact_agent_json(&mut line.content);
+    }
     let mut body = Vec::new();
     for line in &merged {
         serde_json::to_writer(&mut body, line)
@@ -639,7 +651,6 @@ pub async fn show_media(
     let mut persisted = false;
     let mut meta: Option<shared::PortalMeta> = None;
     {
-        use crate::schema::messages;
         let new_message = crate::models::NewMessage {
             session_id: target_id,
             role: shared::MessageRole::Portal.to_string(),
@@ -650,15 +661,15 @@ pub async fn show_media(
             provenance_session_id: None,
             provenance_agent_type: None,
         };
-        match diesel::insert_into(messages::table)
-            .values(&new_message)
-            .get_result::<crate::models::Message>(&mut conn)
-        {
+        match crate::secrets::redaction::insert_message(&mut conn, new_message) {
             Ok(inserted) => {
                 persisted = true;
                 meta = Some(inserted.portal_meta(None));
             }
-            Err(e) => error!("Failed to persist show-media message: {}", e),
+            Err(_) => error!(
+                "{}: show-media row could not commit",
+                crate::markers::SECRET_REDACTION_FAILED
+            ),
         }
     }
 
