@@ -1,0 +1,87 @@
+{
+  "id": 43103903314,
+  "html_url": "https://github.com/meawoppl/agent-portal/actions/runs/43103903314",
+  "head_sha": "f007f10116fe0449db552ddebbc05c1883391bcf",
+  "created_at": "2026-11-11T21:32:12Z",
+  "run_started_at": "2026-11-11T21:32:12Z",
+  "run_attempt": 1,
+  "jobs": [
+    {
+      "id": 130804066758,
+      "name": "Build Backend",
+      "started_at": "2026-11-11T21:36:04Z",
+      "completed_at": "2026-11-11T21:38:01Z",
+      "conclusion": "success",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1,
+          "started_at": "2026-11-11T21:36:04Z",
+          "completed_at": "2026-11-11T21:36:05Z"
+        },
+        {
+          "name": "Run actions/checkout@v7",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2,
+          "started_at": "2026-11-11T21:36:05Z",
+          "completed_at": "2026-11-11T21:36:08Z"
+        },
+        {
+          "name": "Stub frontend dist",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3,
+          "started_at": "2026-11-11T21:36:08Z",
+          "completed_at": "2026-11-11T21:36:08Z"
+        },
+        {
+          "name": "Setup Rust",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4,
+          "started_at": "2026-11-11T21:36:08Z",
+          "completed_at": "2026-11-11T21:36:48Z"
+        },
+        {
+          "name": "Build backend",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5,
+          "started_at": "2026-11-11T21:36:48Z",
+          "completed_at": "2026-11-11T21:37:58Z"
+        },
+        {
+          "name": "Post Setup Rust",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 9,
+          "started_at": "2026-11-11T21:37:58Z",
+          "completed_at": "2026-11-11T21:37:58Z"
+        },
+        {
+          "name": "Post Run actions/checkout@v7",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 10,
+          "started_at": "2026-11-11T21:37:58Z",
+          "completed_at": "2026-11-11T21:37:59Z"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 11,
+          "started_at": "2026-11-11T21:37:59Z",
+          "completed_at": "2026-11-11T21:37:59Z"
+        }
+      ]
+    }
+  ],
+  "cache_evidence": [
+    "Cache hit for: v0-rust-backend-Linux-x64-0e352f95-2ce9ec68",
+    "Restored from cache key \"v0-rust-backend-Linux-x64-0e352f95-2ce9ec68\" full match: true."
+  ]
+}
