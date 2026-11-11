@@ -295,6 +295,13 @@ diesel::table! {
 }
 
 diesel::table! {
+    session_disconnect_notifications (session_id) {
+        session_id -> Uuid,
+        input_seq -> Int8,
+    }
+}
+
+diesel::table! {
     session_edit_stack_items (id) {
         id -> Uuid,
         session_id -> Uuid,
@@ -534,6 +541,7 @@ diesel::joinable!(session_attention_views -> sessions (session_id));
 diesel::joinable!(session_attention_views -> users (user_id));
 diesel::joinable!(session_continuations -> sessions (session_id));
 diesel::joinable!(session_continuations -> users (user_id));
+diesel::joinable!(session_disconnect_notifications -> sessions (session_id));
 diesel::joinable!(session_edit_stack_items -> sessions (session_id));
 diesel::joinable!(session_edit_stack_items -> users (created_by));
 diesel::joinable!(session_follow_heads -> sessions (session_id));
@@ -569,6 +577,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     session_attention_receipts,
     session_attention_views,
     session_continuations,
+    session_disconnect_notifications,
     session_edit_stack_items,
     session_follow_heads,
     session_follow_messages,

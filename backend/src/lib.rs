@@ -177,8 +177,8 @@ pub async fn run() -> anyhow::Result<()> {
     let (notifications, notification_rx) = push::channel();
 
     // Mark sessions whose proxies do not reconnect within the grace period.
-    // A stale ACTIVE session losing its proxy is an unexpected disconnect, so
-    // the sweep emits SessionDisconnected pushes for the sessions it downs.
+    // The sweep emits SessionDisconnected candidates; dispatch only alerts
+    // for unfinished work which has not already notified for the same input.
     background::spawn_stale_session_cleanup(
         pool.clone(),
         session_manager.clone(),

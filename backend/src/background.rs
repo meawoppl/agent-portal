@@ -84,9 +84,9 @@ pub fn spawn_stale_session_cleanup(
             }
         };
 
-        // These were ACTIVE and lost their proxy across the grace period — an
-        // unexpected disconnect, so each earns a SessionDisconnected push
-        // (mobile-apps plan §8.1). We keep the names to fill the payload.
+        // These were ACTIVE and lost their proxy across the grace period.
+        // Dispatch filters these candidates for unfinished work and deduplicates
+        // by accepted input. Keep the names to fill the notification payload.
         let stale: Vec<(uuid::Uuid, String)> = active_sessions
             .into_iter()
             .filter(|(id, _)| !connected_keys.contains(&id.to_string()))
