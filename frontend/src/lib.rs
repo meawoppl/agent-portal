@@ -73,8 +73,37 @@ fn settings_route() -> Html {
     let Some(navigator) = use_navigator() else {
         return html! {};
     };
+    let job_id = use_location()
+        .and_then(|location| {
+            location
+                .query::<std::collections::HashMap<String, String>>()
+                .ok()
+        })
+        .and_then(|query| query.get("secret_job").cloned());
     let on_close = Callback::from(move |_| navigator.push(&Route::Dashboard));
-    html! { <SettingsPage on_close={on_close} /> }
+    html! { <SettingsPage on_close={on_close} secret_job_id={job_id} /> }
+}
+
+#[derive(Properties, PartialEq)]
+struct LegacySecretsProps {
+    #[prop_or_default]
+    job_id: Option<String>,
+}
+
+/// Keep old bookmarks and cleanup-job links useful while Settings owns the UI.
+#[function_component(LegacySecretsRoute)]
+fn legacy_secrets_route(props: &LegacySecretsProps) -> Html {
+    let navigator = use_navigator();
+    use_effect_with((navigator, props.job_id.clone()), |(navigator, job_id)| {
+        if let Some(navigator) = navigator {
+            let mut query = vec![("tab", "secrets")];
+            if let Some(id) = job_id {
+                query.push(("secret_job", id.as_str()));
+            }
+            let _ = navigator.replace_with_query(&Route::Settings, &query);
+        }
+    });
+    html! {}
 }
 
 fn switch(routes: Route) -> Html {
@@ -84,9 +113,9 @@ fn switch(routes: Route) -> Html {
         Route::Demo => html! { <DemoPage /> },
         Route::Aperture => html! { <pages::aperture::AperturePage /> },
         Route::Settings => html! { <SettingsRoute /> },
-        Route::Secrets => html! { <pages::secrets::SecretsPage /> },
+        Route::Secrets => html! { <LegacySecretsRoute /> },
         Route::SecretAuthorize => html! { <pages::secrets::SecretAuthorizePage /> },
-        Route::SecretJob { id } => html! { <pages::secrets::SecretsPage job_id={Some(id)} /> },
+        Route::SecretJob { id } => html! { <LegacySecretsRoute job_id={Some(id)} /> },
         Route::History => html! { <HistoryBrowserPage /> },
         Route::HistorySession { user, session } => html! {
             <HistoryTranscriptPage {user} {session} />
