@@ -581,8 +581,7 @@ impl SecretsPage {
                 </div>
                 if self.editing == Some(true) {<ValueForm key={secret.id.to_string()} replacing={true} can_publish={false} on_submit={ctx.link().callback(Msg::Save)} on_cancel={ctx.link().callback(|_|Msg::Cancel)} />}
             }
-            if !secret.description.is_empty() {<p>{&secret.description}</p>}
-            <dl><dt>{"Audience"}</dt><dd>{audience(secret)}</dd><dt>{"Owner"}</dt><dd>{self.members.iter().find(|member|member.user_id==secret.owner_user_id).map(compact_member_label).unwrap_or_else(||"Unknown member".into())}</dd><dt>{"Updated"}</dt><dd>{utils::format_timestamp(&secret.updated_at)}</dd><dt>{"Reference"}</dt><dd><code>{format!("id/{}",secret.id)}</code></dd></dl>
+            <dl><dt>{"Audience"}</dt><dd>{audience(secret)}</dd><dt>{"Reference"}</dt><dd><code>{format!("id/{}",secret.id)}</code></dd></dl>
             if deleted(secret) {
                 <p>{format!("Deleted {} by {}",secret.deleted_at.as_deref().map(utils::format_timestamp).unwrap_or_else(||"at an unknown time".into()),secret.deleted_by.map(|id|id.to_string()).unwrap_or_else(||"an unavailable user".into()))}</p>
                 if !secret.grants.is_empty() { <ul aria-label="Retained individual access">{for secret.grants.iter().map(|grant|html!{<li key={grant.user_id.to_string()}>{self.member_label(grant.user_id)}{format!(" — {}",grant.rights.iter().map(right_label).collect::<Vec<_>>().join(", "))}</li>})}</ul> }
@@ -692,15 +691,20 @@ fn metadata_row(
     updated: &str,
     onclick: Callback<MouseEvent>,
 ) -> Html {
-    html! {<tr key={secret.id.to_string()} class={classes!(selected.then_some("is-selected"))}>
+    html! {<>
+    <tr class={classes!("secret-summary-row",(!secret.description.is_empty()).then_some("has-description"),selected.then_some("is-selected"))}>
         <th scope="row"><button type="button" class="secret-name" aria-expanded={selected.to_string()} aria-controls={format!("secret-details-{}",secret.id)} {onclick}><span class="secret-disclosure" aria-hidden="true">{if selected {"▾"} else {"▸"}}</span>{&secret.name}</button>
             if deleted(secret) {<span class="secret-deleted-badge">{"Deleted"}</span>}
-            if !secret.description.is_empty(){<small class="secrets-description">{&secret.description}</small>}
         </th>
         <td>{if secret.namespace==SecretNamespace::Personal {"Personal"} else {"Organization"}}</td>
         <td>{secret.current_version}</td><td class="secrets-owner">{owner}</td>
         <td class="secrets-updated"><time datetime={secret.updated_at.clone()}>{updated}</time></td>
-    </tr>}
+    </tr>
+    <tr class={classes!("secret-description-row",secret.description.is_empty().then_some("is-empty"),selected.then_some("is-selected"))}><td colspan="5">
+        if !secret.description.is_empty(){<p class="secrets-description">{&secret.description}</p>}
+        <div class="secret-mobile-metadata"><span>{format!("Owner: {owner}")}</span><span>{"Updated: "}<time datetime={secret.updated_at.clone()}>{updated}</time></span></div>
+    </td></tr>
+    </>}
 }
 fn compact_member_label(member: &SecretMember) -> String {
     for identity in &member.identities {
