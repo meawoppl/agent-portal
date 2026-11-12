@@ -62,7 +62,7 @@ pub struct PermissionHandlerProps {
     /// thin WebSocket router without storing any permission state itself.
     pub on_register: Callback<Callback<PermissionUpdate>>,
     /// Fired when the handler's pending state transitions. The parent uses
-    /// this to feed the `is_awaiting` computation.
+    /// this to keep queued prompts from bypassing an approval.
     pub on_pending_changed: Callback<bool>,
     /// Fired when the user answers a permission. Carries both the
     /// originating `request_id` (so the parent doesn't need to remember it)

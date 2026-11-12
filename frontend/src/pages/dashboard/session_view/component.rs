@@ -36,8 +36,8 @@ use super::forward_chips::ForwardChips;
 use super::forward_surface::ForwardSurface;
 use super::helpers::{
     autoscroll_transition, classify_output_msg_type, clear_completed_tools, edit_stack_dispatch,
-    enrich_codex_file_change_permission, ephemeral_summary, format_tool_elapsed, is_awaiting,
-    parse_iso_ms_utc, reconcile_edit_stack_activity, reconcile_pending_sends, running_tool_key,
+    enrich_codex_file_change_permission, ephemeral_summary, format_tool_elapsed, parse_iso_ms_utc,
+    reconcile_edit_stack_activity, reconcile_pending_sends, running_tool_key,
     update_pending_send_delivery, upsert_tool_progress, ActiveToolProgress, ActivityTag,
     EditStackDispatch, MuseLiveTurn,
 };
@@ -86,9 +86,7 @@ pub struct SessionViewProps {
     pub focused: bool,
     #[prop_or_default]
     pub attention: Option<shared::api::SessionAttention>,
-    pub on_awaiting_change: Callback<(SessionKey, bool)>,
     pub on_connected_change: Callback<(SessionKey, bool)>,
-    pub on_message_sent: Callback<SessionKey>,
     pub on_renamed: Callback<()>,
     #[allow(clippy::type_complexity)]
     pub on_branch_change: Callback<(
@@ -379,7 +377,6 @@ pub enum SessionViewMsg {
     WebSocketConnected(WsSender),
     WebSocketError(String),
     AttemptReconnect,
-    CheckAwaiting,
     BranchChanged(
         Option<String>,
         Option<String>,
@@ -391,7 +388,7 @@ pub enum SessionViewMsg {
     /// forwarded without the parent owning any permission state.
     PermissionDispatcherRegistered(Callback<PermissionUpdate>),
     /// PermissionHandler reports a transition in its pending state. We
-    /// track the flag for the `is_awaiting` computation.
+    /// track the flag to keep queued prompts from bypassing a permission.
     PermissionPendingChanged(bool),
     /// PermissionHandler emitted a typed answer for the user. We translate
     /// it into the wire frame here so the WS plumbing stays in this file.
@@ -461,9 +458,6 @@ pub enum SessionViewMsg {
     /// The upload-commit wait expired: report the failure and drop the held
     /// prompt rather than announce a file the host never confirmed.
     UploadCommitTimeout,
-    /// InputBar reports that a submission landed — bumps the parent's
-    /// `on_message_sent` prop.
-    MessageSent,
     /// Send an interrupt to stop the current Claude response
     Interrupt,
     /// Scroll listener reports the current at-bottom state. The `update()`
@@ -536,7 +530,7 @@ pub struct SessionView {
     /// zero permission UI state itself.
     permission_dispatcher: Option<Callback<PermissionUpdate>>,
     /// Mirror of the handler's pending state, kept in sync via
-    /// `PermissionPendingChanged`. Feeds the `is_awaiting` computation.
+    /// `PermissionPendingChanged`. Blocks queued input while approval is pending.
     has_pending_permission: bool,
     /// Snapshot of the last permission request forwarded to the handler.
     /// Kept so the wire-frame translation in `PermissionAnswered` can read
@@ -633,9 +627,6 @@ impl Component for SessionView {
         let socket_lifetime = SocketLifetime::default();
         let link = ctx.link().clone();
         let session_id = ctx.props().session.id;
-        let session_key = Self::session_key(ctx);
-        let agent_type = ctx.props().session.agent_type;
-        let on_awaiting_change = ctx.props().on_awaiting_change.clone();
         let escape_link = ctx.link().clone();
         let surface_escape_listener = web_sys::window().and_then(|window| {
             window.document().map(|document| {
@@ -695,9 +686,6 @@ impl Component for SessionView {
                 )
                 .await
             {
-                let is_awaiting = is_awaiting(data.messages.iter().map(|m| &m.content), agent_type);
-                on_awaiting_change.emit((session_key, is_awaiting));
-
                 last_message_time = data.messages.last().map(|m| m.created_at.clone());
 
                 link.send_message(SessionViewMsg::LoadHistory(
@@ -942,13 +930,6 @@ impl Component for SessionView {
             }
             SessionViewMsg::PermissionPendingChanged(pending) => {
                 self.has_pending_permission = pending;
-                if pending {
-                    ctx.props()
-                        .on_awaiting_change
-                        .emit((Self::session_key(ctx), true));
-                } else {
-                    ctx.link().send_message(SessionViewMsg::CheckAwaiting);
-                }
                 false
             }
             SessionViewMsg::PermissionAnswered(request_id, kind) => {
@@ -1014,17 +995,6 @@ impl Component for SessionView {
             SessionViewMsg::WebSocketError(err) => self.handle_ws_error(ctx, err, true),
             SessionViewMsg::AttemptReconnect => {
                 self.attempt_reconnect(ctx);
-                false
-            }
-            SessionViewMsg::CheckAwaiting => {
-                let is_result_awaiting = is_awaiting(
-                    self.messages.iter().map(|m| &m.content),
-                    ctx.props().session.agent_type,
-                );
-                let is_awaiting = is_result_awaiting || self.has_pending_permission;
-                ctx.props()
-                    .on_awaiting_change
-                    .emit((Self::session_key(ctx), is_awaiting));
                 false
             }
             SessionViewMsg::BranchChanged(branch, pr_url, repo_url, open_prs) => {
@@ -1242,12 +1212,12 @@ impl Component for SessionView {
                     .map(|item| item.id)
                 {
                     self.edit_stack_send_all = false;
-                    self.send_edit_stack_item(ctx, item_id)
+                    self.send_edit_stack_item(item_id)
                 } else {
                     false
                 }
             }
-            SessionViewMsg::SendEditStackItem(item_id) => self.send_edit_stack_item(ctx, item_id),
+            SessionViewMsg::SendEditStackItem(item_id) => self.send_edit_stack_item(item_id),
             SessionViewMsg::SendAllEditStack => {
                 self.edit_stack_send_all = true;
                 self.drain_edit_stack_queue_if_idle(ctx);
@@ -1433,10 +1403,6 @@ impl Component for SessionView {
                 } else {
                     false
                 }
-            }
-            SessionViewMsg::MessageSent => {
-                ctx.props().on_message_sent.emit(Self::session_key(ctx));
-                false
             }
             SessionViewMsg::Interrupt => {
                 if let Some(ref sender) = self.ws_sender {
@@ -1882,7 +1848,6 @@ impl SessionView {
                 advance_replay_watermark(&mut self.last_message_timestamp, message.raw_iso());
                 ctx.link()
                     .send_message(SessionViewMsg::ReceivedOutput(message));
-                ctx.link().send_message(SessionViewMsg::CheckAwaiting);
                 false
             }
             WsEvent::HistoryBatch(messages, last_created_at) => {
@@ -1914,7 +1879,6 @@ impl SessionView {
                     &mut self.last_message_timestamp,
                     last_created_at.as_deref(),
                 );
-                ctx.link().send_message(SessionViewMsg::CheckAwaiting);
                 true
             }
             WsEvent::Permission(perm) => {
@@ -2265,10 +2229,9 @@ impl SessionView {
             .collect();
         deduplicate_secret_notices(&mut self.messages);
         self.last_message_timestamp = last_timestamp;
-        ctx.link().send_message(SessionViewMsg::CheckAwaiting);
     }
 
-    fn send_edit_stack_item(&mut self, ctx: &Context<Self>, item_id: Uuid) -> bool {
+    fn send_edit_stack_item(&mut self, item_id: Uuid) -> bool {
         let Some(item) = self
             .edit_stack_items
             .iter()
@@ -2287,7 +2250,6 @@ impl SessionView {
         self.edit_stack_active = Some((item.id, client_msg_id));
         self.edit_stack_error = None;
         self.ephemeral_status = Some(format!("Sent edit-stack item: {}", item.title));
-        ctx.props().on_message_sent.emit(Self::session_key(ctx));
         true
     }
 
@@ -2306,7 +2268,7 @@ impl SessionView {
             EditStackDispatch::Busy => {}
             EditStackDispatch::Drained => self.edit_stack_send_all = false,
             EditStackDispatch::Send(next_id) => {
-                self.send_edit_stack_item(ctx, next_id);
+                self.send_edit_stack_item(next_id);
             }
         }
     }
@@ -2445,8 +2407,7 @@ impl SessionView {
     }
 
     /// Translate a plain-text submission from `InputBar` into an outbox-tracked
-    /// `AgentInput`. The bar has already trimmed and cleared its textarea and
-    /// emitted `MessageSent` separately; we just dispatch the input.
+    /// `AgentInput`. The bar has already trimmed and cleared its textarea.
     fn send_text_input(
         &mut self,
         input: String,
@@ -3086,7 +3047,6 @@ impl SessionView {
             },
         );
         let on_upload_error = link.callback(SessionViewMsg::UploadError);
-        let on_message_sent = link.callback(|_| SessionViewMsg::MessageSent);
         html! {
             <InputBar
                 session_id={ctx.props().session.id}
@@ -3102,7 +3062,6 @@ impl SessionView {
                 {on_upload_prompt}
                 {on_secret_drop}
                 {on_upload_error}
-                {on_message_sent}
             />
         }
     }
