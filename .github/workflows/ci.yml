@@ -134,7 +134,10 @@ jobs:
           protoc: "true"
 
       - name: Build backend
-        run: cargo build -p backend -p claude-portal -p shared
+        # Linux proxy and launcher binaries are built by the dedicated matrix
+        # lane below. shared is already a backend dependency; keep this lane
+        # focused on backend code generation instead of compiling the proxy twice.
+        run: cargo build -p backend
 
   test:
     name: Tests
