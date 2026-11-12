@@ -177,7 +177,6 @@ impl Component for RequestCard {
                 self.busy = false;
                 self.error = result.err();
                 // Never trust a stale marker or a POST response as current authority.
-                self.info = None;
                 ctx.link().send_message(Msg::Load(true));
             }
         }
@@ -187,7 +186,16 @@ impl Component for RequestCard {
         let eligible = ctx.props().eligible;
         let actionable =
             self.error.is_none() && can_decide(eligible, self.busy, self.info.as_ref());
-        html! { <section class="permission-prompt secret-access-request" aria-live="polite">
+        let state_class = match self.info.as_ref().map(|i| &i.state) {
+            Some(SecretAccessState::Approved) => "is-approved",
+            Some(
+                SecretAccessState::Denied
+                | SecretAccessState::Expired
+                | SecretAccessState::Invalidated,
+            ) => "is-closed",
+            _ => "is-pending",
+        };
+        html! { <section class={classes!("permission-prompt", "secret-access-request", state_class)} aria-live="polite">
             <strong>{"Agent secret access"}</strong>
             if !eligible { {inactive_notice()} }
             else {
@@ -196,13 +204,15 @@ impl Component for RequestCard {
                 if let Some(error) = self.error {
                     <p role="alert">{error}</p>
                 }
-                <crate::components::secret_verification::SecretVerification on_verified={ctx.link().callback(Msg::AccountVerified)} />
+                if pending(self.info.as_ref()) {
+                    <crate::components::secret_verification::SecretVerification on_verified={ctx.link().callback(Msg::AccountVerified)} />
+                }
                 <div class="secret-access-actions">
                     if pending(self.info.as_ref()) {
-                        <button disabled={!actionable || !self.account_verified} onclick={ctx.link().callback(|_| Msg::Decide(true))}>{"Approve plaintext access"}</button>
-                        <button disabled={!actionable} onclick={ctx.link().callback(|_| Msg::Decide(false))}>{"Deny"}</button>
+                        <button type="button" class="secret-button secret-button--primary" disabled={!actionable || !self.account_verified} onclick={ctx.link().callback(|_| Msg::Decide(true))}>{"Approve access"}</button>
+                        <button type="button" class="secret-button" disabled={!actionable} onclick={ctx.link().callback(|_| Msg::Decide(false))}>{"Deny"}</button>
                     }
-                    <button disabled={self.busy} onclick={ctx.link().callback(|_| Msg::Load(false))}>{"Refresh status"}</button>
+                    <button type="button" class="secret-button secret-button--quiet" disabled={self.busy} onclick={ctx.link().callback(|_| Msg::Load(false))}>{if self.busy {"Checking…"} else {"Refresh status"}}</button>
                 </div>
             }
         </section> }
@@ -220,20 +230,38 @@ fn render_info(info: &SecretAccessRequestInfo) -> Html {
         SecretAccessState::Expired => "Expired",
         SecretAccessState::Invalidated => "Invalidated",
     };
+    let duration = if info.expires_in_seconds >= 60 && info.expires_in_seconds % 60 == 0 {
+        let minutes = info.expires_in_seconds / 60;
+        format!(
+            "{minutes} {}",
+            if minutes == 1 { "minute" } else { "minutes" }
+        )
+    } else {
+        format!("{} seconds", info.expires_in_seconds)
+    };
+    let expiry = chrono::DateTime::parse_from_rfc3339(&info.expires_at)
+        .map(|time| {
+            time.with_timezone(&chrono::Utc)
+                .format("%b %-d, %H:%M UTC")
+                .to_string()
+        })
+        .unwrap_or_else(|_| info.expires_at.clone());
     html! { <>
-        <p><strong>{format!("{namespace} / {} · version {}", info.name, info.version)}</strong>{format!(" — {state}")}</p>
+        <div class="secret-access-summary"><p><strong>{&info.name}</strong><span class="secret-access-version">{format!("{namespace} · version {}", info.version)}</span></p><span class="secret-access-status">{state}</span></div>
         <dl>
+            <dt>{"Environment variable"}</dt><dd><code>{&info.env_name}</code></dd>
+            <dt>{"Access duration"}</dt><dd>{duration}</dd>
+            <dt>{if info.binding_id.is_some() {"Access expires"} else {"Request expires"}}</dt><dd><time datetime={info.expires_at.clone()}>{expiry}</time></dd>
+        </dl>
+        <details class="secret-access-details"><summary>{"Technical details"}</summary><dl>
             <dt>{"Owner"}</dt><dd>{info.owner_user_id.to_string()}</dd>
             <dt>{"Secret ID"}</dt><dd>{info.secret_id.to_string()}</dd>
             <dt>{"Request ID"}</dt><dd>{info.id.to_string()}</dd>
             <dt>{"Session"}</dt><dd>{info.session_id.to_string()}</dd>
             <dt>{"Launcher"}</dt><dd>{info.launcher_id.to_string()}</dd>
-            <dt>{"Environment variable"}</dt><dd><code>{&info.env_name}</code></dd>
-            <dt>{"Access duration"}</dt><dd>{format!("{} seconds", info.expires_in_seconds)}</dd>
-            <dt>{if info.binding_id.is_some() {"Access expires"} else {"Request expires"}}</dt><dd>{&info.expires_at}</dd>
-        </dl>
+        </dl></details>
         if info.state == SecretAccessState::Pending {
-            <p>{"Approval gives this agent/session plaintext access to this exact secret version. The saved value is never shown here. Requests expire after 10 minutes."}</p>
+            <p>{"Approval lets this agent process use this secret version. The value stays hidden here."}</p>
         }
     </> }
 }

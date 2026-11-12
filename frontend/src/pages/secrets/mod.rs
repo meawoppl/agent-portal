@@ -3,6 +3,7 @@
 mod api;
 mod authorize;
 mod value_form;
+mod verified;
 use crate::{
     utils::{self, On401},
     Route,
@@ -16,6 +17,7 @@ use shared::api::{
 };
 use uuid::Uuid;
 use value_form::{FreshValue, ValueForm};
+pub use verified::SecretVerifiedPage;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::HtmlInputElement;
 use yew::prelude::*;

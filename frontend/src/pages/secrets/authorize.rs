@@ -55,7 +55,7 @@ pub fn secret_authorize_page() -> Html {
     };
     html! {<main class="secrets-page secrets-authorization"><h1>{"Authorize your CLI"}</h1>
         <p>{"Only approve a code from a command you started on a computer you trust. This grants that CLI access to secret metadata, reads, use and management for your account for up to 30 days. It does not grant access to other people's personal secrets."}</p>
-        <crate::components::secret_verification::SecretVerification on_verified={{let verified=verified.clone(); Callback::from(move |value| verified.set(value))}} return_to={Some(format!("/secrets/authorize?code={}",js_sys::encode_uri_component(&code)))} />
+        <crate::components::secret_verification::SecretVerification on_verified={{let verified=verified.clone(); Callback::from(move |value| verified.set(value))}} />
         <label>{"Code shown by your CLI"}<input autocomplete="off" value={(*code).clone()} disabled={*busy||matches!(&*result,Some(Ok(())))} oninput={{let code=code.clone();Callback::from(move |event:InputEvent|code.set(event.target_unchecked_into::<HtmlInputElement>().value()))}} /></label>
         <label class="secrets-check"><input type="checkbox" checked={*confirmed} disabled={*busy} onchange={{let confirmed=confirmed.clone();Callback::from(move |event:Event|confirmed.set(event.target_unchecked_into::<HtmlInputElement>().checked()))}} />{"I started this request and trust this computer to access my secrets."}</label>
         <div class="secrets-actions"><button disabled={*busy||!*verified||!*confirmed||matches!(&*result,Some(Ok(())))} onclick={action(true)}>{"Approve CLI"}</button><button disabled={*busy||matches!(&*result,Some(Ok(())))} onclick={action(false)}>{"Deny"}</button></div>

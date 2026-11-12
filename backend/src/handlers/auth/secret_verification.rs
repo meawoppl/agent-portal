@@ -26,7 +26,7 @@ fn destination(value: &str) -> Result<String, AppError> {
         || parsed.origin().ascii_serialization() != "https://portal.invalid"
         || !matches!(
             parsed.path(),
-            "/dashboard" | "/settings" | "/secrets/authorize"
+            "/dashboard" | "/settings" | "/secrets/authorize" | "/secrets/verified"
         )
         || value.len() > 2048
     {
@@ -307,6 +307,7 @@ mod tests {
             "/dashboard?session=abc",
             "/settings?tab=secrets&secret_job=123",
             "/secrets/authorize?code=ABC",
+            "/secrets/verified?channel=portal-secret-verification-test",
         ] {
             assert_eq!(destination(p).unwrap(), p);
         }

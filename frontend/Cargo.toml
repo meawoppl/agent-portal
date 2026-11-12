@@ -37,6 +37,7 @@ wasm-bindgen-futures = { workspace = true }
 # Web APIs
 web-sys = { workspace = true, features = [
     "Window",
+    "BroadcastChannel",
     # Cold-load telemetry (#1915): performance.now() since navigation start.
     "Performance",
     "Document",
