@@ -1,4 +1,4 @@
-//! Vault values never enter ordinary session authentication or browser reads.
+//! Vault reads require dedicated CLI authority or explicitly verified browser copy access.
 pub(crate) mod archive_versions;
 pub mod auth;
 pub mod crypto;
