@@ -3,6 +3,8 @@ name: Dependency Security
 on:
   pull_request:
     branches: [main]
+    # Recheck drafts at handoff: advisories may have changed since the last push.
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
   schedule:

@@ -6,10 +6,39 @@ new security findings immediately rather than waiting for the weekly review.
 Dependency PRs need the same CI and independent review as application changes;
 there is no automatic merge policy.
 
+## Automated update proposals
+
+`.github/dependabot.yml` checks the root Cargo workspace every day at 07:11 UTC,
+including weekends. It includes transitive dependencies, since packages such
+as OpenSSL need updates even when they are not direct manifest dependencies.
+Dependabot opens at most five version-update PRs at a time, changes only the
+lockfile within the existing manifest requirements, and does not edit SDK
+manifest requirements.
+The dependency-only PRs use the existing `no-visual` exemption; all build, test,
+and security checks still apply. Review and merge these proposals promptly.
+
+The schedule starts when the configuration reaches the default branch.
+Alert-triggered **Dependabot security updates** are a separate repository
+setting: a repository administrator must enable the dependency graph,
+Dependabot alerts, and security updates in Settings -> Advanced Security.
+The YAML file does not enable those settings. Security updates use a separate
+GitHub limit of ten open PRs. Check the Dependabot page under Insights ->
+Dependency graph for blocked updates or exhausted PR limits.
+
+This automation proposes compatible updates; it cannot guarantee that a new
+advisory has a compatible patch or that its PR has been reviewed and merged.
+Fixes requiring manifest changes, pinned SDK updates, and vendored code changes
+still follow the targeted update procedure below. RustSec remains the full
+lockfile gate even when GitHub has not yet indexed an advisory.
+
+Configuration behavior: [Dependabot options](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference)
+and [enabling security updates](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/configure-security-updates).
+
 ## RustSec gate
 
-`.github/workflows/security-audit.yml` runs pinned `cargo-audit` 0.22.2 on PRs,
-main pushes, daily, and by manual dispatch. It fetches the current RustSec
+`.github/workflows/security-audit.yml` runs pinned `cargo-audit` 0.22.2 on PRs
+(including when a draft is marked ready for review), main pushes, daily, and
+by manual dispatch. It fetches the current RustSec
 advisory database and audits the full workspace lockfile without platform
 filters. Vulnerabilities fail the job unless a specific reviewed exception is
 recorded in `.cargo/audit.toml`. Every ignore must have matching ownership and
@@ -41,6 +70,22 @@ maintenance.
 
 Official tool behavior: [cargo-audit](https://github.com/rustsec/rustsec/tree/main/cargo-audit)
 and its [configuration reference](https://github.com/rustsec/rustsec/blob/main/cargo-audit/audit.toml.example).
+
+## Shared failures across PRs
+
+Every audit scans the full lockfile, so one newly disclosed vulnerable package
+can fail otherwise unrelated PRs. Treat this as a shared dependency blocker,
+not an acceptable baseline failure. Fetch current `main` and inspect its
+lockfile before making another dependency change. If the fix has landed there,
+merge current `main` into affected open branches and push to trigger new checks.
+If it has not, prepare the targeted fix using the procedure below, then bring
+the affected branches up to date once that fix lands.
+
+Watch `gh pr checks <number> --watch` for each updated PR. Only call it ready
+after the latest head passes, including RustSec. Re-running an old workflow
+uses its old checkout and cannot pick up a later lockfile fix. When no safe
+patch is available, report the unresolved blocker and follow the existing
+exception review policy; do not weaken the gate to unblock unrelated work.
 
 ## Specific RSA exposure exception
 

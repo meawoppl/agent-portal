@@ -1,0 +1,18 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      # Unlike "daily" (weekdays only), this also checks on weekends.
+      interval: cron
+      cronjob: "11 7 * * *"
+    # OpenSSL and other audited packages arrive through transitive dependencies.
+    allow:
+      - dependency-type: all
+    # Keep the reviewed manifest requirements intact. Fixes that
+    # need a manifest change still require a targeted maintainer update.
+    versioning-strategy: lockfile-only
+    open-pull-requests-limit: 5
+    # Dependency-only bumps qualify for the existing visual-summary exemption.
+    labels:
+      - no-visual
