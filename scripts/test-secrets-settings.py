@@ -12,6 +12,7 @@ from playwright.async_api import async_playwright, expect
 
 ROOT = Path(__file__).resolve().parents[1]
 USER = '11111111-1111-4111-8111-111111111111'
+ALPHA_DESCRIPTION = 'Deployment credential for the synthetic staging database. Used by scheduled integration checks and test deployments; this deliberately long description should use the full inventory width rather than wrapping inside the Name column.'
 
 class Handler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
@@ -20,7 +21,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *_): pass
 
 def secret(i, name, namespace='personal', deleted=False):
-    return dict(id=f'00000000-0000-4000-8000-{i:012d}', owner_user_id=USER, namespace=namespace, name=name, description='Synthetic credential', tags=['deleted'] if deleted else [], current_version=1, generation=1, created_at='2026-11-12T00:00:00Z', updated_at='2026-11-12T00:00:00Z', deleted_at='2026-11-12T00:00:00Z' if deleted else None, deleted_by=USER if deleted else None, can_read=True, can_use=True, can_write=True, can_manage=True, grants=[])
+    return dict(id=f'00000000-0000-4000-8000-{i:012d}', owner_user_id=USER, namespace=namespace, name=name, description=ALPHA_DESCRIPTION if name == 'Alpha' else (f'Synthetic credential for {name}' if name != 'Zulu' else ''), tags=['deleted'] if deleted else [], current_version=1, generation=1, created_at='2026-11-12T00:00:00Z', updated_at='2026-11-12T00:00:00Z', deleted_at='2026-11-12T00:00:00Z' if deleted else None, deleted_by=USER if deleted else None, can_read=True, can_use=True, can_write=True, can_manage=True, grants=[])
 
 async def exercise(browser, base, output, width):
     context = await browser.new_context(viewport=dict(width=width, height=950), service_workers='block')
@@ -92,9 +93,27 @@ async def exercise(browser, base, output, width):
     await expect(alpha).to_have_attribute('aria-expanded','true')
     expanded = page.locator('.secret-expanded-row')
     await expect(expanded).to_have_count(1)
+    description = page.get_by_text(ALPHA_DESCRIPTION,exact=True)
+    await expect(description).to_have_count(1)
+    await expect(description).to_be_visible()
+    assert await description.evaluate("e => e.closest('td').colSpan === 5")
+    await expect(expanded.locator('dt')).to_have_text(['Audience','Reference'])
+    await expect(expanded.get_by_text(ALPHA_DESCRIPTION,exact=True)).to_have_count(0)
+    summary = page.locator('.secret-summary-row').filter(has=alpha)
+    assert (await description.bounding_box())['width'] > (await summary.locator('th').bounding_box())['width']
+    mobile_meta = page.locator('.secret-description-row').filter(has=description).locator('.secret-mobile-metadata')
+    if width <= 700:
+        await expect(summary.locator('.secrets-owner')).to_be_hidden()
+        await expect(mobile_meta).to_be_visible()
+        await expect(mobile_meta).to_contain_text('Owner: Fixture')
+        await expect(mobile_meta).to_contain_text('Updated:')
+    else:
+        await expect(summary.locator('.secrets-owner')).to_be_visible()
+        await expect(mobile_meta).to_be_hidden()
+
     await expect(page.get_by_role('button',name='Start cleanup for all versions',exact=True)).to_have_count(0)
     await expect(page.get_by_text('Clean up leaked copies',exact=True)).to_have_count(0)
-    assert await expanded.evaluate("e => e.previousElementSibling.textContent.includes('Alpha') && e.nextElementSibling.textContent.includes('bravo')")
+    assert await expanded.evaluate("e => e.previousElementSibling.previousElementSibling.textContent.includes('Alpha') && e.nextElementSibling.textContent.includes('bravo')")
     await expect(expanded.get_by_role('button',name='Copy secret',exact=True)).to_be_visible()
     await expanded.get_by_role('button',name='Replace value',exact=True).click()
     await expect(expanded.locator('form')).to_be_visible()

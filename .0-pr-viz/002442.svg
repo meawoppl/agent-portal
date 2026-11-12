@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="Arial, sans-serif" fill="#c0caf5">
+<text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2442 - Secret descriptions and expanded details</text>
+<text x="55" y="110" font-size="34" fill="#e6e9f5">Describe each secret once, across the full inventory width.</text>
+<text x="55" y="155" font-size="28">Keep summary metadata in the summary and actions in the expanded panel.</text>
+<path d="M55 185H1945 M1000 210V1120" stroke="#565f89" stroke-width="2" stroke-dasharray="8 8"/>
+<text x="65" y="240" font-size="22" fill="#f7768e" letter-spacing="4">BEFORE</text>
+<text x="1055" y="240" font-size="22" fill="#9ece6a" letter-spacing="4">AFTER</text>
+<rect x="65" y="290" width="865" height="260" rx="16" fill="#1e202e" stroke="#565f89"/>
+<text x="95" y="340" font-size="26">Name              Scope       Version    Owner    Updated</text>
+<text x="95" y="395" font-size="27" fill="#7aa2f7">DEPLOY_TOKEN</text>
+<text x="95" y="440" font-size="24">Long description</text>
+<text x="95" y="475" font-size="24">wraps inside the</text>
+<text x="95" y="510" font-size="24" fill="#f7768e">narrow Name cell</text>
+<rect x="65" y="590" width="865" height="385" rx="16" fill="#1e202e" stroke="#f7768e"/>
+<text x="95" y="640" font-size="28">Expanded details</text>
+<text x="95" y="700" font-size="25">Copy secret     Replace value</text>
+<text x="95" y="760" font-size="25" fill="#f7768e">Description repeats</text>
+<text x="95" y="815" font-size="25" fill="#f7768e">Owner repeats</text>
+<text x="95" y="870" font-size="25" fill="#f7768e">Updated repeats</text>
+<text x="95" y="930" font-size="25">Access, reference and history below</text>
+<rect x="1055" y="290" width="865" height="260" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1085" y="340" font-size="26">Name              Scope       Version    Owner    Updated</text>
+<text x="1085" y="395" font-size="27" fill="#7aa2f7">DEPLOY_TOKEN</text>
+<path d="M1085 425H1890" stroke="#565f89"/>
+<text x="1085" y="470" font-size="25" fill="#9ece6a">Description spans all five columns on its own line.</text>
+<text x="1085" y="515" font-size="24">No repeated description inside the expansion.</text>
+<rect x="1055" y="590" width="865" height="260" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1085" y="640" font-size="28">Expanded details</text>
+<text x="1085" y="700" font-size="25">Copy secret     Replace value</text>
+<text x="1085" y="760" font-size="25">Audience, reference, sharing and version history</text>
+<text x="1085" y="810" font-size="25">Two-click deletion stays in place</text>
+<rect x="1055" y="900" width="865" height="165" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1085" y="950" font-size="27" fill="#9ece6a">Phone summary preserves Owner and Updated</text>
+<text x="1085" y="1000" font-size="24">A compact line replaces their hidden columns.</text>
+<text x="1085" y="1040" font-size="24">Empty descriptions add no empty desktop row.</text>
+<text x="55" y="1170" font-size="22" fill="#a9b1d6">Presentation only: access verification, permissions, sorting, filtering and deletion behavior are unchanged.</text>
+</g></svg>
