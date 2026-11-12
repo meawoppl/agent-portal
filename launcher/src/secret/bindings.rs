@@ -99,6 +99,13 @@ impl BoundAgent {
         Ok(values)
     }
     async fn redeem(&self, binding: Uuid) -> anyhow::Result<(String, SecretString)> {
+        self.redeem_version(binding, None).await
+    }
+    pub(super) async fn redeem_version(
+        &self,
+        binding: Uuid,
+        expected: Option<i32>,
+    ) -> anyhow::Result<(String, SecretString)> {
         let response: SecretBindingTicketResponse = self
             .client
             .request::<_, ()>(Method::POST, &format!("/bindings/{binding}/ticket"), None)
@@ -122,7 +129,11 @@ impl BoundAgent {
         request.ticket.0.zeroize();
         let response = response.map_err(binding_error)?;
         let value = SecretString::new(response.value.0);
-        if value.is_empty() || value.len() > input::MAX_VALUE_BYTES || response.version < 1 {
+        if value.is_empty()
+            || value.len() > input::MAX_VALUE_BYTES
+            || response.version < 1
+            || expected.is_some_and(|v| v != response.version)
+        {
             bail!("Binding returned an invalid version or value size");
         }
         let env_name = input::env_name(&response.env_name).map_err(|_| {

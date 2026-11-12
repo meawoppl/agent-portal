@@ -159,3 +159,58 @@ A receipt distinguishes active-storage work, blocked targets and backup expiry. 
 Watch `SECRETS_REDACTION_REFRESH_FAILED`, `SECRET_REDACTION_FAILED` and `SECRET_EXPUNGE_FAILED` alongside the existing archive markers. A stale matcher causes protected reads/writes to fail closed until refresh, rather than logging or publishing raw content. Mutation concurrency, request-body buffers, key loading, matcher sources, JSON trees, archive spools and S3 pagination/deletion are bounded. Metadata responses use `Cache-Control: no-store`; sensitive API errors do not echo request/response bodies.
 
 Tests use isolated PostgreSQL schemas and synthetic local encryption keys. Coverage includes ciphertext authentication/identity substitution, immutable versions, namespace reservation, deletion/restore, provider resolution, scoped permissions, fresh enrollment, credential revocation, idempotency, binding replay/process replacement/expiry, reader consent, rollback/ACK fencing, target-specific archive coverage, source timestamps/order, media resurrection and unsafe-record blocking. S3 request tests use local HTTP fixtures, including paginated version IDs, null versions, races and HTTP-200 per-object delete failures; they do not modify production storage.
+
+## Inject secret references into a file
+
+Keep references in a UTF-8 template and materialize its values locally:
+
+```text
+DB_PASSWORD={{ secret://org/database-password }}
+API_TOKEN={{ secret://personal/api-token }}
+STABLE_KEY={{ secret://id/01234567-89ab-4cde-8012-3456789abcde }}
+```
+
+```bash
+agent-portal secret inject --in-file config.env.tpl --out-file config.env
+```
+
+`secret://personal/NAME`, `secret://org/NAME`, and `secret://id/UUID` use the same
+identities as ordinary secret references. IDs are UUIDs, not sequential numbers.
+The URI prefix also works in existing reference-taking commands. Template names
+are literal (including spaces); percent-encoding, URI query strings, and field
+selectors are not interpreted. Only `{{ secret://... }}` placeholders expand;
+other template expressions and bare URIs remain unchanged.
+
+For an agent, first request the credentials together, then supply the resulting
+**group request ID** (not a member binding ID):
+
+```bash
+agent-portal secret request \
+  --credential DB_PASSWORD=secret://org/database-password \
+  --credential API_TOKEN=secret://personal/api-token \
+  --credential STABLE_KEY=secret://id/01234567-89ab-4cde-8012-3456789abcde --wait
+agent-portal secret inject --approval GROUP_REQUEST_UUID \
+  --in-file config.env.tpl --out-file config.env
+```
+
+Every template reference must match exactly one credential in that approved
+group. The existing process-bound tickets, pinned versions and expiry checks
+still apply. The environment-variable labels used during approval are checked
+against the redeemed bindings; the template selects secrets by reference.
+An agent context never falls back to a human CLI credential. Outside an agent
+context, injection uses the separately authorized human CLI credential and
+requires both read and use rights.
+
+Substitution is literal: no shell expansion, recursive interpolation, or
+JSON/YAML/INI escaping occurs. Choose the template syntax appropriately for the
+secret's value. Repeated identical references are resolved once. Templates are
+limited to 1 MiB, 16 unique secrets and 4096 placeholders; rendered output is
+limited to 8 MiB. Values and rendered content are never printed.
+
+All lookups and rendering complete before a temporary file is written beside
+the destination and atomically published. Existing files require `--force`;
+input and output must be different files, and output symlinks/special files are
+rejected. Failed resolution leaves an existing output unchanged. Files use mode
+0600 on Unix; Windows uses the destination directory's ACL. The rendered file
+contains plaintext and persists after binding expiry or revocation: keep it out
+of version control and remove it when no longer needed.

@@ -8,7 +8,7 @@ impl SecretString {
     pub(super) fn new(value: String) -> Self {
         Self(Zeroizing::new(value))
     }
-    /// Explicit exposure only at the approved HTTP or child-environment boundary.
+    /// Explicit exposure only at the approved HTTP, child-environment, or output-file boundary.
     pub(super) fn as_str(&self) -> &str {
         self.0.as_str()
     }

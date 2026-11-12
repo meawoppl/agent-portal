@@ -15,6 +15,7 @@ pub enum Reference {
 impl std::str::FromStr for Reference {
     type Err = String;
     fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let value = value.strip_prefix("secret://").unwrap_or(value);
         let (namespace, name) = value
             .split_once('/')
             .ok_or("Use personal/NAME, org/NAME, or id/UUID")?;
