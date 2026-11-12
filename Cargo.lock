@@ -1553,9 +1553,9 @@ dependencies = [
 
 [[package]]
 name = "codex-codes"
-version = "0.167.5"
+version = "0.167.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99c00fdd3b12cb6f581536b08211b2d90e6ccfb83600ada985902214ad8d3354"
+checksum = "5b79b7c840fd7b7a31f5aebf3384d5a03ac69c60c49e75199f480c0433c6231e"
 dependencies = [
  "log",
  "serde",
