@@ -261,7 +261,7 @@ fn render_info(info: &SecretAccessRequestInfo) -> Html {
             <dt>{"Launcher"}</dt><dd>{info.launcher_id.to_string()}</dd>
         </dl></details>
         if info.state == SecretAccessState::Pending {
-            <p>{"Approval lets this agent process use this secret version. The value stays hidden here."}</p>
+            <p>{"Approval gives this agent process plaintext access to this secret version. The value stays hidden here."}</p>
         }
     </> }
 }
