@@ -43,8 +43,6 @@ pub enum Route {
     Secrets,
     #[at("/secrets/authorize")]
     SecretAuthorize,
-    #[at("/secrets/verified")]
-    SecretVerified,
     #[at("/secrets/jobs/:id")]
     SecretJob { id: String },
     #[at("/history")]
@@ -116,7 +114,6 @@ fn switch(routes: Route) -> Html {
         Route::Aperture => html! { <pages::aperture::AperturePage /> },
         Route::Settings => html! { <SettingsRoute /> },
         Route::Secrets => html! { <LegacySecretsRoute /> },
-        Route::SecretVerified => html! { <pages::secrets::SecretVerifiedPage /> },
         Route::SecretAuthorize => html! { <pages::secrets::SecretAuthorizePage /> },
         Route::SecretJob { id } => html! { <LegacySecretsRoute job_id={Some(id)} /> },
         Route::History => html! { <HistoryBrowserPage /> },

@@ -87,37 +87,7 @@ async def exercise(browser, base, output, width):
     await context.route('**/api/**', api)
     await context.route(lambda url: '/mock-provider' in url, provider)
     await context.route_web_socket('**/ws/**', ws)
-    await page.goto(base + '/secrets/authorize?code=ORIGINAL')
-    await page.get_by_label('Code shown by your CLI').fill('KEEP-MY-DRAFT')
-    await page.get_by_role('checkbox').check()
-    await expect(page.get_by_role('button', name='Approve CLI', exact=True)).to_be_disabled()
-    original_url, original_navigations = page.url, len(navigations)
-    # A blocked popup must neither POST a new challenge nor navigate the parent.
-    await page.evaluate('window.savedOpen=window.open; window.open=()=>null')
-    await page.get_by_role('button', name='Verify with Google').click()
-    await expect(page.get_by_role('alert')).to_contain_text('Allow popups')
-    assert state['starts'] == 0 and page.url == original_url
-    await page.evaluate('() => { window.open=window.savedOpen; }')
-    # Cancellation can be retried in place, with no account proof or approval.
-    async with context.expect_page() as opened:
-        await page.get_by_role('button', name='Verify with Google').click()
-    popup = await opened.value
-    await expect(popup.get_by_role('button', name='Cancel', exact=True)).to_be_visible()
-    assert await popup.evaluate('window.opener === null')
-    await popup.get_by_role('button', name='Cancel', exact=True).click()
-    await expect(page.get_by_role('alert')).to_contain_text('cancelled')
-    await expect(page.get_by_role('button', name='Approve CLI', exact=True)).to_be_disabled()
-    # Successful verification preserves the draft and checkbox without reloading.
-    async with context.expect_page() as opened:
-        await page.get_by_role('button', name='Verify with Google').click()
-    popup = await opened.value
-    await popup.get_by_role('button', name='Continue', exact=True).click()
-    await expect(page.get_by_text('Account verified', exact=True)).to_be_visible()
-    await expect(page.get_by_label('Code shown by your CLI')).to_have_value('KEEP-MY-DRAFT')
-    await expect(page.get_by_role('checkbox')).to_be_checked()
-    await expect(page.get_by_role('button', name='Approve CLI', exact=True)).to_be_enabled()
-    assert page.url == original_url and len(navigations) == original_navigations
-    assert state['approvals'] == 0
+    state['verified'] = True
     # Transcript card: current proof enables approval; only the card updates.
     await page.goto(base + f'/dashboard?session={SESSION}')
     card = page.locator('.secret-access-request')
@@ -154,7 +124,7 @@ async def main(args):
                 await exercise(browser, f'http://127.0.0.1:{server.server_port}', args.output, width)
             await browser.close()
     finally: server.shutdown()
-    print('PASS: popup success/cancel/blocked, preserved draft, no parent reload or automatic approval, desktop/mobile controls')
+    print('PASS: desktop/mobile card approval, refresh without reload, touch targets, keyboard focus')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)

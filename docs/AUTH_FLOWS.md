@@ -691,10 +691,9 @@ home-only; use `PortalClient` for account-bound requests.
 
 Protected browser actions use an explicit **Verify with Google** button (or
 GitHub for an already-linked GitHub identity), rather than requiring the ordinary
-Portal login to be less than ten minutes old. Verification opens in a popup, leaving the approval/settings page, its drafts
-and scroll position intact. A dedicated completion page closes the popup; the
-original page checks authenticated status before enabling Approve. Returning
-does not approve the operation: the user still clicks Approve.
+Portal login to be less than ten minutes old. Verification returns to the same
+approval/settings page, preserving the CLI code, session query and cleanup-job
+query. Returning does not approve the operation: the user still clicks Approve.
 
 The browser-only start endpoint requires the Portal cookie and same-origin CSRF
 checks. A signed, short-lived OAuth challenge binds provider, current user,
@@ -715,13 +714,3 @@ The OAuth challenge still expires after ten minutes to limit an unfinished
 round-trip. This is independent of login age. Pending secret-access requests and
 CLI enrollment codes retain their own expiration. Provider verification confirms
 the current provider session; it does not guarantee a fresh password or MFA prompt.
-
-
-The popup is opened synchronously from the click so browser popup rules apply.
-Blocked popups show a retry message; they never navigate the original tab.
-The popup has no opener access. A per-attempt BroadcastChannel notification
-only prompts a fresh server status check, with bounded polling as a fallback
-for provider isolation or unavailable channels. Cancellation, unmount and
-completion release timers, channels and popup handles; stale attempt responses
-cannot enable approval. A provider cancellation or account mismatch leaves the
-request unapproved and permits retry in place.
