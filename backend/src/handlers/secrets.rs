@@ -295,7 +295,11 @@ async fn list(
     State(state): State<Arc<AppState>>,
     SecretPrincipal(principal): SecretPrincipal,
     Query(query): Query<SecretListQuery>,
+    cookies: tower_cookies::Cookies,
 ) -> Result<Json<SecretListResponse>, AppError> {
+    if principal.browser {
+        auth::require_verification(&cookies, &state, principal.user)?;
+    }
     if !principal.metadata {
         return Err(AppError::Forbidden);
     };

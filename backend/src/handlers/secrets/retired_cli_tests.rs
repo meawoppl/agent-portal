@@ -42,6 +42,7 @@ async fn legacy_vault_tokens_and_owner_jwts_cannot_access_browser_vault_routes()
             shared::protocol::SESSION_COOKIE_NAME,
             user.id.to_string(),
         ));
+    auth::record_verification(&cookies, &state, user.id);
     let cookie = cookies
         .list()
         .iter()
@@ -91,7 +92,7 @@ async fn legacy_vault_tokens_and_owner_jwts_cannot_access_browser_vault_routes()
     assert_eq!(
         response.status(),
         axum::http::StatusCode::OK,
-        "OAuth browser metadata remains available"
+        "Verified OAuth browser metadata remains available"
     );
     for (method, path) in [
         ("POST", "/api/secrets/authorize/start"),
