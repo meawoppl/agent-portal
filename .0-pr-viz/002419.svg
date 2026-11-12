@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="Arial, sans-serif" font-size="24" fill="#a9b1d6">PR #2419 · Shared persistence-first session stop</text>
+<text x="55" y="112" font-family="Arial, sans-serif" font-size="34" fill="#e6e9f5">Two stop paths now share one persistence-first operation.</text>
+<path d="M55 160 H1945 M1000 190 V1130" stroke="#565f89" stroke-dasharray="7 7"/>
+<text x="55" y="220" font-family="Arial, sans-serif" font-size="24" fill="#f7768e">BEFORE</text>
+<rect x="55" y="265" width="900" height="225" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="310" font-family="Arial, sans-serif" font-size="28" fill="#7aa2f7">Manual stop</text>
+<text x="80" y="365" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Scope and owner/editor checks.</text>
+<text x="80" y="410" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Inline pause, disconnect, launcher stop.</text>
+<rect x="55" y="535" width="900" height="225" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="580" font-family="Arial, sans-serif" font-size="28" fill="#7aa2f7">Child lifecycle cleanup</text>
+<text x="80" y="635" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Parent-ended / idle policy checks.</text>
+<text x="80" y="680" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Same inline pause and stop sequence.</text>
+<rect x="55" y="805" width="900" height="225" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="850" font-family="Arial, sans-serif" font-size="28" fill="#7aa2f7">Maintenance risk</text>
+<text x="80" y="905" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Two copies of a critical ordering rule.</text>
+<text x="80" y="950" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">A future edit could drift between callers.</text>
+<text x="1045" y="220" font-family="Arial, sans-serif" font-size="24" fill="#9ece6a">AFTER</text>
+<rect x="1045" y="265" width="900" height="225" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1070" y="310" font-family="Arial, sans-serif" font-size="28" fill="#7aa2f7">Callers retain their checks</text>
+<text x="1070" y="365" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Manual authorization is unchanged.</text>
+<text x="1070" y="410" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Child policy checks are unchanged.</text>
+<rect x="1045" y="535" width="900" height="225" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1070" y="580" font-family="Arial, sans-serif" font-size="28" fill="#7aa2f7">session_stop::persist_and_stop</text>
+<text x="1070" y="635" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Persist paused state first.</text>
+<text x="1070" y="680" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Then disconnect proxy and stop launcher.</text>
+<rect x="1045" y="805" width="900" height="225" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1070" y="850" font-family="Arial, sans-serif" font-size="28" fill="#7aa2f7">PostgreSQL regression test</text>
+<text x="1070" y="905" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Failed UPDATE emits no proxy stop.</text>
+<text x="1070" y="950" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Successful stop persists paused state.</text>
+<text x="55" y="1172" font-family="Arial, sans-serif" font-size="22" fill="#a9b1d6">Scope: manual stop and child lifecycle only. Pause and archive/delete operations retain their distinct behavior.</text>
+</svg>
