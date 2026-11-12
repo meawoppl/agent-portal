@@ -42,6 +42,7 @@ async fn handle(
         && path != "/api/secrets/requests"
         && !path.starts_with("/api/secrets/requests/")
         && !path.ends_with("/read")
+        && !path.ends_with("/copy")
         && !path.ends_with("/resolve")
         && !path.ends_with("/expunge")
         && !(path.contains("/bindings/")

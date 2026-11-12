@@ -1,7 +1,8 @@
-//! Metadata-only vault management. Saved plaintext is intentionally absent
-//! from this page's model, requests, rendered cards and version history.
+//! Vault management. Saved plaintext never enters page state or rendered markup;
+//! the explicit verified copy action sends it directly to the clipboard.
 mod api;
 mod authorize;
+mod copy;
 mod value_form;
 use crate::{
     utils::{self, On401},
@@ -59,6 +60,7 @@ pub struct SecretsProps {
 }
 pub enum Msg {
     Load,
+    Verified(bool),
     RefreshCredentials,
     Credentials(Result<SecretCredentialsResponse, String>),
     RevokeCredential(Uuid),
@@ -86,6 +88,7 @@ pub enum Msg {
     Members(Result<SecretMembersResponse, utils::FetchError>),
 }
 pub struct SecretsPage {
+    verified: bool,
     tab: Tab,
     response: Option<SecretListResponse>,
     selected: Option<Uuid>,
@@ -146,6 +149,7 @@ impl Component for SecretsPage {
             ctx.link().send_message(Msg::RefreshJob);
         }
         Self {
+            verified: false,
             tab: Tab::Active,
             response: None,
             selected: None,
@@ -183,6 +187,10 @@ impl Component for SecretsPage {
     }
     fn update(&mut self, ctx: &Context<Self>, msg: Msg) -> bool {
         match msg {
+            Msg::Verified(verified) => {
+                self.verified = verified;
+                true
+            }
             Msg::RefreshCredentials => {
                 let link = ctx.link().clone();
                 spawn_local(async move {
@@ -561,7 +569,7 @@ impl Component for SecretsPage {
                 <button type="button" disabled={self.busy} onclick={ctx.link().callback(|_|Msg::Load)}>{"Refresh"}</button>
             </div>
             </header>
-            <crate::components::secret_verification::SecretVerification />
+            <crate::components::secret_verification::SecretVerification on_verified={ctx.link().callback(Msg::Verified)} />
             if let Some(error)=&self.error {<p role="alert" class="secrets-error">{error}</p>}
             if self.tab==Tab::Deleted {<p class="secrets-notice">{"Deleted secrets cannot be used. Restore to enable access again. All versions are retained and names stay reserved."}</p>}
             if let Some(replacing)=self.editing {<ValueForm key={format!("{}-{replacing}",self.selected.map(|id|id.to_string()).unwrap_or_default())} {replacing} can_publish={can_publish} on_submit={ctx.link().callback(Msg::Save)} on_cancel={ctx.link().callback(|_|Msg::Cancel)} />}
@@ -639,6 +647,7 @@ impl SecretsPage {
                     <button disabled={self.busy||!self.confirm_restore} onclick={ctx.link().callback(|_|Msg::Restore)}>{"Restore secret"}</button>
                 }
             } else {
+                if secret.can_read {<copy::SecretCopy key={format!("{}-{}",secret.id,secret.current_version)} id={secret.id} version={secret.current_version} verified={self.verified} disabled={self.busy} />}
                 if secret.can_write {<button disabled={self.busy} onclick={ctx.link().callback(|_|Msg::Replace)}>{"Replace value"}</button>}
                 if secret.can_manage {
                     if secret.namespace==SecretNamespace::Personal {
