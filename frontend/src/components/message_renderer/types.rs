@@ -7,6 +7,14 @@
 
 use serde::{Deserialize, Deserializer, Serialize};
 
+// Probe the tag without allocating large agent bodies or buffering an
+// internally tagged enum. Serde recognizes escaped tags and arbitrary key order.
+#[derive(Deserialize)]
+struct NoticeFrameKind {
+    #[serde(rename = "type")]
+    kind: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderedMessage {
     /// Replace through the constructors rather than editing in place: logical
@@ -24,11 +32,10 @@ impl RenderedMessage {
     pub fn new(content: String, meta: Option<shared::PortalMeta>) -> Self {
         // Cache the logical identity once, rather than reparsing every stored
         // message on each streamed event. Only an ID-only Portal marker counts.
-        let secret_request_id = content
-            .contains("secret_access_request")
-            .then(|| serde_json::from_str::<shared::PortalMessage>(&content).ok())
-            .flatten()
-            .filter(|message| message.message_type == shared::PortalMessage::MESSAGE_TYPE)
+        let secret_request_id = serde_json::from_str::<NoticeFrameKind>(&content)
+            .ok()
+            .filter(|frame| frame.kind == shared::PortalMessage::MESSAGE_TYPE)
+            .and_then(|_| serde_json::from_str::<shared::PortalMessage>(&content).ok())
             .and_then(|message| match message.content.as_slice() {
                 [shared::PortalContent::SecretAccessRequest { request_id }] => Some(*request_id),
                 _ => None,

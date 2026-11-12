@@ -110,6 +110,25 @@ mod tests {
     }
 
     #[test]
+    fn notice_identity_is_typed_and_accepts_json_escaped_tags() {
+        use crate::components::message_renderer::RenderedMessage;
+        let id = uuid::Uuid::new_v4();
+        let canonical =
+            shared::PortalMessage::with_content(vec![shared::PortalContent::SecretAccessRequest {
+                request_id: id,
+            }])
+            .to_json()
+            .to_string();
+        let escaped = canonical.replace("secret_access_request", r"secr\u0065t_access_request");
+        assert_eq!(
+            RenderedMessage::new(escaped, None).secret_request_id(),
+            Some(id)
+        );
+        let forged = canonical.replace("\"type\":\"portal\"", "\"type\":\"assistant\"");
+        assert_eq!(RenderedMessage::new(forged, None).secret_request_id(), None);
+    }
+
+    #[test]
     fn secret_notice_replay_keeps_one_original_position_and_distinct_requests() {
         use crate::components::message_renderer::RenderedMessage;
         fn marker(id: uuid::Uuid) -> RenderedMessage {
