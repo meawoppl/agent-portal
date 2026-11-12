@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="Arial, sans-serif" fill="#c0caf5">
+<text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2443 - Claude ListAgents scope reminder</text>
+<text x="55" y="110" font-size="34" fill="#e6e9f5">Native ListAgents is not a complete Portal inventory.</text>
+<text x="55" y="155" font-size="28">A post-tool reminder points Claude to peers across computers and providers.</text>
+<path d="M55 185H1945 M1000 210V1120" stroke="#565f89" stroke-width="2" stroke-dasharray="8 8"/>
+<text x="65" y="240" font-size="22" fill="#f7768e" letter-spacing="4">BEFORE</text>
+<text x="1055" y="240" font-size="22" fill="#9ece6a" letter-spacing="4">AFTER</text>
+<rect x="65" y="290" width="865" height="170" rx="16" fill="#1e202e" stroke="#565f89"/>
+<text x="95" y="345" font-size="28" fill="#7aa2f7">Claude calls ListAgents</text>
+<text x="95" y="405" font-size="25">Native tool returns its own inventory.</text>
+<path d="M490 460V545" stroke="#565f89" stroke-width="3"/>
+<rect x="65" y="545" width="865" height="230" rx="16" fill="#1e202e" stroke="#f7768e"/>
+<text x="95" y="600" font-size="28" fill="#f7768e">No contextual scope reminder</text>
+<text x="95" y="660" font-size="25">Other computers and providers can be absent.</text>
+<text x="95" y="715" font-size="25">The result can look like a complete peer list.</text>
+<rect x="1055" y="290" width="865" height="170" rx="16" fill="#1e202e" stroke="#565f89"/>
+<text x="1085" y="345" font-size="28" fill="#7aa2f7">Claude calls ListAgents</text>
+<text x="1085" y="405" font-size="25">Native result remains unchanged.</text>
+<path d="M1485 460V510" stroke="#9ece6a" stroke-width="3"/>
+<rect x="1055" y="510" width="865" height="250" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1085" y="565" font-size="28" fill="#9ece6a">PostToolUse: ^ListAgents$</text>
+<text x="1085" y="620" font-size="25">additionalContext becomes a system reminder</text>
+<text x="1085" y="670" font-size="25">beside the tool result, before the next model call.</text>
+<text x="1085" y="720" font-size="25">Existing settings and hooks are preserved.</text>
+<path d="M1485 760V810" stroke="#9ece6a" stroke-width="3"/>
+<rect x="1055" y="810" width="865" height="230" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1085" y="865" font-size="28" fill="#9ece6a">agent-portal message list</text>
+<text x="1085" y="925" font-size="25">Discover accessible Portal sessions across hosts</text>
+<text x="1085" y="975" font-size="25">and providers. Normal permissions still apply.</text>
+<text x="65" y="910" font-size="25" fill="#a9b1d6">Applied at launch in both native and shim paths.</text>
+<text x="65" y="965" font-size="25" fill="#a9b1d6">No user settings files are modified.</text>
+<text x="55" y="1172" font-size="22" fill="#a9b1d6">Scope: newly started Claude processes; explicit hook-disabling policy still applies. No expansion of session access.</text>
+</g>
+</svg>

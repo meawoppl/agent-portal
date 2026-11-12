@@ -139,7 +139,8 @@ fn spawn_claude(
         prompt_suggestions,
         &config.claude_args,
     );
-    add_portal_tool_reminders(&mut args, &config.working_directory).map_err(anyhow::Error::msg)?;
+    add_portal_tool_reminders(&mut args, std::path::Path::new(&config.working_directory))
+        .map_err(anyhow::Error::msg)?;
     cmd.args(args);
 
     cmd.current_dir(&config.working_directory);
