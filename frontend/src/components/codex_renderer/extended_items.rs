@@ -189,7 +189,18 @@ pub(super) fn render_extended_item(
             "Image",
             "View image".into(),
             None,
-            html! { <pre class="tool-input-content">{ text_preview(&path.0) }</pre> },
+            html! {
+                <>
+                    <pre class="tool-input-content">{ text_preview(&path.0) }</pre>
+                    if let Some(media) = media {
+                        if media.uploaded {
+                            <div class="tool-meta">{"Viewed image saved in the media message."}</div>
+                        } else {
+                            <div class="tool-result error">{text_preview(media.error.as_deref().unwrap_or("Viewed image could not be uploaded."))}</div>
+                        }
+                    }
+                </>
+            },
             completed,
         ),
         ThreadItemPayload::EnteredReviewMode { review, .. }
