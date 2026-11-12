@@ -305,10 +305,6 @@ async fn provider_callback(
             );
         })?;
 
-    if let Some(challenge) = verification {
-        return secret_verification::finish(challenge, &resolved_identity, &app_state, &cookies);
-    }
-
     // An address the provider has not vouched for must not satisfy the
     // allow-list — otherwise anyone could claim a permitted domain. Treat it as
     // absent here and let `resolve_user` refuse below.
@@ -326,6 +322,10 @@ async fn provider_callback(
             reason = "email_not_allowed",
         );
         return Ok(redirect.into_response());
+    }
+
+    if let Some(challenge) = verification {
+        return secret_verification::finish(challenge, &resolved_identity, &app_state, &cookies);
     }
 
     info!("User authenticated via {}", provider.key);
