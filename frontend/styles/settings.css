@@ -532,62 +532,43 @@
     background: var(--accent-hover);
 }
 
-/* Update-and-restart button */
+/* Computer lifecycle actions share the agent install button treatment. */
 .launcher-update-actions {
     display: grid;
-    grid-template-columns: repeat(2, 2.25rem);
+    grid-template-columns: max-content;
     gap: 0.5rem;
     justify-content: start;
     align-items: center;
 }
 
-.update-button {
-    border: none;
-    color: white;
-    padding: 0.5rem 1rem;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 0.9rem;
-    font-weight: 500;
-    transition: background 0.2s;
-}
 .launcher-update-primary,
 .launcher-restart-button,
 .launcher-update-secondary {
-    width: 100%;
-    min-height: 2.25rem;
     white-space: nowrap;
 }
 
-/* The "Restart" action deliberately shares the .update-button styles below.
-   (An earlier outline variant set its text to var(--text-secondary) #7f849c —
-   the same value .update-button.stage-0 uses as its BACKGROUND, and since the
-   restart button carries both classes the later background rule won: invisible
-   text. Same-color-on-same-color; don't reintroduce per-button color rules.) */
-.update-button.stage-0 {
-    background: #7f849c;
-}
-.update-button.stage-0:hover {
-    background: #565f89;
-}
 .update-button.confirming {
-    background: var(--error);
+    border-color: var(--error);
+    color: var(--error);
 }
-.update-button.confirming:hover {
-    background: #ff5a72;
+
+.update-button.confirming:not(:disabled):hover {
+    background: color-mix(in srgb, var(--error) 15%, transparent);
 }
+
 .update-button.stage-3 {
-    background: #565f89;
     cursor: progress;
 }
-.update-button[disabled] {
+
+.update-button:disabled {
     cursor: not-allowed;
-    opacity: 0.85;
+    opacity: 0.5;
 }
+
 .launcher-update-secondary {
-    grid-column: 1 / -1;
-    padding: 0.3rem;
+    padding: 0.25rem 0.65rem;
 }
+
 .launcher-update-secondary.is-placeholder {
     display: none;
 }
@@ -1110,6 +1091,7 @@
 }
 
 .agents-signin,
+.update-button,
 .agent-login-submit {
     width: fit-content;
     padding: 0.25rem 0.65rem;
@@ -1120,12 +1102,14 @@
     cursor: pointer;
 }
 
-.agents-signin {
+.agents-signin,
+.update-button {
     margin-top: 0.15rem;
     font-size: 0.75rem;
 }
 
 .agents-signin:hover,
+.update-button:not(:disabled):hover,
 .agent-login-submit:hover {
     background: color-mix(in srgb, var(--accent) 15%, transparent);
 }
@@ -1907,7 +1891,7 @@
 }
 
 .computers-table .actions-column {
-    width: 6.5rem;
+    width: 10rem;
 }
 
 .computers-table th,
@@ -1931,13 +1915,6 @@
 
 .computers-table .launcher-version-behind {
     color: var(--warning);
-}
-
-.launcher-update-primary,
-.launcher-restart-button {
-    padding: 0;
-    font-size: 1.3rem;
-    line-height: 1;
 }
 
 .agents-cell > .agents-statuses {
@@ -1977,20 +1954,11 @@
 }
 
 @media (pointer: coarse) {
-    .launcher-update-actions {
-        grid-template-columns: repeat(2, 44px);
-        gap: 0.25rem;
-    }
-
     .launcher-update-primary,
     .launcher-restart-button,
     .launcher-update-secondary,
     .agents-signin {
         min-height: 44px;
-    }
-
-    .computers-table .actions-column {
-        width: 7.5rem;
     }
 }
 
