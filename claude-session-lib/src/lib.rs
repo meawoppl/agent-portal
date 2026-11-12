@@ -18,10 +18,12 @@ pub mod login;
 pub mod proxy_session;
 mod spawn;
 pub mod strings;
+mod tool_reminders;
 pub mod transcript;
 
 pub use agent::ClaudeAgent;
 pub use spawn::{claude_cli_args, claude_supports_prompt_suggestions};
+pub use tool_reminders::add_portal_tool_reminders;
 pub use transcript::{
     claude_transcript_id, claude_transcript_status, diverged_conversation_id, TranscriptStatus,
 };

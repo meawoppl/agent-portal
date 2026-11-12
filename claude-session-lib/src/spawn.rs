@@ -99,7 +99,7 @@ pub(crate) async fn spawn_claude(
 
     log_claude_info(claude_path);
 
-    let args = claude_cli_args(
+    let mut args = claude_cli_args(
         config.session_id,
         config.resume,
         config.claude_conversation_id,
@@ -110,13 +110,16 @@ pub(crate) async fn spawn_claude(
         &config.extra_args,
     );
 
+    crate::add_portal_tool_reminders(&mut args, &config.working_directory)
+        .map_err(SessionError::CommunicationError)?;
+
     let mut cmd = build_claude_command(claude_path, &args, config);
 
-    // Log the full command for diagnostics.
+    // Settings can contain credentials; log only process identity.
     tracing::info!(
-        "Spawning Claude: {} {}",
+        "Spawning Claude: {} (session={})",
         claude_path.to_string_lossy(),
-        args.join(" ")
+        config.session_id
     );
 
     let child = cmd.spawn().map_err(SessionError::SpawnFailed)?;

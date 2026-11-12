@@ -23,7 +23,9 @@ use claude_codes::io::{
     ControlResponsePayload, PermissionResult, UserMessage,
 };
 use claude_codes::{ClaudeInput, ClaudeOutput};
-use claude_session_lib::{claude_cli_args, claude_supports_prompt_suggestions};
+use claude_session_lib::{
+    add_portal_tool_reminders, claude_cli_args, claude_supports_prompt_suggestions,
+};
 use session_lib::git_metadata::get_git_branch;
 use session_lib::output_buffer::PendingOutputBuffer;
 use shared::ProxyToServer;
@@ -129,14 +131,16 @@ fn spawn_claude(
     let mut cmd = Command::new("claude");
     // Shim mode wraps claude directly and keeps no conversation sidecar, so
     // there is no learned conversation id or fork source to pass.
-    cmd.args(claude_cli_args(
+    let mut args = claude_cli_args(
         config.session_id,
         config.resume,
         None,
         None,
         prompt_suggestions,
         &config.claude_args,
-    ));
+    );
+    add_portal_tool_reminders(&mut args, &config.working_directory).map_err(anyhow::Error::msg)?;
+    cmd.args(args);
 
     cmd.current_dir(&config.working_directory);
     cmd.stdin(std::process::Stdio::piped());

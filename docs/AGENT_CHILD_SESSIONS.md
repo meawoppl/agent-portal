@@ -41,6 +41,21 @@ keeps a cross-host child under its host. Plugin overrides are installed before
 the first process starts, survive reconnect, and do not overwrite later owner
 changes. Unspecified plugins follow the normal detection rules.
 
+## Discovering peers across providers and computers
+
+Claude's native `ListAgents` is not a complete Portal session inventory. Use
+`agent-portal message list` for Portal sessions accessible to the caller across
+computers and providers, or `agent-portal session list` for direct Portal
+children. These commands retain their normal permission checks.
+
+Newly launched Portal Claude processes (including proxy shim mode) register a
+session-only `PostToolUse` hook matching `ListAgents`. Claude inserts its
+`additionalContext` as a system reminder next to the tool result. This does not
+replace the result, start another turn, or change permissions. Existing hooks
+are preserved; settings files are read but never modified. Explicit Claude
+hook-disabling policies still apply. Already-running Claude processes pick up
+the hook when restarted with the updated launcher/proxy.
+
 ## Limits and lifecycle
 
 Defaults are four lifetime children, maximum depth two (root is depth one),
