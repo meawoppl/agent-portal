@@ -159,7 +159,8 @@ jobs:
   migration-roundtrip:
     name: Migration Roundtrip
     timeout-minutes: 20
-    runs-on: ubuntu-latest
+    # Keep the distro pg_dump major aligned with the PostgreSQL 16 service.
+    runs-on: ubuntu-24.04
     env:
       DATABASE_URL: postgresql://migration_check:migration_check@localhost:5432/postgres
     services:
