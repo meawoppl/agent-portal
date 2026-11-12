@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2430 · Inject approved secret references into files</text>
+<text x="55" y="106" font-family="sans-serif" font-size="34" fill="#e6e9f5">Secret commands supplied values and child environments; now templates reuse that authority.</text>
+<text x="55" y="148" font-family="sans-serif" font-size="34" fill="#e6e9f5">Resolve every reference first, then publish one private output file without printing values.</text>
+<path d="M55 175 H1945 M1000 190 V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="70" y="230" font-family="sans-serif" font-size="24" fill="#f7768e">BEFORE</text>
+<text x="1070" y="230" font-family="sans-serif" font-size="24" fill="#9ece6a">AFTER</text>
+<rect x="70" y="270" width="840" height="170" rx="12" fill="#1e202e" stroke="#7aa2f7" stroke-width="2"/>
+<text x="94" y="310" font-family="sans-serif" font-size="28" fill="#7aa2f7">secret read / secret run</text>
+<text x="94" y="353" font-family="sans-serif" font-size="24" fill="#c0caf5">Human read/use rights or approved agent bindings</text>
+<text x="94" y="387" font-family="sans-serif" font-size="24" fill="#c0caf5">Existing credentials and pinned secret versions</text>
+<path d="M490 440 v55 m-8 -10 l8 10 l8 -10" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="70" y="500" width="840" height="170" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="94" y="540" font-family="sans-serif" font-size="28" fill="#f7768e">Values or child environment</text>
+<text x="94" y="583" font-family="sans-serif" font-size="24" fill="#c0caf5">The CLI exposes existing read and execution paths.</text>
+<text x="94" y="617" font-family="sans-serif" font-size="24" fill="#c0caf5">No secret-reference file renderer.</text>
+<path d="M490 670 v55 m-8 -10 l8 10 l8 -10" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="70" y="730" width="840" height="170" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="94" y="770" font-family="sans-serif" font-size="28" fill="#f7768e">Configuration file integration</text>
+<text x="94" y="813" font-family="sans-serif" font-size="24" fill="#c0caf5">Caller must implement substitution and file output.</text>
+<text x="94" y="847" font-family="sans-serif" font-size="24" fill="#c0caf5">No common all-lookups-first publishing step.</text>
+<rect x="1070" y="270" width="840" height="170" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1094" y="310" font-family="sans-serif" font-size="28" fill="#9ece6a">secret inject --in-file --out-file</text>
+<text x="1094" y="353" font-family="sans-serif" font-size="24" fill="#c0caf5">{{ secret://org/NAME }} or personal/NAME or id/UUID</text>
+<text x="1094" y="387" font-family="sans-serif" font-size="24" fill="#c0caf5">Parse once; deduplicate repeated references.</text>
+<path d="M1490 440 v55 m-8 -10 l8 10 l8 -10" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="1070" y="500" width="840" height="170" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1094" y="540" font-family="sans-serif" font-size="28" fill="#9ece6a">Existing permissions or --approval GROUP_ID</text>
+<text x="1094" y="583" font-family="sans-serif" font-size="24" fill="#c0caf5">Human: require read + use; pin current version.</text>
+<text x="1094" y="617" font-family="sans-serif" font-size="24" fill="#c0caf5">Agent: validate group scope; redeem pinned bindings.</text>
+<path d="M1490 670 v55 m-8 -10 l8 10 l8 -10" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="1070" y="730" width="840" height="170" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1094" y="770" font-family="sans-serif" font-size="28" fill="#9ece6a">Resolve all, render literally, publish atomically</text>
+<text x="1094" y="813" font-family="sans-serif" font-size="24" fill="#c0caf5">Private temporary file; mode 0600 on Unix.</text>
+<text x="1094" y="847" font-family="sans-serif" font-size="24" fill="#c0caf5">No stdout; --force required to replace a file.</text>
+<text x="1070" y="967" font-family="sans-serif" font-size="28" fill="#9ece6a">Failures leave the destination unchanged.</text>
+<text x="1070" y="1011" font-family="sans-serif" font-size="24" fill="#c0caf5">16 unique secrets · 1 MiB input · 8 MiB output</text>
+<text x="55" y="1170" font-family="sans-serif" font-size="22" fill="#a9b1d6">Scope: literal substitution, no format escaping. Output files remain plaintext after approval expiry or revocation.</text>
+</svg>

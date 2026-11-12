@@ -2,6 +2,7 @@
 mod bindings;
 mod client;
 mod credentials;
+mod inject;
 mod input;
 mod requests;
 mod sensitive;
@@ -52,6 +53,8 @@ pub enum Action {
     },
     /// Ask the human in this session to approve a pinned secret binding.
     Request(requests::RequestArgs),
+    /// Render secret:// references in a template into a local file; never prints values.
+    Inject(inject::InjectArgs),
     /// Approve a short-lived, pinned secret binding for one session and launcher.
     Bind(bindings::BindArgs),
     /// List your approved bindings (metadata only).
@@ -226,6 +229,24 @@ pub async fn run(action: Action, backend: Option<String>, dev: bool) -> anyhow::
             return bindings::execute(binding, command, dev).await;
         }
     }
+    if let Action::Inject(args) = &action {
+        if args.approval.is_some()
+            || [
+                "PORTAL_SESSION_ID",
+                "PORTAL_SESSION_TOKEN",
+                "PORTAL_SESSION_BACKEND",
+            ]
+            .iter()
+            .any(|name| std::env::var_os(name).is_some())
+        {
+            if backend.is_some() {
+                bail!(
+                    "Bound injection uses PORTAL_SESSION_BACKEND; --backend-url cannot override it"
+                );
+            }
+            return inject::bound(args, dev).await;
+        }
+    }
     let config = crate::config::load_config_checked()?;
     let backend = crate::resolve_backend_url(backend, config.backend_url);
     let path = session_lib::paths::config_dir().join("secret-credentials.json");
@@ -313,6 +334,7 @@ pub async fn run(action: Action, backend: Option<String>, dev: bool) -> anyhow::
             }
         }
         Action::Request(_) => unreachable!(),
+        Action::Inject(args) => inject::human(&client, &args).await,
         Action::Bind(request) => bindings::create(&client, request).await,
         Action::Bindings => {
             let response: SecretBindingListResponse = client
