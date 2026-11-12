@@ -14,7 +14,7 @@ use axum::{
     extract::{DefaultBodyLimit, FromRequestParts, Path, Query, State},
     http::{header, request::Parts, HeaderMap},
     response::{IntoResponse, Response},
-    routing::{delete, get, post},
+    routing::{any, delete, get, post},
     Json, Router,
 };
 use chrono::Utc;
@@ -24,7 +24,6 @@ use std::sync::Arc;
 use uuid::Uuid;
 mod access_requests;
 mod bindings;
-mod enrollment;
 mod idempotency;
 mod members;
 const MAX_RULE_SOURCE_BYTES: i64 = 1024 * 1024;
@@ -51,19 +50,13 @@ impl FromRequestParts<Arc<AppState>> for SecretPrincipal {
         parts: &mut Parts,
         state: &Arc<AppState>,
     ) -> Result<Self, Self::Rejection> {
-        match auth::credential(state, &parts.headers).map_err(IntoResponse::into_response)? {
-            Some(principal) => Ok(Self(principal)),
-            None => {
-                let user = crate::auth::BrowserUserId::from_request_parts(parts, state).await?;
-                Ok(Self(Principal {
-                    user: user.0,
-                    browser: true,
-                    metadata: true,
-                    mutation: true,
-                    read: false,
-                }))
-            }
-        }
+        let user = crate::auth::BrowserUserId::from_request_parts(parts, state).await?;
+        Ok(Self(Principal {
+            user: user.0,
+            browser: true,
+            metadata: true,
+            mutation: true,
+        }))
     }
 }
 pub fn principal(
@@ -72,22 +65,18 @@ pub fn principal(
     cookies: &tower_cookies::Cookies,
     is_mutation: bool,
 ) -> Result<Principal, AppError> {
-    let principal = if let Some(principal) = auth::credential(state, headers)? {
-        principal
-    } else {
-        let cookie = cookies
-            .signed(&state.cookie_key)
-            .get(shared::protocol::SESSION_COOKIE_NAME)
-            .ok_or(AppError::Unauthorized)?;
-        let user = Uuid::parse_str(cookie.value()).map_err(|_| AppError::Unauthorized)?;
-        store::active_user(&mut *state.conn()?, user)?;
-        Principal {
-            user,
-            browser: true,
-            metadata: true,
-            mutation: true,
-            read: false,
-        }
+    auth::require_browser_headers(headers)?;
+    let cookie = cookies
+        .signed(&state.cookie_key)
+        .get(shared::protocol::SESSION_COOKIE_NAME)
+        .ok_or(AppError::Unauthorized)?;
+    let user = Uuid::parse_str(cookie.value()).map_err(|_| AppError::Unauthorized)?;
+    store::active_user(&mut *state.conn()?, user)?;
+    let principal = Principal {
+        user,
+        browser: true,
+        metadata: true,
+        mutation: true,
     };
     if let Some(expected) = headers.get("X-Portal-Account") {
         if expected.to_str().ok().and_then(|v| Uuid::parse_str(v).ok()) != Some(principal.user) {
@@ -548,18 +537,13 @@ fn register_reader(
         Ok(true)
     })
 }
-async fn read(
-    State(state): State<Arc<AppState>>,
-    SecretPrincipal(principal): SecretPrincipal,
-    headers: HeaderMap,
-    Path(id): Path<Uuid>,
-    SecretJson(request): SecretJson<SecretReadRequest>,
-) -> Result<Json<SecretReadResponse>, AppError> {
-    auth::require_read(principal)?;
-    read_value(state, principal, headers, id, request, None).await
+/// Retired human CLI endpoints intentionally return a terminal response. No
+/// credential, cookie, or legacy enrollment can restore this access path.
+async fn retired_cli_access() -> axum::http::StatusCode {
+    axum::http::StatusCode::GONE
 }
 
-// Separate from CLI reads: a browser must explicitly verify its session and
+// A browser must explicitly verify its OAuth-backed session and
 // pass same-origin CSRF checks. Re-run this policy after each asynchronous step.
 fn clipboard_principal(
     state: &AppState,
@@ -582,7 +566,7 @@ async fn copy_value(
 ) -> Result<Json<SecretReadResponse>, AppError> {
     let principal = clipboard_principal(&state, &headers, &cookies)?;
     request.for_execution = false;
-    read_value(state, principal, headers, id, request, Some(cookies)).await
+    read_value(state, principal, headers, id, request, cookies).await
 }
 async fn read_value(
     state: Arc<AppState>,
@@ -590,16 +574,9 @@ async fn read_value(
     headers: HeaderMap,
     id: Uuid,
     request: SecretReadRequest,
-    cookies: Option<tower_cookies::Cookies>,
+    cookies: tower_cookies::Cookies,
 ) -> Result<Json<SecretReadResponse>, AppError> {
-    let recheck = || match &cookies {
-        Some(cookies) => clipboard_principal(&state, &headers, cookies),
-        None => {
-            let verified = auth::credential(&state, &headers)?.ok_or(AppError::Forbidden)?;
-            auth::require_read(verified)?;
-            Ok(verified)
-        }
-    };
+    let recheck = || clipboard_principal(&state, &headers, &cookies);
     state.secrets.refresh_redaction(&state.db_pool).await?;
     let (row, version) = {
         let mut conn = state.conn()?;
@@ -655,13 +632,7 @@ async fn read_value(
             &mut conn,
             principal.user,
             Some(id),
-            if cookies.is_some() {
-                "clipboard_read"
-            } else if request.for_execution {
-                "execute_read"
-            } else {
-                "read"
-            },
+            "clipboard_read",
             "allowed",
         )?;
     }
@@ -971,7 +942,7 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
             .route("/api/secrets/resolve", post(resolve))
             .route("/api/secrets/{id}", get(info))
             .route("/api/secrets/{id}/versions", get(versions).post(write))
-            .route("/api/secrets/{id}/read", post(read))
+            .route("/api/secrets/{id}/read", post(retired_cli_access))
             .route("/api/secrets/{id}/copy", post(copy_value))
             .route("/api/secrets/{id}/grants", post(grant))
             .route("/api/secrets/{id}/grants/{user}", delete(revoke))
@@ -985,13 +956,17 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
                 "/api/secrets/jobs/{id}",
                 get(crate::secrets::expunge::get_job),
             )
-            .merge(enrollment::router())
+            .route("/api/secrets/authorize/{*rest}", any(retired_cli_access))
             .merge(access_requests::router())
             .layer(DefaultBodyLimit::max(400_000)),
         state,
     )
     .layer(axum::middleware::from_fn(no_store))
 }
+
+#[cfg(test)]
+#[path = "secrets/retired_cli_tests.rs"]
+mod retired_cli_tests;
 
 #[cfg(test)]
 #[path = "secrets/vault_tests.rs"]

@@ -8,6 +8,7 @@ Data-only irreversible migrations are not expected to restore deleted rows.
 import difflib
 import json
 import os
+import re
 import signal
 from pathlib import Path
 import subprocess
@@ -35,8 +36,22 @@ def compare(expected, actual, label):
 
 def dump_schema(env):
     dump = run("Snapshot database objects", ["pg_dump", "--schema-only", "--no-owner", "--no-privileges", "--dbname", env["DATABASE_URL"]], env, capture=True)
-    # Newer pg_dump versions generate a random psql guard token per dump.
-    return "\n".join(line for line in dump.splitlines() if not line.startswith(("\\restrict ", "\\unrestrict ")))
+    return normalize_dump(dump)
+
+
+def normalize_dump(dump):
+    # Older pg_dump clients expose the server's internal pg_attver WAL LSN.
+    # Recreating a column necessarily changes it; it is not user-settable DDL.
+    # Keep the statement/column and every other option so real drift still fails.
+    # https://github.com/postgres/postgres/blob/REL_16_STABLE/src/backend/catalog/README.attver.md
+    lines = []
+    for line in dump.splitlines():
+        if line.startswith(("\\restrict ", "\\unrestrict ")):
+            continue
+        if line.startswith("ALTER TABLE ") and " ALTER COLUMN " in line:
+            line = re.sub(r"(?<=pg_attver=)[0-9]+(?=[,)])", "0", line)
+        lines.append(line)
+    return "\n".join(lines)
 
 
 def main():

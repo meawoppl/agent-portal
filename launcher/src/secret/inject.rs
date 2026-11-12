@@ -1,12 +1,12 @@
-//! Literal template substitution through existing vault/approved-binding authority.
+//! Literal template substitution using session-bound approvals.
 //! Resolve everything first; publish one private file atomically. Never log content.
-use super::{bindings::BoundAgent, client::Client, input::Reference, sensitive::SecretString};
+use super::{bindings::BoundAgent, input::Reference, sensitive::SecretString};
 use anyhow::{bail, Context};
 use clap::Args;
 use reqwest::Method;
 use shared::api::{
     SecretAccessGroupInfo, SecretAccessRequestInfo, SecretAccessState, SecretNamespace,
-    SecretReadRequest, SecretReadResponse, MAX_SECRET_ACCESS_GROUP_ITEMS,
+    MAX_SECRET_ACCESS_GROUP_ITEMS,
 };
 use std::{
     io::{Read, Write},
@@ -33,7 +33,7 @@ pub struct InjectArgs {
     force: bool,
     /// Approved credential-group request ID, using only the bound agent identity.
     #[arg(long)]
-    pub approval: Option<Uuid>,
+    pub approval: Uuid,
 }
 struct Marker {
     span: Range<usize>,
@@ -190,35 +190,6 @@ fn publish(args: &InjectArgs, value: SecretString) -> anyhow::Result<()> {
     eprintln!("Secret template injected successfully.");
     Ok(())
 }
-pub(super) async fn human(client: &Client, args: &InjectArgs) -> anyhow::Result<()> {
-    let template = prepare(args)?;
-    let mut values = Vec::new();
-    for reference in &template.references {
-        let metadata = super::resolve(client, reference).await?;
-        if super::is_deleted(&metadata) || !metadata.can_read || !metadata.can_use {
-            bail!("File injection requires read and use rights on a live secret");
-        }
-        let response: SecretReadResponse = client
-            .request(
-                Method::POST,
-                &format!("/{}/read", metadata.id),
-                Some(&SecretReadRequest {
-                    version: Some(metadata.current_version),
-                    for_execution: true,
-                }),
-            )
-            .await?;
-        let value = SecretString::new(response.value.0);
-        if response.version != metadata.current_version
-            || value.is_empty()
-            || value.len() > super::input::MAX_VALUE_BYTES
-        {
-            bail!("Invalid secret version or value size");
-        }
-        values.push(value);
-    }
-    publish(args, template.render(&values)?)
-}
 fn matches(reference: &Reference, item: &SecretAccessRequestInfo) -> bool {
     match reference {
         Reference::Id(id) => *id == item.secret_id,
@@ -265,7 +236,7 @@ fn approved_items<'a>(
         .collect()
 }
 pub(super) async fn bound(args: &InjectArgs, dev: bool) -> anyhow::Result<()> {
-    let approval = args.approval.context("Agent file injection requires --approval GROUP_REQUEST_ID; request approval with secret request --credential first")?;
+    let approval = args.approval;
     let agent = BoundAgent::from_env(dev)?;
     bound_with_agent(&agent, args, approval).await
 }
@@ -308,7 +279,7 @@ mod tests {
             input: dir.join("config.tpl"),
             output: dir.join("config.env"),
             force: false,
-            approval: None,
+            approval: Uuid::new_v4(),
         }
     }
     #[test]
@@ -403,11 +374,13 @@ mod tests {
         assert_eq!(std::fs::read_to_string(target).unwrap(), "keep");
     }
     #[test]
-    fn cli_requires_file_paths_and_accepts_uri_references() {
+    fn cli_requires_approval_and_file_paths_and_accepts_uri_references() {
         assert!(crate::Args::try_parse_from([
             "agent-portal",
             "secret",
             "inject",
+            "--approval",
+            "00000000-0000-0000-0000-000000000001",
             "--in-file",
             "input",
             "--out-file",
@@ -418,6 +391,8 @@ mod tests {
             "agent-portal",
             "secret",
             "inject",
+            "--approval",
+            "00000000-0000-0000-0000-000000000001",
             "--in-file",
             "input"
         ])
@@ -496,32 +471,6 @@ mod tests {
         group.items.pop();
         group.items[0].state = SecretAccessState::Expired;
         assert!(approved_items(&input, &group, group.id, session).is_err());
-    }
-    #[tokio::test]
-    async fn lookup_failure_keeps_existing_output_and_leaves_no_temporary_file() {
-        use super::super::requests::tests::mock_server;
-        let dir = tempfile::tempdir().unwrap();
-        let mut args = args(dir.path());
-        args.force = true;
-        std::fs::write(&args.input, "{{secret://org/ONE}} {{secret://org/TWO}}").unwrap();
-        std::fs::write(&args.output, "keep").unwrap();
-        let metadata = serde_json::json!({"id":Uuid::new_v4(),"owner_user_id":Uuid::new_v4(),"namespace":"organization","name":"ONE","description":"","tags":[],"current_version":1,"generation":1,"created_at":"","updated_at":"","deleted_at":null,"deleted_by":null,"can_read":true,"can_use":true,"can_write":false,"can_manage":false,"grants":[]});
-        let (url, server) = mock_server(vec![
-            metadata,
-            serde_json::json!({"value":"SENSITIVE_CANARY","version":1}),
-            serde_json::json!({"error":"SENSITIVE_ERROR"}),
-        ]);
-        let client = Client::new(
-            &url,
-            true,
-            Some(SecretString::new("aps_secret_test".into())),
-        )
-        .unwrap();
-        let error = human(&client, &args).await.unwrap_err();
-        assert!(!format!("{error:?}").contains("SENSITIVE"));
-        assert_eq!(std::fs::read_to_string(&args.output).unwrap(), "keep");
-        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
-        assert_eq!(server.join().unwrap().len(), 3);
     }
     #[tokio::test]
     async fn bound_injection_redeems_only_matching_approved_version_and_deduplicates() {

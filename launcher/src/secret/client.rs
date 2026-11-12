@@ -99,7 +99,7 @@ impl Client {
             return Err(ServiceError {
                 status: status.as_u16(),
                 message: match status.as_u16() {
-                    401 => "Secret credential rejected or expired; run secret authorize",
+                    401 => "Bound session credential rejected or expired; reconnect this portal session",
                     403 => "Secret operation denied by policy",
                     404 => "Secret, version, or verified member not found",
                     409 => "Secret changed concurrently; inspect metadata and try again",
@@ -173,27 +173,25 @@ mod tests {
         (format!("http://{address}"), handle)
     }
     #[tokio::test]
-    async fn errors_never_echo_sensitive_response_and_dedicated_bearer_is_used() {
+    async fn errors_never_echo_sensitive_response_and_bound_bearer_is_used() {
         let (base, server) = mock_response("403 Forbidden", "SUPER-SECRET-ECHO").await;
         let client = Client::new(
             &base,
             true,
-            Some(SecretString::new("aps_secret_dedicated".into())),
+            Some(SecretString::new("SESSION-PROXY-TOKEN".into())),
         )
         .unwrap();
         let result = client
-            .request::<shared::api::SecretMetadata, _>(
+            .request::<shared::api::SecretBindingTicketResponse, ()>(
                 Method::POST,
-                "/resolve",
-                Some(&shared::api::SecretResolveRequest {
-                    reference: "personal/A".into(),
-                }),
+                "/bindings/00000000-0000-0000-0000-000000000001/ticket",
+                None,
             )
             .await
             .unwrap_err();
         assert!(!format!("{result:?}").contains("SUPER-SECRET"));
         let request = server.join().unwrap().to_ascii_lowercase();
-        assert!(request.contains("authorization: bearer aps_secret_dedicated"));
+        assert!(request.contains("authorization: bearer session-proxy-token"));
         assert!(request.contains("idempotency-key:"));
     }
     #[tokio::test]
@@ -201,38 +199,10 @@ mod tests {
         let (base, server) = mock_response("200 OK", "SECRET-VALUE-BAD-JSON").await;
         let client = Client::new(&base, true, None).unwrap();
         let error = client
-            .request::<shared::api::SecretReadResponse, ()>(Method::GET, "/test", None)
+            .request::<shared::api::SecretBindingRedeemResponse, ()>(Method::GET, "/test", None)
             .await
             .unwrap_err();
         assert!(!format!("{error:?}").contains("SECRET-VALUE"));
         server.join().unwrap();
-    }
-    #[tokio::test]
-    async fn sharing_resolves_provider_selector_on_backend_not_cached_display_names() {
-        let user_id = uuid::Uuid::new_v4();
-        let body = serde_json::to_string(&shared::api::SecretMember {
-            user_id,
-            display_name: "Display name must not resolve".into(),
-            email: "legacy@example.test".into(),
-            identities: vec![],
-        })
-        .unwrap();
-        let (base, server) = mock_response("200 OK", &body).await;
-        let client = Client::new(
-            &base,
-            true,
-            Some(SecretString::new("aps_secret_dedicated".into())),
-        )
-        .unwrap();
-        assert_eq!(
-            super::super::member(&client, "meawoppl@github")
-                .await
-                .unwrap(),
-            user_id
-        );
-        let request = server.join().unwrap();
-        assert!(request.starts_with("POST /api/secrets/members/resolve "));
-        assert!(request.contains("\"selector\":\"meawoppl@github\""));
-        assert!(!request.starts_with("GET /api/secrets/members"));
     }
 }

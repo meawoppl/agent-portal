@@ -515,8 +515,8 @@ mod tests {
             .unwrap();
     }
     #[tokio::test]
-    async fn directory_routes_require_a_verified_locked_domain_for_browser_and_cli() {
-        use crate::handlers::secrets::tests::{credential, Database};
+    async fn directory_routes_require_domain_verified_browser_and_reject_cli() {
+        use crate::handlers::secrets::tests::Database;
         use crate::schema::{user_identities, users};
         use axum::http::{Request, StatusCode};
         use tower::ServiceExt;
@@ -569,7 +569,7 @@ mod tests {
                 ))
                 .execute(&mut db.pool.get().unwrap())
                 .unwrap();
-            let token = credential(&state, user.id, "directory-gate");
+            let token = "aps_secret_retired";
             let cookies = tower_cookies::Cookies::default();
             cookies
                 .signed(&state.cookie_key)
@@ -611,8 +611,8 @@ mod tests {
                         .oneshot(request.body(axum::body::Body::from(body)).unwrap())
                         .await
                         .unwrap();
-                    assert_eq!(response.status(), if allowed {StatusCode::OK} else {StatusCode::FORBIDDEN}, "domain={domain:?}, email={email}, verified={verified}, browser={browser}, path={path}");
-                    if !allowed {
+                    assert_eq!(response.status(), if allowed && browser {StatusCode::OK} else {StatusCode::FORBIDDEN}, "domain={domain:?}, email={email}, verified={verified}, browser={browser}, path={path}");
+                    if !allowed || !browser {
                         let body = axum::body::to_bytes(response.into_body(), 8192)
                             .await
                             .unwrap();

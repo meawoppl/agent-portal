@@ -118,7 +118,7 @@ struct Args {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// Manage encrypted secrets using a separately approved credential.
+    /// Request and use explicitly approved secrets inside an agent session.
     Secret {
         #[command(subcommand)]
         action: secret::Action,
