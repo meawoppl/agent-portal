@@ -9,8 +9,11 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderedMessage {
+    /// Replace through the constructors rather than editing in place: logical
+    /// transcript identity is cached from this immutable wire frame.
     pub content: String,
     pub meta: Option<shared::PortalMeta>,
+    secret_request_id: Option<uuid::Uuid>,
 }
 
 impl RenderedMessage {
@@ -19,7 +22,22 @@ impl RenderedMessage {
     /// by nature. For a frame the portal itself authors, use [`Self::local`],
     /// which cannot produce a shape the renderer does not understand.
     pub fn new(content: String, meta: Option<shared::PortalMeta>) -> Self {
-        Self { content, meta }
+        // Cache the logical identity once, rather than reparsing every stored
+        // message on each streamed event. Only an ID-only Portal marker counts.
+        let secret_request_id = content
+            .contains("secret_access_request")
+            .then(|| serde_json::from_str::<shared::PortalMessage>(&content).ok())
+            .flatten()
+            .filter(|message| message.message_type == shared::PortalMessage::MESSAGE_TYPE)
+            .and_then(|message| match message.content.as_slice() {
+                [shared::PortalContent::SecretAccessRequest { request_id }] => Some(*request_id),
+                _ => None,
+            });
+        Self {
+            content,
+            meta,
+            secret_request_id,
+        }
     }
 
     /// The single door for portal-authored frames.
@@ -30,10 +48,11 @@ impl RenderedMessage {
     /// Hand-rolling `serde_json::to_string` at a call site is what previously
     /// let `{"type":"error"}` ship from three sites with no renderer at all.
     pub fn local(frame: shared::LocalFrame, meta: Option<shared::PortalMeta>) -> Self {
-        Self {
-            content: frame.to_json(),
-            meta,
-        }
+        Self::new(frame.to_json(), meta)
+    }
+
+    pub(crate) fn secret_request_id(&self) -> Option<uuid::Uuid> {
+        self.secret_request_id
     }
 
     pub fn raw_iso(&self) -> Option<&str> {
