@@ -125,8 +125,7 @@ mod tests {
             "job",
         ] {
             let error = crate::Args::try_parse_from(["agent-portal", "secret", command])
-                .err()
-                .expect("retired command must not parse");
+                .expect_err("retired command must not parse");
             // Missing required arguments would also reject an old command;
             // require its actual removal from the CLI's command surface.
             assert_eq!(
