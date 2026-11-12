@@ -19,6 +19,7 @@ pub mod models;
 pub mod push;
 pub mod routes;
 pub mod schema;
+pub mod secrets;
 pub mod service_stats;
 
 // Visible to the crate's own `#[cfg(test)]` modules AND to the separate
@@ -62,6 +63,7 @@ struct Args {
 
 #[derive(Clone)]
 pub struct AppState {
+    pub secrets: Arc<secrets::SecretsService>,
     pub dev_mode: bool,
     pub db_pool: DbPool,
     pub session_manager: SessionManager,
@@ -197,10 +199,12 @@ pub async fn run() -> anyhow::Result<()> {
         config.native_push,
     )?);
 
+    let secrets = Arc::new(secrets::SecretsService::from_env()?);
     // Create app state
     let forward_http_client =
         handlers::forward_client::ForwardHttpClient::new(session_manager.clone());
     let app_state = Arc::new(AppState {
+        secrets: secrets.clone(),
         dev_mode: args.dev_mode,
         db_pool: pool,
         session_manager,
@@ -242,6 +246,25 @@ pub async fn run() -> anyhow::Result<()> {
         push_transport: push_transport.clone(),
         vapid_public_key: Some(vapid.public_key),
         mobile_app_links: config.mobile_app_links,
+    });
+    secrets::expunge::spawn_worker(app_state.clone());
+    let secrets_refresh = secrets.clone();
+    let secrets_pool = app_state.db_pool.clone();
+    tokio::spawn(async move {
+        let mut failed = false;
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+            let next_failed = secrets_refresh
+                .refresh_redaction(&secrets_pool)
+                .await
+                .is_err();
+            if next_failed && !failed {
+                tracing::warn!("{} Secrets redaction refresh unavailable; generation-gated operations fail closed", crate::markers::SECRETS_REDACTION_REFRESH_FAILED);
+            }
+            failed = next_failed;
+        }
     });
 
     // Drain notification events and dispatch pushes (mobile-apps plan §8.2).

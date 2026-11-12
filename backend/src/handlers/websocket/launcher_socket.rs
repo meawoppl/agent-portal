@@ -1824,7 +1824,7 @@ mod tests {
 
         // ...with Scheduler attribution for the sender chip.
         assert_eq!(
-            app_state.session_manager.take_last_input_sender(session_id),
+            app_state.session_manager.peek_last_input_sender(session_id),
             Some((owner.id, "Scheduler".to_string()))
         );
 

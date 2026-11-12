@@ -63,10 +63,15 @@ impl SessionManager {
         self.last_input_sender.insert(session_id, (user_id, name));
     }
 
-    /// Remove and return the last input sender for `session_id`, if any. The
-    /// echoed user message consumes it exactly once.
-    pub(crate) fn take_last_input_sender(&self, session_id: Uuid) -> Option<(Uuid, String)> {
-        self.last_input_sender.remove(&session_id).map(|(_, v)| v)
+    pub(crate) fn peek_last_input_sender(&self, session_id: Uuid) -> Option<(Uuid, String)> {
+        self.last_input_sender
+            .get(&session_id)
+            .map(|value| value.clone())
+    }
+
+    pub(crate) fn consume_last_input_sender(&self, session_id: Uuid, expected: &(Uuid, String)) {
+        self.last_input_sender
+            .remove_if(&session_id, |_, value| value == expected);
     }
 
     /// Add `tokens` to the running sub-agent (Task tool) token total for

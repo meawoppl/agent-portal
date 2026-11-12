@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2412 · Organize secrets in Settings</text>
+<text x="55" y="108" font-family="sans-serif" font-size="34" fill="#e6e9f5">Secrets used separate scope buttons; Settings now shows both namespaces.</text>
+<text x="55" y="150" font-family="sans-serif" font-size="34" fill="#e6e9f5">Selectors choose status and actions; saved values stay hidden.</text>
+<path d="M55 178H1945 M1000 205V1130" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="55" y="230" font-family="sans-serif" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1055" y="230" font-family="sans-serif" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="55" y="275" width="840" height="190" rx="12" fill="#1e202e" stroke="#7aa2f7"/>
+<text x="79" y="317" font-family="sans-serif" font-size="28" fill="#7aa2f7">Standalone Secrets page</text>
+<text x="79" y="363" font-family="sans-serif" font-size="24" fill="#c0caf5">Dashboard shortcut opens /secrets</text>
+<text x="79" y="399" font-family="sans-serif" font-size="24" fill="#c0caf5">Settings has no Secrets tab</text>
+<rect x="1055" y="275" width="840" height="190" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="317" font-family="sans-serif" font-size="28" fill="#9ece6a">Settings / Secrets</text>
+<text x="1079" y="363" font-family="sans-serif" font-size="24" fill="#c0caf5">Dashboard opens /settings?tab=secrets</text>
+<text x="1079" y="399" font-family="sans-serif" font-size="24" fill="#c0caf5">Standalone route reuses the same component</text>
+<rect x="55" y="505" width="840" height="190" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="547" font-family="sans-serif" font-size="28" fill="#f7768e">Scope button row</text>
+<text x="79" y="593" font-family="sans-serif" font-size="24" fill="#c0caf5">Personal / Shared / Organization / Deleted</text>
+<text x="79" y="629" font-family="sans-serif" font-size="24" fill="#c0caf5">Only the selected scope is visible</text>
+<rect x="1055" y="505" width="840" height="190" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="547" font-family="sans-serif" font-size="28" fill="#9ece6a">View and Actions selectors</text>
+<text x="1079" y="593" font-family="sans-serif" font-size="24" fill="#c0caf5">Active secrets / Deleted secrets</text>
+<text x="1079" y="629" font-family="sans-serif" font-size="24" fill="#c0caf5">Create secret / Refresh</text>
+<rect x="55" y="735" width="840" height="190" rx="12" fill="#1e202e" stroke="#a9b1d6"/>
+<text x="79" y="777" font-family="sans-serif" font-size="28" fill="#a9b1d6">List and selected details</text>
+<text x="79" y="823" font-family="sans-serif" font-size="24" fill="#c0caf5">Cards occupy a separate list column</text>
+<text x="79" y="859" font-family="sans-serif" font-size="24" fill="#c0caf5">Other namespaces require switching views</text>
+<rect x="1055" y="735" width="840" height="190" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="777" font-family="sans-serif" font-size="28" fill="#9ece6a">Personal, divider, Organization</text>
+<text x="1079" y="823" font-family="sans-serif" font-size="24" fill="#c0caf5">Both tables remain visible; owner identifies shares</text>
+<text x="1079" y="859" font-family="sans-serif" font-size="24" fill="#c0caf5">Name / Value / Version / Owner / Updated</text>
+<text x="1055" y="1010" font-family="sans-serif" font-size="26" fill="#9ece6a">Value: Configured; details open below the tables</text>
+<text x="55" y="1172" font-family="sans-serif" font-size="22" fill="#a9b1d6">Scope: interface only; encryption, access checks and approval rules are unchanged.</text>
+</svg>

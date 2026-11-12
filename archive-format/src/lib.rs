@@ -295,7 +295,7 @@ pub struct ArchivedMediaMeta {
 /// UNION the existing archived transcript with whatever remains in the hot
 /// DB (phase 2 trims hot messages after archival; a later re-archive must
 /// never shrink the archived transcript).
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ArchiveMessageLine {
     /// Optional original agent clock, separate from the server archive order.
     #[serde(default, skip_serializing_if = "Option::is_none")]

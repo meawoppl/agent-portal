@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2414 · Active secrets first</text>
+<text x="55" y="108" font-family="sans-serif" font-size="34" fill="#e6e9f5">Active secrets opens directly; creation is visible and deleted items are secondary.</text>
+<text x="55" y="150" font-family="sans-serif" font-size="34" fill="#e6e9f5">Bottom navigation opens a distinct deleted view with a clear return path.</text>
+<path d="M55 178H1945 M1000 205V1130" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="55" y="230" font-family="sans-serif" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1055" y="230" font-family="sans-serif" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="55" y="275" width="840" height="190" rx="12" fill="#1e202e" stroke="#7aa2f7"/>
+<text x="79" y="317" font-family="sans-serif" font-size="28" fill="#7aa2f7">Top Secondary deleted navigation</text>
+<text x="79" y="363" font-family="sans-serif" font-size="24" fill="#c0caf5">Active and Deleted have equal prominence</text>
+<text x="79" y="399" font-family="sans-serif" font-size="24" fill="#c0caf5">Creation is hidden inside the Actions select</text>
+<rect x="1055" y="275" width="840" height="190" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="317" font-family="sans-serif" font-size="28" fill="#9ece6a">Active secrets on entry</text>
+<text x="1079" y="363" font-family="sans-serif" font-size="24" fill="#c0caf5">Visible Add secret and Refresh buttons</text>
+<text x="1079" y="399" font-family="sans-serif" font-size="24" fill="#c0caf5">Personal then Organization inventory stays visible</text>
+<rect x="55" y="505" width="840" height="190" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="79" y="547" font-family="sans-serif" font-size="28" fill="#f7768e">Commands presented as selector state</text>
+<text x="79" y="593" font-family="sans-serif" font-size="24" fill="#c0caf5">Actions control keeps a selected option</text>
+<text x="79" y="629" font-family="sans-serif" font-size="24" fill="#c0caf5">The primary action is difficult to discover</text>
+<rect x="1055" y="505" width="840" height="190" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="547" font-family="sans-serif" font-size="28" fill="#9ece6a">Secondary deleted navigation</text>
+<text x="1079" y="593" font-family="sans-serif" font-size="24" fill="#c0caf5">Show deleted secrets below the inventory</text>
+<text x="1079" y="629" font-family="sans-serif" font-size="24" fill="#c0caf5">Above the separate Approved CLI access section</text>
+<rect x="55" y="735" width="840" height="190" rx="12" fill="#1e202e" stroke="#a9b1d6"/>
+<text x="79" y="777" font-family="sans-serif" font-size="28" fill="#a9b1d6">Ambiguous deleted-state presentation</text>
+<text x="79" y="823" font-family="sans-serif" font-size="24" fill="#c0caf5">Deleted rows still say Configured</text>
+<text x="79" y="859" font-family="sans-serif" font-size="24" fill="#c0caf5">CLI approval explanation dominates the page</text>
+<rect x="1055" y="735" width="840" height="190" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1079" y="777" font-family="sans-serif" font-size="28" fill="#9ece6a">Explicit Deleted secrets view</text>
+<text x="1079" y="823" font-family="sans-serif" font-size="24" fill="#c0caf5">Top Back to active secrets button; heading focus</text>
+<text x="1079" y="859" font-family="sans-serif" font-size="24" fill="#c0caf5">Rows say Deleted / unavailable; Add secret hidden</text>
+<text x="1055" y="1010" font-family="sans-serif" font-size="26" fill="#9ece6a">CLI access explanation uses expandable details</text>
+<text x="55" y="1172" font-family="sans-serif" font-size="22" fill="#a9b1d6">Scope: interface only; encryption, access checks and approval rules are unchanged.</text>
+</svg>

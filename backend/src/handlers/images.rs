@@ -62,6 +62,10 @@ pub struct ImageStore {
 }
 
 impl ImageStore {
+    pub(crate) fn invalidate(&self, id: &Uuid) {
+        self.images.invalidate(id);
+    }
+
     /// Build a store with the given total-byte cap and per-entry TTL.
     pub fn new(max_bytes: u64, ttl: Duration) -> Self {
         let images = Cache::builder()
@@ -227,6 +231,8 @@ pub async fn serve_image(
         }
     }
 
+    crate::secrets::expunge::ensure_media_bytes(&app_state, id, image.user_id, &image.data)?;
+
     let mut headers = crate::handlers::media_security::media_security_headers(&image.content_type);
     headers.insert(
         header::CONTENT_TYPE,
@@ -237,7 +243,7 @@ pub async fn serve_image(
     );
     headers.insert(
         header::CACHE_CONTROL,
-        HeaderValue::from_static("private, max-age=86400, immutable"),
+        HeaderValue::from_static("private, no-store"),
     );
 
     Ok((headers, image.data.clone()))

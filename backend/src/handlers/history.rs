@@ -21,7 +21,6 @@
 //! reads always hit the store for the freshest bytes.
 
 use std::collections::{BTreeMap, HashSet};
-use std::io::Cursor;
 use std::sync::Arc;
 
 use axum::body::Body;
@@ -31,7 +30,6 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use diesel::prelude::*;
 use serde::Deserialize;
-use tokio_util::io::ReaderStream;
 use tower_cookies::Cookies;
 use uuid::Uuid;
 
@@ -40,10 +38,7 @@ use shared::api::{
     DEFAULT_HISTORY_PAGE_SIZE, MAX_HISTORY_PAGE_SIZE,
 };
 
-use crate::archive::{
-    decode_transcript, manifest_key, scan, transcript_key, ArchiveRuntime, SessionArchiveManifest,
-    TRANSCRIPT_COMPRESSION,
-};
+use crate::archive::{manifest_key, scan, ArchiveRuntime, SessionArchiveManifest};
 use crate::auth::extract_user;
 use crate::errors::AppError;
 use crate::handlers::media_store::{parse_range, RangeOutcome};
@@ -176,10 +171,19 @@ pub async fn list_history_sessions(
     let live_member_ids = live_member_session_ids(&app_state, user.id)?;
 
     // Visibility first: everything below operates on rows this caller may see.
-    let visible: Vec<&scan::FlatRow> = rows
+    let mut sanitized: Vec<scan::FlatRow> = rows
         .iter()
-        .filter(|r| row_visible(r, &user, &live_member_ids))
+        .filter(|row| row_visible(row, &user, &live_member_ids))
+        .cloned()
         .collect();
+    {
+        let mut conn = app_state.conn()?;
+        for row in &mut sanitized {
+            crate::secrets::redaction::snapshot_for_user(&mut conn, row.user_id)?
+                .redact_manifest(&mut row.manifest);
+        }
+    }
+    let visible: Vec<&scan::FlatRow> = sanitized.iter().collect();
 
     // Owner rollup deliberately ignores the `user` filter — see the field doc on
     // `HistorySessionsResponse::owners`. Admin-only, since it drives an
@@ -342,7 +346,11 @@ pub async fn get_history_manifest(
     })
     .await?
     .ok_or(AppError::NotFound("Session not found"))?;
-    Ok(([(header::CONTENT_TYPE, "application/json")], bytes).into_response())
+    let mut manifest: SessionArchiveManifest = serde_json::from_slice(&bytes)
+        .map_err(|_| AppError::ServiceUnavailable("Invalid archive manifest"))?;
+    crate::secrets::redaction::snapshot_for_user(&mut *app_state.conn()?, owner_id)?
+        .redact_manifest(&mut manifest);
+    Ok(Json(manifest).into_response())
 }
 
 /// GET /api/history/sessions/{user}/{session}/messages — the archived
@@ -359,116 +367,116 @@ pub async fn get_history_messages(
     let (owner_id, session_id) = parse_ids(&user, &session)?;
     verify_history_reader(&app_state, &runtime, &caller, owner_id, session_id).await?;
 
-    let backfill_runtime = runtime.clone();
-    let (ndjson, backfilled) = on_blocking(move || {
-        match runtime
-            .store
-            .get_object(&transcript_key(owner_id, session_id))?
-        {
-            // Decode per the manifest's declared codec, not a hardcoded zstd
-            // (#1466). Manifest-last write order means an absent manifest is a
-            // mid-write read; fall back to the write-side default.
-            Some(raw) => {
-                let manifest = runtime.store.get_session_manifest(owner_id, session_id)?;
-                let compression = manifest
-                    .as_ref()
-                    .and_then(|m| m.transcript.as_ref())
-                    .map(|t| t.compression.clone())
-                    .unwrap_or_else(|| TRANSCRIPT_COMPRESSION.to_string());
-                let ndjson = decode_transcript(&compression, &raw)?;
-                let backfilled =
-                    backfill_user_message_count(&runtime, manifest, owner_id, session_id, &ndjson);
-                Ok((Some(ndjson), backfilled))
+    let permit = runtime
+        .read_slots
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| AppError::ServiceUnavailable("Archive readers are busy; retry shortly"))?;
+    let pool = app_state.db_pool.clone();
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Vec<u8>, std::io::Error>>(2);
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        let result = (|| -> Result<(), AppError> {
+            use std::io::{BufRead, Read};
+            let mut conn = pool.get()?;
+            let mut reader = runtime
+                .store
+                .transcript_reader(owner_id, session_id)
+                .map_err(|_| AppError::ServiceUnavailable("Archive unavailable"))?;
+            let mut count = 0i64;
+            loop {
+                let mut bytes = Vec::new();
+                let read = reader
+                    .by_ref()
+                    .take(4 * 1024 * 1024 + 1)
+                    .read_until(b'\n', &mut bytes)
+                    .map_err(|_| AppError::ServiceUnavailable("Archive unavailable"))?;
+                if read == 0 {
+                    break;
+                }
+                if bytes.len() > 4 * 1024 * 1024 {
+                    return Err(AppError::ServiceUnavailable(
+                        "Archive record exceeds safe read budget",
+                    ));
+                }
+                if bytes.iter().all(u8::is_ascii_whitespace) {
+                    continue;
+                }
+                crate::secrets::redaction::validate_json_budget(&bytes)?;
+                let mut line: crate::archive::ArchiveMessageLine =
+                    serde_json::from_slice(&bytes)
+                        .map_err(|_| AppError::ServiceUnavailable("Invalid archive record"))?;
+                if line.role == "user"
+                    && shared::user_messages::is_substantive_user_record(&line.content)
+                {
+                    count += 1;
+                }
+                let rules = crate::secrets::redaction::snapshot_for_user(&mut conn, owner_id)?;
+                rules.redact_agent_json(&mut line.content);
+                let mut encoded = serde_json::to_vec(&line)
+                    .map_err(|_| AppError::Internal("Cannot encode archive record".into()))?;
+                encoded.push(b'\n');
+                drop(rules);
+                if tx.blocking_send(Ok(encoded)).is_err() {
+                    return Ok(());
+                }
             }
-            None => Ok((None, false)),
+            backfill_stream_count(&runtime, &mut conn, owner_id, session_id, count)?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = tx.blocking_send(Err(std::io::Error::other("Archive stream unavailable")));
         }
-    })
-    .await?;
-    let ndjson = ndjson.unwrap_or_default();
-    if backfilled {
-        // The manifest object changed under the list cache; refresh it behind
-        // this request so the new count shows on the next list fetch rather
-        // than after the self-heal window.
-        backfill_runtime.warm_scan_cache();
-    }
-
-    let stream = ReaderStream::new(Cursor::new(ndjson));
+    });
+    let stream = futures_util::stream::unfold(rx, |mut rx| async move {
+        rx.recv().await.map(|item| (item, rx))
+    });
     Ok((
-        [(header::CONTENT_TYPE, "application/x-ndjson")],
+        [
+            (header::CONTENT_TYPE, "application/x-ndjson"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
         Body::from_stream(stream),
     )
         .into_response())
 }
 
-/// Lazily backfill `user_message_count` on a pre-existing manifest the first
-/// time its transcript is viewed. New archives get the count at archive time
-/// (`background.rs`); this fills manifests written before the field existed
-/// without a bulk migration pass over the whole archive. Best-effort: a failed
-/// write only delays the backfill to the next view. Returns true when the
-/// manifest object was rewritten.
-fn backfill_user_message_count(
+fn backfill_stream_count(
     runtime: &ArchiveRuntime,
-    manifest: Option<SessionArchiveManifest>,
-    owner_id: Uuid,
-    session_id: Uuid,
-    ndjson: &[u8],
-) -> bool {
-    // Cheap pre-checks on the manifest fetched earlier in this request; the
-    // authoritative read happens under the write lock below.
-    match &manifest {
-        None => return false,
-        Some(m) if m.user_message_count.is_some() => return false,
-        Some(_) => {}
-    }
-    let count = ndjson
-        .split(|b| *b == b'\n')
-        .filter(|line| !line.is_empty())
-        .filter_map(|line| serde_json::from_slice::<crate::archive::ArchiveMessageLine>(line).ok())
-        .filter(|l| {
-            l.role == "user" && shared::user_messages::is_substantive_user_record(&l.content)
-        })
-        .count() as i64;
-
-    // Serialize with the archive sweep and RE-READ before writing: both
-    // writers read-modify-write the whole manifest object, and writing our
-    // earlier copy here could clobber a concurrently re-archived (newer)
-    // manifest — losing its fresher last_activity, counts, and transcript
-    // info. Under the lock, a fresh read + conditional write is a CAS.
-    let _manifest_guard = shared::sync::lock_recovering_poison(&runtime.manifest_write_lock);
-    let mut manifest = match runtime.store.get_session_manifest(owner_id, session_id) {
-        Ok(Some(m)) => m,
-        Ok(None) => return false,
-        Err(e) => {
-            tracing::warn!("history backfill: manifest re-read failed for {session_id}: {e}");
-            return false;
+    conn: &mut diesel::PgConnection,
+    owner: Uuid,
+    session: Uuid,
+    count: i64,
+) -> Result<(), AppError> {
+    use diesel::Connection;
+    let _guard = shared::sync::lock_recovering_poison(&runtime.manifest_write_lock);
+    conn.transaction::<_, AppError, _>(|conn| {
+        crate::secrets::expunge::archive_session_lock(conn, session)?;
+        let Some(mut manifest) = runtime
+            .store
+            .get_session_manifest(owner, session)
+            .map_err(|_| AppError::ServiceUnavailable("Archive metadata unavailable"))?
+        else {
+            return Ok(());
+        };
+        if manifest.user_message_count.is_some() {
+            return Ok(());
         }
-    };
-    if manifest.user_message_count.is_some() {
-        // A re-archive filled it in while we were counting — theirs is
-        // computed from the same merged transcript; nothing to do.
-        return false;
-    }
-    manifest.user_message_count = Some(count);
-    let bytes = match serde_json::to_vec(&manifest) {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            tracing::warn!("history backfill: could not serialize manifest {session_id}: {e}");
-            return false;
-        }
-    };
-    match runtime
-        .store
-        .put_object(&manifest_key(owner_id, session_id), bytes)
-    {
-        Ok(()) => {
-            tracing::info!("history backfill: user_message_count={count} for session {session_id}");
-            true
-        }
-        Err(e) => {
-            tracing::warn!("history backfill: manifest write failed for {session_id}: {e}");
-            false
-        }
-    }
+        manifest.user_message_count = Some(count);
+        let rules = crate::secrets::redaction::snapshot_for_user(conn, owner)?;
+        rules.redact_manifest(&mut manifest);
+        let value = serde_json::to_value(&manifest)
+            .map_err(|_| AppError::Internal("Cannot encode archive metadata".into()))?;
+        runtime
+            .store
+            .put_object(
+                &manifest_key(owner, session),
+                serde_json::to_vec(&value)
+                    .map_err(|_| AppError::Internal("Cannot encode archive metadata".into()))?,
+            )
+            .map_err(|_| AppError::ServiceUnavailable("Archive metadata unavailable"))?;
+        Ok(())
+    })
 }
 
 /// GET /api/history/media/{user}/{session}/{media_id} — archived media bytes
@@ -486,35 +494,128 @@ pub async fn get_history_media(
         Uuid::parse_str(media.trim()).map_err(|_| AppError::NotFound("Media not found"))?;
     verify_history_reader(&app_state, &runtime, &caller, owner_id, session_id).await?;
 
-    let (meta, bytes) = on_blocking(move || {
+    let permit = runtime
+        .read_slots
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| AppError::ServiceUnavailable("Archive readers are busy; retry shortly"))?;
+    let pool = app_state.db_pool.clone();
+    let (content_type, file) = tokio::task::spawn_blocking(move || -> Result<_, AppError> {
+        use std::io::{Read, Seek, Write};
+        let mut conn = pool.get()?;
+        if crate::secrets::expunge::media_removed(&mut conn, media_id)? {
+            return Err(AppError::NotFound("Media not found"));
+        }
         let meta = runtime
             .store
-            .get_media_meta(owner_id, session_id, media_id)?;
-        let bytes = runtime
+            .get_media_meta(owner_id, session_id, media_id)
+            .map_err(|_| AppError::ServiceUnavailable("Archive media unavailable"))?;
+        let mut reader = runtime
             .store
-            .get_media_bytes(owner_id, session_id, media_id)?;
-        Ok((meta, bytes))
+            .object_reader(
+                &crate::archive::media_key(owner_id, session_id, media_id),
+                512 * 1024 * 1024,
+            )
+            .map_err(|_| AppError::ServiceUnavailable("Archive media exceeds read budget"))?
+            .ok_or(AppError::NotFound("Media not found"))?;
+        let mut file = tempfile::tempfile()
+            .map_err(|_| AppError::ServiceUnavailable("Archive spool unavailable"))?;
+        let mut buffer = vec![0; 64 * 1024];
+        loop {
+            let count = reader
+                .read(&mut buffer)
+                .map_err(|_| AppError::ServiceUnavailable("Archive media unavailable"))?;
+            if count == 0 {
+                break;
+            }
+            file.write_all(&buffer[..count])
+                .map_err(|_| AppError::ServiceUnavailable("Archive spool unavailable"))?;
+        }
+        file.rewind()
+            .map_err(|_| AppError::ServiceUnavailable("Archive spool unavailable"))?;
+        let rules = crate::secrets::redaction::snapshot_for_user(&mut conn, owner_id)?;
+        if crate::secrets::expunge::scan_media(&mut file, &rules)
+            .map_err(|_| AppError::ServiceUnavailable("Archive media inspection unavailable"))?
+            .0
+        {
+            return Err(AppError::NotFound(
+                "Media unavailable after secret redaction",
+            ));
+        }
+        if crate::secrets::expunge::media_removed(&mut conn, media_id)? {
+            return Err(AppError::NotFound("Media not found"));
+        }
+        file.rewind()
+            .map_err(|_| AppError::ServiceUnavailable("Archive spool unavailable"))?;
+        let mut prefix = [0; 4096];
+        let prefix_len = file
+            .read(&mut prefix)
+            .map_err(|_| AppError::ServiceUnavailable("Archive media unavailable"))?;
+        file.rewind()
+            .map_err(|_| AppError::ServiceUnavailable("Archive spool unavailable"))?;
+        let content_type = meta
+            .map(|meta| meta.content_type)
+            .filter(|ct| shared::media::media_kind(ct).is_some())
+            .or_else(|| shared::media::sniff_content_type(&prefix[..prefix_len]).map(str::to_owned))
+            .unwrap_or_else(|| "application/octet-stream".into());
+        Ok((content_type, file))
     })
-    .await?;
-
-    let bytes = bytes.ok_or(AppError::NotFound("Media not found"))?;
-    // The sidecar carries the content type. When it's missing, sniff the bytes
-    // rather than serving `application/octet-stream`: browsers content-sniff
-    // raster formats and render them regardless, but they never sniff SVG, so a
-    // blanket octet-stream fallback breaks *only* SVG while PNG/JPEG keep
-    // working — a failure shaped to escape notice. Octet-stream remains the
-    // last resort for bytes we don't recognize.
-    let content_type = meta
-        .map(|m| m.content_type)
-        .filter(|ct| shared::strings::is_non_blank(ct))
-        .or_else(|| shared::media::sniff_content_type(&bytes).map(str::to_string))
-        .unwrap_or_else(|| "application/octet-stream".to_string());
-
-    Ok(bytes_response(&bytes, &content_type, &request_headers))
+    .await
+    .map_err(|_| AppError::ServiceUnavailable("Archive media reader unavailable"))??;
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
+    let total = file
+        .metadata()
+        .map_err(|_| AppError::NotFound("Media not found"))?
+        .len();
+    let (start, len, status) = match parse_range(&request_headers, total) {
+        RangeOutcome::NotSatisfiable => {
+            return Response::builder()
+                .status(StatusCode::RANGE_NOT_SATISFIABLE)
+                .header(header::CONTENT_RANGE, format!("bytes */{total}"))
+                .body(Body::empty())
+                .map_err(|_| AppError::Internal("Cannot build media response".into()))
+        }
+        RangeOutcome::Partial { start, end } => {
+            (start, end - start + 1, StatusCode::PARTIAL_CONTENT)
+        }
+        RangeOutcome::Full => (0, total, StatusCode::OK),
+    };
+    let mut file = tokio::fs::File::from_std(file);
+    file.seek(std::io::SeekFrom::Start(start))
+        .await
+        .map_err(|_| AppError::ServiceUnavailable("Archive media unavailable"))?;
+    let source = tokio_util::io::ReaderStream::new(file.take(len));
+    let stream =
+        futures_util::stream::unfold((source, permit), |(mut source, permit)| async move {
+            use futures_util::StreamExt;
+            source.next().await.map(|chunk| (chunk, (source, permit)))
+        });
+    let mut response = Response::builder()
+        .status(status)
+        .header(header::CONTENT_TYPE, &content_type)
+        .header(header::CONTENT_LENGTH, len)
+        .header(header::ACCEPT_RANGES, "bytes")
+        .header(header::CACHE_CONTROL, "private, no-store");
+    if status == StatusCode::PARTIAL_CONTENT {
+        response = response.header(
+            header::CONTENT_RANGE,
+            format!("bytes {}-{}/{total}", start, start + len - 1),
+        );
+    }
+    let mut response = response
+        .body(Body::from_stream(stream))
+        .map_err(|_| AppError::Internal("Cannot build media response".into()))?;
+    response
+        .headers_mut()
+        .extend(crate::handlers::media_security::media_security_headers(
+            &content_type,
+        ));
+    Ok(response)
 }
 
 /// Build a media response honoring a single (or suffix) HTTP Range. Bytes are
 /// already in memory (`get_media_bytes`), so ranging is a slice.
+#[cfg(test)]
 fn bytes_response(bytes: &[u8], content_type: &str, headers: &HeaderMap) -> Response {
     let total = bytes.len() as u64;
     let mut response = match parse_range(headers, total) {

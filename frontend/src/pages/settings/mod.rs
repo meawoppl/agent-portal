@@ -36,19 +36,26 @@ enum SettingsTab {
     Plugins,
     Sessions,
     Tokens,
+    Secrets,
     Notifications,
     Schedule,
     Performance,
     Appearance,
 }
 
-/// `/settings?tab=plugins` opens on the Plugins tab, so other surfaces can link
+/// `/settings?tab=plugins` and `?tab=secrets` open their matching panels, so other surfaces can link
 /// straight to it.
 fn initial_tab() -> SettingsTab {
     let search = web_sys::window()
         .and_then(|w| w.location().search().ok())
         .unwrap_or_default();
     if search
+        .trim_start_matches('?')
+        .split('&')
+        .any(|p| p == "tab=secrets")
+    {
+        SettingsTab::Secrets
+    } else if search
         .trim_start_matches('?')
         .split('&')
         .any(|p| p == "tab=plugins")
@@ -61,6 +68,8 @@ fn initial_tab() -> SettingsTab {
 
 #[derive(Properties, PartialEq)]
 pub struct SettingsPageProps {
+    #[prop_or_default]
+    pub secret_job_id: Option<String>,
     pub on_close: Callback<()>,
 }
 
@@ -98,6 +107,7 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
     let on_plugins_tab = make_tab_handler(SettingsTab::Plugins);
     let on_sessions_tab = make_tab_handler(SettingsTab::Sessions);
     let on_tokens_tab = make_tab_handler(SettingsTab::Tokens);
+    let on_secrets_tab = make_tab_handler(SettingsTab::Secrets);
     let on_notifications_tab = make_tab_handler(SettingsTab::Notifications);
     let on_schedule_tab = make_tab_handler(SettingsTab::Schedule);
     let on_performance_tab = make_tab_handler(SettingsTab::Performance);
@@ -156,6 +166,7 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
                         <span class="expiring-badge">{ *expiring_token_count }</span>
                     }
                 </button>
+                <button class={classes!("tab-button", (*active_tab == SettingsTab::Secrets).then_some("active"))} onclick={on_secrets_tab}>{"Secrets"}</button>
                 <button
                     class={classes!("tab-button", (*active_tab == SettingsTab::Notifications).then_some("active"))}
                     onclick={on_notifications_tab}
@@ -195,6 +206,9 @@ pub fn settings_page(props: &SettingsPageProps) -> Html {
                 }
                 if *active_tab == SettingsTab::Tokens {
                     <TokensPanel on_tokens_loaded={on_tokens_loaded} />
+                }
+                if *active_tab == SettingsTab::Secrets {
+                    <crate::pages::secrets::SecretsPage embedded={true} job_id={props.secret_job_id.clone()} />
                 }
                 if *active_tab == SettingsTab::Notifications {
                     <NotificationsPanel />

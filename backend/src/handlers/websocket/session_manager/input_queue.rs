@@ -8,10 +8,9 @@
 //! them — which is why a single write fault 500'd one path and was silent on
 //! the other.)
 //!
-//! Semantics: bump the per-session input sequence, best-effort persist a
-//! pending-input row (the reconnect-replay buffer), then deliver to the live
-//! proxy. DB hiccups are logged, never fatal — delivering to the live agent is
-//! what matters, and persistence only governs replay if the proxy reconnects.
+//! Sequence allocation and sanitized pending-input insertion commit together.
+//! Only a durable accepted input is handed to the live proxy; a database or
+//! redaction failure is explicitly rejected rather than forwarded as plaintext.
 
 use diesel::prelude::*;
 use shared::{ReasoningEffort, SendMode, ServerToProxy};
@@ -28,7 +27,7 @@ use super::SessionManager;
 
 /// Outcome of [`SessionManager::enqueue_input`].
 pub(crate) struct EnqueueOutcome {
-    /// Sequence number assigned (0 if no DB connection was available).
+    /// Durable sequence number assigned (0 when input was rejected).
     pub seq: i64,
     /// Whether the message was handed off: to the live proxy, or held in
     /// memory for it to receive on reconnect.
@@ -40,8 +39,7 @@ pub(crate) struct EnqueueOutcome {
     /// if the proxy reconnects; logged as `PENDING_INPUT_PERSIST_FAILED`.
     pub persisted: bool,
     /// Whether the input is durably queued for replay: a real sequence was
-    /// allocated *and* its row persisted. A failed sequence bump falls back
-    /// to seq `1`, whose row may persist but can't be trusted to replay.
+    /// allocated and its sanitized row committed in the same transaction.
     pub durable: bool,
 }
 
@@ -53,8 +51,8 @@ pub(crate) struct EnqueueInput {
 }
 
 impl SessionManager {
-    /// Bump the session's input sequence, best-effort persist a pending-input
-    /// row, and forward the message to the live proxy (queued if disconnected).
+    /// Commit a fenced, sanitized input and sequence before forwarding it.
+    /// Failed persistence never becomes an unsequenced raw-content fallback.
     pub(crate) fn enqueue_input(
         &self,
         db_pool: &DbPool,
@@ -71,61 +69,59 @@ impl SessionManager {
             client_msg_id,
         } = input;
 
-        let mut persisted = false;
-        let mut allocated = false;
-        let seq = match db_pool.get() {
-            Ok(mut conn) => {
-                // The same accepted input owns both values: sequence assignment
-                // and recency ordering cannot drift across separate writes.
-                let next_seq: i64 = match diesel::update(sessions::table.find(session_id))
+        let stored = (|| -> Result<(i64, serde_json::Value), crate::errors::AppError> {
+            let mut conn = db_pool.get()?;
+            conn.transaction(|conn| {
+                crate::secrets::redaction::lock_generation(conn)?;
+                let owner = sessions::table
+                    .find(session_id)
+                    .select(sessions::user_id)
+                    .first::<Uuid>(conn)?;
+                let rules = crate::secrets::redaction::snapshot_for_user(conn, owner)?;
+                let mut content = content;
+                rules.redact_agent_json(&mut content);
+                let seq = diesel::update(sessions::table.find(session_id))
                     .set((
                         sessions::input_seq.eq(sessions::input_seq + 1),
                         sessions::last_messaged_at.eq(diesel::dsl::now),
                     ))
                     .returning(sessions::input_seq)
-                    .get_result(&mut conn)
-                {
-                    Ok(s) => {
-                        allocated = true;
-                        s
-                    }
-                    Err(e) => {
-                        error!("{INPUT_SEQ_BUMP_FAILED} session={}: {}", session_id, e);
-                        1
-                    }
-                };
-
-                let new_input = NewPendingInput {
+                    .get_result::<i64>(conn)
+                    .map_err(|error| {
+                        error!("{INPUT_SEQ_BUMP_FAILED} session={session_id}");
+                        crate::errors::AppError::from(error)
+                    })?;
+                let row = NewPendingInput {
                     session_id,
-                    seq_num: next_seq,
-                    content: serde_json::to_string(&content).unwrap_or_default(),
-                    send_mode: send_mode.unwrap_or_default().as_str().to_string(),
+                    seq_num: seq,
+                    content: serde_json::to_string(&content).map_err(|_| {
+                        crate::errors::AppError::Internal("Cannot encode sanitized input".into())
+                    })?,
+                    send_mode: send_mode.unwrap_or_default().as_str().to_owned(),
                     client_msg_id,
-                    reasoning_effort: reasoning_effort.map(|effort| effort.as_str().to_string()),
+                    reasoning_effort: reasoning_effort.map(|effort| effort.as_str().to_owned()),
                 };
-                match diesel::insert_into(pending_inputs::table)
-                    .values(&new_input)
-                    .execute(&mut conn)
-                {
-                    Ok(_) => persisted = true,
-                    Err(e) => {
-                        error!(
-                            "{PENDING_INPUT_PERSIST_FAILED} session={}: {}",
-                            session_id, e
-                        )
-                    }
-                }
-                next_seq
-            }
-            Err(e) => {
-                // No DB connection ⇒ the pending-input row is never written and
-                // the sequence is never assigned: same durable-loss outcome as a
-                // failed INSERT, so it carries the same marker (see markers.rs).
+                diesel::insert_into(pending_inputs::table)
+                    .values(row)
+                    .execute(conn)?;
+                Ok((seq, content))
+            })
+        })();
+        let (seq, content) = match stored {
+            Ok(stored) => stored,
+            Err(_) => {
+                error!("{PENDING_INPUT_PERSIST_FAILED}: input rejected before delivery for session {session_id}");
                 error!(
-                    "{PENDING_INPUT_PERSIST_FAILED} no DB connection to enqueue input for session {}: {}",
-                    session_id, e
+                    "{}: input requires a durable sanitized commit",
+                    crate::markers::SECRET_REDACTION_FAILED
                 );
-                0
+                return EnqueueOutcome {
+                    seq: 0,
+                    delivered: false,
+                    live: false,
+                    persisted: false,
+                    durable: false,
+                };
             }
         };
 
@@ -160,8 +156,8 @@ impl SessionManager {
             seq,
             delivered: true,
             live: sent == Sent::Live,
-            persisted,
-            durable: allocated && persisted,
+            persisted: true,
+            durable: true,
         }
     }
 }

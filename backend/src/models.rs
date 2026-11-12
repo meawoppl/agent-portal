@@ -49,6 +49,9 @@ pub struct UserIdentity {
     pub subject: String,
     pub email: Option<String>,
     pub created_at: NaiveDateTime,
+    pub handle: Option<String>,
+    pub email_verified: bool,
+    pub last_seen_at: Option<NaiveDateTime>,
 }
 
 #[derive(Debug, Insertable)]
@@ -58,6 +61,9 @@ pub struct NewUserIdentity {
     pub provider: String,
     pub subject: String,
     pub email: Option<String>,
+    pub handle: Option<String>,
+    pub email_verified: bool,
+    pub last_seen_at: Option<NaiveDateTime>,
 }
 
 #[derive(Debug, Queryable, Selectable, Clone)]

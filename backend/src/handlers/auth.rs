@@ -29,6 +29,7 @@ use shared::protocol::SESSION_COOKIE_NAME;
 
 mod identity;
 mod oauth;
+pub mod secret_verification;
 
 pub use identity::{ProviderIdentity, PROVIDER_GITHUB, PROVIDER_GOOGLE};
 
@@ -164,8 +165,9 @@ pub async fn device_login(
 
 #[derive(Debug, Deserialize)]
 pub struct AuthCallbackQuery {
-    code: String,
+    code: Option<String>,
     state: Option<String>,
+    error: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -191,6 +193,7 @@ struct GoogleUserInfo {
 #[derive(Debug, Deserialize)]
 struct GitHubUserInfo {
     id: u64,
+    login: String,
     name: Option<String>,
     avatar_url: Option<String>,
 }
@@ -247,7 +250,11 @@ async fn provider_callback(
         .build()
         .map_err(|e| AppError::Internal(format!("Failed to build OAuth HTTP client: {e}")))?;
 
-    let device_state =
+    let verification =
+        secret_verification::take(provider, &app_state, &cookies, query.state.as_deref())?;
+    let device_state = if verification.is_some() {
+        None
+    } else {
         oauth::validate_callback_state(provider, &cookies, &app_state, query.state.as_deref())
             .inspect_err(|_| {
                 warn!(
@@ -257,14 +264,23 @@ async fn provider_callback(
                     flow = callback_kind,
                     reason = "invalid_state",
                 );
-            })?;
+            })?
+    };
 
+    if query.error.is_some() || query.code.is_none() {
+        return match verification {
+            Some(challenge) => secret_verification::cancel(challenge),
+            None => Err(AppError::Unauthorized),
+        };
+    }
     // Exchange code for token
     let token: oauth2::StandardTokenResponse<
         oauth2::EmptyExtraTokenFields,
         oauth2::basic::BasicTokenType,
     > = client
-        .exchange_code(AuthorizationCode::new(query.code))
+        .exchange_code(AuthorizationCode::new(
+            query.code.ok_or(AppError::Unauthorized)?,
+        ))
         .request_async(&http_client)
         .await
         .map_err(|e| {
@@ -306,6 +322,10 @@ async fn provider_callback(
             reason = "email_not_allowed",
         );
         return Ok(redirect.into_response());
+    }
+
+    if let Some(challenge) = verification {
+        return secret_verification::finish(challenge, &resolved_identity, &app_state, &cookies);
     }
 
     info!("User authenticated via {}", provider.key);
@@ -415,6 +435,7 @@ async fn google_identity(
     Ok(ProviderIdentity {
         provider: PROVIDER_GOOGLE,
         subject: info.sub,
+        handle: None,
         email: Some(info.email),
         email_verified: info.email_verified,
         name: info.name,
@@ -457,6 +478,7 @@ async fn github_identity(
     Ok(ProviderIdentity {
         provider: PROVIDER_GITHUB,
         subject: info.id.to_string(),
+        handle: Some(info.login),
         email_verified: email.is_some(),
         email,
         name: info.name,
@@ -617,6 +639,7 @@ fn me_response(user: User) -> MeResponse {
 }
 
 pub async fn logout(State(app_state): State<Arc<AppState>>, cookies: Cookies) -> impl IntoResponse {
+    crate::secrets::auth::clear_verification(&cookies, &app_state);
     cookies
         .signed(&app_state.cookie_key)
         .add(remove_session_cookie());
@@ -709,6 +732,7 @@ fn check_email_allowed(app_state: &AppState, email: &str) -> Result<(), Redirect
 }
 
 fn add_session_cookie(cookies: &Cookies, app_state: &AppState, user: &User) {
+    crate::secrets::auth::clear_verification(cookies, app_state);
     cookies
         .signed(&app_state.cookie_key)
         .add(session_cookie(user, !app_state.dev_mode));
@@ -852,6 +876,7 @@ mod tests {
         }"#;
         let info: GitHubUserInfo = serde_json::from_str(body).expect("parses /user");
         assert_eq!(info.id.to_string(), "583231");
+        assert_eq!(info.login, "octocat");
         assert_eq!(info.name.as_deref(), Some("The Octocat"));
     }
 
