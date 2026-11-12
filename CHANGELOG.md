@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- **`SESSION_SECRET_FILE`.** The session secret (cookie signing and
+  proxy/launcher JWTs) can be read from a file, such as a read-only bind mount,
+  instead of the `SESSION_SECRET` env var. The value is byte-identical to the
+  env var's after stripping one trailing newline, so switching keeps sessions
+  and launcher tokens valid. Setting both, or pointing at a missing, empty or
+  unsafe file, fails startup rather than falling back to an ephemeral key.
+
 - **Image previews on uploaded attachments.** A pasted, dropped, or picked image
   now shows as a thumbnail above its attachment chip in the sent message (click
   for the zoomable lightbox). It is pulled back from the session's working

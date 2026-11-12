@@ -46,7 +46,16 @@ EXPOSE 3000
 #   GOOGLE_CLIENT_ID      Google OAuth client ID
 #   GOOGLE_CLIENT_SECRET  Google OAuth client secret
 #   GOOGLE_REDIRECT_URI   OAuth callback URL (e.g. https://example.com/api/auth/callback)
-#   SESSION_SECRET        Secret key for signing session cookies (min 32 chars)
+#   SESSION_SECRET        Signs session cookies AND proxy/launcher JWTs (64+ bytes)
+#   SESSION_SECRET_FILE   Alternative to SESSION_SECRET: path to a file holding it
+#                         (e.g. a read-only bind mount at /run/secrets/session.key).
+#                         One trailing newline is stripped. Set exactly one of the
+#                         two. A missing/empty/unsafe file fails startup; a file
+#                         must be owned by root or uid 1001 and not group/world
+#                         writable. With neither set, an ephemeral key is
+#                         generated and everything is logged out on restart.
+#                         Rotating it logs out every browser and forces every
+#                         launcher to re-authenticate.
 #
 # Optional:
 #   APP_TITLE             Text shown in the dashboard header (default: "Agent Portal")
