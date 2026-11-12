@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="Arial, sans-serif" fill="#c0caf5">
+<text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2437 - Secrets settings</text>
+<text x="55" y="110" font-size="34" fill="#e6e9f5">Check access first; expand each secret where you selected it.</text>
+<text x="55" y="155" font-size="28" fill="#c0caf5">One name-sorted inventory, with deleted entries controlled by a checkbox.</text>
+<path d="M55 185H1945 M1000 210V1120" stroke="#565f89" stroke-width="2" stroke-dasharray="8 8"/>
+<text x="65" y="240" font-size="22" fill="#f7768e" letter-spacing="4">BEFORE</text>
+<text x="1055" y="240" font-size="22" fill="#9ece6a" letter-spacing="4">AFTER</text>
+<rect x="65" y="280" width="865" height="140" rx="16" fill="#1e202e" stroke="#565f89"/>
+<text x="95" y="325" font-size="28">Opening Settings loads the inventory</text>
+<text x="95" y="375" font-size="24" fill="#f7768e">Names arrive before the explicit access check</text>
+<rect x="65" y="455" width="865" height="365" rx="16" fill="#1e202e" stroke="#565f89"/>
+<text x="95" y="505" font-size="28">Personal / Organization tables</text>
+<text x="95" y="560" font-size="26">Alpha                         Configured</text>
+<text x="95" y="615" font-size="26">Zulu                           Configured</text>
+<text x="95" y="670" font-size="26">bravo                         Configured</text>
+<text x="95" y="745" font-size="24" fill="#f7768e">Select a name, then scroll past the inventory</text>
+<rect x="65" y="865" width="865" height="195" rx="16" fill="#1e202e" stroke="#f7768e"/>
+<text x="95" y="920" font-size="28">Selected secret controls at the bottom</text>
+<text x="95" y="975" font-size="24">Deleted secrets open a separate view</text>
+<text x="95" y="1020" font-size="24">Constant value labels add no useful information</text>
+<rect x="1055" y="280" width="865" height="140" rx="16" fill="#1e202e" stroke="#e0af68"/>
+<text x="1085" y="325" font-size="28" fill="#e0af68">Check Portal access - spinner and retry</text>
+<text x="1085" y="375" font-size="24">No inventory requests until verification succeeds</text>
+<rect x="1055" y="455" width="865" height="420" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1085" y="505" font-size="26">[ ] Show deleted secrets</text>
+<text x="1085" y="560" font-size="26" fill="#7aa2f7">Alpha                              Personal</text>
+<rect x="1080" y="585" width="810" height="145" rx="10" fill="#1a1b26" stroke="#9ece6a"/>
+<text x="1100" y="630" font-size="25" fill="#9ece6a">Copy secret     Replace value</text>
+<text x="1100" y="675" font-size="24">Details, sharing, history and cleanup here</text>
+<text x="1085" y="780" font-size="26">bravo                              Organization</text>
+<text x="1085" y="835" font-size="26">Zulu                                Personal</text>
+<rect x="1055" y="920" width="865" height="140" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1085" y="965" font-size="26" fill="#9ece6a">Browser list endpoint also requires verification</text>
+<text x="1085" y="1015" font-size="24">Approved CLI inventory access is preserved</text>
+<text x="55" y="1170" font-size="22" fill="#a9b1d6">Access check validates the Portal session; it is not a fresh Google sign-in or MFA challenge.</text>
+</g></svg>
