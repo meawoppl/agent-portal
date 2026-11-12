@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="Arial, sans-serif" fill="#c0caf5">
+<text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2441 - Two-click secret deletion</text>
+<text x="55" y="110" font-size="34" fill="#e6e9f5">Delete secrets with the same two-click pattern as closing sessions.</text>
+<text x="55" y="155" font-size="28">First click arms confirmation; the second click sends the request.</text>
+<path d="M55 185H1945 M1000 210V1120" stroke="#565f89" stroke-width="2" stroke-dasharray="8 8"/>
+<text x="65" y="240" font-size="22" fill="#f7768e" letter-spacing="4">BEFORE</text>
+<text x="1055" y="240" font-size="22" fill="#9ece6a" letter-spacing="4">AFTER</text>
+<rect x="65" y="300" width="865" height="200" rx="16" fill="#1e202e" stroke="#565f89"/>
+<text x="100" y="355" font-size="28">Separate confirmation checkbox</text>
+<text x="100" y="415" font-size="25">[ ] I understand deletion is reversible...</text>
+<text x="100" y="465" font-size="25" fill="#a9b1d6">Delete secret - disabled until checked</text>
+<rect x="65" y="570" width="865" height="180" rx="16" fill="#1e202e" stroke="#565f89"/>
+<text x="100" y="625" font-size="28">Checkbox, then Delete secret</text>
+<text x="100" y="685" font-size="25" fill="#f7768e">Different gesture from Close Session</text>
+<rect x="1055" y="300" width="865" height="140" rx="16" fill="#1e202e" stroke="#565f89"/>
+<text x="1090" y="355" font-size="28">Delete secret</text>
+<text x="1090" y="405" font-size="25">First click: no network request</text>
+<path d="M1485 450V500" stroke="#9ece6a" stroke-width="3"/>
+<rect x="1055" y="510" width="865" height="175" rx="16" fill="#1e202e" stroke="#e0af68"/>
+<text x="1090" y="565" font-size="28" fill="#e0af68">Click again to confirm</text>
+<text x="1090" y="620" font-size="25">Deletion is reversible; encrypted versions stay</text>
+<text x="1090" y="660" font-size="25">Second click: send the deletion request</text>
+<path d="M1485 695V745" stroke="#9ece6a" stroke-width="3"/>
+<rect x="1055" y="755" width="865" height="145" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1090" y="810" font-size="28" fill="#9ece6a">Pending request disables the button</text>
+<text x="1090" y="865" font-size="25">Success refreshes the inventory</text>
+<rect x="65" y="960" width="1855" height="125" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="100" y="1010" font-size="27" fill="#9ece6a">Confirmation resets on close, selection changes, edits, refresh and mutation submission.</text>
+<text x="100" y="1055" font-size="25">A failed deletion requires two fresh clicks. Desktop, phone and keyboard paths are tested.</text>
+<text x="55" y="1170" font-size="22" fill="#a9b1d6">UI interaction only: server authorization, generation checks and reversible deletion are unchanged.</text>
+</g></svg>
