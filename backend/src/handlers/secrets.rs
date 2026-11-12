@@ -1,5 +1,5 @@
-//! Browser responses contain metadata only. Dedicated credentials are checked
-//! here AND by the service policy before any saved value is released.
+//! Browser metadata is separate from the explicit, verified clipboard read.
+//! Credentials and current policy are rechecked before saved values are released.
 use crate::{
     errors::AppError,
     schema::{secret_grants, secret_versions, secrets, secrets_generation},
@@ -556,6 +556,50 @@ async fn read(
     SecretJson(request): SecretJson<SecretReadRequest>,
 ) -> Result<Json<SecretReadResponse>, AppError> {
     auth::require_read(principal)?;
+    read_value(state, principal, headers, id, request, None).await
+}
+
+// Separate from CLI reads: a browser must explicitly verify its session and
+// pass same-origin CSRF checks. Re-run this policy after each asynchronous step.
+fn clipboard_principal(
+    state: &AppState,
+    headers: &HeaderMap,
+    cookies: &tower_cookies::Cookies,
+) -> Result<Principal, AppError> {
+    let user = principal(state, headers, cookies, true)?;
+    if !user.browser {
+        return Err(AppError::Forbidden);
+    }
+    auth::require_verification(cookies, state, user.user)?;
+    Ok(user)
+}
+async fn copy_value(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    cookies: tower_cookies::Cookies,
+    Path(id): Path<Uuid>,
+    SecretJson(mut request): SecretJson<SecretReadRequest>,
+) -> Result<Json<SecretReadResponse>, AppError> {
+    let principal = clipboard_principal(&state, &headers, &cookies)?;
+    request.for_execution = false;
+    read_value(state, principal, headers, id, request, Some(cookies)).await
+}
+async fn read_value(
+    state: Arc<AppState>,
+    principal: Principal,
+    headers: HeaderMap,
+    id: Uuid,
+    request: SecretReadRequest,
+    cookies: Option<tower_cookies::Cookies>,
+) -> Result<Json<SecretReadResponse>, AppError> {
+    let recheck = || match &cookies {
+        Some(cookies) => clipboard_principal(&state, &headers, cookies),
+        None => {
+            let verified = auth::credential(&state, &headers)?.ok_or(AppError::Forbidden)?;
+            auth::require_read(verified)?;
+            Ok(verified)
+        }
+    };
     state.secrets.refresh_redaction(&state.db_pool).await?;
     let (row, version) = {
         let mut conn = state.conn()?;
@@ -594,8 +638,7 @@ async fn read(
         .map_err(crypto_error)?;
     // Recheck after the asynchronous key operation. A revoked credential, grant,
     // disabled account, deleted key or changed generation cannot release a value.
-    let verified = auth::credential(&state, &headers)?.ok_or(AppError::Forbidden)?;
-    auth::require_read(verified)?;
+    let verified = recheck()?;
     {
         let mut conn = state.conn()?;
         let latest = store::load(&mut conn, id)?;
@@ -612,7 +655,9 @@ async fn read(
             &mut conn,
             principal.user,
             Some(id),
-            if request.for_execution {
+            if cookies.is_some() {
+                "clipboard_read"
+            } else if request.for_execution {
                 "execute_read"
             } else {
                 "read"
@@ -629,8 +674,7 @@ async fn read(
     }
     // Installing a newly consented reader rule is asynchronous. Revalidate
     // credentials and current policy once more before releasing plaintext.
-    let verified = auth::credential(&state, &headers)?.ok_or(AppError::Forbidden)?;
-    auth::require_read(verified)?;
+    let verified = recheck()?;
     {
         let mut conn = state.conn()?;
         let latest = store::load(&mut conn, id)?;
@@ -928,6 +972,7 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
             .route("/api/secrets/{id}", get(info))
             .route("/api/secrets/{id}/versions", get(versions).post(write))
             .route("/api/secrets/{id}/read", post(read))
+            .route("/api/secrets/{id}/copy", post(copy_value))
             .route("/api/secrets/{id}/grants", post(grant))
             .route("/api/secrets/{id}/grants/{user}", delete(revoke))
             .route("/api/secrets/{id}/delete", post(soft_delete))

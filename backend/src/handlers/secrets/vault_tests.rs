@@ -702,3 +702,167 @@ async fn retained_source_quota_rejects_before_rule_generation_or_value_release()
         .snapshot(&mut state.conn().unwrap())
         .is_ok());
 }
+
+#[tokio::test]
+async fn clipboard_read_requires_verified_browser_csrf_and_live_read_grant() {
+    let Some(db) = Database::new() else { return };
+    let mut state = crate::test_support::test_app_state(db.pool.clone());
+    state.secrets = Arc::new(SecretsService::new(Some(EnvelopeCrypto {
+        key: Arc::new(Zeroizing::new(vec![23; 32])),
+    })));
+    let state = Arc::new(state);
+    let owner = crate::test_support::insert_user(&mut state.conn().unwrap(), "copy-owner").id;
+    let other = crate::test_support::insert_user(&mut state.conn().unwrap(), "copy-other").id;
+    let token = credential(&state, owner, "owner");
+    let router = router(state.clone())
+        .with_state(state.clone())
+        .layer(tower_cookies::CookieManagerLayer::new());
+    let (status, created) = request(
+        &router,
+        &token,
+        "POST",
+        "/api/secrets",
+        serde_json::json!({"namespace":"personal","name":"COPY_TEST","value":"clipboard-canary\n"}),
+        Uuid::new_v4(),
+    )
+    .await;
+    assert!(status.is_success());
+    let id = created["id"].as_str().unwrap();
+    let path = format!("/api/secrets/{id}/copy");
+    let cookies = tower_cookies::Cookies::default();
+    cookies
+        .signed(&state.cookie_key)
+        .add(tower_cookies::Cookie::new(
+            shared::protocol::SESSION_COOKIE_NAME,
+            owner.to_string(),
+        ));
+    let browser = |path: &str, cookies: &tower_cookies::Cookies, origin: &str, csrf: bool| {
+        let cookie = cookies
+            .list()
+            .iter()
+            .map(|c| format!("{}={}", c.name(), c.value()))
+            .collect::<Vec<_>>()
+            .join("; ");
+        let mut request = axum::http::Request::builder()
+            .method("POST")
+            .uri(path)
+            .header("cookie", cookie)
+            .header("origin", origin)
+            .header("content-type", "application/json");
+        if csrf {
+            request = request.header("x-portal-secrets", "1");
+        }
+        request
+            .body(axum::body::Body::from("{\"version\":1}"))
+            .unwrap()
+    };
+    let denied = router
+        .clone()
+        .oneshot(browser(&path, &cookies, "http://localhost:3000", true))
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), axum::http::StatusCode::FORBIDDEN);
+    auth::record_verification(&cookies, &state, owner);
+    for (origin, csrf) in [
+        ("https://attacker.invalid", true),
+        ("http://localhost:3000", false),
+    ] {
+        let denied = router
+            .clone()
+            .oneshot(browser(&path, &cookies, origin, csrf))
+            .await
+            .unwrap();
+        assert_eq!(denied.status(), axum::http::StatusCode::FORBIDDEN);
+    }
+    let (status, _) = request(
+        &router,
+        &token,
+        "POST",
+        &path,
+        serde_json::json!({}),
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::FORBIDDEN,
+        "CLI credentials cannot use browser copy"
+    );
+    let response = router
+        .clone()
+        .oneshot(browser(&path, &cookies, "http://localhost:3000", true))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    let value: SecretReadResponse = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), 100_000)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(value.value.0, "clipboard-canary\n");
+    let ordinary = router
+        .clone()
+        .oneshot(browser(
+            &format!("/api/secrets/{id}/read"),
+            &cookies,
+            "http://localhost:3000",
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        ordinary.status(),
+        axum::http::StatusCode::FORBIDDEN,
+        "Browser copy must not open CLI read"
+    );
+    let other_cookies = tower_cookies::Cookies::default();
+    other_cookies
+        .signed(&state.cookie_key)
+        .add(tower_cookies::Cookie::new(
+            shared::protocol::SESSION_COOKIE_NAME,
+            other.to_string(),
+        ));
+    auth::record_verification(&other_cookies, &state, other);
+    let denied = router
+        .clone()
+        .oneshot(browser(
+            &path,
+            &other_cookies,
+            "http://localhost:3000",
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        denied.status(),
+        axum::http::StatusCode::FORBIDDEN,
+        "Verification does not grant read rights"
+    );
+    let (status, _) = request(
+        &router,
+        &token,
+        "POST",
+        &format!("/api/secrets/{id}/delete"),
+        serde_json::json!({"expected_generation":1}),
+        Uuid::new_v4(),
+    )
+    .await;
+    assert!(status.is_success());
+    let denied = router
+        .clone()
+        .oneshot(browser(&path, &cookies, "http://localhost:3000", true))
+        .await
+        .unwrap();
+    assert!(
+        !denied.status().is_success(),
+        "Deleted secrets cannot be copied"
+    );
+    assert!(!String::from_utf8_lossy(
+        &axum::body::to_bytes(denied.into_body(), 100_000)
+            .await
+            .unwrap()
+    )
+    .contains("clipboard-canary"));
+}

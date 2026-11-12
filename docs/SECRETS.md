@@ -1,6 +1,6 @@
 # Secrets service
 
-Portal stores immutable, encrypted secret versions in PostgreSQL. The web page manages metadata, sharing, replacement and cleanup without retrieving saved values. Human CLI reads require a separately approved credential; ordinary session, launcher and linked-account credentials do not provide general vault access.
+Portal stores immutable, encrypted secret versions in PostgreSQL. The web page manages metadata, sharing, replacement and cleanup. An explicit verified Copy action retrieves a value only for the browser clipboard. Human CLI reads require a separately approved credential; ordinary session, launcher and linked-account credentials do not provide general vault access.
 
 ## Configure encryption
 
@@ -47,7 +47,7 @@ agent-portal login
 agent-portal secret authorize --label 'My development workstation'
 ```
 
-Approve the displayed code on the Secrets authorization page. Approval requires the matching browser account and an OAuth sign-in within ten minutes. A long-lived Portal cookie or a token-login does not substitute for that recent sign-in. Dedicated credentials are backend-scoped, expire after 30 days, and are stored in an owner-only local file. The Secrets page lists and revokes these approvals without exposing credential hashes or tokens. Disabled accounts and revoked credentials lose subsequent access.
+Approve the displayed code on the Secrets authorization page. Approval requires the matching browser account and an explicit server-side Portal session verification. This checks the Portal login and current account policy; it is not a fresh Google login or MFA challenge. The verification is bound to that browser session. Dedicated credentials are backend-scoped, expire after 30 days, and are stored in an owner-only local file. The Secrets page lists and revokes these approvals without exposing credential hashes or tokens. Disabled accounts and revoked credentials lose subsequent access.
 
 ```sh
 agent-portal secret set personal/DEPLOY_TOKEN
@@ -67,7 +67,7 @@ Read/use, write and manage are independent rights. Arbitrary `run --env` require
 
 ## Versions and deletion
 
-Every replacement appends an encrypted immutable version and advances the current pointer. Older versions remain available for explicit authorized CLI reads. The web page shows version metadata only; no saved-value reveal, copy, prefix, suffix or length-dependent mask is provided.
+Every replacement appends an encrypted immutable version and advances the current pointer. Older versions remain available for explicit authorized CLI reads. The web page shows version metadata only. Select an active secret and use **Copy secret** after verifying the Portal session to copy its displayed current version. The server requires read permission, the browser-bound verification cookie and same-origin CSRF headers, and rechecks authorization after asynchronous decryption and reader registration. Copy never renders the value in the page or stores it in component state; success appears only after the clipboard write completes. Browser clipboard permission is also required. Clipboard contents may persist or be synchronized by the operating system; revocation cannot recall a copied value. The existing CLI read endpoint remains unavailable to browser cookies.
 
 ```sh
 agent-portal secret rotate personal/DEPLOY_TOKEN --stdin < replacement.txt
@@ -111,7 +111,7 @@ if a redemption fails or environments collide. This is atomic command startup,
 not a guarantee that credentials cannot be revoked after redemption.
 
 
-The request uses only the injected session credential; it cannot fall back to a human's CLI vault credential. It creates a durable **Approve / Deny** card in that session. The card fetches authenticated server metadata rather than trusting transcript text, and shows the exact secret/version, owner, target session/launcher, environment variable and requested duration. It never retrieves a saved value. Only the local browser-authenticated session owner can decide; approval also requires a recent sign-in. Session viewers, editors, linked users, launchers and the requesting agent cannot approve themselves.
+The request uses only the injected session credential; it cannot fall back to a human's CLI vault credential. It creates a durable **Approve / Deny** card in that session. The card fetches authenticated server metadata rather than trusting transcript text, and shows the exact secret/version, owner, target session/launcher, environment variable and requested duration. It never retrieves a saved value. Only the local browser-authenticated session owner can decide; approval also requires the explicit Portal session verification. Session viewers, editors, linked users, launchers and the requesting agent cannot approve themselves.
 
 Requests expire after ten minutes. Approval creates one binding pinned to the requesting process, secret version and ACL generation; approval does not expose a value to the browser. A rotation, deletion, revoked credential, replaced process or changed access cannot silently revive a stale request. Denial and expiry grant nothing. Repeated requests with the same request UUID replay the original outcome without creating duplicate cards or bindings. Use `--request-id UUID` when retrying a command whose response was lost. Archive and linked-portal views show inert history; reconnecting live threads fetch current server state before enabling controls.
 
