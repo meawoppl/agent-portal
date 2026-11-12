@@ -546,6 +546,17 @@ This is about where to spend *review/analysis* effort, not a license to skip
 local checks when **you are the author** shipping a change — run `cargo fmt`
 before pushing (see below) so you don't waste a CI round-trip on a trivial red.
 
+### Dependency audit failures block review handoff
+
+A failing **RustSec Audit** must be resolved before calling a PR ready for
+review, including failures inherited from `main`. Fetch current `main` first:
+if it already has the dependency fix, update the affected PR branch from it and
+watch fresh CI on the new head. Rerunning a stale commit does not incorporate
+the fix. If `main` is still affected, prepare the smallest targeted dependency
+update using [the dependency security procedure](docs/DEPENDENCY_SECURITY.md).
+If no safe fix is available, report the blocker explicitly; do not label the
+PR ready or suppress the advisory just to make CI green.
+
 ## Important Constraints
 
 ### WASM Compatibility Checklist
