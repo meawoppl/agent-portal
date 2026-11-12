@@ -1,6 +1,6 @@
 # Secrets service
 
-Portal stores immutable, encrypted secret versions in PostgreSQL. The web page manages metadata, sharing, replacement and cleanup. An explicit verified Copy action retrieves a value only for the browser clipboard. Humans use the OAuth-authenticated web UI; there is no human CLI vault access. Agents receive only explicitly approved, process-bound access. Ordinary session, launcher and linked-account credentials do not provide general vault access.
+Portal stores immutable, encrypted secret versions in PostgreSQL. The web page manages metadata, sharing, replacement and deletion. An explicit verified Copy action retrieves a value only for the browser clipboard. Humans use the OAuth-authenticated web UI; there is no human CLI vault access. Agents receive only explicitly approved, process-bound access. Ordinary session, launcher and linked-account credentials do not provide general vault access.
 
 ## Configure encryption
 
@@ -41,8 +41,7 @@ Legacy provider assertions have no fabricated verification timestamp. Sign in ag
 ## Human access: web UI only
 
 Open **Settings → Secrets** after signing in through the Portal's configured
-OAuth provider. Manage names, versions, sharing, deletion, restoration and
-archive cleanup there. Explicit Copy and approval operations additionally
+OAuth provider. Manage names, versions, sharing, deletion and restoration there. Explicit Copy and approval operations additionally
 require the browser-bound Portal account verification and same-origin CSRF
 checks. Verification checks the current OAuth-backed Portal session; it is not
 a separate computer approval, fresh provider login, or MFA challenge.
@@ -128,8 +127,7 @@ Owner-scoped rules protect personal values. Merely sharing a value does not let 
 
 Matching covers raw values, ordinary JSON string escaping, base64 and bounded URL decoding. Streaming text/tool-argument delta payloads are withheld while applicable rules exist; completed records are sanitized. Provider/control identifiers remain intact, and explicit untrusted tool inputs/results receive semantic JSON redaction. Short or common values may mask unrelated text in the approved scope. Arbitrary transformations, screenshots and model/provider logs are not certified by matching.
 
-Start archive cleanup from the selected secret in **Settings → Secrets**, then
-review its cleanup receipt in the same panel.
+Archive cleanup controls are not exposed in the normal **Settings → Secrets** inventory. A separate administrator interface is planned. Existing cleanup receipt links remain readable.
 
 
 The default cleans the requester's own sessions and archives. Cross-user cleanup requires an organization curator who also has management access to the key. Its approval captures the exact retained version IDs; a later personal rotation cannot expand the destructive scope without fresh curator approval. Global policy tombstones also protect send-time replay buffers, rather than relying only on rewriting SQL rows.

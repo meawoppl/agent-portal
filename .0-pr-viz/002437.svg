@@ -28,7 +28,7 @@
 <text x="1085" y="560" font-size="26" fill="#7aa2f7">Alpha                              Personal</text>
 <rect x="1080" y="585" width="810" height="145" rx="10" fill="#1a1b26" stroke="#9ece6a"/>
 <text x="1100" y="630" font-size="25" fill="#9ece6a">Copy secret     Replace value</text>
-<text x="1100" y="675" font-size="24">Details, sharing, history and cleanup here</text>
+<text x="1100" y="675" font-size="24">Details, sharing and version history here</text>
 <text x="1085" y="780" font-size="26">bravo                              Organization</text>
 <text x="1085" y="835" font-size="26">Zulu                                Personal</text>
 <rect x="1055" y="920" width="865" height="140" rx="16" fill="#1e202e" stroke="#9ece6a"/>

@@ -8,10 +8,10 @@ use crate::{
     Route,
 };
 use shared::api::{
-    SecretCreateRequest, SecretExpungeJob, SecretExpungeRequest, SecretExpungeState,
-    SecretGrantRequest, SecretListResponse, SecretMember, SecretMembersResponse, SecretMetadata,
-    SecretMutationRequest, SecretNamespace, SecretRestoreRequest, SecretRight, SecretValue,
-    SecretVersionsResponse, SecretWriteRequest,
+    SecretCreateRequest, SecretExpungeJob, SecretExpungeState, SecretGrantRequest,
+    SecretListResponse, SecretMember, SecretMembersResponse, SecretMetadata, SecretMutationRequest,
+    SecretNamespace, SecretRestoreRequest, SecretRight, SecretValue, SecretVersionsResponse,
+    SecretWriteRequest,
 };
 use uuid::Uuid;
 use value_form::{FreshValue, ValueForm};
@@ -98,8 +98,6 @@ pub enum Msg {
     ShareUser(String),
     Share,
     Unshare(Uuid),
-    Expunge,
-    GlobalCleanup(bool),
     Job(Result<SecretExpungeJob, String>),
     RefreshJob,
     Members(Result<SecretMembersResponse, utils::FetchError>),
@@ -118,7 +116,6 @@ pub struct SecretsPage {
     error: Option<String>,
     confirm_delete: bool,
     confirm_restore: bool,
-    global_cleanup: bool,
     members: Vec<SecretMember>,
     directory_restricted: bool,
     share_user: Option<Uuid>,
@@ -167,7 +164,6 @@ impl Component for SecretsPage {
             error: None,
             confirm_delete: false,
             confirm_restore: false,
-            global_cleanup: false,
             members: vec![],
             directory_restricted: false,
             share_user: None,
@@ -228,7 +224,7 @@ impl Component for SecretsPage {
             }
             Msg::Load => {
                 self.confirm_restore = false;
-                self.global_cleanup = false;
+
                 self.confirm_delete = false;
                 self.list_loading = true;
                 self.load_generation += 1;
@@ -255,7 +251,7 @@ impl Component for SecretsPage {
                 }
                 self.list_loading = false;
                 self.confirm_restore = false;
-                self.global_cleanup = false;
+
                 self.confirm_delete = false;
                 match result {
                     Ok(data) => {
@@ -288,7 +284,7 @@ impl Component for SecretsPage {
                 self.editing = None;
                 self.confirm_delete = false;
                 self.confirm_restore = false;
-                self.global_cleanup = false;
+
                 self.share_user = None;
                 let link = ctx.link().clone();
                 spawn_local(async move {
@@ -371,7 +367,7 @@ impl Component for SecretsPage {
                         self.versions = None;
                         self.confirm_delete = false;
                         self.confirm_restore = false;
-                        self.global_cleanup = false;
+
                         ctx.link().send_message(Msg::Load);
                     }
                     Err(error) => self.error = Some(error),
@@ -476,35 +472,6 @@ impl Component for SecretsPage {
                     }
                     Err(_) => self.error = Some("Member directory unavailable.".into()),
                 }
-                true
-            }
-            Msg::GlobalCleanup(value) => {
-                self.global_cleanup = value
-                    && self
-                        .response
-                        .as_ref()
-                        .is_some_and(|response| response.can_manage_organization);
-                true
-            }
-            Msg::Expunge => {
-                if self.busy {
-                    return false;
-                }
-                let Some(secret) = self.current() else {
-                    return false;
-                };
-                let path = format!("/api/secrets/{}/expunge", secret.id);
-                let global = self.global_cleanup
-                    && self
-                        .response
-                        .as_ref()
-                        .is_some_and(|response| response.can_manage_organization);
-                self.busy = true;
-                let link = ctx.link().clone();
-                spawn_local(async move {
-                    let result=match api::mutate("POST",&path,&SecretExpungeRequest{all_versions:true,global}).await{Ok(response)=>response.json::<SecretExpungeJob>().await.map_err(|_| "Cleanup started but its status could not be read. Refresh job status.".into()),Err(error)=>Err(error)};
-                    link.send_message(Msg::Job(result));
-                });
                 true
             }
             Msg::Job(result) => {
@@ -634,9 +601,6 @@ impl SecretsPage {
             }
             <h3>{"Retained versions"}</h3><p>{"All versions remain encrypted. This page shows metadata only, including for deleted secrets."}</p>
             {match &self.versions{None=>html!{<p>{"Loading version history…"}</p>},Some(history)=>html!{<ol class="secrets-versions">{for history.versions.iter().map(|version|html!{<li key={version.version}><strong>{format!("Version {}{}",version.version,if version.current{" · current"}else{""})}</strong><small>{format!("{} · {}",utils::format_timestamp(&version.created_at),version.created_by)}</small></li>})}</ol>}}}
-            if secret.can_manage {<h3>{"Clean up leaked copies"}</h3><p>{"Scan all retained versions for copies in your own Portal records and archives. Organization-wide cleanup requires an administrator. This preserves the encrypted vault and does not revoke the provider credential. Backups, external copies and uninspected assets may remain; inspect the cleanup receipt."}</p>
-                if self.response.as_ref().is_some_and(|response|response.can_manage_organization) {<label class="secrets-check"><input type="checkbox" checked={self.global_cleanup} disabled={self.busy} onchange={ctx.link().callback(|event:Event|Msg::GlobalCleanup(event.target_unchecked_into::<HtmlInputElement>().checked()))}/>{"Include other members' Portal records and archives. I authorize organization-wide cleanup as an administrator."}</label>}
-                <button disabled={self.busy} onclick={ctx.link().callback(|_|Msg::Expunge)}>{"Start cleanup for all versions"}</button>}
         </section>}
     }
     fn member_label(&self, id: Uuid) -> String {

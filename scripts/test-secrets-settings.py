@@ -75,6 +75,8 @@ async def exercise(browser, base, output, width):
     await expect(alpha).to_have_attribute('aria-expanded','true')
     expanded = page.locator('.secret-expanded-row')
     await expect(expanded).to_have_count(1)
+    await expect(page.get_by_role('button',name='Start cleanup for all versions',exact=True)).to_have_count(0)
+    await expect(page.get_by_text('Clean up leaked copies',exact=True)).to_have_count(0)
     assert await expanded.evaluate("e => e.previousElementSibling.textContent.includes('Alpha') && e.nextElementSibling.textContent.includes('bravo')")
     await expect(expanded.get_by_role('button',name='Copy secret',exact=True)).to_be_visible()
     await expanded.get_by_role('button',name='Replace value',exact=True).click()
