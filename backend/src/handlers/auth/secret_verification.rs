@@ -1,5 +1,6 @@
 //! Explicit provider verification, separate from login and account linking.
 use super::*;
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde::{Deserialize, Serialize};
 use shared::api::{SecretVerificationRedirect, SecretVerificationStart, SecretVerificationStatus};
 
@@ -34,7 +35,7 @@ fn destination(value: &str) -> Result<String, AppError> {
     Ok(value.into())
 }
 fn challenge_cookie(value: String, state: &AppState) -> Cookie<'static> {
-    let mut cookie = Cookie::new(CHALLENGE, value);
+    let mut cookie = Cookie::new(CHALLENGE, URL_SAFE_NO_PAD.encode(value));
     cookie.set_path("/api/auth");
     cookie.set_http_only(true);
     cookie.set_secure(!state.dev_mode);
@@ -120,8 +121,10 @@ pub(super) fn take(
         .signed(&state.cookie_key)
         .get(CHALLENGE)
         .ok_or(AppError::Forbidden)?;
-    let challenge: Challenge =
-        serde_json::from_str(cookie.value()).map_err(|_| AppError::Forbidden)?;
+    let decoded = URL_SAFE_NO_PAD
+        .decode(cookie.value())
+        .map_err(|_| AppError::Forbidden)?;
+    let challenge: Challenge = serde_json::from_slice(&decoded).map_err(|_| AppError::Forbidden)?;
     let age = chrono::Utc::now().timestamp() - challenge.created_at;
     let current = cookies
         .signed(&state.cookie_key)
