@@ -29,7 +29,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *_):
         pass
 
-async def exercise(browser, base, output, width):
+async def exercise(browser, base, output, width, grouped=False):
     context = await browser.new_context(viewport=dict(width=width, height=950), service_workers="block")
     page = await context.new_page()
     state = dict(verified=False, request='pending', return_to='', starts=0, approvals=0)
@@ -48,7 +48,7 @@ async def exercise(browser, base, output, width):
         elif path == '/api/portal-connections': data = dict(connections=[])
         elif path == '/api/launchers': data = []
         elif path.endswith('/messages'):
-            content = dict(type='portal', content=[dict(type='secret_access_request', request_id=REQUEST)])
+            content = dict(type='portal', content=[dict(type='secret_access_group' if grouped else 'secret_access_request', request_id=REQUEST)])
             data = dict(total=1, messages=[dict(role='portal', content=json.dumps(content), created_at='2026-11-12T00:00:00Z')])
         elif path == '/api/secrets/verification': data = dict(verified=state['verified'], providers=['google'])
         elif path == '/api/secrets/verification/start':
@@ -63,12 +63,15 @@ async def exercise(browser, base, output, width):
             state['approvals'] += 1
             state['request'] = 'approved'
             data = {}
-        elif path == f'/api/secrets/requests/{REQUEST}':
+        elif path in [f'/api/secrets/requests/{REQUEST}', f'/api/secrets/request-groups/{REQUEST}']:
             data = dict(id=REQUEST, secret_id=SECRET, owner_user_id=USER, namespace='personal',
                         name='portal-test-canary', version=1, session_id=SESSION, launcher_id=SECRET,
                         env_name='CANARY', expires_in_seconds=900, state=state['request'],
                         created_at='2026-11-12T00:00:00Z', expires_at='2026-11-12T02:00:00Z',
                         binding_id=SECRET if state['request'] == 'approved' else None)
+            if grouped:
+                second = dict(data, id='00000000-0000-4000-8000-000000000005', name='second-credential', env_name='SECOND')
+                data = dict(id=REQUEST, state=state['request'], items=[data, second])
         else: data = {}
         await route.fulfill(content_type='application/json', body=json.dumps(data))
     async def provider(route):
@@ -91,14 +94,18 @@ async def exercise(browser, base, output, width):
     # Transcript card: current proof enables approval; only the card updates.
     await page.goto(base + f'/dashboard?session={SESSION}')
     card = page.locator('.secret-access-request')
-    await expect(card.get_by_role('button', name='Approve access', exact=True)).to_be_enabled(timeout=30000)
-    await card.screenshot(path=str(output / f'secret-controls-pending-{width}.png'))
+    approve_label = 'Approve all credentials' if grouped else 'Approve access'
+    if grouped:
+        await expect(card.locator('.secret-access-group > ul > li')).to_have_count(2)
+        await expect(card.locator('.secret-access-group > ul')).to_contain_text('second-credential')
+    await expect(card.get_by_role('button', name=approve_label, exact=True)).to_be_enabled(timeout=30000)
+    await card.screenshot(path=str(output / f'secret-controls-{grouped}-pending-{width}.png'))
     count = len(navigations)
-    await card.get_by_role('button', name='Approve access', exact=True).click()
-    await expect(card.locator('.secret-access-status')).to_have_text('Approved')
+    await card.get_by_role('button', name=approve_label, exact=True).click()
+    await expect(card.locator('.secret-access-group > p').first if grouped else card.locator('.secret-access-status')).to_contain_text('Approved')
     await expect(card.locator('.secrets-verification')).to_have_count(0)
-    await expect(card.get_by_role('button', name='Approve access')).to_have_count(0)
-    await expect(card.locator('details')).not_to_have_attribute('open', '')
+    await expect(card.get_by_role('button', name=approve_label)).to_have_count(0)
+    await expect(card.locator('details').first).not_to_have_attribute('open', '')
     refresh = card.get_by_role('button', name='Refresh status')
     await expect(refresh).to_be_enabled()
     assert (await refresh.bounding_box())['height'] >= 44
@@ -106,10 +113,10 @@ async def exercise(browser, base, output, width):
     await refresh.focus()
     assert await refresh.evaluate("e => getComputedStyle(e).outlineStyle") != 'none'
     await refresh.click()
-    await expect(card.locator('.secret-access-status')).to_have_text('Approved')
+    await expect(card.locator('.secret-access-group > p').first if grouped else card.locator('.secret-access-status')).to_contain_text('Approved')
     assert len(navigations) == count and state['approvals'] == 1
     assert await card.evaluate('e => e.scrollWidth <= e.clientWidth + 1')
-    await card.screenshot(path=str(output / f'secret-controls-approved-{width}.png'))
+    await card.screenshot(path=str(output / f'secret-controls-{grouped}-approved-{width}.png'))
     assert not errors, errors
     await context.close()
 
@@ -121,13 +128,14 @@ async def main(args):
         async with async_playwright() as p:
             browser = await p.chromium.launch()
             for width in [1100, 390]:
-                await exercise(browser, f'http://127.0.0.1:{server.server_port}', args.output, width)
+                await exercise(browser, f'http://127.0.0.1:{server.server_port}', args.output, width, args.groups)
             await browser.close()
     finally: server.shutdown()
     print('PASS: desktop/mobile card approval, refresh without reload, touch targets, keyboard focus')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--groups', action='store_true')
     parser.add_argument('--dist', type=Path, default=ROOT / 'frontend/dist')
     parser.add_argument('--output', type=Path, default=ROOT / 'reports/secret-controls')
     asyncio.run(main(parser.parse_args()))

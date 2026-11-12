@@ -148,6 +148,9 @@ fn render_portal_content(
         shared::PortalContent::AgentMessage { text, .. } => {
             render_markdown_for_session(text, session_id)
         }
+        shared::PortalContent::SecretAccessGroup { request_id } => html! {
+            <SecretAccessRequestCard key={format!("{session_id}:{request_id}")} request_id={*request_id} {session_id} grouped={true}/>
+        },
         shared::PortalContent::SecretAccessRequest { request_id } => html! {
             <SecretAccessRequestCard key={format!("{session_id}:{request_id}")} request_id={*request_id} {session_id}/>
         },

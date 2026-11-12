@@ -1223,6 +1223,11 @@ pub enum PortalContent {
     SecretAccessRequest {
         request_id: Uuid,
     },
+    /// One server-authorized approval card for a bounded credential set.
+    #[serde(rename = "secret_access_group")]
+    SecretAccessGroup {
+        request_id: Uuid,
+    },
 }
 
 /// A bounded, declarative slider exposed by a portable figure. The host owns
@@ -1320,6 +1325,10 @@ impl std::fmt::Debug for PortalContent {
                 .field("from_agent_type", from_agent_type)
                 .field("from_session_id", from_session_id)
                 .field("text", text)
+                .finish(),
+            Self::SecretAccessGroup { request_id } => f
+                .debug_struct("SecretAccessGroup")
+                .field("request_id", request_id)
                 .finish(),
             Self::SecretAccessRequest { request_id } => f
                 .debug_struct("SecretAccessRequest")

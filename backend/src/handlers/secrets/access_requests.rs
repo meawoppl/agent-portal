@@ -266,6 +266,148 @@ fn notice(
         None => Ok(None),
     }
 }
+fn create_row(
+    state: &AppState,
+    conn: &mut PgConnection,
+    headers: &HeaderMap,
+    request: &SecretAccessCreateRequest,
+    grouped: bool,
+) -> Result<
+    (
+        SecretAccessRequestInfo,
+        Option<crate::models::Message>,
+        bool,
+    ),
+    AppError,
+> {
+    let process = bindings::authenticated_process(state, conn, headers)?;
+    diesel::sql_query("SELECT pg_advisory_xact_lock(1936024434,2)").execute(conn)?;
+    if !grouped {
+        groups::require_single(conn, request.request_id)?;
+    }
+    if let Some(mut existing) = requests::table
+        .find(request.request_id)
+        .for_update()
+        .select(AccessRequest::as_select())
+        .first::<AccessRequest>(conn)
+        .optional()?
+    {
+        if !grouped {
+            groups::require_single(conn, existing.id)?;
+        }
+        if !same_process(&existing, &process) {
+            return Err(AppError::Forbidden);
+        }
+        if existing.reference != request.reference
+            || existing.requested_version != request.version
+            || existing.env_name != request.env_name
+            || existing.lifetime_seconds as u64 != request.expires_in_seconds
+        {
+            return Err(AppError::Conflict(
+                "Request ID belongs to a different approval payload",
+            ));
+        }
+        refresh_state(conn, &mut existing)?;
+        return Ok((info(conn, &existing)?, notice(conn, &existing)?, false));
+    }
+    let recent = requests::table
+        .filter(requests::owner_user_id.eq(process.user))
+        .filter(requests::created_at.gt(Utc::now() - chrono::Duration::hours(1)))
+        .count()
+        .get_result::<i64>(conn)?;
+    let pending = requests::table
+        .filter(requests::state.eq("pending"))
+        .filter(requests::expires_at.gt(Utc::now()));
+    let user_pending = pending
+        .filter(requests::owner_user_id.eq(process.user))
+        .count()
+        .get_result::<i64>(conn)?;
+    let process_pending = pending
+        .filter(requests::proxy_token_id.eq(process.token))
+        .count()
+        .get_result::<i64>(conn)?;
+    if recent >= 30 || user_pending >= 16 || process_pending >= if grouped { 16 } else { 4 } {
+        return Err(AppError::ServiceUnavailable(
+            "Secret approval request rate limit reached",
+        ));
+    }
+    let secret = resolve(conn, process.user, &request.reference)?;
+    let query = secret_versions::table.filter(secret_versions::secret_id.eq(secret.id));
+    let version = if let Some(version) = request.version {
+        query
+            .filter(secret_versions::ordinal.eq(version))
+            .select(secret_versions::id)
+            .first::<Uuid>(conn)
+    } else {
+        query
+            .filter(secret_versions::id.nullable().eq(secret.current_version_id))
+            .select(secret_versions::id)
+            .first::<Uuid>(conn)
+    }
+    .map_err(|_| AppError::NotFound("Secret version not found"))?;
+    let session = sessions::table
+        .find(process.session)
+        .first::<crate::models::Session>(conn)?;
+    if state.session_manager.launcher_owner(process.launcher) != Some(process.user)
+        || !state
+            .session_manager
+            .is_proxy_connected(&session.session_key)
+    {
+        return Err(AppError::Conflict("Requesting process is not connected"));
+    }
+    let expires = Utc::now() + chrono::Duration::minutes(10);
+    diesel::insert_into(requests::table)
+        .values((
+            requests::id.eq(request.request_id),
+            requests::owner_user_id.eq(process.user),
+            requests::session_id.eq(process.session),
+            requests::launcher_id.eq(process.launcher),
+            requests::proxy_token_id.eq(process.token),
+            requests::secret_id.eq(secret.id),
+            requests::version_id.eq(version),
+            requests::generation.eq(secret.acl_generation),
+            requests::reference.eq(&request.reference),
+            requests::requested_version.eq(request.version),
+            requests::env_name.eq(&request.env_name),
+            requests::lifetime_seconds.eq(request.expires_in_seconds as i32),
+            requests::expires_at.eq(expires),
+        ))
+        .execute(conn)?;
+    let message = if grouped {
+        None
+    } else {
+        let portal =
+            shared::PortalMessage::with_content(vec![shared::PortalContent::SecretAccessRequest {
+                request_id: request.request_id,
+            }]);
+        let message = crate::secrets::redaction::insert_message(
+            conn,
+            crate::models::NewMessage {
+                session_id: process.session,
+                role: shared::MessageRole::Portal.to_string(),
+                content: portal.to_json().to_string(),
+                user_id: process.user,
+                agent_type: session.agent_type,
+                provenance_kind: None,
+                provenance_session_id: None,
+                provenance_agent_type: None,
+            },
+        )?;
+        diesel::update(requests::table.find(request.request_id))
+            .set(requests::notice_message_id.eq(Some(message.id)))
+            .execute(conn)?;
+        Some(message)
+    };
+    store::audit(
+        conn,
+        process.user,
+        Some(secret.id),
+        "access_requested",
+        "pending",
+    )?;
+    let row = load(conn, request.request_id)?;
+    Ok((info(conn, &row)?, message, true))
+}
 async fn create(
     State(state): State<Arc<AppState>>,
     _process: BoundProcess,
@@ -287,122 +429,7 @@ async fn create(
         })?;
     let mut conn = state.conn()?;
     let (response, message, created) = conn.transaction::<_, AppError, _>(|conn| {
-        let process = bindings::authenticated_process(&state, conn, &headers)?;
-        diesel::sql_query("SELECT pg_advisory_xact_lock(1936024434,2)").execute(conn)?;
-        if let Some(mut existing) = requests::table
-            .find(request.request_id)
-            .for_update()
-            .select(AccessRequest::as_select())
-            .first::<AccessRequest>(conn)
-            .optional()?
-        {
-            if !same_process(&existing, &process) {
-                return Err(AppError::Forbidden);
-            }
-            if existing.reference != request.reference
-                || existing.requested_version != request.version
-                || existing.env_name != request.env_name
-                || existing.lifetime_seconds as u64 != request.expires_in_seconds
-            {
-                return Err(AppError::Conflict(
-                    "Request ID belongs to a different approval payload",
-                ));
-            }
-            refresh_state(conn, &mut existing)?;
-            return Ok((info(conn, &existing)?, notice(conn, &existing)?, false));
-        }
-        let recent = requests::table
-            .filter(requests::owner_user_id.eq(process.user))
-            .filter(requests::created_at.gt(Utc::now() - chrono::Duration::hours(1)))
-            .count()
-            .get_result::<i64>(conn)?;
-        let pending = requests::table
-            .filter(requests::state.eq("pending"))
-            .filter(requests::expires_at.gt(Utc::now()));
-        let user_pending = pending
-            .filter(requests::owner_user_id.eq(process.user))
-            .count()
-            .get_result::<i64>(conn)?;
-        let process_pending = pending
-            .filter(requests::proxy_token_id.eq(process.token))
-            .count()
-            .get_result::<i64>(conn)?;
-        if recent >= 30 || user_pending >= 16 || process_pending >= 4 {
-            return Err(AppError::ServiceUnavailable(
-                "Secret approval request rate limit reached",
-            ));
-        }
-        let secret = resolve(conn, process.user, &request.reference)?;
-        let query = secret_versions::table.filter(secret_versions::secret_id.eq(secret.id));
-        let version = if let Some(version) = request.version {
-            query
-                .filter(secret_versions::ordinal.eq(version))
-                .select(secret_versions::id)
-                .first::<Uuid>(conn)
-        } else {
-            query
-                .filter(secret_versions::id.nullable().eq(secret.current_version_id))
-                .select(secret_versions::id)
-                .first::<Uuid>(conn)
-        }
-        .map_err(|_| AppError::NotFound("Secret version not found"))?;
-        let session = sessions::table
-            .find(process.session)
-            .first::<crate::models::Session>(conn)?;
-        if state.session_manager.launcher_owner(process.launcher) != Some(process.user)
-            || !state
-                .session_manager
-                .is_proxy_connected(&session.session_key)
-        {
-            return Err(AppError::Conflict("Requesting process is not connected"));
-        }
-        let expires = Utc::now() + chrono::Duration::minutes(10);
-        diesel::insert_into(requests::table)
-            .values((
-                requests::id.eq(request.request_id),
-                requests::owner_user_id.eq(process.user),
-                requests::session_id.eq(process.session),
-                requests::launcher_id.eq(process.launcher),
-                requests::proxy_token_id.eq(process.token),
-                requests::secret_id.eq(secret.id),
-                requests::version_id.eq(version),
-                requests::generation.eq(secret.acl_generation),
-                requests::reference.eq(&request.reference),
-                requests::requested_version.eq(request.version),
-                requests::env_name.eq(&request.env_name),
-                requests::lifetime_seconds.eq(request.expires_in_seconds as i32),
-                requests::expires_at.eq(expires),
-            ))
-            .execute(conn)?;
-        let portal =
-            shared::PortalMessage::with_content(vec![shared::PortalContent::SecretAccessRequest {
-                request_id: request.request_id,
-            }]);
-        let message = crate::secrets::redaction::insert_message(
-            conn,
-            crate::models::NewMessage {
-                session_id: process.session,
-                role: shared::MessageRole::Portal.to_string(),
-                content: portal.to_json().to_string(),
-                user_id: process.user,
-                agent_type: session.agent_type,
-                provenance_kind: None,
-                provenance_session_id: None,
-                provenance_agent_type: None,
-            },
-        )?;
-        diesel::update(requests::table.find(request.request_id))
-            .set(requests::notice_message_id.eq(Some(message.id)))
-            .execute(conn)?;
-        store::audit(
-            conn,
-            process.user,
-            Some(secret.id),
-            "access_requested",
-            "pending",
-        )?;
-        let row = load(conn, request.request_id)?;
-        Ok((info(conn, &row)?, Some(message), true))
+        create_row(&state, conn, &headers, &request, false)
     })?;
     drop(conn);
     publish(&state, message)?;
@@ -436,6 +463,7 @@ async fn get_request(
         .ok_or(AppError::ServiceUnavailable("Database is busy; retry"))?;
     let response = conn.transaction::<_, AppError, _>(|conn| {
         diesel::sql_query("SET LOCAL lock_timeout = '250ms'").execute(conn)?;
+        groups::require_single(conn, id)?;
         let mut row = load(conn, id)?;
         if headers.contains_key(header::AUTHORIZATION) {
             let process = bindings::authenticated_process(&state, conn, &headers)?;
@@ -453,6 +481,68 @@ async fn get_request(
         info(conn, &row)
     })?;
     Ok(Json(response))
+}
+fn decide_row(
+    state: &AppState,
+    conn: &mut PgConnection,
+    id: Uuid,
+    user: Uuid,
+    approve: bool,
+) -> Result<(SecretAccessRequestInfo, Option<crate::models::Message>), AppError> {
+    let mut row = load(conn, id)?;
+    owner(conn, &row, user)?;
+    refresh_state(conn, &mut row)?;
+    if row.state == "pending" {
+        if approve {
+            let binding = bindings::approve(
+                state,
+                conn,
+                Approval {
+                    id: Uuid::new_v5(&row.id, b"agent-portal:secret-access-binding:v1"),
+                    secret_id: row.secret_id,
+                    session_id: row.session_id,
+                    launcher_id: row.launcher_id,
+                    owner_user_id: row.owner_user_id,
+                    version_id: row.version_id,
+                    proxy_token_id: row.proxy_token_id,
+                    generation: row.generation,
+                    env_name: row.env_name.clone(),
+                    lifetime_seconds: row.lifetime_seconds as u64,
+                },
+            )?;
+            if row.expires_at <= Utc::now() {
+                return Err(AppError::Conflict("Approval request expired"));
+            }
+            let expires = chrono::DateTime::parse_from_rfc3339(&binding.expires_at)
+                .map_err(|_| AppError::Internal("Invalid binding deadline".into()))?
+                .with_timezone(&Utc);
+            diesel::update(requests::table.find(id))
+                .set((
+                    requests::state.eq("approved"),
+                    requests::binding_id.eq(Some(binding.id)),
+                    requests::expires_at.eq(expires),
+                ))
+                .execute(conn)?;
+            row.state = "approved".into();
+            row.binding_id = Some(binding.id);
+            row.expires_at = expires;
+        } else {
+            diesel::update(requests::table.find(id))
+                .set(requests::state.eq("denied"))
+                .execute(conn)?;
+            row.state = "denied".into();
+        }
+        store::audit(
+            conn,
+            user,
+            Some(row.secret_id),
+            "access_decision",
+            &row.state,
+        )?;
+    }
+    // Read back PostgreSQL timestamp precision so retries return the same metadata.
+    let row = load(conn, id)?;
+    Ok((info(conn, &row)?, notice(conn, &row)?))
 }
 async fn decision(
     State(state): State<Arc<AppState>>,
@@ -476,65 +566,17 @@ async fn decision(
         })?;
     let mut conn = state.conn()?;
     let (response, message) = conn.transaction::<_, AppError, _>(|conn| {
-        let mut row = load(conn, id)?;
-        owner(conn, &row, user)?;
-        refresh_state(conn, &mut row)?;
-        if row.state == "pending" {
-            if request.approve {
-                let binding = bindings::approve(
-                    &state,
-                    conn,
-                    Approval {
-                        id: Uuid::new_v5(&row.id, b"agent-portal:secret-access-binding:v1"),
-                        secret_id: row.secret_id,
-                        session_id: row.session_id,
-                        launcher_id: row.launcher_id,
-                        owner_user_id: row.owner_user_id,
-                        version_id: row.version_id,
-                        proxy_token_id: row.proxy_token_id,
-                        generation: row.generation,
-                        env_name: row.env_name.clone(),
-                        lifetime_seconds: row.lifetime_seconds as u64,
-                    },
-                )?;
-                if row.expires_at <= Utc::now() {
-                    return Err(AppError::Conflict("Approval request expired"));
-                }
-                let expires = chrono::DateTime::parse_from_rfc3339(&binding.expires_at)
-                    .map_err(|_| AppError::Internal("Invalid binding deadline".into()))?
-                    .with_timezone(&Utc);
-                diesel::update(requests::table.find(id))
-                    .set((
-                        requests::state.eq("approved"),
-                        requests::binding_id.eq(Some(binding.id)),
-                        requests::expires_at.eq(expires),
-                    ))
-                    .execute(conn)?;
-                row.state = "approved".into();
-                row.binding_id = Some(binding.id);
-                row.expires_at = expires;
-            } else {
-                diesel::update(requests::table.find(id))
-                    .set(requests::state.eq("denied"))
-                    .execute(conn)?;
-                row.state = "denied".into();
-            }
-            store::audit(
-                conn,
-                user,
-                Some(row.secret_id),
-                "access_decision",
-                &row.state,
-            )?;
-        }
-        Ok((info(conn, &row)?, notice(conn, &row)?))
+        groups::require_single(conn, id)?;
+        decide_row(&state, conn, id, user, request.approve)
     })?;
     drop(conn);
     publish(&state, message)?;
     Ok(Json(response))
 }
+mod groups;
 pub(super) fn router() -> Router<Arc<AppState>> {
     Router::new()
+        .merge(groups::router())
         .route("/api/secrets/requests", post(create))
         .route("/api/secrets/requests/{id}", get(get_request))
         .route("/api/secrets/requests/{id}/decision", post(decision))

@@ -594,3 +594,22 @@
         flex: 1 1 auto;
     }
 }
+.secret-access-group > ul {
+    list-style: none;
+    margin: 0.75rem 0;
+    padding: 0;
+    display: grid;
+    gap: 0.75rem;
+}
+.secret-access-group > ul > li {
+    display: grid;
+    gap: 0.25rem;
+    padding: 0.75rem;
+    border: 1px solid var(--border-color, #565f89);
+    border-radius: 8px;
+    overflow-wrap: anywhere;
+}
+.secret-access-group > ul > li > span,
+.secret-access-group > ul > li > time {
+    font-size: 0.875rem;
+}
