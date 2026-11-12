@@ -145,7 +145,9 @@ self.addEventListener("push", (event) => {
     body: payload.body || "",
     tag: payload.tag || undefined,
     icon: "/icon-192.png",
-    badge: "/icon-192.png",
+    // Android masks the badge to a monochrome silhouette. Keep its background
+    // transparent: the opaque launcher icon would become a solid square.
+    badge: "/notification-badge-96.png",
     data: { session_id: payload.event_kind === "test" ? null : (payload.session_id || null) },
   };
 
