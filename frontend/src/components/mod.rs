@@ -58,3 +58,5 @@ pub use upload_notice::{
 pub use voice_input::{load_voice_hold_open, save_voice_hold_open, VoiceInput};
 
 pub(crate) mod task_report;
+
+pub mod secret_verification;

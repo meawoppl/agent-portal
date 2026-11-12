@@ -121,6 +121,7 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
     let app_state_for_forward_gate = app_state.clone();
     let app_state_for_linked_gate = app_state.clone();
     let app_state_for_logging = app_state.clone();
+    let app_state_for_redaction = app_state.clone();
 
     // Rate-limited device-code creation. Keep this strict: creating a code is
     // user-visible work and should not be spammed.
@@ -495,6 +496,14 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
             axum::routing::patch(handlers::portal_connections::update_portal_connection)
                 .delete(handlers::portal_connections::delete_portal_connection),
         )
+        .route(
+            "/api/secrets/verification",
+            get(handlers::auth::secret_verification::status),
+        )
+        .route(
+            "/api/secrets/verification/start",
+            post(handlers::auth::secret_verification::start),
+        )
         .route(AUTH_ME, get(handlers::auth::me))
         .route(AUTH_REFRESH, post(handlers::auth::refresh_token))
         .route(AUTH_TOKEN_LOGIN, post(handlers::auth::token_login))
@@ -625,6 +634,7 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
             "/api/admin/forwards",
             get(handlers::admin_subdomains::list_admin_forwards),
         )
+        .merge(handlers::secrets::router(app_state.clone()))
         // Add single unified state
         .with_state(app_state)
         // Merge rate-limited route groups
@@ -645,6 +655,10 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
         )
         .layer(axum::middleware::from_fn(unhashed_assets_no_cache))
         // Add CORS and cookie management
+        .layer(axum::middleware::from_fn_with_state(
+            app_state_for_redaction,
+            crate::secrets::redaction::http_middleware,
+        ))
         .layer(CookieManagerLayer::new())
         .layer(cors)
         // Outermost: requests for `{port}--{session}.{forward domain}` hosts

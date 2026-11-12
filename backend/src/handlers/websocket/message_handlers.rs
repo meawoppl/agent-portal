@@ -158,6 +158,7 @@ fn parse_reasoning_effort(value: &str) -> Option<shared::ReasoningEffort> {
 }
 
 /// Stable dependencies for handling one proxy-originated output frame.
+#[derive(Clone, Copy)]
 pub struct AgentOutputContext<'a> {
     pub session_manager: &'a SessionManager,
     pub session_key: &'a Option<SessionId>,
@@ -194,13 +195,136 @@ fn parse_claude_event(
 /// Handle agent output (both AgentOutput and SequencedOutput).
 /// Broadcasts to web clients, deduplicates sequenced messages, stores in DB,
 /// and sends acknowledgments.
+struct OutputPublication {
+    content: serde_json::Value,
+    agent_type: AgentType,
+    meta: Option<shared::PortalMeta>,
+    created_at: Option<chrono::NaiveDateTime>,
+    releases_edit_stack: bool,
+    sender_info: Option<(Uuid, String)>,
+    subagent_tokens_delta: i64,
+    notify_reply: bool,
+}
+
 pub fn handle_agent_output(ctx: AgentOutputContext<'_>, frame: AgentOutputFrame) {
+    use diesel::Connection;
+    let seq = frame.seq;
+    let Ok(mut conn) = ctx.db_pool.get() else {
+        error!(
+            "{}: output held without database connection",
+            crate::markers::SECRET_REDACTION_FAILED
+        );
+        ctx.tx.cancel();
+        return;
+    };
+    let publication = conn.transaction::<_, crate::errors::AppError, _>(|conn| {
+        crate::secrets::redaction::lock_generation(conn)?;
+        handle_agent_output_inner(ctx, frame, conn)
+    });
+    drop(conn);
+    let effect = match publication {
+        Ok(Some(effect)) => effect,
+        Ok(None) => return,
+        Err(_) => {
+            error!(
+                "{}: output held until durable sanitized commit",
+                crate::markers::SECRET_REDACTION_FAILED
+            );
+            ctx.tx.cancel();
+            return;
+        }
+    };
+    if let Some(session_id) = ctx.db_session_id {
+        if let Some(sender) = &effect.sender_info {
+            ctx.session_manager
+                .consume_last_input_sender(session_id, sender);
+        }
+        if effect.subagent_tokens_delta != 0 {
+            ctx.session_manager
+                .add_subagent_tokens(session_id, effect.subagent_tokens_delta);
+        }
+        if effect.agent_type == AgentType::Claude && is_claude_compaction_boundary(&effect.content)
+        {
+            ctx.session_manager
+                .edit_stack_compaction_boundary(session_id);
+        }
+        if effect.notify_reply {
+            ctx.notifications
+                .emit(crate::push::NotificationEvent::TurnComplete {
+                    session_id,
+                    session_name: String::new(),
+                });
+        }
+        ctx.session_manager.queue_truncation(session_id);
+        if let Some(seq) = seq {
+            ctx.session_manager.record_ack_seq(session_id, seq);
+            let _ = ctx.tx.send(ServerToProxy::OutputAck {
+                session_id,
+                ack_seq: seq,
+            });
+        }
+        maybe_schedule_overloaded_retry(
+            ctx.session_manager,
+            ctx.session_key,
+            session_id,
+            ctx.db_pool,
+            &effect.content,
+            effect.created_at,
+        );
+    }
+    if let Some(key) = ctx.session_key {
+        ctx.session_manager.broadcast_to_web_clients(
+            key,
+            ServerToClient::AgentOutput {
+                content: effect.content,
+                agent_type: effect.agent_type,
+                meta: effect.meta,
+            },
+        );
+    }
+    if effect.releases_edit_stack {
+        if let Some(session_id) = ctx.db_session_id {
+            ctx.session_manager.mark_turn_finished(session_id);
+            let phase = ctx
+                .session_manager
+                .edit_stack_compaction_turn_ended(session_id);
+            if effect.created_at.is_some() {
+                if let Some(key) = ctx.session_key {
+                    if phase == Some(CompactionPhase::AwaitingReminder) {
+                        release_edit_stack_after_reminder_timeout(
+                            ctx.db_pool.clone(),
+                            ctx.session_manager.clone(),
+                            key.clone(),
+                            session_id,
+                        );
+                    }
+                    if crate::handlers::edit_stack::try_send_next_pending_edit_stack_item(
+                        ctx.db_pool,
+                        ctx.session_manager,
+                        key.as_str(),
+                        session_id,
+                    )
+                    .is_err()
+                    {
+                        warn!("Could not promote queued work after sanitized output commit");
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn handle_agent_output_inner(
+    ctx: AgentOutputContext<'_>,
+    frame: AgentOutputFrame,
+    conn: &mut diesel::PgConnection,
+) -> Result<Option<OutputPublication>, crate::errors::AppError> {
     let AgentOutputContext {
         session_manager,
-        session_key,
+        session_key: _,
         db_session_id,
-        db_pool,
-        notifications,
+        db_pool: _,
+        notifications: _,
         tx,
         image_store,
     } = ctx;
@@ -223,9 +347,29 @@ pub fn handle_agent_output(ctx: AgentOutputContext<'_>, frame: AgentOutputFrame)
                 session_id,
                 ack_seq: seq_num,
             });
-            return;
+            return Ok(None);
         }
     }
+
+    // Sanitize before diagnostic parsing, media extraction, storage or fanout.
+    // Failure leaves sequenced output unacknowledged for replay after recovery.
+    use crate::schema::sessions;
+    let owner = db_session_id
+        .map(|sid| {
+            sessions::table
+                .find(sid)
+                .select(sessions::user_id)
+                .first::<Uuid>(conn)
+        })
+        .transpose()?;
+    let content = if let Some(owner) = owner {
+        let rules = crate::secrets::redaction::snapshot_for_user(conn, owner)?;
+        let mut value = content;
+        rules.redact_agent_json(&mut value);
+        value
+    } else {
+        content
+    };
 
     // Extract sender attribution for user-type messages (from last_input_sender, not injected into JSON)
     let role_str = content
@@ -233,11 +377,13 @@ pub fn handle_agent_output(ctx: AgentOutputContext<'_>, frame: AgentOutputFrame)
         .and_then(|t| t.as_str())
         .unwrap_or("assistant");
     let sender_info = if role_str == "user" {
-        db_session_id.and_then(|sid| session_manager.take_last_input_sender(sid))
+        db_session_id.and_then(|sid| session_manager.peek_last_input_sender(sid))
     } else {
         None
     };
 
+    let mut subagent_tokens_delta = 0;
+    let mut notify_reply = false;
     // Claude task accounting applies only to Claude protocol events.
     match parse_claude_event(agent_type, &content) {
         Some(Ok(shared::ClaudeOutput::System(sys))) => {
@@ -263,7 +409,8 @@ pub fn handle_agent_output(ctx: AgentOutputContext<'_>, frame: AgentOutputFrame)
                         // `SessionManager::subagent_tokens`). `task_notification`
                         // fires once per task, so summing is exact.
                         if let (Some(sid), Some(usage)) = (db_session_id, notif.usage.as_ref()) {
-                            session_manager.add_subagent_tokens(sid, usage.total_tokens as i64);
+                            let _ = sid;
+                            subagent_tokens_delta = usage.total_tokens as i64;
                         }
                     }
                     None => warn!(
@@ -291,15 +438,7 @@ pub fn handle_agent_output(ctx: AgentOutputContext<'_>, frame: AgentOutputFrame)
     // extraction (auth check on `/api/images/{id}`, #786) and the message
     // insert (fallback `user_id`). A single cheap owner-only `.select`
     // replaces the previous pair of per-message session lookups (#977).
-    let session_user_id: Option<Uuid> = db_session_id.and_then(|sid| {
-        use crate::schema::sessions;
-        let mut conn = db_pool.get().ok()?;
-        sessions::table
-            .find(sid)
-            .select(sessions::user_id)
-            .first::<Uuid>(&mut conn)
-            .ok()
-    });
+    let session_user_id = owner;
 
     // Extract base64 images from portal messages and replace with URLs.
     // This keeps WebSocket messages small — browsers fetch images via HTTP.
@@ -315,12 +454,6 @@ pub fn handle_agent_output(ctx: AgentOutputContext<'_>, frame: AgentOutputFrame)
     let normalized = normalize_output_content(content);
     let content = normalized.content;
     let releases_edit_stack = edit_stack_output_releases_next(agent_type.as_str(), &content);
-    if let Some(session_id) = db_session_id {
-        if agent_type == AgentType::Claude && is_claude_compaction_boundary(&content) {
-            session_manager.edit_stack_compaction_boundary(session_id);
-        }
-    }
-
     // Insert the message FIRST so the live broadcast's `meta` carries the
     // server-assigned `created_at` the historical-read path would surface
     // (closes #784 — silent data-loss on reconnect when the frontend used
@@ -333,7 +466,7 @@ pub fn handle_agent_output(ctx: AgentOutputContext<'_>, frame: AgentOutputFrame)
     // Server timestamp of the just-inserted row, used by the overload
     // auto-retry to detect whether a human has responded since a failed turn.
     let mut inserted_created_at: Option<chrono::NaiveDateTime> = None;
-    if let (Some(session_id), Ok(mut conn)) = (db_session_id, db_pool.get()) {
+    if let Some(session_id) = db_session_id {
         use crate::schema::{messages, sessions};
 
         // Only insert when the owner lookup above resolved — same gating the
@@ -363,129 +496,50 @@ pub fn handle_agent_output(ctx: AgentOutputContext<'_>, frame: AgentOutputFrame)
                 provenance_agent_type: normalized.provenance_agent_type.clone(),
             };
 
-            match diesel::insert_into(messages::table)
+            let inserted = diesel::insert_into(messages::table)
                 .values(&new_message)
-                .get_result::<crate::models::Message>(&mut conn)
+                .get_result::<crate::models::Message>(conn)?;
+            inserted_created_at = Some(inserted.created_at);
+            if crate::handlers::session_activity::activity_signal(
+                agent_type.as_str(),
+                &inserted.role,
+                &inserted.content,
+            ) == Some(shared::api::SessionActivityState::Idle)
             {
-                Ok(inserted) => {
-                    inserted_created_at = Some(inserted.created_at);
-                    if crate::handlers::session_activity::activity_signal(
-                        agent_type.as_str(),
-                        &inserted.role,
-                        &inserted.content,
-                    ) == Some(shared::api::SessionActivityState::Idle)
-                    {
-                        match crate::handlers::attention::record_reply(&mut conn, &inserted) {
-                            Ok(true) => {
-                                notifications.emit(crate::push::NotificationEvent::TurnComplete {
-                                    session_id,
-                                    session_name: String::new(),
-                                })
-                            }
-                            Ok(false) => {}
-                            Err(e) => error!(
-                                "{}: session {}: {}",
-                                crate::markers::ATTENTION_PERSIST_FAILED,
-                                session_id,
-                                e
-                            ),
-                        }
-                    }
-
-                    // `meta.created_at` becomes the frontend's reconnect
-                    // watermark (matches `replay_history`'s `%Y-%m-%dT%H:%M:%S%.f`).
-                    broadcast_meta =
-                        Some(inserted.portal_meta(sender_info.as_ref().map(|(_, n)| n.clone())));
-                }
-                Err(e) => {
-                    error!("Failed to store message: {}", e);
-                }
+                // Attention is part of this fenced transaction: failure must
+                // abort output, rather than log and continue with partial state.
+                notify_reply = crate::handlers::attention::record_reply(conn, &inserted)?;
             }
+            broadcast_meta =
+                Some(inserted.portal_meta(sender_info.as_ref().map(|(_, name)| name.clone())));
 
             if role == shared::MessageRole::Result {
                 let subagent_tokens = session_manager.subagent_tokens(session_id);
                 if inserted_created_at.is_some() {
-                    store_result_metadata(&mut conn, session_id, &content, subagent_tokens);
+                    store_result_metadata(conn, session_id, &content, subagent_tokens);
                 }
-
-                // A turn killed by a transient 529 provider overload leaves the
-                // session stalled on a user-visible error. Auto-retry it (bounded
-                // + paced) so a human doesn't have to nudge it back to life. The
-                // scheduler takes its own pooled connection (distinct from `conn`).
-                maybe_schedule_overloaded_retry(
-                    session_manager,
-                    session_key,
-                    session_id,
-                    db_pool,
-                    &content,
-                    inserted_created_at,
-                );
             }
-
-            session_manager.queue_truncation(session_id);
         }
 
         // Update last_activity
-        let _ = diesel::update(sessions::table.find(session_id))
+        diesel::update(sessions::table.find(session_id))
             .set(sessions::last_activity.eq(diesel::dsl::now))
-            .execute(&mut conn);
-
-        // Update last_ack tracker and send acknowledgment
-        if let Some(seq_num) = seq {
-            session_manager.record_ack_seq(session_id, seq_num);
-
-            let _ = tx.send(ServerToProxy::OutputAck {
-                session_id,
-                ack_seq: seq_num,
-            });
-        }
+            .execute(conn)?;
     }
 
-    // Broadcast raw output to all web clients. Sender/attribution and the
-    // server `created_at` watermark (closes #784) ride in `meta`; the frontend
-    // renders entirely from it (see docs/PORTAL_META_SIDECAR.md).
-    if let Some(ref key) = session_key {
-        session_manager.broadcast_to_web_clients(
-            key,
-            ServerToClient::AgentOutput {
-                content,
-                agent_type,
-                meta: broadcast_meta,
-            },
-        );
-    }
-
-    if releases_edit_stack {
-        if let Some(session_id) = db_session_id {
-            session_manager.mark_turn_finished(session_id);
-            let compaction = session_manager.edit_stack_compaction_turn_ended(session_id);
-            if inserted_created_at.is_some() {
-                if let Some(key) = session_key.as_ref() {
-                    if compaction == Some(CompactionPhase::AwaitingReminder) {
-                        release_edit_stack_after_reminder_timeout(
-                            db_pool.clone(),
-                            session_manager.clone(),
-                            key.clone(),
-                            session_id,
-                        );
-                    }
-                    if let Err(err) =
-                        crate::handlers::edit_stack::try_send_next_pending_edit_stack_item(
-                            db_pool,
-                            session_manager,
-                            key.as_str(),
-                            session_id,
-                        )
-                    {
-                        warn!(
-                        "Could not promote next edit-stack item after turn completion for session {}: {:?}",
-                        session_id, err
-                    );
-                    }
-                }
-            }
-        }
-    }
+    // Optional accounting helpers historically log failures. Verify that none
+    // left this transaction aborted before publication can be authorized.
+    diesel::sql_query("SELECT 1").execute(conn)?;
+    Ok(Some(OutputPublication {
+        content,
+        agent_type,
+        meta: broadcast_meta,
+        created_at: inserted_created_at,
+        releases_edit_stack,
+        sender_info,
+        subagent_tokens_delta,
+        notify_reply,
+    }))
 }
 
 /// How long to wait for the reminder turn the proxy injects after a
@@ -1046,3 +1100,6 @@ mod attention_delivery_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod secret_tests;

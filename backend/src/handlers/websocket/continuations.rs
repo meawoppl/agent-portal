@@ -629,7 +629,6 @@ fn insert_portal_message(
     session: &Session,
     portal: &PortalMessage,
 ) -> Option<crate::models::Message> {
-    use crate::schema::messages;
     let new_message = NewMessage {
         session_id: session.id,
         role: "portal".to_string(),
@@ -640,13 +639,13 @@ fn insert_portal_message(
         provenance_session_id: None,
         provenance_agent_type: None,
     };
-    match diesel::insert_into(messages::table)
-        .values(&new_message)
-        .get_result::<crate::models::Message>(conn)
-    {
+    match crate::secrets::redaction::insert_message(conn, new_message) {
         Ok(inserted) => Some(inserted),
-        Err(e) => {
-            error!("Failed to store continuation portal message: {}", e);
+        Err(_) => {
+            error!(
+                "{}: continuation row could not commit",
+                crate::markers::SECRET_REDACTION_FAILED
+            );
             None
         }
     }

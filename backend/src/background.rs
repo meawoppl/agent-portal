@@ -301,6 +301,19 @@ fn archive_one_session(
     runtime: &crate::archive::ArchiveRuntime,
     session: &models::Session,
 ) -> anyhow::Result<()> {
+    use diesel::Connection;
+    conn.transaction(|conn| {
+        crate::secrets::expunge::archive_session_lock(conn, session.id)
+            .map_err(|_| anyhow::anyhow!("Archive fencing unavailable"))?;
+        archive_one_session_inner(conn, runtime, session)
+    })
+}
+
+fn archive_one_session_inner(
+    conn: &mut diesel::PgConnection,
+    runtime: &crate::archive::ArchiveRuntime,
+    session: &models::Session,
+) -> anyhow::Result<()> {
     use crate::archive::{
         transcript_key, ArchiveMemberEntry, ArchiveMessageLine, ArchiveTokenTotals,
         ArchiveTranscriptInfo, ArchiveTurnStats, SessionArchiveManifest, ARCHIVE_SCHEMA_VERSION,
@@ -308,6 +321,9 @@ fn archive_one_session(
     use diesel::prelude::*;
     use schema::{messages, session_members, turn_metrics, users};
     use std::collections::BTreeMap;
+
+    let redactor = crate::secrets::redaction::snapshot_for_user(conn, session.user_id)
+        .map_err(|_| anyhow::anyhow!("Archive held until secret rules refresh"))?;
 
     let (owner_email, owner_nickname, owner_name): (String, Option<String>, Option<String>) =
         users::table
@@ -348,7 +364,7 @@ fn archive_one_session(
 
     // Keep record bodies off the heap: libpq's default loading mode buffers a
     // whole result even for load_iter, so explicitly request row-by-row mode.
-    use std::io::{BufRead, Write};
+    use std::io::Write;
     let hot_ids: Vec<uuid::Uuid> = messages::table
         .filter(messages::session_id.eq(session.id))
         .select(messages::id)
@@ -376,6 +392,13 @@ fn archive_one_session(
     let current = rows.map(|row| {
         let (id, role, content, created_at, agent_type, source_created_at) =
             row.map_err(std::io::Error::other)?;
+        if content.len() > 4 * 1024 * 1024 {
+            return Err(std::io::Error::other("Archive record exceeds safe budget"));
+        }
+        if content.starts_with('{') || content.starts_with('[') {
+            crate::secrets::redaction::validate_json_budget(content.as_bytes())
+                .map_err(|_| std::io::Error::other("Archive record exceeds JSON budget"))?;
+        }
         let content = serde_json::from_str(&content).unwrap_or(serde_json::Value::String(content));
         Ok(ArchiveMessageLine {
             source_created_at: source_created_at.map(|time| time.and_utc()),
@@ -386,16 +409,24 @@ fn archive_one_session(
             agent_type,
         })
     });
-    let existing = runtime
+    let mut existing_reader = runtime
         .store
-        .transcript_reader(session.user_id, session.id)?
-        .lines()
-        .filter_map(|line| match line {
-            Ok(line) if line.trim().is_empty() => None,
-            line => Some(line.and_then(|line| {
-                serde_json::from_str::<ArchiveMessageLine>(&line).map_err(std::io::Error::other)
-            })),
-        });
+        .transcript_reader(session.user_id, session.id)?;
+    let existing = std::iter::from_fn(move || {
+        match crate::secrets::expunge::bounded_line(existing_reader.as_mut()) {
+            Ok(Some(bytes)) => Some(Ok(bytes)),
+            Ok(None) => None,
+            Err(error) => Some(Err(error)),
+        }
+    })
+    .filter_map(|line| match line {
+        Ok(bytes) if bytes.iter().all(u8::is_ascii_whitespace) => None,
+        line => Some(line.and_then(|bytes| {
+            crate::secrets::redaction::validate_json_budget(&bytes)
+                .map_err(|_| std::io::Error::other("Archive record exceeds JSON budget"))?;
+            serde_json::from_slice::<ArchiveMessageLine>(&bytes).map_err(std::io::Error::other)
+        })),
+    });
     let mut compressed = tempfile::tempfile()?;
     let mut encoder = zstd::Encoder::new(&mut compressed, 9)?;
     let mut message_counts: BTreeMap<String, i64> = BTreeMap::new();
@@ -404,6 +435,9 @@ fn archive_one_session(
     let mut transcript_bytes = 0u64;
     let mut media_entries = BTreeMap::new();
     archive_format::stream_merge_transcript(existing, current, &hot_id_set, |line| {
+        let mut sanitized_line = line.clone();
+        redactor.redact_agent_json(&mut sanitized_line.content);
+        let line = &sanitized_line;
         *message_counts.entry(line.role.clone()).or_default() += 1;
         message_count += 1;
         if line.role == "user" && shared::user_messages::is_substantive_user_record(&line.content) {
@@ -544,6 +578,17 @@ fn archive_one_session(
         archived_by_version: Some(shared::VERSION.to_string()),
         members,
     };
+    let mut manifest = manifest;
+    redactor.redact_manifest(&mut manifest);
+    crate::secrets::redaction::lock_generation(conn)
+        .map_err(|_| anyhow::anyhow!("Archive redaction fence unavailable"))?;
+    if crate::secrets::redaction::snapshot(conn)
+        .map_err(|_| anyhow::anyhow!("Archive redaction rules unavailable"))?
+        .generation
+        != redactor.generation
+    {
+        anyhow::bail!("Archive held because secret rules changed during preparation");
+    }
     runtime
         .store
         .put_session_archive_file(&manifest, transcripts_enabled.then_some(&mut compressed))?;

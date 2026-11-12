@@ -40,8 +40,57 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
     let cancel = rx.cancellation_token();
 
     let writer_cancel = cancel.clone();
+    let writer_pool = db_pool.clone();
     let send_task = tokio::spawn(async move {
-        while let Some(msg) = rx.recv().await {
+        let mut bound_session = None;
+        while let Some(mut msg) = rx.recv().await {
+            if let ServerToProxy::RegisterAck {
+                success: true,
+                session_id,
+                ..
+            } = &msg
+            {
+                bound_session = Some(*session_id);
+            }
+            if let ServerToProxy::SequencedInput { session_id, .. } = &msg {
+                bound_session = Some(*session_id);
+            }
+            if let ServerToProxy::AgentInput { content, .. }
+            | ServerToProxy::SequencedInput { content, .. } = &mut msg
+            {
+                let sanitized = (|| -> Result<(), crate::errors::AppError> {
+                    use diesel::prelude::*;
+                    let mut conn = writer_pool.try_get().ok_or(
+                        crate::errors::AppError::ServiceUnavailable(
+                            "Input redaction is busy; reconnect shortly",
+                        ),
+                    )?;
+                    let rules = if let Some(session) = bound_session {
+                        let owner = crate::schema::sessions::table
+                            .find(session)
+                            .select(crate::schema::sessions::user_id)
+                            .first::<Uuid>(&mut conn)?;
+                        crate::secrets::redaction::snapshot_for_user(&mut conn, owner)?
+                    } else {
+                        let rules = crate::secrets::redaction::snapshot(&mut conn)?;
+                        if !rules.is_empty() {
+                            return Err(crate::errors::AppError::ServiceUnavailable(
+                                "Input awaits verified session redaction",
+                            ));
+                        }
+                        rules
+                    };
+                    rules.redact_agent_json(content);
+                    Ok(())
+                })();
+                if sanitized.is_err() {
+                    warn!(
+                        "{}: proxy input held until current rules are available",
+                        crate::markers::SECRET_REDACTION_FAILED
+                    );
+                    break;
+                }
+            }
             if ws_sender.send(msg).await.is_err() {
                 break;
             }
@@ -234,6 +283,9 @@ fn handle_proxy_message(
         tx,
         cancel,
     } = ctx;
+    if cancel.is_cancelled() {
+        return ControlFlow::Break(());
+    }
     match proxy_msg {
         ProxyToServer::Register(shared::RegisterFields {
             protocol_version,

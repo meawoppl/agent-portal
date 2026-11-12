@@ -143,3 +143,38 @@ fn hidden_frames_do_not_split_a_portal_run() {
         other => panic!("expected one Portal group, got {other:?}"),
     }
 }
+
+#[test]
+fn approval_notice_has_one_stable_card_across_portal_groups_and_replays() {
+    use super::super::RenderedMessage;
+    let id = uuid::Uuid::new_v4();
+    let marker = RenderedMessage::new(
+        shared::PortalMessage::with_content(vec![shared::PortalContent::SecretAccessRequest {
+            request_id: id,
+        }])
+        .to_json()
+        .to_string(),
+        Some(shared::PortalMeta {
+            created_at: Some("2026-11-12T00:07:52Z".into()),
+            ..Default::default()
+        }),
+    );
+    let group = |messages: &[RenderedMessage]| {
+        super::super::group_messages(messages, shared::AgentType::Claude, None)
+    };
+    let first = group(std::slice::from_ref(&marker));
+    let key = first[0].key(0);
+    let mut messages = vec![
+        RenderedMessage::new(portal_text_message("Before"), None),
+        marker.clone(),
+        RenderedMessage::new(portal_text_message("TASK STARTED"), None),
+    ];
+    messages.extend(std::iter::repeat_n(marker, 8));
+    let groups = group(&messages);
+    let cards:Vec<_> = groups.iter().filter(|group| matches!(group, MessageGroup::Single(message) if message.secret_request_id()==Some(id))).collect();
+    assert_eq!(cards.len(), 1);
+    assert_eq!(cards[0].key(1), key);
+    let keys: std::collections::HashSet<_> =
+        groups.iter().enumerate().map(|(i, g)| g.key(i)).collect();
+    assert_eq!(keys.len(), groups.len());
+}

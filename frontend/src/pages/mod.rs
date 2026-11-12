@@ -7,3 +7,5 @@ pub mod demo;
 pub mod history;
 pub mod settings;
 pub mod splash;
+
+pub mod secrets;

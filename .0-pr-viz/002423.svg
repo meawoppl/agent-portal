@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="Arial, sans-serif" font-size="24" fill="#a9b1d6">PR #2423 · Explicit verification for Secrets</text>
+<text x="55" y="110" font-family="Arial, sans-serif" font-size="34" fill="#e6e9f5">Secret approvals use an explicit account check instead of a login-age deadline.</text>
+<path d="M55 165 H1945 M1000 190 V1130" stroke="#565f89" stroke-dasharray="7 7"/>
+<text x="55" y="220" font-family="Arial, sans-serif" font-size="24" fill="#f7768e">BEFORE</text>
+<rect x="55" y="265" width="900" height="225" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="310" font-family="Arial, sans-serif" font-size="28" fill="#7aa2f7">Login starts a ten-minute window</text>
+<text x="80" y="365" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Ordinary OAuth callback sets recent-auth proof.</text>
+<text x="80" y="410" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Approval depends on when the user logged in.</text>
+<rect x="55" y="535" width="900" height="225" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="580" font-family="Arial, sans-serif" font-size="28" fill="#7aa2f7">Expired login-age check</text>
+<text x="80" y="635" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Approval fails despite a valid Portal session.</text>
+<text x="80" y="680" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">UI asks the user to sign out and sign in again.</text>
+<rect x="55" y="805" width="900" height="225" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="850" font-family="Arial, sans-serif" font-size="28" fill="#7aa2f7">Pending action context</text>
+<text x="80" y="905" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">User must return to the CLI link or session.</text>
+<text x="80" y="950" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Normal login implicitly enables protected actions.</text>
+<text x="1045" y="220" font-family="Arial, sans-serif" font-size="24" fill="#9ece6a">AFTER</text>
+<rect x="1045" y="265" width="900" height="225" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1070" y="310" font-family="Arial, sans-serif" font-size="28" fill="#7aa2f7">Verify with Google / GitHub</text>
+<text x="1070" y="365" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Signed challenge binds browser, user and provider.</text>
+<text x="1070" y="410" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Only an existing matching identity can verify.</text>
+<rect x="1045" y="535" width="900" height="225" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1070" y="580" font-family="Arial, sans-serif" font-size="28" fill="#7aa2f7">Return to the pending action</text>
+<text x="1070" y="635" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Keep CLI code, session and Settings job query.</text>
+<text x="1070" y="680" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Verification never approves the action itself.</text>
+<rect x="1045" y="805" width="900" height="225" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1070" y="850" font-family="Arial, sans-serif" font-size="28" fill="#7aa2f7">Browser-session proof</text>
+<text x="1070" y="905" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Normal login/logout clear verification.</text>
+<text x="1070" y="950" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">ACL, CSRF and owner checks still apply.</text>
+<text x="55" y="1172" font-family="Arial, sans-serif" font-size="22" fill="#a9b1d6">Provider-session confirmation, not a promise of fresh password/MFA. Pending requests retain their own expiry.</text>
+</svg>

@@ -46,6 +46,51 @@ impl OutboundAuthorization {
     }
 }
 
+/// The socket's verified binding and closed typed metadata frames are the
+/// only session authority here. Nested agent JSON IDs must never choose a
+/// different owner's rules. Resolve fresh matchers using a nonwaiting checkout:
+/// the replay producer can hold the last connection while waiting on this sink.
+fn sanitize_outbound(
+    pool: &crate::db::DbPool,
+    viewer: Uuid,
+    verified_session: Option<Uuid>,
+    frame: ServerToClient,
+) -> Result<ServerToClient, crate::errors::AppError> {
+    use crate::{errors::AppError, schema::sessions, secrets::redaction};
+    let session = match &frame {
+        ServerToClient::SessionUpdate { session_id, .. } => Some(*session_id),
+        _ => verified_session,
+    };
+    let mut conn = pool.try_get().ok_or(AppError::ServiceUnavailable(
+        "Content authorization is busy; reconnect shortly",
+    ))?;
+    let owner = session
+        .map(|id| {
+            sessions::table
+                .find(id)
+                .select(sessions::user_id)
+                .first::<Uuid>(&mut conn)
+        })
+        .transpose()?;
+    let catalog = redaction::snapshot(&mut conn)?;
+    let viewer_rules = catalog.scoped_for(viewer);
+    let owner_rules = owner
+        .filter(|owner| *owner != viewer)
+        .map(|owner| catalog.scoped_for(owner));
+    drop(conn);
+    if viewer_rules.is_empty() && owner_rules.as_ref().is_none_or(|rules| rules.is_empty()) {
+        return Ok(frame);
+    }
+    let mut value = serde_json::to_value(frame)
+        .map_err(|_| AppError::ServiceUnavailable("Content redaction unavailable"))?;
+    viewer_rules.redact_transport_json(&mut value);
+    if let Some(rules) = owner_rules {
+        rules.redact_transport_json(&mut value);
+    }
+    serde_json::from_value(value)
+        .map_err(|_| AppError::ServiceUnavailable("Content redaction unavailable"))
+}
+
 #[tracing::instrument(skip_all, fields(user, user_id = %user_id, session_name, session_id, computer, owner, owner_id))]
 pub async fn handle_web_client_socket(
     socket: WebSocket,
@@ -128,6 +173,10 @@ pub async fn handle_web_client_socket(
                 match replayed {
                     Some(Ok(msg)) => {
                         if linked.as_ref().is_some_and(|auth| outbound_auth.check(std::time::Instant::now(), false, || auth.authorize(&app_state, shared::api::TokenScope::Read)).is_err()) { break; }
+                        let msg = match sanitize_outbound(&db_pool, user_id, verified_session_id, msg) {
+                            Ok(msg) => msg,
+                            Err(_) => { warn!("{}: closing client until rules refresh", crate::markers::SECRET_REDACTION_FAILED); break; }
+                        };
                         if ws_sender.send(msg).await.is_err() { break; }
                     }
                     Some(Err(error)) => { warn!("History replay failed: {error}"); break; }
@@ -137,12 +186,20 @@ pub async fn handle_web_client_socket(
             msg = rx.recv(), if pending_replay.is_none() => {
                 let Some(msg) = msg else { break; };
                 if linked.as_ref().is_some_and(|auth| outbound_auth.check(std::time::Instant::now(), false, || auth.authorize(&app_state, shared::api::TokenScope::Read)).is_err()) { break; }
-                if ws_sender.send(msg).await.is_err() { break; }
+                let msg = match sanitize_outbound(&db_pool, user_id, verified_session_id, msg) {
+                            Ok(msg) => msg,
+                            Err(_) => { warn!("{}: closing client until rules refresh", crate::markers::SECRET_REDACTION_FAILED); break; }
+                        };
+                        if ws_sender.send(msg).await.is_err() { break; }
             }
             result = ws_receiver.recv() => {
                 let Some(result) = result else { break; };
                 match result {
                     Ok(client_msg) => {
+                        let client_msg = match crate::secrets::redaction::sanitize_for_user(&db_pool, user_id, client_msg) {
+                            Ok(msg) => msg,
+                            Err(_) => { warn!("{}: closing client until rules refresh", crate::markers::SECRET_REDACTION_FAILED); break; }
+                        };
                         if linked.as_ref().is_some_and(|auth| auth.authorize(&app_state, crate::handlers::federation::message_scope(&client_msg)).is_err()) { break; }
                         // Negotiate inline: a rejection must reach the socket before
                         // closing, and no later pipelined mutation may dispatch.
@@ -646,7 +703,6 @@ fn handle_web_input(
             // meta-only frontend gets created_at + source (#portal-meta).
             let mut broadcast_meta: Option<shared::PortalMeta> = None;
             if let (Some(session), Ok(mut conn)) = (session.as_ref(), db_pool.get()) {
-                use crate::schema::messages;
                 let new_message = crate::models::NewMessage {
                     session_id,
                     role: "portal".to_string(),
@@ -657,15 +713,15 @@ fn handle_web_input(
                     provenance_session_id: None,
                     provenance_agent_type: None,
                 };
-                match diesel::insert_into(messages::table)
-                    .values(&new_message)
-                    .get_result::<crate::models::Message>(&mut conn)
-                {
+                match crate::secrets::redaction::insert_message(&mut conn, new_message) {
                     Ok(inserted) => {
                         broadcast_meta = Some(inserted.portal_meta(None));
                     }
-                    Err(e) => {
-                        error!("Failed to store portal message: {}", e);
+                    Err(_) => {
+                        error!(
+                            "{}: portal row could not commit",
+                            crate::markers::SECRET_REDACTION_FAILED
+                        );
                     }
                 }
             }
@@ -695,6 +751,18 @@ fn handle_web_input(
             client_msg_id,
         },
     );
+    if !outcome.durable {
+        if let Some(id) = client_msg_id {
+            let _=ctx.tx.send(ServerToClient::InputProgress { client_msg_id:id, stage:shared::InputDeliveryStage::Failed,
+                message:Some("Input was not sent: secure persistence is temporarily unavailable. Retry shortly.".into()), queued:false });
+        } else {
+            let _ = ctx.tx.send(ServerToClient::Error {
+                message: "Input was not sent: secure persistence is temporarily unavailable."
+                    .into(),
+            });
+        }
+        return;
+    }
     if !outcome.live {
         info!("Agent for session '{key}' is offline; input held for its reconnect");
         // Tell only the sender it is waiting for the agent, and only when it
@@ -1019,7 +1087,7 @@ mod queued_input_tests {
     /// bump never claims it.
     #[test]
     fn offline_input_is_queued_only_when_durably_stored() {
-        use shared::InputDeliveryStage::ServerReceived;
+        use shared::InputDeliveryStage::{Failed, ServerReceived};
         let Some(pool) = shared_pool() else { return };
         let state = test_app_state(pool);
         let mut conn = state.conn().unwrap();
@@ -1040,7 +1108,8 @@ mod queued_input_tests {
         assert!(!std::iter::from_fn(|| other_rx.try_recv().ok())
             .any(|frame| matches!(frame, ServerToClient::InputProgress { queued: true, .. })));
 
-        // Occupy the next sequence: the bump succeeds, the insert conflicts.
+        // Occupy the next sequence: a conflicting insert must roll back its
+        // sequence bump and explicitly reject the input, never claim delivery.
         let next: i64 = sessions::table
             .find(session.id)
             .select(sessions::input_seq)
@@ -1057,7 +1126,163 @@ mod queued_input_tests {
             })
             .execute(&mut conn)
             .unwrap();
-        send_input(&state, &tx, owner.id, session.id, Uuid::new_v4());
-        assert_eq!(stages(&mut rx), [(ServerReceived, false)]);
+        let rejected_id = Uuid::new_v4();
+        send_input(&state, &tx, owner.id, session.id, rejected_id);
+        assert_eq!(stages(&mut rx), [(ServerReceived, false), (Failed, false)]);
+        assert_eq!(
+            sessions::table
+                .find(session.id)
+                .select(sessions::input_seq)
+                .first::<i64>(&mut conn)
+                .unwrap(),
+            next
+        );
+        assert_eq!(
+            pending_inputs::table
+                .filter(pending_inputs::session_id.eq(session.id))
+                .count()
+                .get_result::<i64>(&mut conn)
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            pending_inputs::table
+                .filter(pending_inputs::session_id.eq(session.id))
+                .filter(pending_inputs::client_msg_id.eq(Some(rejected_id)))
+                .count()
+                .get_result::<i64>(&mut conn)
+                .unwrap(),
+            0
+        );
+    }
+}
+
+#[cfg(test)]
+mod owner_redaction_tests {
+    use super::*;
+    use crate::handlers::secrets::tests::Database;
+    use crate::secrets::redaction::{RedactionRuntime, MASK};
+    use shared::api::SecretValue;
+
+    #[test]
+    fn outbound_uses_verified_owner_and_viewer_but_never_nested_agent_session_ids() {
+        let Some(db) = Database::new() else {
+            return;
+        };
+        let mut conn = db.pool.get().unwrap();
+        let owner = crate::test_support::insert_user(&mut conn, "ws-owner");
+        let viewer = crate::test_support::insert_user(&mut conn, "ws-viewer");
+        let third = crate::test_support::insert_user(&mut conn, "ws-unrelated");
+        let session = crate::test_support::insert_session(&mut conn, owner.id, "owner session");
+        let other_session =
+            crate::test_support::insert_session(&mut conn, third.id, "unrelated session");
+        use crate::schema::secrets_generation as generation;
+        let organization = generation::table
+            .find(1i16)
+            .select(generation::organization_id)
+            .first::<Uuid>(&mut conn)
+            .unwrap();
+        diesel::update(generation::table.find(1i16))
+            .set(generation::generation.eq(1i64))
+            .execute(&mut conn)
+            .unwrap();
+        let runtime = RedactionRuntime::new();
+        runtime
+            .install(
+                organization,
+                1,
+                vec![
+                    (Uuid::new_v4(), SecretValue("a".into()), Some(owner.id)),
+                    (
+                        Uuid::new_v4(),
+                        SecretValue("VIEWER_77".into()),
+                        Some(viewer.id),
+                    ),
+                    (
+                        Uuid::new_v4(),
+                        SecretValue("THIRD_99".into()),
+                        Some(third.id),
+                    ),
+                ],
+            )
+            .unwrap();
+        drop(conn);
+        let frame = || ServerToClient::AgentOutput {
+            content: serde_json::json!({"type":"assistant","uuid":"a-provider-id","session_id":other_session.id,"message":{"role":"assistant","content":[{"type":"text","text":"a VIEWER_77 THIRD_99"}]}}),
+            agent_type: shared::AgentType::Claude,
+            meta: Some(shared::PortalMeta {
+                created_at: Some("2026-11-10T01:02:03.000004".into()),
+                ..Default::default()
+            }),
+        };
+        let ServerToClient::AgentOutput { content, meta, .. } =
+            sanitize_outbound(&db.pool, viewer.id, Some(session.id), frame()).unwrap()
+        else {
+            panic!("typed transport changed");
+        };
+        assert_eq!(content["type"], "assistant");
+        assert_eq!(content["uuid"], "a-provider-id");
+        assert_eq!(content["session_id"], other_session.id.to_string());
+        assert_eq!(content["message"]["role"], "assistant");
+        let text = content["message"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.starts_with(MASK));
+        assert!(!text.contains("VIEWER_77"));
+        assert!(text.contains("THIRD_99"));
+        assert_eq!(
+            meta.unwrap().created_at.as_deref(),
+            Some("2026-11-10T01:02:03.000004")
+        );
+        let ServerToClient::AgentOutput { content, .. } =
+            sanitize_outbound(&db.pool, viewer.id, None, frame()).unwrap()
+        else {
+            panic!("typed transport changed");
+        };
+        let text = content["message"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.starts_with("a "));
+        assert!(text.contains("THIRD_99"));
+        let update = ServerToClient::SessionUpdate {
+            session_id: session.id,
+            git_branch: Some("a VIEWER_77 THIRD_99".into()),
+            pr_url: None,
+            repo_url: None,
+            open_prs: vec![],
+        };
+        let ServerToClient::SessionUpdate {
+            session_id,
+            git_branch,
+            ..
+        } = sanitize_outbound(&db.pool, viewer.id, Some(other_session.id), update).unwrap()
+        else {
+            panic!("typed transport changed");
+        };
+        assert_eq!(session_id, session.id);
+        let branch = git_branch.unwrap();
+        assert!(branch.starts_with(MASK));
+        assert!(!branch.contains("VIEWER_77"));
+        assert!(branch.contains("THIRD_99"));
+    }
+    #[test]
+    fn outbound_pool_checkout_fails_fast_when_replay_producers_hold_every_connection() {
+        let Some(db) = Database::new() else {
+            return;
+        };
+        let held: Vec<_> = (0..db.pool.max_size())
+            .map(|_| db.pool.get().unwrap())
+            .collect();
+        let started = std::time::Instant::now();
+        let result = sanitize_outbound(
+            &db.pool,
+            Uuid::new_v4(),
+            None,
+            ServerToClient::Error {
+                message: "safe diagnostic".into(),
+            },
+        );
+        assert!(matches!(
+            result,
+            Err(crate::errors::AppError::ServiceUnavailable(_))
+        ));
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+        drop(held);
     }
 }
