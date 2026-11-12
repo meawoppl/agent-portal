@@ -164,14 +164,12 @@ pub async fn get_prefs(
     use crate::schema::users;
     let mut conn = app_state.conn()?;
 
-    let stored: Option<serde_json::Value> = users::table
+    let stored: Option<crate::db::jsonb::NotificationPrefsJson> = users::table
         .find(user_id)
         .select(users::notification_prefs)
         .first(&mut conn)?;
 
-    let prefs = stored
-        .and_then(|v| serde_json::from_value(v).ok())
-        .unwrap_or_default();
+    let prefs = stored.map(|v| v.0).unwrap_or_default();
 
     Ok(Json(prefs))
 }
@@ -187,9 +185,7 @@ pub async fn put_prefs(
     use crate::schema::users;
     let mut conn = app_state.conn()?;
 
-    // `NotificationPrefs` is a flat struct of bools, so serialization can only
-    // fail on OOM — an `AppError::Internal` is the honest response.
-    let value = serde_json::to_value(prefs).map_err(|e| AppError::Internal(e.to_string()))?;
+    let value = crate::db::jsonb::NotificationPrefsJson(prefs);
 
     diesel::update(users::table.find(user_id))
         .set(users::notification_prefs.eq(Some(value)))
@@ -273,14 +269,12 @@ mod db_tests {
     /// default fallback as the `get_prefs` handler.
     fn read_prefs(conn: &mut diesel::pg::PgConnection, user_id: Uuid) -> NotificationPrefs {
         use crate::schema::users;
-        let stored: Option<serde_json::Value> = users::table
+        let stored: Option<crate::db::jsonb::NotificationPrefsJson> = users::table
             .find(user_id)
             .select(users::notification_prefs)
             .first(conn)
             .expect("select notification_prefs");
-        stored
-            .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_default()
+        stored.map(|v| v.0).unwrap_or_default()
     }
 
     #[test]
@@ -306,7 +300,7 @@ mod db_tests {
         assert_ne!(custom, NotificationPrefs::default());
         {
             use crate::schema::users;
-            let value = serde_json::to_value(custom).unwrap();
+            let value = crate::db::jsonb::NotificationPrefsJson(custom);
             diesel::update(users::table.find(user.id))
                 .set(users::notification_prefs.eq(Some(value)))
                 .execute(&mut conn)

@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="Arial, sans-serif" font-size="24" fill="#a9b1d6">PR #2418 · Typed notification preferences</text>
+<text x="55" y="112" font-family="Arial, sans-serif" font-size="34" fill="#e6e9f5">Notification preferences now cross the database boundary as a typed value.</text>
+<path d="M55 160 H1945 M1000 190 V1130" stroke="#565f89" stroke-dasharray="7 7"/>
+<text x="55" y="220" font-family="Arial, sans-serif" font-size="24" fill="#f7768e">BEFORE</text>
+<rect x="55" y="265" width="900" height="225" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="310" font-family="Arial, sans-serif" font-size="28" fill="#7aa2f7">User.notification_prefs</text>
+<text x="80" y="360" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Option&lt;serde_json::Value&gt;</text>
+<text x="80" y="403" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Handlers and dispatch decode preferences.</text>
+<rect x="55" y="535" width="900" height="225" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="580" font-family="Arial, sans-serif" font-size="28" fill="#7aa2f7">PUT preferences</text>
+<text x="80" y="630" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Serialize to an untyped JSON value.</text>
+<text x="80" y="673" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Database shape is implicit at call sites.</text>
+<rect x="55" y="805" width="900" height="225" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="850" font-family="Arial, sans-serif" font-size="28" fill="#7aa2f7">Legacy reads</text>
+<text x="80" y="900" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Missing and malformed data default.</text>
+<text x="80" y="943" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Behavior spread across consumers.</text>
+<text x="1045" y="220" font-family="Arial, sans-serif" font-size="24" fill="#9ece6a">AFTER</text>
+<rect x="1045" y="265" width="900" height="225" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1070" y="310" font-family="Arial, sans-serif" font-size="28" fill="#7aa2f7">NotificationPrefsJson</text>
+<text x="1070" y="360" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Transparent wrapper around NotificationPrefs.</text>
+<text x="1070" y="403" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">User and queries share the typed boundary.</text>
+<rect x="1045" y="535" width="900" height="225" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1070" y="580" font-family="Arial, sans-serif" font-size="28" fill="#7aa2f7">JSONB write</text>
+<text x="1070" y="630" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Same bare JSON object; no migration.</text>
+<text x="1070" y="673" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">PUT writes the wrapper directly.</text>
+<rect x="1045" y="805" width="900" height="225" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1070" y="850" font-family="Arial, sans-serif" font-size="28" fill="#7aa2f7">PostgreSQL regression coverage</text>
+<text x="1070" y="900" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">SQL NULL, partial and malformed values.</text>
+<text x="1070" y="943" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Defaults preserved; reads do not rewrite data.</text>
+<text x="55" y="1172" font-family="Arial, sans-serif" font-size="22" fill="#a9b1d6">Scope: notification preferences only; unknown fields are ignored on read and omitted on replacement.</text>
+</svg>
