@@ -52,7 +52,9 @@ Newly launched Portal Claude processes (including proxy shim mode) register a
 session-only `PostToolUse` hook matching `ListAgents`. Claude inserts its
 `additionalContext` as a system reminder next to the tool result. This does not
 replace the result, start another turn, or change permissions. Existing hooks
-are preserved; settings files are read but never modified. Explicit Claude
+are preserved: a private, temporary hook plugin is added with `--plugin-dir`,
+without reading or changing user settings. Its files are removed when the
+process exits normally. Explicit Claude
 hook-disabling policies still apply. Already-running Claude processes pick up
 the hook when restarted with the updated launcher/proxy.
 

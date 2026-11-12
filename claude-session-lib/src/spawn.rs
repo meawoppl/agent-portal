@@ -94,7 +94,7 @@ pub fn claude_cli_args(
 /// detached-task ownership of the `Child` defeats — see #927).
 pub(crate) async fn spawn_claude(
     config: &SessionConfig,
-) -> Result<(ClaudeAsyncClient, Option<u32>), SessionError> {
+) -> Result<(ClaudeAsyncClient, Option<u32>, crate::PortalToolReminders), SessionError> {
     let claude_path = config.claude_path.as_deref().unwrap_or(Path::new("claude"));
 
     log_claude_info(claude_path);
@@ -110,8 +110,8 @@ pub(crate) async fn spawn_claude(
         &config.extra_args,
     );
 
-    crate::add_portal_tool_reminders(&mut args, &config.working_directory)
-        .map_err(SessionError::CommunicationError)?;
+    let tool_reminders =
+        crate::add_portal_tool_reminders(&mut args).map_err(SessionError::SpawnFailed)?;
 
     let mut cmd = build_claude_command(claude_path, &args, config);
 
@@ -128,7 +128,7 @@ pub(crate) async fn spawn_claude(
     let client = ClaudeAsyncClient::new(child).map_err(|e| {
         SessionError::CommunicationError(format!("Failed to create ClaudeAsyncClient: {}", e))
     })?;
-    Ok((client, pid))
+    Ok((client, pid, tool_reminders))
 }
 
 /// Build the fully-configured `claude` [`Command`], short of spawning it.

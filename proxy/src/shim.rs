@@ -53,7 +53,7 @@ pub async fn run_shim(config: ProxySessionConfig) -> Result<()> {
     // Spawn claude binary with the same flags as claude-session-lib
     let prompt_suggestions =
         claude_supports_prompt_suggestions(std::path::Path::new("claude")).await;
-    let mut child = spawn_claude(&config, prompt_suggestions)?;
+    let (mut child, tool_reminders) = spawn_claude(&config, prompt_suggestions)?;
 
     let claude_stdin = child
         .stdin
@@ -120,6 +120,7 @@ pub async fn run_shim(config: ProxySessionConfig) -> Result<()> {
 
     stderr_task.abort();
     info!("Claude exited with code {}", code);
+    drop(tool_reminders);
     std::process::exit(code);
 }
 
@@ -127,7 +128,10 @@ pub async fn run_shim(config: ProxySessionConfig) -> Result<()> {
 fn spawn_claude(
     config: &ProxySessionConfig,
     prompt_suggestions: bool,
-) -> Result<tokio::process::Child> {
+) -> Result<(
+    tokio::process::Child,
+    claude_session_lib::PortalToolReminders,
+)> {
     let mut cmd = Command::new("claude");
     // Shim mode wraps claude directly and keeps no conversation sidecar, so
     // there is no learned conversation id or fork source to pass.
@@ -139,8 +143,7 @@ fn spawn_claude(
         prompt_suggestions,
         &config.claude_args,
     );
-    add_portal_tool_reminders(&mut args, std::path::Path::new(&config.working_directory))
-        .map_err(anyhow::Error::msg)?;
+    let tool_reminders = add_portal_tool_reminders(&mut args)?;
     cmd.args(args);
 
     cmd.current_dir(&config.working_directory);
@@ -153,8 +156,10 @@ fn spawn_claude(
         config.session_id, config.resume
     );
 
-    cmd.spawn()
-        .map_err(|e| anyhow::anyhow!("Failed to spawn claude: {e}"))
+    let child = cmd
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("Failed to spawn claude: {e}"))?;
+    Ok((child, tool_reminders))
 }
 
 /// Main shim loop with WebSocket reconnection.

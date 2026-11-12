@@ -1,172 +1,114 @@
 //! Native Claude hooks: context must reach Claude, not just Portal's output mirror.
 
-use std::path::Path;
+const MANIFEST: &str = include_str!("../hooks/portal-agent-discovery/.claude-plugin/plugin.json");
+const HOOKS: &str = include_str!("../hooks/portal-agent-discovery/hooks/hooks.json");
 
-use serde_json::{json, Value};
+/// Owns the private, session-only plugin directory. Keep this alive until the
+/// Claude process ends: hooks can be loaded lazily or again after a clear.
+pub struct PortalToolReminders {
+    _directory: tempfile::TempDir,
+}
 
-const LIST_AGENTS_REMINDER: &str = "Claude's ListAgents results are not a complete Agent Portal inventory. They can omit Portal sessions on other computers or using other providers (such as Codex or Muse). `agent-portal message list` lists Portal sessions accessible to this caller across computers and providers; normal Portal permissions still apply.";
-
-/// Add a session-only PostToolUse hook without modifying settings on disk.
-/// Claude accepts either inline JSON or a file for --settings; preserve the
-/// effective (last) value and its existing hooks. A bare `--` ends flag parsing.
-/// Explicit hook-disabling policy is left intact for Claude to enforce.
-pub fn add_portal_tool_reminders(args: &mut Vec<String>, cwd: &Path) -> Result<(), String> {
+/// Add an independent plugin rather than merging --settings: settings files
+/// may contain secrets and must never be copied into process arguments.
+/// Claude's repeatable --plugin-dir keeps the caller's plugins/settings intact;
+/// explicit hook-disabling policy is left for Claude to enforce.
+pub fn add_portal_tool_reminders(args: &mut Vec<String>) -> std::io::Result<PortalToolReminders> {
+    let directory = tempfile::Builder::new()
+        .prefix("portal-agent-discovery-")
+        .tempdir()?;
+    std::fs::create_dir(directory.path().join(".claude-plugin"))?;
+    std::fs::create_dir(directory.path().join("hooks"))?;
+    std::fs::write(
+        directory.path().join(".claude-plugin/plugin.json"),
+        MANIFEST,
+    )?;
+    std::fs::write(directory.path().join("hooks/hooks.json"), HOOKS)?;
+    // Put flags before a possible end-of-options separator. All original
+    // arguments remain byte-for-byte intact, including settings file paths.
     let end = args
         .iter()
         .position(|arg| arg == "--")
         .unwrap_or(args.len());
-    let mut setting = None;
-    let mut i = 0;
-    while i < end {
-        if args[i] == "--settings" {
-            if i + 1 >= end {
-                return Err("Claude --settings requires a file or JSON object".into());
-            }
-            setting = Some((i + 1, false, args[i + 1].clone()));
-            i += 2;
-        } else {
-            if let Some(value) = args[i].strip_prefix("--settings=") {
-                setting = Some((i, true, value.to_owned()));
-            }
-            i += 1;
-        }
-    }
-    let mut settings = match &setting {
-        None => json!({}),
-        Some((_, _, value)) => {
-            let contents = if value.trim_start().starts_with('{') {
-                value.clone()
-            } else {
-                std::fs::read_to_string(cwd.join(value))
-                    .map_err(|_| "Could not read Claude --settings file".to_string())?
-            };
-            // Settings may contain credentials. Never include their contents
-            // (or a JSON parser's source excerpt) in diagnostics.
-            serde_json::from_str::<Value>(&contents)
-                .map_err(|_| "Claude --settings must contain a JSON object".to_string())?
-        }
-    };
-    let object = settings
-        .as_object_mut()
-        .ok_or("Claude --settings must contain a JSON object")?;
-    let hooks = object.entry("hooks").or_insert_with(|| json!({}));
-    let hooks = hooks
-        .as_object_mut()
-        .ok_or("Claude hooks must be an object")?;
-    let post = hooks.entry("PostToolUse").or_insert_with(|| json!([]));
-    let post = post
-        .as_array_mut()
-        .ok_or("Claude PostToolUse hooks must be an array")?;
-    let output = json!({"hookSpecificOutput": {
-        "hookEventName": "PostToolUse",
-        // Claude itself wraps additionalContext in a system-reminder tag.
-        "additionalContext": LIST_AGENTS_REMINDER,
-    }})
-    .to_string();
-    // Static data only; POSIX single-quote escaping keeps apostrophes and any
-    // future shell metacharacters literal. No tool input enters this command.
-    let command = format!("printf '%s\\n' '{}'", output.replace('\'', "'\\''"));
-    post.push(json!({"matcher": "^ListAgents$", "hooks": [{
-        "type": "command", "command": command, "timeout": 5,
-    }]}));
-    let encoded = settings.to_string();
-    match setting {
-        Some((index, true, _)) => args[index] = format!("--settings={encoded}"),
-        Some((index, false, _)) => args[index] = encoded,
-        None => {
-            args.splice(end..end, ["--settings".to_owned(), encoded]);
-        }
-    }
-    Ok(())
+    args.splice(
+        end..end,
+        [
+            "--plugin-dir".to_owned(),
+            directory.path().to_string_lossy().into_owned(),
+        ],
+    );
+    Ok(PortalToolReminders {
+        _directory: directory,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::Value;
 
     #[test]
     fn hook_emits_context_without_changing_tool_result_or_permissions() {
-        let mut args = vec!["--print".into()];
-        add_portal_tool_reminders(&mut args, Path::new(".")).unwrap();
-        let settings: Value = serde_json::from_str(&args[2]).unwrap();
-        let hook = &settings["hooks"]["PostToolUse"][0];
+        let hooks: Value = serde_json::from_str(HOOKS).unwrap();
+        let events = hooks["hooks"].as_object().unwrap();
+        assert_eq!(events.len(), 1);
+        let hook = &events["PostToolUse"][0];
         assert_eq!(hook["matcher"], "^ListAgents$");
+        assert_eq!(hook["hooks"][0]["type"], "command");
         let result = std::process::Command::new("sh")
             .args(["-c", hook["hooks"][0]["command"].as_str().unwrap()])
             .output()
             .unwrap();
         assert!(result.status.success());
         let output: Value = serde_json::from_slice(&result.stdout).unwrap();
-        assert_eq!(
-            output,
-            json!({"hookSpecificOutput": {
-                "hookEventName": "PostToolUse", "additionalContext": LIST_AGENTS_REMINDER,
-            }})
-        );
+        assert_eq!(output.as_object().unwrap().len(), 1);
+        let context = &output["hookSpecificOutput"];
+        assert_eq!(context.as_object().unwrap().len(), 2);
+        assert_eq!(context["hookEventName"], "PostToolUse");
+        let reminder = context["additionalContext"].as_str().unwrap();
+        assert!(reminder.contains("not a complete Agent Portal inventory"));
+        assert!(reminder.contains("other computers"));
+        assert!(reminder.contains("Codex or Muse"));
+        assert!(reminder.contains("agent-portal message list"));
+        assert!(reminder.contains("permissions still apply"));
     }
 
     #[test]
-    fn preserves_inline_settings_and_existing_hooks() {
-        let existing = json!({"model": "sonnet", "disableAllHooks": true,
-            "hooks": {"PostToolUse": [{"matcher": "Bash", "hooks": []}],
-                      "PreToolUse": [{"matcher": "Read", "hooks": []}]}});
-        let mut args = vec![format!("--settings={existing}")];
-        add_portal_tool_reminders(&mut args, Path::new(".")).unwrap();
-        let updated: Value =
-            serde_json::from_str(args[0].strip_prefix("--settings=").unwrap()).unwrap();
-        assert_eq!(updated["model"], existing["model"]);
-        assert_eq!(updated["disableAllHooks"], true);
-        assert_eq!(
-            updated["hooks"]["PreToolUse"],
-            existing["hooks"]["PreToolUse"]
-        );
-        assert_eq!(
-            updated["hooks"]["PostToolUse"][0],
-            existing["hooks"]["PostToolUse"][0]
-        );
-        assert_eq!(updated["hooks"]["PostToolUse"].as_array().unwrap().len(), 2);
-    }
-
-    #[test]
-    fn resolves_settings_file_from_session_directory_without_writing_it() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("settings.json");
-        let original = r#"{"env":{"EXAMPLE":"value"}}"#;
-        std::fs::write(&path, original).unwrap();
-        let mut args = vec!["--settings".into(), "settings.json".into()];
-        add_portal_tool_reminders(&mut args, dir.path()).unwrap();
-        let updated: Value = serde_json::from_str(&args[1]).unwrap();
-        assert_eq!(updated["env"]["EXAMPLE"], "value");
-        assert_eq!(std::fs::read_to_string(path).unwrap(), original);
-    }
-
-    #[test]
-    fn uses_last_settings_and_respects_end_of_options() {
-        let mut args = vec![
+    fn preserves_settings_plugins_and_prompt_arguments() {
+        let original = vec![
             "--settings".into(),
-            "missing.json".into(),
-            "--settings={\"model\":\"sonnet\"}".into(),
+            "private-settings.json".into(),
+            "--plugin-dir".into(),
+            "user-plugin".into(),
             "--".into(),
-            "--settings=prompt".into(),
+            "prompt".into(),
         ];
-        add_portal_tool_reminders(&mut args, Path::new(".")).unwrap();
-        assert_eq!(args[1], "missing.json");
-        assert!(args[2].contains("PostToolUse"));
-        assert_eq!(args[4], "--settings=prompt");
+        let mut args = original.clone();
+        let plugin = add_portal_tool_reminders(&mut args).unwrap();
+        assert_eq!(args[4], "--plugin-dir");
+        assert_eq!(std::path::Path::new(&args[5]), plugin._directory.path());
+        args.drain(4..6);
+        assert_eq!(args, original);
     }
 
     #[test]
-    fn malformed_settings_fail_without_disclosing_contents() {
-        for value in [
-            "{\"secret\": private",
-            "{\"hooks\":false}",
-            "{\"hooks\":{\"PostToolUse\":{}}}",
-        ] {
-            let mut args = vec!["--settings".into(), value.into()];
-            let original = args.clone();
-            let error = add_portal_tool_reminders(&mut args, Path::new(".")).unwrap_err();
-            assert!(!error.contains("private"));
-            assert_eq!(args, original);
-        }
+    fn plugin_files_live_until_guard_drops_and_are_private_per_process() {
+        let first = add_portal_tool_reminders(&mut Vec::new()).unwrap();
+        let second = add_portal_tool_reminders(&mut Vec::new()).unwrap();
+        let root = first._directory.path().to_owned();
+        assert_ne!(root, second._directory.path());
+        assert_eq!(
+            std::fs::read_to_string(root.join(".claude-plugin/plugin.json")).unwrap(),
+            MANIFEST
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("hooks/hooks.json")).unwrap(),
+            HOOKS
+        );
+        let manifest: Value = serde_json::from_str(MANIFEST).unwrap();
+        assert_eq!(manifest["name"], "portal-agent-discovery");
+        drop(first);
+        assert!(!root.exists());
+        assert!(second._directory.path().exists());
     }
 }

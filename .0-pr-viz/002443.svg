@@ -23,7 +23,7 @@
 <text x="1085" y="565" font-size="28" fill="#9ece6a">PostToolUse: ^ListAgents$</text>
 <text x="1085" y="620" font-size="25">additionalContext becomes a system reminder</text>
 <text x="1085" y="670" font-size="25">beside the tool result, before the next model call.</text>
-<text x="1085" y="720" font-size="25">Existing settings and hooks are preserved.</text>
+<text x="1085" y="720" font-size="25">Added via a private --plugin-dir; settings untouched.</text>
 <path d="M1485 760V810" stroke="#9ece6a" stroke-width="3"/>
 <rect x="1055" y="810" width="865" height="230" rx="16" fill="#1e202e" stroke="#9ece6a"/>
 <text x="1085" y="865" font-size="28" fill="#9ece6a">agent-portal message list</text>

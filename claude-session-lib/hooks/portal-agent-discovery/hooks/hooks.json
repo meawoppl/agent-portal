@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "^ListAgents$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PostToolUse\",\"additionalContext\":\"Claude'\\''s ListAgents results are not a complete Agent Portal inventory. They can omit Portal sessions on other computers or using other providers (such as Codex or Muse). `agent-portal message list` lists Portal sessions accessible to this caller across computers and providers; normal Portal permissions still apply.\"}}'",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

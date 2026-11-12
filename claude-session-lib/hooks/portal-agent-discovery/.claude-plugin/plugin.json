@@ -1,0 +1,9 @@
+{
+  "name": "portal-agent-discovery",
+  "version": "1.0.0",
+  "description": "Clarifies the scope of native Claude agent discovery in Agent Portal.",
+  "author": {
+    "name": "Agent Portal"
+  },
+  "license": "MIT"
+}

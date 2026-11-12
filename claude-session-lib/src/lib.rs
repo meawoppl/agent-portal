@@ -23,7 +23,7 @@ pub mod transcript;
 
 pub use agent::ClaudeAgent;
 pub use spawn::{claude_cli_args, claude_supports_prompt_suggestions};
-pub use tool_reminders::add_portal_tool_reminders;
+pub use tool_reminders::{add_portal_tool_reminders, PortalToolReminders};
 pub use transcript::{
     claude_transcript_id, claude_transcript_status, diverged_conversation_id, TranscriptStatus,
 };
