@@ -35,6 +35,9 @@ pub fn secret_verification(props: &Props) -> Html {
                 .await
                 {
                     Ok(value) => {
+                        if value.verified {
+                            error.set(None);
+                        }
                         on_verified.emit(value.verified);
                         status.set(Some(value));
                     }

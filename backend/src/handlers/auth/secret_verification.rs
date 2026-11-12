@@ -21,6 +21,7 @@ fn destination(value: &str) -> Result<String, AppError> {
     if !value.starts_with('/')
         || value.starts_with("//")
         || value.contains('\\')
+        || value.chars().any(char::is_control)
         || parsed.origin().ascii_serialization() != "https://portal.invalid"
         || !matches!(
             parsed.path(),
@@ -311,6 +312,8 @@ mod tests {
             "https://evil.test/dashboard",
             "/\\evil.test/dashboard",
             "/api/auth/logout",
+            "/settings\n",
+            "/settings?x=\r",
             "/settings/../api/auth/logout",
         ] {
             assert!(destination(p).is_err(), "{p}");
