@@ -623,10 +623,15 @@ GET  /api/auth/device/error     → Error page
 | `GOOGLE_CLIENT_ID` | Production | OAuth client ID |
 | `GOOGLE_CLIENT_SECRET` | Production | OAuth client secret |
 | `GOOGLE_REDIRECT_URI` | Production | OAuth callback URL |
-| `SESSION_SECRET` | Production | Cookie signing key |
+| `SESSION_SECRET` | Production | Cookie signing key and proxy/launcher JWT secret |
+| `SESSION_SECRET_FILE` | Alternative | Path to a file holding `SESSION_SECRET` (one trailing newline stripped). Mutually exclusive with `SESSION_SECRET`; a missing/empty/unsafe file fails startup. See [DOCKER.md](DOCKER.md#session-secret) |
 | `ALLOWED_EMAIL_DOMAIN` | Optional | Restrict to email domain |
 | `ALLOWED_EMAILS` | Optional | Restrict to specific emails |
 | `--dev-mode` (CLI flag) | Development | Enable dev mode (not an env var) |
+
+Rotating the session secret invalidates every signed cookie **and** every
+proxy/launcher JWT: all browsers are logged out and every launcher must
+re-authenticate.
 
 ### Linked portals (federation)
 
