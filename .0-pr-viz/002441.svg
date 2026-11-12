@@ -26,8 +26,9 @@
 <rect x="1055" y="755" width="865" height="145" rx="16" fill="#1e202e" stroke="#9ece6a"/>
 <text x="1090" y="810" font-size="28" fill="#9ece6a">Pending request disables the button</text>
 <text x="1090" y="865" font-size="25">Success refreshes the inventory</text>
-<rect x="65" y="960" width="1855" height="125" rx="16" fill="#1e202e" stroke="#9ece6a"/>
-<text x="100" y="1010" font-size="27" fill="#9ece6a">Confirmation resets on close, selection changes, edits, refresh and mutation submission.</text>
-<text x="100" y="1055" font-size="25">A failed deletion requires two fresh clicks. Desktop, phone and keyboard paths are tested.</text>
+<rect x="1055" y="940" width="865" height="165" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1090" y="985" font-size="25" fill="#9ece6a">Close, switch, edit or refresh cancels confirmation.</text>
+<text x="1090" y="1030" font-size="25">Submitting a mutation also clears confirmation.</text>
+<text x="1090" y="1075" font-size="25">Failure requires two fresh clicks.</text>
 <text x="55" y="1170" font-size="22" fill="#a9b1d6">UI interaction only: server authorization, generation checks and reversible deletion are unchanged.</text>
 </g></svg>
