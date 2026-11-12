@@ -1,6 +1,6 @@
 //! A transcript marker is only a pointer: authority and display metadata come from the API.
 use crate::{portal_client::use_portal, utils};
-use gloo::timers::callback::Timeout;
+use gloo::{events::EventListener, timers::callback::Timeout};
 use gloo_net::http::Request;
 use shared::api::{
     SecretAccessDecisionRequest, SecretAccessGroupInfo, SecretAccessRequestInfo, SecretAccessState,
@@ -49,9 +49,12 @@ struct RequestCard {
     error: Option<&'static str>,
     busy: bool,
     poll: Option<Timeout>,
+    expiry: Option<Timeout>,
+    _wake: Vec<EventListener>,
     account_verified: bool,
 }
 enum Msg {
+    Expire,
     AccountVerified(bool),
     Load(bool),
     Loaded(Result<SecretAccessGroupInfo, &'static str>),
@@ -70,7 +73,95 @@ fn inactive_notice() -> Html {
 fn pending(info: Option<&SecretAccessRequestInfo>) -> bool {
     info.is_some_and(|i| i.state == SecretAccessState::Pending)
 }
-const TRANSIENT_ERROR: &str = "Could not refresh this request. Try again.";
+const TRANSIENT_ERROR: &str = "Could not check this request. Retrying automatically…";
+fn active(state: SecretAccessState) -> bool {
+    matches!(
+        state,
+        SecretAccessState::Pending | SecretAccessState::Approved
+    )
+}
+fn deadline(item: &SecretAccessRequestInfo) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(&item.expires_at)
+        .ok()
+        .map(|t| t.timestamp_millis())
+}
+fn expire_at(info: &mut SecretAccessGroupInfo, now: i64) {
+    if !active(info.state) {
+        return;
+    }
+    for item in &mut info.items {
+        if active(item.state) && deadline(item).is_some_and(|t| t <= now) {
+            item.state = SecretAccessState::Expired;
+        }
+    }
+    if info
+        .items
+        .iter()
+        .any(|i| i.state == SecretAccessState::Expired)
+    {
+        info.state = SecretAccessState::Expired;
+    }
+}
+fn can_decide_group(
+    eligible: bool,
+    busy: bool,
+    info: Option<&SecretAccessGroupInfo>,
+    now: i64,
+) -> bool {
+    info.is_some_and(|group| {
+        group.state == SecretAccessState::Pending
+            && !group.items.is_empty()
+            && group.items.iter().all(|item| {
+                can_decide(eligible, busy, Some(item)) && deadline(item).is_some_and(|t| t > now)
+            })
+    })
+}
+impl RequestCard {
+    fn schedule_expiry(&mut self, ctx: &Context<Self>) {
+        self.expiry = None;
+        if let Some(info) = &mut self.info {
+            let now = js_sys::Date::now() as i64;
+            expire_at(info, now);
+            if active(info.state) {
+                if self._wake.is_empty() {
+                    if let Some(window) = web_sys::window() {
+                        let link = ctx.link().clone();
+                        self._wake
+                            .push(EventListener::new(&window, "focus", move |_| {
+                                link.send_message(Msg::Expire)
+                            }));
+                        if let Some(document) = window.document() {
+                            let link = ctx.link().clone();
+                            self._wake.push(EventListener::new(
+                                &document,
+                                "visibilitychange",
+                                move |_| link.send_message(Msg::Expire),
+                            ));
+                        }
+                    }
+                }
+                if let Some(next) = info
+                    .items
+                    .iter()
+                    .filter(|i| active(i.state))
+                    .filter_map(deadline)
+                    .min()
+                {
+                    let delay = (next - now).clamp(1, i32::MAX as i64) as u32;
+                    let link = ctx.link().clone();
+                    self.expiry = Some(Timeout::new(delay, move || link.send_message(Msg::Expire)));
+                }
+            } else {
+                self.poll = None;
+                self._wake.clear();
+                if self.error == Some(TRANSIENT_ERROR) {
+                    self.error = None;
+                }
+            }
+        }
+    }
+}
+
 async fn load(id: Uuid, grouped: bool) -> Result<SecretAccessGroupInfo, &'static str> {
     let fetch = load_response(id, grouped);
     let timeout = gloo::timers::future::TimeoutFuture::new(10_000);
@@ -115,11 +206,14 @@ impl Component for RequestCard {
             error: None,
             busy: false,
             poll: None,
+            expiry: None,
+            _wake: Vec::new(),
             account_verified: false,
         }
     }
     fn update(&mut self, ctx: &Context<Self>, msg: Msg) -> bool {
         match msg {
+            Msg::Expire => self.schedule_expiry(ctx),
             Msg::AccountVerified(value) => self.account_verified = value,
             Msg::Load(preserve_error) => {
                 if self.busy || !ctx.props().eligible {
@@ -147,6 +241,7 @@ impl Component for RequestCard {
                         ) =>
                     {
                         self.info = Some(info);
+                        self.schedule_expiry(ctx);
                         if self
                             .info
                             .as_ref()
@@ -163,12 +258,22 @@ impl Component for RequestCard {
                         self.error = Some("This request does not belong to this session.");
                     }
                     Err(error) => {
+                        if error == TRANSIENT_ERROR
+                            && self
+                                .info
+                                .as_ref()
+                                .is_some_and(|i| i.state == SecretAccessState::Expired)
+                        {
+                            // An overdue fetch cannot erase a locally expired card.
+                            self.error = None;
+                            return true;
+                        }
                         self.error = Some(error);
                         if error == TRANSIENT_ERROR
                             && self
                                 .info
                                 .as_ref()
-                                .is_some_and(|i| i.state == SecretAccessState::Pending)
+                                .is_none_or(|i| i.state == SecretAccessState::Pending)
                         {
                             // Keep polling a previously verified pending request across a reconnect,
                             // but never permit a decision while its status is unconfirmed.
@@ -181,14 +286,19 @@ impl Component for RequestCard {
                         }
                     }
                 }
+                if self.info.is_none() {
+                    self.expiry = None;
+                    self._wake.clear();
+                }
             }
             Msg::Decide(approve) => {
                 if (approve && !self.account_verified)
                     || self.error.is_some()
-                    || !can_decide(
+                    || !can_decide_group(
                         ctx.props().eligible,
                         self.busy,
-                        self.info.as_ref().and_then(|i| i.items.first()),
+                        self.info.as_ref(),
+                        js_sys::Date::now() as i64,
                     )
                 {
                     return false;
@@ -222,10 +332,11 @@ impl Component for RequestCard {
     fn view(&self, ctx: &Context<Self>) -> Html {
         let eligible = ctx.props().eligible;
         let actionable = self.error.is_none()
-            && can_decide(
+            && can_decide_group(
                 eligible,
                 self.busy,
-                self.info.as_ref().and_then(|i| i.items.first()),
+                self.info.as_ref(),
+                js_sys::Date::now() as i64,
             );
         let state_class = match self.info.as_ref().map(|i| &i.state) {
             Some(SecretAccessState::Approved) => "is-approved",
@@ -237,7 +348,9 @@ impl Component for RequestCard {
             _ => "is-pending",
         };
         html! { <section class={classes!("permission-prompt", "secret-access-request", state_class)} aria-live="polite">
-            <strong>{"Agent secret access"}</strong>
+            <header class="secret-access-summary"><strong>{"Agent secret access"}</strong>
+                if let Some(info) = &self.info {<span class="secret-access-status">{state_text(info.state)}</span>}
+            </header>
             if !eligible { {inactive_notice()} }
             else {
                 if let Some(info) = &self.info { {if ctx.props().grouped {render_group(info)} else {info.items.first().map(render_info).unwrap_or_default()}} }
@@ -248,13 +361,12 @@ impl Component for RequestCard {
                 if self.info.as_ref().is_some_and(|i| i.state == SecretAccessState::Pending) {
                     <crate::components::secret_verification::SecretVerification on_verified={ctx.link().callback(Msg::AccountVerified)} />
                 }
-                <div class="secret-access-actions">
-                    if self.info.as_ref().is_some_and(|i| i.state == SecretAccessState::Pending) {
+                if self.info.as_ref().is_some_and(|i| i.state == SecretAccessState::Pending) {
+                    <div class="secret-access-actions">
                         <button type="button" class="secret-button secret-button--primary" disabled={!actionable || !self.account_verified} onclick={ctx.link().callback(|_| Msg::Decide(true))}>{if ctx.props().grouped {"Approve all credentials"} else {"Approve access"}}</button>
                         <button type="button" class="secret-button" disabled={!actionable} onclick={ctx.link().callback(|_| Msg::Decide(false))}>{if ctx.props().grouped {"Deny all"} else {"Deny"}}</button>
-                    }
-                    <button type="button" class="secret-button secret-button--quiet" disabled={self.busy} onclick={ctx.link().callback(|_| Msg::Load(false))}>{if self.busy {"Checking…"} else {"Refresh status"}}</button>
-                </div>
+                    </div>
+                }
             }
         </section> }
     }
@@ -273,21 +385,54 @@ fn verified_group(
     }
     let first = &info.items[0];
     info.items.iter().all(|i| {
-        i.session_id == session
+        deadline(i).is_some()
+            && i.session_id == session
             && i.owner_user_id == first.owner_user_id
             && i.launcher_id == first.launcher_id
     }) && (grouped || (info.items.len() == 1 && verified(first, request, session)))
 }
+fn state_text(state: SecretAccessState) -> &'static str {
+    match state {
+        SecretAccessState::Pending => "Pending",
+        SecretAccessState::Approved => "Approved",
+        SecretAccessState::Denied => "Denied",
+        SecretAccessState::Expired => "Expired",
+        SecretAccessState::Invalidated => "Invalidated",
+    }
+}
+fn render_credential(item: &SecretAccessRequestInfo) -> Html {
+    html! {<div class="secret-access-credential">
+        <div><strong>{&item.name}</strong><span class="secret-access-version">{format!("{} · version {}", if item.namespace == SecretNamespace::Personal {"Personal"} else {"Organization"}, item.version)}</span></div>
+        <span class="secret-access-environment" title="Environment variable"><code>{&item.env_name}</code></span>
+    </div>}
+}
+fn render_deadline(item: &SecretAccessRequestInfo) -> Html {
+    html! {<p class="secret-access-timing">{format!("{} · {} ", duration_text(item.expires_in_seconds), if item.binding_id.is_some() {"Access expires"} else {"Request expires"})}<time datetime={item.expires_at.clone()}>{expiry_text(&item.expires_at)}</time></p>}
+}
+fn render_details(item: &SecretAccessRequestInfo) -> Html {
+    html! {<dl>
+        <dt>{"Owner"}</dt><dd>{item.owner_user_id.to_string()}</dd>
+        <dt>{"Secret ID"}</dt><dd>{item.secret_id.to_string()}</dd>
+        <dt>{"Request ID"}</dt><dd>{item.id.to_string()}</dd>
+        <dt>{"Session"}</dt><dd>{item.session_id.to_string()}</dd>
+        <dt>{"Launcher"}</dt><dd>{item.launcher_id.to_string()}</dd>
+    </dl>}
+}
 fn render_group(info: &SecretAccessGroupInfo) -> Html {
+    let first = &info.items[0]; // verified_group rejects empty responses.
+    let common = info.items.iter().all(|i| {
+        i.expires_at == first.expires_at
+            && i.expires_in_seconds == first.expires_in_seconds
+            && i.binding_id.is_some() == first.binding_id.is_some()
+    });
     html! {<div class="secret-access-group">
-        <p>{format!("{} credentials · {:?}", info.items.len(), info.state)}</p>
         <ul>{for info.items.iter().map(|item| html!{<li>
-            <strong>{&item.name}</strong><span>{format!("{} · version {}", if item.namespace == SecretNamespace::Personal {"Personal"} else {"Organization"}, item.version)}</span>
-            <span>{"Environment: "}<code>{&item.env_name}</code></span>
-            <span>{format!("{} · {:?}", duration_text(item.expires_in_seconds), item.state)}</span><time datetime={item.expires_at.clone()}>{format!("Expires {}", expiry_text(&item.expires_at))}</time>
+            {render_credential(item)}
+            if !common {{render_deadline(item)}}
         </li>})}</ul>
-        if info.state == SecretAccessState::Pending {<p>{"Approval gives this agent process plaintext access to every credential listed above. All are approved together; values stay hidden here."}</p>}
-        <details><summary>{"Technical details"}</summary>{for info.items.iter().map(render_info)}</details>
+        if common {{render_deadline(first)}}
+        <details class="secret-access-details"><summary>{"Technical details"}</summary>{for info.items.iter().map(|item| html!{<div><strong>{&item.name}</strong>{render_details(item)}</div>})}</details>
+        if info.state == SecretAccessState::Pending {<p>{"Approve plaintext access to all listed credentials for this agent process. Values stay hidden here."}</p>}
     </div>}
 }
 fn duration_text(seconds: u64) -> String {
@@ -311,35 +456,12 @@ fn expiry_text(value: &str) -> String {
         .unwrap_or_else(|_| value.into())
 }
 fn render_info(info: &SecretAccessRequestInfo) -> Html {
-    let namespace = match info.namespace {
-        SecretNamespace::Personal => "Personal",
-        SecretNamespace::Organization => "Organization",
-    };
-    let state = match info.state {
-        SecretAccessState::Pending => "Pending",
-        SecretAccessState::Approved => "Approved",
-        SecretAccessState::Denied => "Denied",
-        SecretAccessState::Expired => "Expired",
-        SecretAccessState::Invalidated => "Invalidated",
-    };
-    let duration = duration_text(info.expires_in_seconds);
-    let expiry = expiry_text(&info.expires_at);
     html! { <>
-        <div class="secret-access-summary"><p><strong>{&info.name}</strong><span class="secret-access-version">{format!("{namespace} · version {}", info.version)}</span></p><span class="secret-access-status">{state}</span></div>
-        <dl>
-            <dt>{"Environment variable"}</dt><dd><code>{&info.env_name}</code></dd>
-            <dt>{"Access duration"}</dt><dd>{duration}</dd>
-            <dt>{if info.binding_id.is_some() {"Access expires"} else {"Request expires"}}</dt><dd><time datetime={info.expires_at.clone()}>{expiry}</time></dd>
-        </dl>
-        <details class="secret-access-details"><summary>{"Technical details"}</summary><dl>
-            <dt>{"Owner"}</dt><dd>{info.owner_user_id.to_string()}</dd>
-            <dt>{"Secret ID"}</dt><dd>{info.secret_id.to_string()}</dd>
-            <dt>{"Request ID"}</dt><dd>{info.id.to_string()}</dd>
-            <dt>{"Session"}</dt><dd>{info.session_id.to_string()}</dd>
-            <dt>{"Launcher"}</dt><dd>{info.launcher_id.to_string()}</dd>
-        </dl></details>
+        {render_credential(info)}
+        {render_deadline(info)}
+        <details class="secret-access-details"><summary>{"Technical details"}</summary>{render_details(info)}</details>
         if info.state == SecretAccessState::Pending {
-            <p>{"Approval gives this agent process plaintext access to this secret version. The value stays hidden here."}</p>
+            <p>{"Approve plaintext access to this secret version for this agent process. The value stays hidden here."}</p>
         }
     </> }
 }
@@ -364,6 +486,96 @@ mod tests {
             expires_at: "2026-11-11T00:10:00Z".into(),
             binding_id: None,
         }
+    }
+    #[test]
+    fn deadlines_expire_pending_and_approved_groups_without_reopening_closed_states() {
+        for state in [SecretAccessState::Pending, SecretAccessState::Approved] {
+            let mut item = info();
+            item.state = state;
+            let end = deadline(&item).unwrap();
+            let mut group = SecretAccessGroupInfo {
+                id: item.id,
+                state,
+                items: vec![item],
+            };
+            expire_at(&mut group, end - 1);
+            assert_eq!(group.state, state);
+            assert_eq!(
+                can_decide_group(true, false, Some(&group), end - 1),
+                state == SecretAccessState::Pending
+            );
+            assert!(!can_decide_group(true, false, Some(&group), end));
+            expire_at(&mut group, end);
+            assert_eq!(group.state, SecretAccessState::Expired);
+            assert_eq!(group.items[0].state, SecretAccessState::Expired);
+            expire_at(&mut group, end - 1000);
+            assert_eq!(group.state, SecretAccessState::Expired);
+        }
+        for state in [SecretAccessState::Denied, SecretAccessState::Invalidated] {
+            let mut item = info();
+            item.state = state;
+            let mut group = SecretAccessGroupInfo {
+                id: item.id,
+                state,
+                items: vec![item],
+            };
+            expire_at(&mut group, i64::MAX);
+            assert_eq!(group.state, state);
+        }
+    }
+    #[test]
+    fn group_uses_earliest_deadline_and_rejects_invalid_timestamps() {
+        let first = info();
+        let end = deadline(&first).unwrap();
+        let mut second = first.clone();
+        second.id = Uuid::new_v4();
+        second.expires_at = "2026-11-11T00:20:00Z".into();
+        let mut group = SecretAccessGroupInfo {
+            id: Uuid::new_v4(),
+            state: SecretAccessState::Pending,
+            items: vec![first, second],
+        };
+        assert!(verified_group(
+            &group,
+            group.id,
+            group.items[0].session_id,
+            true
+        ));
+        expire_at(&mut group, end);
+        assert_eq!(group.state, SecretAccessState::Expired);
+        assert!(!can_decide_group(true, false, Some(&group), end));
+        assert_eq!(group.items[1].state, SecretAccessState::Pending);
+        group.items[1].expires_at = "invalid".into();
+        assert!(!verified_group(
+            &group,
+            group.id,
+            group.items[0].session_id,
+            true
+        ));
+    }
+    #[test]
+    fn compact_group_shares_timing_but_preserves_every_credential_scope() {
+        let first = info();
+        let mut second = first.clone();
+        second.name = "other-key".into();
+        second.env_name = "OTHER_KEY".into();
+        let group = SecretAccessGroupInfo {
+            id: Uuid::new_v4(),
+            state: SecretAccessState::Pending,
+            items: vec![first, second],
+        };
+        let text = super::super::visible_text(&render_group(&group));
+        assert_eq!(text.matches("15 minutes").count(), 1);
+        for scope in [
+            "deploy-key",
+            "other-key",
+            "DEPLOY_KEY",
+            "OTHER_KEY",
+            "plaintext access",
+        ] {
+            assert!(text.contains(scope));
+        }
+        assert_eq!(text.matches("Technical details").count(), 1);
     }
     #[test]
     fn binding_expiry_is_distinct_from_pending_request_deadline() {

@@ -536,51 +536,104 @@
 .secret-access-request {
     background: var(--bg-secondary, #24283b);
     border-color: var(--border-color, #565f89);
-    gap: 0.85rem;
+    gap: 0.45rem;
+    padding: 0.75rem;
     max-height: none;
 }
+
 .secret-access-request.is-approved {
     border-color: var(--success-color, #9ece6a);
 }
+
 .secret-access-request p, .secret-access-request dl {
     margin: 0;
-}
-.secret-access-summary {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 1rem;
-}
-.secret-access-summary p {
-    min-width: 0;
-    overflow-wrap: anywhere;
-}
-.secret-access-version {
-    display: block;
-    margin-top: 0.25rem;
-    color: var(--text-muted, #a9b1d6);
     font-size: 0.875rem;
 }
+
+.secret-access-summary,
+.secret-access-credential {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.35rem 0.75rem;
+}
+
+.secret-access-credential,
+.secret-access-credential > div {
+    flex-wrap: wrap;
+    overflow-wrap: anywhere;
+    min-width: 0;
+}
+
+.secret-access-credential > div {
+    display: flex;
+    align-items: baseline;
+    gap: 0.25rem 0.5rem;
+}
+
+.secret-access-version,
+.secret-access-timing,
+.secret-access-environment {
+    color: var(--text-muted, #a9b1d6);
+    font-size: 0.8125rem;
+}
+
 .secret-access-status {
     flex-shrink: 0;
-    padding: 0.25rem 0.6rem;
+    padding: 0.1rem 0.5rem;
     border: 1px solid currentColor;
     border-radius: 999px;
-    font-size: 0.875rem;
+    font-size: 0.8125rem;
 }
+
 .is-approved .secret-access-status {
     color: var(--success-color, #9ece6a);
 }
+
 .secret-access-details summary {
     cursor: pointer;
     color: var(--text-muted, #a9b1d6);
-    padding: 0.25rem 0;
+    font-size: 0.8125rem;
 }
+
 .secret-access-details[open] dl {
-    margin-top: 0.5rem;
+    margin: 0.35rem 0;
 }
+
 .secret-access-request .secrets-verification {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem 0.75rem;
     margin: 0;
+    padding: 0;
+    background: transparent;
+    border: 0;
+}
+
+.secret-access-request .secrets-verification p {
+    margin: 0;
+}
+
+.secret-access-request .secret-button {
+    padding: 0.4rem 0.75rem;
+    font-size: 0.875rem;
+}
+
+.secret-access-group,
+.secret-access-group > ul {
+    display: grid;
+    gap: 0.4rem;
+}
+
+.secret-access-group > ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.secret-access-group > ul > li {
+    min-width: 0;
 }
 
 @media (max-width: 600px) {
@@ -588,28 +641,9 @@
         grid-template-columns: minmax(0, 1fr);
     }
     .secret-access-request dd {
-        margin-bottom: 0.5rem;
+        margin-bottom: 0.35rem;
     }
     .secret-access-actions .secret-button {
         flex: 1 1 auto;
     }
-}
-.secret-access-group > ul {
-    list-style: none;
-    margin: 0.75rem 0;
-    padding: 0;
-    display: grid;
-    gap: 0.75rem;
-}
-.secret-access-group > ul > li {
-    display: grid;
-    gap: 0.25rem;
-    padding: 0.75rem;
-    border: 1px solid var(--border-color, #565f89);
-    border-radius: 8px;
-    overflow-wrap: anywhere;
-}
-.secret-access-group > ul > li > span,
-.secret-access-group > ul > li > time {
-    font-size: 0.875rem;
 }

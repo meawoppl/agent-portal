@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2434 · Compact credential cards with automatic expiry</text>
+<text x="55" y="106" font-family="sans-serif" font-size="34" fill="#e6e9f5">Repeated metadata made cards tall; approved access could stay visible past its deadline.</text>
+<text x="55" y="148" font-family="sans-serif" font-size="34" fill="#e6e9f5">Compact rows preserve scope, while deadline timers close overdue cards without Refresh.</text>
+<path d="M55 175 H1945 M1000 190 V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="70" y="230" font-family="sans-serif" font-size="24" fill="#f7768e">BEFORE</text>
+<text x="1070" y="230" font-family="sans-serif" font-size="24" fill="#9ece6a">AFTER</text>
+<rect x="70" y="280" width="840" height="185" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="94" y="322" font-family="sans-serif" font-size="28" fill="#f7768e">Repeated credential blocks</text>
+<text x="94" y="368" font-family="sans-serif" font-size="24" fill="#c0caf5">Names, versions, durations, states and expiry lines.</text>
+<text x="94" y="402" font-family="sans-serif" font-size="24" fill="#c0caf5">Two credentials: 493px desktop / 591px mobile.</text>
+<rect x="70" y="540" width="840" height="185" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="94" y="582" font-family="sans-serif" font-size="28" fill="#f7768e">Refresh status stays on every card</text>
+<text x="94" y="628" font-family="sans-serif" font-size="24" fill="#c0caf5">Pending requests already poll automatically.</text>
+<text x="94" y="662" font-family="sans-serif" font-size="24" fill="#c0caf5">Approved cards stop polling and need a refresh.</text>
+<rect x="1070" y="280" width="840" height="185" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1094" y="322" font-family="sans-serif" font-size="28" fill="#9ece6a">Compact rows + shared timing</text>
+<text x="1094" y="368" font-family="sans-serif" font-size="24" fill="#c0caf5">Keep name, namespace, version and environment.</text>
+<text x="1094" y="402" font-family="sans-serif" font-size="24" fill="#c0caf5">Two credentials: 236px desktop / 310px mobile.</text>
+<rect x="1070" y="540" width="840" height="185" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1094" y="582" font-family="sans-serif" font-size="28" fill="#9ece6a">Deadline timer + tab wakeup</text>
+<text x="1094" y="628" font-family="sans-serif" font-size="24" fill="#c0caf5">Pending request or approved binding -&gt; Expired.</text>
+<text x="1094" y="662" font-family="sans-serif" font-size="24" fill="#c0caf5">No Refresh button; initial transient failures retry.</text>
+<rect x="1070" y="800" width="840" height="185" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1094" y="842" font-family="sans-serif" font-size="28" fill="#9ece6a">Closed cards stop background work</text>
+<text x="1094" y="888" font-family="sans-serif" font-size="24" fill="#c0caf5">Late data is checked against its expiry timestamp.</text>
+<text x="1094" y="922" font-family="sans-serif" font-size="24" fill="#c0caf5">Decision handlers reject overdue requests too.</text>
+<text x="55" y="1170" font-family="sans-serif" font-size="22" fill="#a9b1d6">Scope: browser presentation only. Server approval policy is unchanged; local time cannot grant or extend access.</text>
+</svg>
