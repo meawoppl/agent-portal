@@ -24,7 +24,8 @@ impl Agent for ClaudeAgent {
         // surfaced via the event channel — see the `Err(e) =>` branch below.
         let handle = tokio::spawn(async move {
             let session_id = config.session_id;
-            let (client, pid) = match spawn_claude(&config).await {
+            // Keep the private hook plugin alive for the entire Claude process.
+            let (client, pid, _tool_reminders) = match spawn_claude(&config).await {
                 Ok(c) => c,
                 Err(e) => {
                     let _ = event_tx.send(IoEvent::Error(e));
