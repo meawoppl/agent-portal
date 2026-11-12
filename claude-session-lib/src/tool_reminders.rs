@@ -24,14 +24,10 @@ pub fn add_portal_tool_reminders(args: &mut Vec<String>) -> std::io::Result<Port
         MANIFEST,
     )?;
     std::fs::write(directory.path().join("hooks/hooks.json"), HOOKS)?;
-    // Put flags before a possible end-of-options separator. All original
-    // arguments remain byte-for-byte intact, including settings file paths.
-    let end = args
-        .iter()
-        .position(|arg| arg == "--")
-        .unwrap_or(args.len());
+    // Prepend rather than parsing arbitrary caller flags: even a value equal
+    // to `--` (for example a system prompt) must remain untouched.
     args.splice(
-        end..end,
+        0..0,
         [
             "--plugin-dir".to_owned(),
             directory.path().to_string_lossy().into_owned(),
@@ -78,6 +74,8 @@ mod tests {
         let original = vec![
             "--settings".into(),
             "private-settings.json".into(),
+            "--append-system-prompt".into(),
+            "--".into(),
             "--plugin-dir".into(),
             "user-plugin".into(),
             "--".into(),
@@ -85,9 +83,9 @@ mod tests {
         ];
         let mut args = original.clone();
         let plugin = add_portal_tool_reminders(&mut args).unwrap();
-        assert_eq!(args[4], "--plugin-dir");
-        assert_eq!(std::path::Path::new(&args[5]), plugin._directory.path());
-        args.drain(4..6);
+        assert_eq!(args[0], "--plugin-dir");
+        assert_eq!(std::path::Path::new(&args[1]), plugin._directory.path());
+        args.drain(0..2);
         assert_eq!(args, original);
     }
 
