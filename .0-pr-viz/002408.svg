@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+  <rect width="2000" height="1200" fill="#1a1b26"/>
+  <g font-family="Arial, sans-serif">
+    <text x="55" y="52" fill="#a9b1d6" font-size="24" letter-spacing="1">PR #2408 · Keep phone navigation aligned with CSS</text>
+    <text x="55" y="105" fill="#e6e9f5" font-size="34">Overflow can make a 412px phone report innerWidth = 1400.</text>
+    <text x="55" y="149" fill="#e6e9f5" font-size="34">The dashboard now follows the CSS media query, keeping mobile controls mounted.</text>
+    <path d="M55 177 H1945" stroke="#3d4666"/>
+    <path d="M1000 205 V1120" stroke="#3d4666" stroke-dasharray="9 9"/>
+    <text x="75" y="235" fill="#f7768e" font-size="22" font-weight="bold" letter-spacing="4">BEFORE</text>
+    <text x="1055" y="235" fill="#9ece6a" font-size="22" font-weight="bold" letter-spacing="4">AFTER</text>
+    <g>
+      <rect x="75" y="275" width="870" height="190" rx="16" fill="#1e202e" stroke="#3d4666"/>
+      <text x="105" y="320" fill="#7aa2f7" font-size="26">session-mobile.css</text>
+      <text x="105" y="365" fill="#c0caf5" font-size="25">@media (max-width: 768px)</text>
+      <text x="105" y="408" fill="#a9b1d6" font-size="23">Matches the 412px phone viewport.</text>
+      <text x="105" y="444" fill="#a9b1d6" font-size="23">Oversized content does not change this CSS result.</text>
+    </g>
+    <g>
+      <rect x="1055" y="275" width="870" height="190" rx="16" fill="#1e202e" stroke="#3d4666"/>
+      <text x="1085" y="320" fill="#7aa2f7" font-size="26">session-mobile.css</text>
+      <text x="1085" y="365" fill="#c0caf5" font-size="25">@media (max-width: 768px)</text>
+      <text x="1085" y="408" fill="#a9b1d6" font-size="23">Matches the same 412px phone viewport.</text>
+      <text x="1085" y="444" fill="#a9b1d6" font-size="23">The stylesheet's breakpoint stays the same.</text>
+    </g>
+    <path d="M510 480 V515 l-10 -14 m10 14 l10 -14" fill="none" stroke="#a9b1d6" stroke-width="3"/>
+    <path d="M1490 480 V515 l-10 -14 m10 14 l10 -14" fill="none" stroke="#a9b1d6" stroke-width="3"/>
+    <g>
+      <rect x="75" y="535" width="870" height="225" rx="16" fill="#1e202e" stroke="#f7768e"/>
+      <text x="105" y="580" fill="#7aa2f7" font-size="26">use_mobile_dashboard</text>
+      <text x="105" y="625" fill="#c0caf5" font-size="25">mobile_dashboard_viewport: innerWidth &lt;= 768</text>
+      <text x="105" y="669" fill="#f7768e" font-size="25">1400 &lt;= 768 is false: selects desktop.</text>
+      <text x="105" y="710" fill="#a9b1d6" font-size="23">A window resize repeats the inflated measurement.</text>
+      <text x="105" y="744" fill="#a9b1d6" font-size="23">Component rendering disagrees with the mobile CSS.</text>
+    </g>
+    <g>
+      <rect x="1055" y="535" width="870" height="225" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+      <text x="1085" y="580" fill="#7aa2f7" font-size="26">use_mobile_dashboard</text>
+      <text x="1085" y="625" fill="#c0caf5" font-size="25">mobile_dashboard_query: MediaQueryList.matches</text>
+      <text x="1085" y="669" fill="#9ece6a" font-size="25">matchMedia("(max-width: 768px)").matches = true</text>
+      <text x="1085" y="710" fill="#a9b1d6" font-size="23">Reconciles at setup; subscribes to query change events.</text>
+      <text x="1085" y="744" fill="#a9b1d6" font-size="23">Component rendering follows the mobile CSS.</text>
+    </g>
+    <path d="M510 780 V815 l-10 -14 m10 14 l10 -14" fill="none" stroke="#a9b1d6" stroke-width="3"/>
+    <path d="M1490 780 V815 l-10 -14 m10 14 l10 -14" fill="none" stroke="#a9b1d6" stroke-width="3"/>
+    <g>
+      <rect x="75" y="835" width="870" height="250" rx="16" fill="#1e202e" stroke="#3d4666"/>
+      <text x="105" y="880" fill="#f7768e" font-size="26">Wrong navigation on the phone</text>
+      <text x="105" y="925" fill="#c0caf5" font-size="25">SessionRail replaces MobileReady.</text>
+      <text x="105" y="970" fill="#c0caf5" font-size="23">Background SessionView hydration can start.</text>
+      <text x="105" y="1015" fill="#a9b1d6" font-size="23">The regression fails on the old Android build:</text>
+      <text x="105" y="1058" fill="#a9b1d6" font-size="23">.mobile-ready-bar disappears after a height resize.</text>
+    </g>
+    <g>
+      <rect x="1055" y="835" width="870" height="250" rx="16" fill="#1e202e" stroke="#3d4666"/>
+      <text x="1085" y="880" fill="#9ece6a" font-size="26">Mobile rendering stays selected</text>
+      <text x="1085" y="925" fill="#c0caf5" font-size="25">MobileReady stays mounted; SessionRail stays absent.</text>
+      <text x="1085" y="970" fill="#c0caf5" font-size="23">Only the focused session is mounted on mobile.</text>
+      <text x="1085" y="1015" fill="#a9b1d6" font-size="23">Android and WebKit browser regressions pass.</text>
+      <text x="1085" y="1058" fill="#a9b1d6" font-size="23">Real 768/769px breakpoint changes work both ways.</text>
+    </g>
+    <text x="55" y="1172" fill="#a9b1d6" font-size="22">Reproduced with injected overflow in browser emulation; confirmation on the reporting phone remains after deployment.</text>
+  </g>
+</svg>
