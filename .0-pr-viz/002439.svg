@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2439 · Read the session secret from SESSION_SECRET_FILE</text>
+<text x="55" y="106" font-family="sans-serif" font-size="34" fill="#e6e9f5">The cookie + launcher JWT secret could only come from an env var, with a silent ephemeral fallback.</text>
+<text x="55" y="148" font-family="sans-serif" font-size="34" fill="#e6e9f5">Now a read-only file can supply the same bytes, and any file problem fails startup instead.</text>
+<path d="M55 175 H1945 M1000 190 V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="70" y="230" font-family="sans-serif" font-size="24" fill="#f7768e">BEFORE</text>
+<text x="1070" y="230" font-family="sans-serif" font-size="24" fill="#9ece6a">AFTER</text>
+<rect x="70" y="280" width="840" height="185" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="94" y="322" font-family="sans-serif" font-size="28" fill="#7aa2f7">env::var("SESSION_SECRET")</text>
+<text x="94" y="368" font-family="sans-serif" font-size="24" fill="#c0caf5">The only source. Deploys must place the secret in the</text>
+<text x="94" y="402" font-family="sans-serif" font-size="24" fill="#c0caf5">container environment (env_file, compose, inspect output).</text>
+<rect x="70" y="540" width="840" height="185" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="94" y="582" font-family="sans-serif" font-size="28" fill="#f7768e">Missing -&gt; Key::generate(), warn only</text>
+<text x="94" y="628" font-family="sans-serif" font-size="24" fill="#c0caf5">A lost secret still boots: every restart logs out all</text>
+<text x="94" y="662" font-family="sans-serif" font-size="24" fill="#c0caf5">browsers and invalidates every launcher JWT.</text>
+<rect x="1070" y="280" width="840" height="185" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1094" y="322" font-family="sans-serif" font-size="28" fill="#9ece6a">resolve_session_secret(env, SESSION_SECRET_FILE)</text>
+<text x="1094" y="368" font-family="sans-serif" font-size="24" fill="#c0caf5">File: strip one "\n" or "\r\n", require UTF-8, non-empty.</text>
+<text x="1094" y="402" font-family="sans-serif" font-size="24" fill="#c0caf5">Same bytes as the env var -&gt; same cookie_key and jwt_secret.</text>
+<rect x="1070" y="540" width="840" height="185" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1094" y="582" font-family="sans-serif" font-size="28" fill="#9ece6a">read_session_secret_file: checks on the open fd</text>
+<text x="1094" y="628" font-family="sans-serif" font-size="24" fill="#c0caf5">Regular file, owner root or backend uid, mode &amp; 0o022 == 0,</text>
+<text x="1094" y="662" font-family="sans-serif" font-size="24" fill="#c0caf5">at most 4096 bytes. Root 0444 and uid-1001 0400 both pass.</text>
+<rect x="1070" y="800" width="840" height="185" rx="12" fill="#1e202e" stroke="#e0af68"/>
+<text x="1094" y="842" font-family="sans-serif" font-size="28" fill="#e0af68">Fail closed: errors abort boot</text>
+<text x="1094" y="888" font-family="sans-serif" font-size="24" fill="#c0caf5">Both set, empty path, missing/empty/unsafe file: no fallback.</text>
+<text x="1094" y="922" font-family="sans-serif" font-size="24" fill="#c0caf5">Logs source = env | file | ephemeral; never value or length.</text>
+<text x="55" y="1170" font-family="sans-serif" font-size="22" fill="#a9b1d6">Scope: env-only and unset behaviour unchanged (unset still boots ephemeral). Cookie and JWT keys still share one secret; no HKDF split.</text>
+</svg>
