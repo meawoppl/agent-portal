@@ -83,9 +83,6 @@ pub struct InputBarProps {
     /// An upload the bar refused or could not read; the parent shows it in
     /// the transcript, since the bar's progress strip only clears.
     pub on_upload_error: Callback<String>,
-    /// Fires once per submit (text or upload) so the parent can bump its
-    /// per-session "I sent something" bookkeeping.
-    pub on_message_sent: Callback<()>,
 }
 
 /// True when the dashboard is in keyboard Nav mode.
@@ -994,7 +991,6 @@ impl InputBar {
         self.set_input_text("");
         self.input_text.clear();
         self.pending_suggestion = None;
-        ctx.props().on_message_sent.emit(());
         ctx.props()
             .on_send_text
             .emit((agent_input, mode, self.effective_reasoning_effort(ctx)));
@@ -1026,7 +1022,6 @@ impl InputBar {
         self.pending_suggestion = None;
         self.upload_progress = Some(0.0);
         self.upload_files = vec![("secret file".to_string(), bytes.len() as u64)];
-        ctx.props().on_message_sent.emit(());
 
         let upload_id = Uuid::new_v4().to_string();
         let total_size = bytes.len() as u64;
@@ -1093,7 +1088,6 @@ impl InputBar {
         if !user_input.is_empty() {
             self.command_history.push(user_input.clone());
         }
-        ctx.props().on_message_sent.emit(());
 
         let link = ctx.link().clone();
         let on_send_frame = ctx.props().on_send_frame.clone();

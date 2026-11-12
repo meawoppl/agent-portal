@@ -233,49 +233,6 @@ pub fn dashboard_page() -> Html {
         session_state.clone(),
     );
 
-    // Seed the rail's awaiting flags from the server as soon as the session
-    // list lands (#1915). The per-view `is_awaiting` signal only exists once a
-    // session hydrates, and background sessions now hydrate on a drip — without
-    // this seed, a session blocked on a permission wouldn't show its red flag
-    // until its turn in the queue. One batched request per portal; each view's
-    // own signal refines (and can clear) the flag as it hydrates.
-    {
-        let session_state = session_state.clone();
-        let portals = distinct_portals(home_portal.clone(), &sessions);
-        let loaded_connections = sessions_hook.loaded_connections.clone();
-        use_effect_with((portals.clone(), loaded_connections), move |(_, loaded)| {
-            let cancelled = std::rc::Rc::new(std::cell::Cell::new(false));
-            {
-                for portal in portals.into_iter().filter(|p| loaded.contains(&p.conn())) {
-                    let cancelled = cancelled.clone();
-                    let session_state = session_state.clone();
-                    spawn_local(async move {
-                        if let Ok(data) = portal
-                            .fetch_json::<shared::api::AgentSessionsResponse>(
-                                "/api/agent/sessions",
-                                utils::On401::Ignore,
-                            )
-                            .await
-                        {
-                            if cancelled.get() {
-                                return;
-                            }
-                            for session in data.sessions {
-                                if session.awaiting_permission {
-                                    session_state.dispatch(DashboardSessionAction::SetAwaiting {
-                                        session_id: portal.session_key(session.id),
-                                        awaiting: true,
-                                    });
-                                }
-                            }
-                        }
-                    });
-                }
-            }
-            move || cancelled.set(true)
-        });
-    }
-
     // Push-notification deep link (mobile-apps plan D4). `sw.js` opens
     // `/dashboard?session=<uuid>` on notification click; parse that id once at
     // mount and hold it until the target session shows up in `active_sessions`
@@ -554,20 +511,6 @@ pub fn dashboard_page() -> Html {
     };
 
     // Session state callbacks
-    let on_awaiting_change = {
-        let session_state = session_state.clone();
-        Callback::from(move |(session_id, is_awaiting): (SessionKey, bool)| {
-            let currently_awaiting = session_state.awaiting_sessions.contains(&session_id);
-            if currently_awaiting == is_awaiting {
-                return;
-            }
-            session_state.dispatch(DashboardSessionAction::SetAwaiting {
-                session_id,
-                awaiting: is_awaiting,
-            });
-        })
-    };
-
     let on_connected_change = {
         let session_state = session_state.clone();
         Callback::from(move |(session_id, connected): (SessionKey, bool)| {
@@ -660,13 +603,6 @@ pub fn dashboard_page() -> Html {
         })
     };
 
-    let on_message_sent = {
-        let session_state = session_state.clone();
-        Callback::from(move |current_session_id: SessionKey| {
-            session_state.dispatch(DashboardSessionAction::MessageSent(current_session_id));
-        })
-    };
-
     let on_activity = {
         let activity_timestamps = (*activity_timestamps).clone();
         Callback::from(
@@ -716,16 +652,23 @@ pub fn dashboard_page() -> Html {
         )
     };
 
-    // Computed values.
-    // The rail's red "needs response" outline and the tab-title count show sessions
-    // still awaiting a reply that the user hasn't looked at yet — awaiting minus the
-    // ones whose current awaiting state has been seen (see DashboardSessionState
-    // `seen_awaiting`). Viewing a session clears it here without disturbing the
-    // underlying "agent is parked" flag.
-    let effective_awaiting: HashSet<SessionKey> = session_state
-        .awaiting_sessions
-        .difference(&session_state.seen_awaiting)
-        .copied()
+    let attention = super::attention::use_attention(
+        distinct_portals(home_portal.clone(), &sessions),
+        active_sessions.clone(),
+        session_state.focused_id,
+    );
+    // Desktop tabs and the title use the same durable receipts as the mobile
+    // queue. A historical turn ending is not evidence of an unread response;
+    // rehydrating transcripts after reload must never recreate that flag.
+    let effective_awaiting: HashSet<SessionKey> = active_sessions
+        .iter()
+        .filter(|session| {
+            attention
+                .rows
+                .get(&session.key)
+                .is_some_and(shared::api::SessionAttention::ready)
+        })
+        .map(|session| session.key)
         .collect();
     let waiting_count = effective_awaiting
         .iter()
@@ -793,11 +736,6 @@ pub fn dashboard_page() -> Html {
         });
     }
 
-    let attention = super::attention::use_attention(
-        distinct_portals(home_portal.clone(), &sessions),
-        active_sessions.clone(),
-        session_state.focused_id,
-    );
     let on_mobile_select = {
         let sessions = active_sessions.clone();
         let hidden = session_state.hidden_sessions.clone();
@@ -1030,9 +968,7 @@ pub fn dashboard_page() -> Html {
                                                 portal={session.portal.clone()}
                                                 focused={is_focused}
                                                 attention={attention.rows.get(&session.key).cloned()}
-                                                on_awaiting_change={on_awaiting_change.clone()}
                                                 on_connected_change={on_connected_change.clone()}
-                                                on_message_sent={on_message_sent.clone()}
                                                 on_branch_change={on_branch_change.clone()}
                                                 on_activity={on_activity.clone()}
                                                 on_agent_message={on_agent_message.clone()}

@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+  <rect width="2000" height="1200" fill="#1a1b26"/>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0 L8 5 L0 10" fill="none" stroke="#565f89" stroke-width="2"/></marker>
+  </defs>
+  <g font-family="sans-serif">
+    <text x="55" y="52" font-size="24" fill="#a9b1d6" letter-spacing="1">PR #2427 · Keep read sessions read across dashboard reloads</text>
+    <text x="55" y="108" font-size="34" fill="#e6e9f5">Reloading forgot which replies were read and turned old sessions red again.</text>
+    <text x="55" y="151" font-size="34" fill="#e6e9f5">Tabs now use saved read receipts, matching the mobile Ready queue.</text>
+    <path d="M55 177 H1945" stroke="#3d4666"/>
+    <path d="M1000 190 V1140" stroke="#565f89" stroke-dasharray="8 10"/>
+    <text x="60" y="230" font-size="22" font-weight="bold" letter-spacing="4" fill="#f7768e">BEFORE</text>
+    <text x="1060" y="230" font-size="22" font-weight="bold" letter-spacing="4" fill="#9ece6a">AFTER</text>
+
+    <rect x="60" y="275" width="870" height="180" rx="14" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+    <text x="84" y="319" font-size="26" fill="#7aa2f7">Dashboard reload</text>
+    <text x="84" y="367" font-size="23" fill="#c0caf5">Old transcripts load into background SessionViews.</text>
+    <text x="84" y="405" font-size="23" fill="#f7768e">The in-memory seen_awaiting set starts empty.</text>
+    <path d="M495 470 V525" stroke="#565f89" stroke-width="3" marker-end="url(#arrow)"/>
+
+    <rect x="60" y="550" width="870" height="180" rx="14" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+    <text x="84" y="594" font-size="26" fill="#7aa2f7">is_awaiting / SetAwaiting</text>
+    <text x="84" y="642" font-size="23" fill="#c0caf5">A historical turn ending sets the awaiting flag.</text>
+    <text x="84" y="680" font-size="23" fill="#f7768e">No saved read receipt participates in tab state.</text>
+    <path d="M495 745 V800" stroke="#565f89" stroke-width="3" marker-end="url(#arrow)"/>
+
+    <rect x="60" y="825" width="870" height="180" rx="14" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+    <text x="84" y="869" font-size="26" fill="#f7768e">Already-read sessions look unread</text>
+    <text x="84" y="917" font-size="23" fill="#c0caf5">Red tab outlines return after each reload.</text>
+    <text x="84" y="955" font-size="23" fill="#c0caf5">The browser title counts these stale flags too.</text>
+
+    <rect x="1060" y="275" width="870" height="180" rx="14" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+    <text x="1084" y="319" font-size="26" fill="#7aa2f7">Dashboard reload</text>
+    <text x="1084" y="367" font-size="23" fill="#c0caf5">use_attention loads the existing saved receipts.</text>
+    <text x="1084" y="405" font-size="23" fill="#9ece6a">History hydration no longer creates unread flags.</text>
+    <path d="M1495 470 V525" stroke="#565f89" stroke-width="3" marker-end="url(#arrow)"/>
+
+    <rect x="1060" y="550" width="870" height="180" rx="14" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1084" y="594" font-size="26" fill="#7aa2f7">SessionAttention::ready()</text>
+    <text x="1084" y="642" font-size="23" fill="#c0caf5">Pending approval, or unread reply while idle.</text>
+    <text x="1084" y="680" font-size="23" fill="#9ece6a">One source drives desktop tabs, title, and Ready.</text>
+    <path d="M1495 745 V800" stroke="#565f89" stroke-width="3" marker-end="url(#arrow)"/>
+
+    <rect x="1060" y="825" width="870" height="180" rx="14" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1084" y="869" font-size="26" fill="#9ece6a">Read sessions stay read after reload</text>
+    <text x="1084" y="917" font-size="23" fill="#c0caf5">New replies still light up their session tabs.</text>
+    <text x="1084" y="955" font-size="23" fill="#c0caf5">Pending approvals remain visible until resolved.</text>
+
+    <text x="55" y="1172" font-size="22" fill="#a9b1d6">Scope: uses the existing 3-second attention refresh; a cold load during a feed outage cannot infer unread state.</text>
+  </g>
+</svg>

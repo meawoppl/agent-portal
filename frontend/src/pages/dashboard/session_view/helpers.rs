@@ -311,20 +311,6 @@ pub(super) fn autoscroll_transition(current: bool, new_at_bottom: bool) -> Optio
     }
 }
 
-/// Check if a session is awaiting user input by scanning messages
-/// backwards. Uses `AgentFrameKind::is_terminator()` so every agent's
-/// turn-end drives the same awaiting logic: Claude `Result`,
-/// Codex `turn.completed`/`turn.failed`, Muse `run.terminal.completed`/
-/// `run.terminal.failed`. The last meaningful signal determines the
-/// pill color — a terminator means awaiting (orange), an assistant/user
-/// or live item means working. Noise types are skipped.
-pub(crate) fn is_awaiting(
-    messages: impl DoubleEndedIterator<Item = impl AsRef<str>>,
-    agent_type: shared::AgentType,
-) -> bool {
-    latest_turn_activity(messages, agent_type) == Some(TurnActivity::AwaitingInput)
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TurnActivity {
     Working,
@@ -408,7 +394,7 @@ pub(super) fn parse_iso_ms_utc(iso: &str) -> f64 {
     js_sys::Date::parse(&shared::time::normalize_iso_utc(iso))
 }
 
-/// Derive the [`ActivityTag`] used by `on_activity` / `CheckAwaiting` from a
+/// Derive the [`ActivityTag`] used by `on_activity` from a
 /// raw wire JSON string. Centralizes the parse-and-classify dance previously
 /// duplicated between `LoadHistory` (REST replay) and `handle_received_output`
 /// (live wire) so a classification change lands in one place.
@@ -1821,7 +1807,7 @@ mod tests {
         assert_eq!(pending.len(), 1);
     }
 
-    // --- is_awaiting ---
+    // --- latest_turn_activity ---
 
     #[test]
     fn is_claude_awaiting_true_when_last_signal_is_result() {
@@ -1830,7 +1816,10 @@ mod tests {
             r#"{"type":"assistant","message":{"id":"msg_1","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[]},"session_id":"01890000-0000-7000-8000-000000000001"}"#.to_string(),
             r#"{"type":"result","subtype":"success","is_error":false,"duration_ms":1,"duration_api_ms":1,"num_turns":1,"session_id":"01890000-0000-7000-8000-000000000001","total_cost_usd":0.0}"#.to_string(),
         ];
-        assert!(is_awaiting(msgs.iter(), shared::AgentType::Claude));
+        assert_eq!(
+            latest_turn_activity(msgs.iter(), shared::AgentType::Claude),
+            Some(TurnActivity::AwaitingInput)
+        );
     }
 
     #[test]
@@ -1839,7 +1828,10 @@ mod tests {
             r#"{"type":"user","content":"q"}"#.to_string(),
             r#"{"type":"assistant","message":{"id":"msg_1","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[]},"session_id":"01890000-0000-7000-8000-000000000001"}"#.to_string(),
         ];
-        assert!(!is_awaiting(msgs.iter(), shared::AgentType::Claude));
+        assert_ne!(
+            latest_turn_activity(msgs.iter(), shared::AgentType::Claude),
+            Some(TurnActivity::AwaitingInput)
+        );
     }
 
     #[test]
@@ -1851,13 +1843,19 @@ mod tests {
             r#"{"type":"portal","content":[{"type":"text","text":"x"}]}"#.to_string(),
             r#"{"type":"error","error":{"type":"api_error","message":"y"}}"#.to_string(),
         ];
-        assert!(is_awaiting(msgs.iter(), shared::AgentType::Claude));
+        assert_eq!(
+            latest_turn_activity(msgs.iter(), shared::AgentType::Claude),
+            Some(TurnActivity::AwaitingInput)
+        );
     }
 
     #[test]
     fn is_claude_awaiting_false_for_empty_history() {
         let msgs: Vec<String> = vec![];
-        assert!(!is_awaiting(msgs.iter(), shared::AgentType::Claude));
+        assert_ne!(
+            latest_turn_activity(msgs.iter(), shared::AgentType::Claude),
+            Some(TurnActivity::AwaitingInput)
+        );
     }
 
     #[test]
@@ -1865,7 +1863,10 @@ mod tests {
         let msgs = [
             r#"{"type":"muse_record","payload_type":"run.terminal.completed","payload":{"status":"completed"}}"#.to_string(),
         ];
-        assert!(is_awaiting(msgs.iter(), shared::AgentType::Muse));
+        assert_eq!(
+            latest_turn_activity(msgs.iter(), shared::AgentType::Muse),
+            Some(TurnActivity::AwaitingInput)
+        );
     }
 
     #[test]
@@ -1873,7 +1874,10 @@ mod tests {
         let msgs = [
             r#"{"type":"muse_record","payload_type":"run.terminal.failed","payload":{"status":"failed"}}"#.to_string(),
         ];
-        assert!(is_awaiting(msgs.iter(), shared::AgentType::Muse));
+        assert_eq!(
+            latest_turn_activity(msgs.iter(), shared::AgentType::Muse),
+            Some(TurnActivity::AwaitingInput)
+        );
     }
 
     #[test]
@@ -1882,7 +1886,10 @@ mod tests {
             r#"{"type":"muse_record","payload_type":"task.started","payload":{"task_id":"1"}}"#
                 .to_string(),
         ];
-        assert!(!is_awaiting(msgs.iter(), shared::AgentType::Muse));
+        assert_ne!(
+            latest_turn_activity(msgs.iter(), shared::AgentType::Muse),
+            Some(TurnActivity::AwaitingInput)
+        );
     }
 
     #[test]
@@ -1890,7 +1897,10 @@ mod tests {
         let msgs = [
             r#"{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":2}}"#.to_string(),
         ];
-        assert!(is_awaiting(msgs.iter(), shared::AgentType::Codex));
+        assert_eq!(
+            latest_turn_activity(msgs.iter(), shared::AgentType::Codex),
+            Some(TurnActivity::AwaitingInput)
+        );
     }
 
     #[test]
@@ -1899,7 +1909,10 @@ mod tests {
             r#"{"type":"antigravity_event","event":"step_update","step_kind":"message","text":"working"}"#.to_string(),
             r#"{"type":"antigravity_turn_completed","is_error":false,"stop_reason":"complete"}"#.to_string(),
         ];
-        assert!(is_awaiting(msgs.iter(), shared::AgentType::Antigravity));
+        assert_eq!(
+            latest_turn_activity(msgs.iter(), shared::AgentType::Antigravity),
+            Some(TurnActivity::AwaitingInput)
+        );
     }
 
     #[test]
@@ -1907,7 +1920,10 @@ mod tests {
         let msgs = [
             r#"{"type":"antigravity_event","event":"step_update","step_kind":"message","text":"working"}"#.to_string(),
         ];
-        assert!(!is_awaiting(msgs.iter(), shared::AgentType::Antigravity));
+        assert_ne!(
+            latest_turn_activity(msgs.iter(), shared::AgentType::Antigravity),
+            Some(TurnActivity::AwaitingInput)
+        );
     }
 
     // --- extract_user_text ---

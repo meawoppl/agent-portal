@@ -17,7 +17,6 @@ use yew::prelude::*;
 pub struct UseSessions {
     pub sessions: Vec<PortalSession>,
     pub loading: bool,
-    pub loaded_connections: HashSet<ConnId>,
     /// The home server's last session poll failed. Its sessions stay listed
     /// as last seen until a poll succeeds.
     pub home_unreachable: bool,
@@ -158,7 +157,6 @@ pub fn use_sessions() -> UseSessions {
             .cloned()
             .collect(),
         loading: !lists.loaded.contains(&ConnId::HOME),
-        loaded_connections: lists.loaded.intersection(&current).copied().collect(),
         home_unreachable: lists.unreachable.contains(&ConnId::HOME),
         refresh,
         set_sessions,
