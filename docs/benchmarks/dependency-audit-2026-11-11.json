@@ -1,0 +1,1269 @@
+{
+  "reviewed_commit": "f007f10116fe0449db552ddebbc05c1883391bcf",
+  "reviewed_on": "2026-11-11",
+  "tool": "cargo-audit 0.22.2",
+  "database": {
+    "advisory-count": 1458,
+    "last-commit": "fd6f39814c4d3c359fdbe223d0280dec4933f78f",
+    "last-updated": "2026-11-11T13:22:32+01:00"
+  },
+  "settings": {
+    "target_arch": [],
+    "target_os": [],
+    "severity": null,
+    "ignore": [
+      "RUSTSEC-2023-0071"
+    ],
+    "informational_warnings": [
+      "unmaintained",
+      "unsound",
+      "notice"
+    ]
+  },
+  "vulnerabilities": {
+    "found": false,
+    "count": 0,
+    "list": []
+  },
+  "warnings": {
+    "unmaintained": [
+      {
+        "kind": "unmaintained",
+        "package": {
+          "name": "anymap2",
+          "version": "0.13.0",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "d301b3b94cb4b2f23d7917810addbbaff90738e0ca2be692bd027e70d7e0330c",
+          "replace": null
+        },
+        "advisory": {
+          "id": "RUSTSEC-2026-0319",
+          "package": "anymap2",
+          "title": "anymap2 is unmaintained",
+          "description": "The `anymap2` crate is not maintained. `anymap3` is the recommended replacement.",
+          "date": "2026-10-02",
+          "aliases": [],
+          "related": [],
+          "collection": "crates",
+          "categories": [],
+          "keywords": [],
+          "cvss": null,
+          "informational": "unmaintained",
+          "references": [],
+          "source": null,
+          "url": "https://github.com/rustsec/advisory-db/issues/3300#issuecomment-5939722190",
+          "withdrawn": null,
+          "license": "CC0-1.0",
+          "expect-deleted": false
+        },
+        "affected": null,
+        "versions": {
+          "patched": [],
+          "unaffected": []
+        }
+      },
+      {
+        "kind": "unmaintained",
+        "package": {
+          "name": "bincode",
+          "version": "1.3.3",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad",
+          "dependencies": [
+            {
+              "name": "serde",
+              "version": "1.0.229",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            }
+          ],
+          "replace": null
+        },
+        "advisory": {
+          "id": "RUSTSEC-2025-0141",
+          "package": "bincode",
+          "title": "Bincode is unmaintained",
+          "description": "Due to a doxxing and harassment incident, the bincode team has taken the decision to cease development permanently.\n\nThe team considers version 1.3.3 a complete version of bincode that is not in need of any updates.\n\n## Alternatives to consider\n\n* [wincode](https://crates.io/crates/wincode)\n* [postcard](https://crates.io/crates/postcard)\n* [bitcode](https://crates.io/crates/bitcode)\n* [rkyv](https://crates.io/crates/rkyv)",
+          "date": "2025-12-16",
+          "aliases": [],
+          "related": [],
+          "collection": "crates",
+          "categories": [],
+          "keywords": [],
+          "cvss": null,
+          "informational": "unmaintained",
+          "references": [],
+          "source": null,
+          "url": "https://git.sr.ht/~stygianentity/bincode/tree/v3.0/item/README.md",
+          "withdrawn": null,
+          "license": "CC0-1.0",
+          "expect-deleted": false
+        },
+        "affected": null,
+        "versions": {
+          "patched": [],
+          "unaffected": []
+        }
+      },
+      {
+        "kind": "unmaintained",
+        "package": {
+          "name": "pin-utils",
+          "version": "0.1.0",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184",
+          "replace": null
+        },
+        "advisory": {
+          "id": "RUSTSEC-2026-0441",
+          "package": "pin-utils",
+          "title": "`pin-utils` is unmaintained",
+          "description": "The [upstream repository] was archived on October 1, 2026, after the\nrelease of version 0.1.1.\n\nFor local pinning, replace `pin_mut!` with [`core::pin::pin!`], available\nsince Rust 1.68. For pin projection, replace `unsafe_pinned!` and\n`unsafe_unpinned!` with [`pin-project`] or [`pin-project-lite`].\n\n[upstream repository]: https://github.com/rust-lang/pin-utils\n[`core::pin::pin!`]: https://doc.rust-lang.org/core/pin/macro.pin.html\n[`pin-project`]: https://crates.io/crates/pin-project\n[`pin-project-lite`]: https://crates.io/crates/pin-project-lite",
+          "date": "2026-10-01",
+          "aliases": [],
+          "related": [],
+          "collection": "crates",
+          "categories": [],
+          "keywords": [],
+          "cvss": null,
+          "informational": "unmaintained",
+          "references": [
+            "https://github.com/rustsec/advisory-db/issues/3314"
+          ],
+          "source": null,
+          "url": "https://github.com/rust-lang/team/pull/2787",
+          "withdrawn": null,
+          "license": "CC0-1.0",
+          "expect-deleted": false
+        },
+        "affected": null,
+        "versions": {
+          "patched": [],
+          "unaffected": []
+        }
+      },
+      {
+        "kind": "unmaintained",
+        "package": {
+          "name": "proc-macro-error",
+          "version": "1.0.4",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "da25490ff9892aab3fcf7c36f08cfb902dd3e71ca0f9f9517bea02a73a5ce38c",
+          "dependencies": [
+            {
+              "name": "proc-macro-error-attr",
+              "version": "1.0.4",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "proc-macro2",
+              "version": "1.0.106",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "quote",
+              "version": "1.0.45",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "syn",
+              "version": "1.0.109",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "version_check",
+              "version": "0.9.5",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            }
+          ],
+          "replace": null
+        },
+        "advisory": {
+          "id": "RUSTSEC-2024-0370",
+          "package": "proc-macro-error",
+          "title": "proc-macro-error is unmaintained",
+          "description": "proc-macro-error's maintainer seems to be unreachable, with no commits for 2 years, no releases pushed for 4 years, and no activity on the GitLab repo or response to email.\n\nproc-macro-error also depends on `syn 1.x`, which may be bringing duplicate dependencies into dependant build trees.\n\n## Possible Alternative(s)\n\n- [manyhow](https://crates.io/crates/manyhow)\n- [proc-macro2-diagnostics](https://github.com/SergioBenitez/proc-macro2-diagnostics)",
+          "date": "2024-09-01",
+          "aliases": [],
+          "related": [],
+          "collection": "crates",
+          "categories": [],
+          "keywords": [],
+          "cvss": null,
+          "informational": "unmaintained",
+          "references": [],
+          "source": null,
+          "url": "https://gitlab.com/CreepySkeleton/proc-macro-error/-/issues/20",
+          "withdrawn": null,
+          "license": "CC0-1.0",
+          "expect-deleted": false
+        },
+        "affected": null,
+        "versions": {
+          "patched": [],
+          "unaffected": []
+        }
+      },
+      {
+        "kind": "unmaintained",
+        "package": {
+          "name": "unic-char-property",
+          "version": "0.9.0",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "a8c57a407d9b6fa02b4795eb81c5b6652060a15a7903ea981f3d723e6c0be221",
+          "dependencies": [
+            {
+              "name": "unic-char-range",
+              "version": "0.9.0",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            }
+          ],
+          "replace": null
+        },
+        "advisory": {
+          "id": "RUSTSEC-2025-0081",
+          "package": "unic-char-property",
+          "title": "`unic-char-property` is unmaintained",
+          "description": "All Unicode crates that are part of https://github.com/open-i18n/rust-unic are unmaintained.\n\n## Recommended alternatives\n\n- [`icu_properties`](https://crates.io/crates/icu_properties)",
+          "date": "2025-10-18",
+          "aliases": [],
+          "related": [],
+          "collection": "crates",
+          "categories": [],
+          "keywords": [],
+          "cvss": null,
+          "informational": "unmaintained",
+          "references": [],
+          "source": null,
+          "url": "https://github.com/rustsec/advisory-db/issues/2414",
+          "withdrawn": null,
+          "license": "CC0-1.0",
+          "expect-deleted": false
+        },
+        "affected": null,
+        "versions": {
+          "patched": [],
+          "unaffected": []
+        }
+      },
+      {
+        "kind": "unmaintained",
+        "package": {
+          "name": "unic-char-range",
+          "version": "0.9.0",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "0398022d5f700414f6b899e10b8348231abf9173fa93144cbc1a43b9793c1fbc",
+          "replace": null
+        },
+        "advisory": {
+          "id": "RUSTSEC-2025-0075",
+          "package": "unic-char-range",
+          "title": "`unic-char-range` is unmaintained",
+          "description": "All Unicode crates that are part of https://github.com/open-i18n/rust-unic are unmaintained.\n\n## Recommended alternatives\n\n- Since version [1.45.0](https://releases.rs/docs/1.45.0/#libraries) Rust [supports](https://github.com/rust-lang/rust/pull/72413/) using `char` with `ops::{Range, RangeFrom, RangeFull, RangeInclusive, RangeTo}` to iterate over a range of codepoints.",
+          "date": "2025-10-18",
+          "aliases": [],
+          "related": [],
+          "collection": "crates",
+          "categories": [],
+          "keywords": [],
+          "cvss": null,
+          "informational": "unmaintained",
+          "references": [],
+          "source": null,
+          "url": "https://github.com/rustsec/advisory-db/issues/2414",
+          "withdrawn": null,
+          "license": "CC0-1.0",
+          "expect-deleted": false
+        },
+        "affected": null,
+        "versions": {
+          "patched": [],
+          "unaffected": []
+        }
+      },
+      {
+        "kind": "unmaintained",
+        "package": {
+          "name": "unic-common",
+          "version": "0.9.0",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "80d7ff825a6a654ee85a63e80f92f054f904f21e7d12da4e22f9834a4aaa35bc",
+          "replace": null
+        },
+        "advisory": {
+          "id": "RUSTSEC-2025-0080",
+          "package": "unic-common",
+          "title": "`unic-common` is unmaintained",
+          "description": "All Unicode crates that are part of https://github.com/open-i18n/rust-unic are unmaintained.",
+          "date": "2025-10-18",
+          "aliases": [],
+          "related": [],
+          "collection": "crates",
+          "categories": [],
+          "keywords": [],
+          "cvss": null,
+          "informational": "unmaintained",
+          "references": [],
+          "source": null,
+          "url": "https://github.com/rustsec/advisory-db/issues/2414",
+          "withdrawn": null,
+          "license": "CC0-1.0",
+          "expect-deleted": false
+        },
+        "affected": null,
+        "versions": {
+          "patched": [],
+          "unaffected": []
+        }
+      },
+      {
+        "kind": "unmaintained",
+        "package": {
+          "name": "unic-ucd-ident",
+          "version": "0.9.0",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "e230a37c0381caa9219d67cf063aa3a375ffed5bf541a452db16e744bdab6987",
+          "dependencies": [
+            {
+              "name": "unic-char-property",
+              "version": "0.9.0",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "unic-char-range",
+              "version": "0.9.0",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "unic-ucd-version",
+              "version": "0.9.0",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            }
+          ],
+          "replace": null
+        },
+        "advisory": {
+          "id": "RUSTSEC-2025-0100",
+          "package": "unic-ucd-ident",
+          "title": "`unic-ucd-ident` is unmaintained",
+          "description": "All Unicode crates that are part of https://github.com/open-i18n/rust-unic are unmaintained.\n\n## Recommended alternatives\n\n- [`icu_properties`](https://crates.io/crates/icu_properties)\n- [`unicode-ident`](https://crates.io/crates/unicode-ident)",
+          "date": "2025-10-18",
+          "aliases": [],
+          "related": [],
+          "collection": "crates",
+          "categories": [],
+          "keywords": [],
+          "cvss": null,
+          "informational": "unmaintained",
+          "references": [],
+          "source": null,
+          "url": "https://github.com/rustsec/advisory-db/issues/2414",
+          "withdrawn": null,
+          "license": "CC0-1.0",
+          "expect-deleted": false
+        },
+        "affected": null,
+        "versions": {
+          "patched": [],
+          "unaffected": []
+        }
+      },
+      {
+        "kind": "unmaintained",
+        "package": {
+          "name": "unic-ucd-version",
+          "version": "0.9.0",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "96bd2f2237fe450fcd0a1d2f5f4e91711124f7857ba2e964247776ebeeb7b0c4",
+          "dependencies": [
+            {
+              "name": "unic-common",
+              "version": "0.9.0",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            }
+          ],
+          "replace": null
+        },
+        "advisory": {
+          "id": "RUSTSEC-2025-0098",
+          "package": "unic-ucd-version",
+          "title": "`unic-ucd-version` is unmaintained",
+          "description": "All Unicode crates that are part of https://github.com/open-i18n/rust-unic are unmaintained.",
+          "date": "2025-10-18",
+          "aliases": [],
+          "related": [],
+          "collection": "crates",
+          "categories": [],
+          "keywords": [],
+          "cvss": null,
+          "informational": "unmaintained",
+          "references": [],
+          "source": null,
+          "url": "https://github.com/rustsec/advisory-db/issues/2414",
+          "withdrawn": null,
+          "license": "CC0-1.0",
+          "expect-deleted": false
+        },
+        "affected": null,
+        "versions": {
+          "patched": [],
+          "unaffected": []
+        }
+      },
+      {
+        "kind": "unmaintained",
+        "package": {
+          "name": "zbus_names",
+          "version": "4.3.3",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "1039ca249fee9559680f3a9f05b55e0761fee51af4f6c1e7d8c1f31e549721d2",
+          "dependencies": [
+            {
+              "name": "serde",
+              "version": "1.0.229",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "winnow",
+              "version": "1.0.2",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "zvariant",
+              "version": "5.13.0",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            }
+          ],
+          "replace": null
+        },
+        "advisory": {
+          "id": "RUSTSEC-2026-0371",
+          "package": "zbus_names",
+          "title": "`zbus_names` is unmaintained",
+          "description": "The `zbus_names` crate is no longer maintained as a standalone crate.\n\nIt has been merged into [`zbus`](https://crates.io/crates/zbus) starting with version `6.0.0`, as its `names` module.\n\nUsers should migrate to [`zbus`](https://crates.io/crates/zbus), with its default features disabled if they only need the D-Bus name types.",
+          "date": "2026-10-16",
+          "aliases": [],
+          "related": [],
+          "collection": "crates",
+          "categories": [],
+          "keywords": [],
+          "cvss": null,
+          "informational": "unmaintained",
+          "references": [],
+          "source": null,
+          "url": "https://github.com/z-galaxy/zbus/issues/2043",
+          "withdrawn": null,
+          "license": "CC0-1.0",
+          "expect-deleted": false
+        },
+        "affected": null,
+        "versions": {
+          "patched": [],
+          "unaffected": []
+        }
+      },
+      {
+        "kind": "unmaintained",
+        "package": {
+          "name": "zvariant",
+          "version": "5.13.0",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "7cf057bb00bf5c9ad77abb6147b0ca4818236a1858416e9d988e40d6322fefa7",
+          "dependencies": [
+            {
+              "name": "endi",
+              "version": "1.1.1",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "enumflags2",
+              "version": "0.7.12",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "serde",
+              "version": "1.0.229",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "winnow",
+              "version": "1.0.2",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "zvariant_derive",
+              "version": "5.13.0",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "zvariant_utils",
+              "version": "3.5.0",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            }
+          ],
+          "replace": null
+        },
+        "advisory": {
+          "id": "RUSTSEC-2026-0370",
+          "package": "zvariant",
+          "title": "`zvariant` is unmaintained",
+          "description": "The `zvariant` crate is no longer maintained as a standalone crate.\n\nIt has been merged into [`zbus`](https://crates.io/crates/zbus) starting with version `6.0.0`, as its `wire` module.\n\nUsers should migrate to [`zbus`](https://crates.io/crates/zbus), with its default features disabled if they only need the D-Bus wire format. Users of the GVariant format should migrate to [`zgvariant`](https://crates.io/crates/zgvariant).",
+          "date": "2026-10-16",
+          "aliases": [],
+          "related": [],
+          "collection": "crates",
+          "categories": [],
+          "keywords": [],
+          "cvss": null,
+          "informational": "unmaintained",
+          "references": [],
+          "source": null,
+          "url": "https://github.com/z-galaxy/zbus/issues/2043",
+          "withdrawn": null,
+          "license": "CC0-1.0",
+          "expect-deleted": false
+        },
+        "affected": null,
+        "versions": {
+          "patched": [],
+          "unaffected": []
+        }
+      },
+      {
+        "kind": "unmaintained",
+        "package": {
+          "name": "zvariant_derive",
+          "version": "5.13.0",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "8118ca6bda77bfc0ab51d660db0c955f2505eef854c9a449435bccb616933b31",
+          "dependencies": [
+            {
+              "name": "proc-macro-crate",
+              "version": "3.5.0",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "proc-macro2",
+              "version": "1.0.106",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "quote",
+              "version": "1.0.45",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "syn",
+              "version": "2.0.117",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "zvariant_utils",
+              "version": "3.5.0",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            }
+          ],
+          "replace": null
+        },
+        "advisory": {
+          "id": "RUSTSEC-2026-0372",
+          "package": "zvariant_derive",
+          "title": "`zvariant_derive` is unmaintained",
+          "description": "The `zvariant_derive` crate is no longer maintained as a standalone crate.\n\nIts derive macros are provided by [`zbus`](https://crates.io/crates/zbus) starting with version `6.0.0`.\n\nUsers should migrate to [`zbus`](https://crates.io/crates/zbus), with its default features disabled if they only need the D-Bus wire format.",
+          "date": "2026-10-16",
+          "aliases": [],
+          "related": [],
+          "collection": "crates",
+          "categories": [],
+          "keywords": [],
+          "cvss": null,
+          "informational": "unmaintained",
+          "references": [],
+          "source": null,
+          "url": "https://github.com/z-galaxy/zbus/issues/2043",
+          "withdrawn": null,
+          "license": "CC0-1.0",
+          "expect-deleted": false
+        },
+        "affected": null,
+        "versions": {
+          "patched": [],
+          "unaffected": []
+        }
+      }
+    ],
+    "unsound": [
+      {
+        "kind": "unsound",
+        "package": {
+          "name": "diesel",
+          "version": "2.3.9",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "9940fb8467a0a06312218ed384185cb8536aa10d8ec017d0ce7fad2c1bd882d5",
+          "dependencies": [
+            {
+              "name": "bigdecimal",
+              "version": "0.4.10",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "bitflags",
+              "version": "2.11.1",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "byteorder",
+              "version": "1.5.0",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "chrono",
+              "version": "0.4.45",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "diesel_derives",
+              "version": "2.3.9",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "downcast-rs",
+              "version": "2.0.2",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "itoa",
+              "version": "1.0.18",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "num-bigint",
+              "version": "0.4.6",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "num-integer",
+              "version": "0.1.46",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "num-traits",
+              "version": "0.2.19",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "pq-sys",
+              "version": "0.7.5",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "r2d2",
+              "version": "0.8.10",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "serde_json",
+              "version": "1.0.154",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "uuid",
+              "version": "1.23.1",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            }
+          ],
+          "replace": null
+        },
+        "advisory": {
+          "id": "RUSTSEC-2026-0172",
+          "package": "diesel",
+          "title": "Possible use after free when deserializing a SQLite database via `SqliteConnection::deserialize_readonly_database`",
+          "description": "Diesel allows loading a SQLite database from a byte buffer, represented as `&[u8]`, at runtime via the `SqliteConnection::deserialize_readonly_database` function. In previous versions of Diesel, this buffer was passed directly to libsqlite3. Since libsqlite3 requires the buffer to remain alive for as long as the database connection is open and Diesel did not ensure this as part of its safe API, callers of `SqliteConnection::deserialize_readonly_database` could drop the buffer prematurely. This prematurely drop caused libsqlite3 to operate on freed memory.\n\nThis vulnerability affects users of `SqliteConnection::deserialize_readonly_database` who drop the buffer passed to the function before they drop the database connection.\n\n## Mitigation\n\nThe preferred mitigation to the outlined problem is to update to Diesel version 2.3.10 or newer, which includes a fix for the problem. Alternatively users need to take to keep the buffer alive until the connection is dropped.\n\n## Resolution\n\nDiesel now stores a copy of the buffer inside of the `SqliteConnection` object itself to keep it alive as long as the underlying libsqlite3 connection exists.",
+          "date": "2026-06-05",
+          "aliases": [
+            "GHSA-ggxf-9f6j-w742"
+          ],
+          "related": [],
+          "collection": "crates",
+          "categories": [],
+          "keywords": [],
+          "cvss": null,
+          "informational": "unsound",
+          "references": [],
+          "source": null,
+          "url": "https://github.com/diesel-rs/diesel/commit/1bc2ea46d9840e8d9af844239d3c84f37fe7d84b",
+          "withdrawn": null,
+          "license": "CC0-1.0",
+          "expect-deleted": false
+        },
+        "affected": {
+          "arch": [],
+          "os": [],
+          "functions": {
+            "diesel::sqlite::SqliteConnection::deserialize_readonly_database": [
+              "<2.3.10"
+            ]
+          }
+        },
+        "versions": {
+          "patched": [
+            ">=2.3.10"
+          ],
+          "unaffected": []
+        }
+      },
+      {
+        "kind": "unsound",
+        "package": {
+          "name": "glib",
+          "version": "0.18.5",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "233daaf6e83ae6a12a52055f568f9d7cf4671dabb78ff9560ab6da230ce00ee5",
+          "dependencies": [
+            {
+              "name": "bitflags",
+              "version": "2.11.1",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "futures-channel",
+              "version": "0.3.32",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "futures-core",
+              "version": "0.3.32",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "futures-executor",
+              "version": "0.3.32",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "futures-task",
+              "version": "0.3.32",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "futures-util",
+              "version": "0.3.32",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "gio-sys",
+              "version": "0.18.1",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "glib-macros",
+              "version": "0.18.5",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "glib-sys",
+              "version": "0.18.1",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "gobject-sys",
+              "version": "0.18.0",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "libc",
+              "version": "0.2.186",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "memchr",
+              "version": "2.8.0",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "once_cell",
+              "version": "1.21.4",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "smallvec",
+              "version": "1.15.1",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "thiserror",
+              "version": "1.0.69",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            }
+          ],
+          "replace": null
+        },
+        "advisory": {
+          "id": "RUSTSEC-2024-0429",
+          "package": "glib",
+          "title": "Unsoundness in `Iterator` and `DoubleEndedIterator` impls for `glib::VariantStrIter`",
+          "description": "The `VariantStrIter::impl_get` function (called internally by implementations of the `Iterator` and `DoubleEndedIterator` traits for this type) was unsound, resulting in undefined behaviour.\n\nAn immutable reference `&p` to a `*mut libc::c_char` pointer initialized to `NULL` was passed as an argument to a C function that that mutates the pointer behind `&p` in-place (i.e. as an out-argument), which was unsound. After changes in recent versions of the Rust compiler, these unsound writes through `&p` now seem to be completely disregarded when building the `glib` crate with optimizations.\n\nThis subsequently caused all calls of `VariantStrIter::impl_get` to violate the safety requirements of the `std::ffi::CStr::from_ptr` function - which requires its argument to be a valid pointer to a C-style string - resulting in crashes due to `NULL` pointer dereferences.\n\nThis was fixed by passing the out-argument pointer explitly as `&mut p` instead of `&p`.\n\nThis issue has been present since this code was initially added in `glib` v0.15.0. The mismatch in mutability was likely missed (and not raised as an error by the compiler) because the C function wrapped by `VariantStrIter::impl_get` is variadic (`glib_sys::g_variant_get_child`), and the pointer in question is one of the variadic arguments.",
+          "date": "2024-03-30",
+          "aliases": [
+            "GHSA-wrw7-89jp-8q8g"
+          ],
+          "related": [],
+          "collection": "crates",
+          "categories": [],
+          "keywords": [],
+          "cvss": null,
+          "informational": "unsound",
+          "references": [],
+          "source": null,
+          "url": "https://github.com/gtk-rs/gtk-rs-core/pull/1343",
+          "withdrawn": null,
+          "license": "CC0-1.0",
+          "expect-deleted": false
+        },
+        "affected": {
+          "arch": [],
+          "os": [],
+          "functions": {
+            "glib::VariantStrIter::last": [
+              ">=0.15.0, <0.20.0"
+            ],
+            "glib::VariantStrIter::next": [
+              ">=0.15.0, <0.20.0"
+            ],
+            "glib::VariantStrIter::next_back": [
+              ">=0.15.0, <0.20.0"
+            ],
+            "glib::VariantStrIter::nth": [
+              ">=0.15.0, <0.20.0"
+            ],
+            "glib::VariantStrIter::nth_back": [
+              ">=0.15.0, <0.20.0"
+            ]
+          }
+        },
+        "versions": {
+          "patched": [
+            ">=0.20.0"
+          ],
+          "unaffected": [
+            "<0.15.0"
+          ]
+        }
+      },
+      {
+        "kind": "unsound",
+        "package": {
+          "name": "lru",
+          "version": "0.16.4",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "7f66e8d5d03f609abc3a39e6f08e4164ebf1447a732906d39eb9b99b7919ef39",
+          "dependencies": [
+            {
+              "name": "hashbrown",
+              "version": "0.16.1",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            }
+          ],
+          "replace": null
+        },
+        "advisory": {
+          "id": "RUSTSEC-2026-0253",
+          "package": "lru",
+          "title": "Potential use-after-free due to lack of panic safety in `LruCache::pop()`",
+          "description": "`LruCache::pop()` in `lru` was not panic-safe. If the `Drop` implementation of a stored key panics during `pop()`, `self.detach()` is never called, leaving dangling pointers in the internal doubly-linked list.\n\nA subsequent cache operation that triggers eviction can then dereference these dangling pointers:\n- The node is freed from the map, but remains linked in the LRU list due to the skipped `detach()` call\n- When a new insertion causes eviction, the LRU traversal encounters the dangling pointer\n- This results in a write to already-freed memory during the eviction process\n\n## Impact\n\n- **CWE-416 (Use-After-Free):** memory corruption when subsequent cache operations access freed node pointers in the linked list\n- **CWE-415 (Double Free):** potential heap corruption when the same memory is freed multiple times\n\nBoth types of undefined behavior can be invoked in safe Rust, but only if unwinding panics are enabled and `std::panic::catch_unwind` is used with key types that have potentially-panicking `Drop` implementations.\n\n## Fix\n\nFixed in `lru` 0.18.2 by detaching the node from the linked list before freeing it and dropping the key ([lru-rs#238](https://github.com/jeromefroe/lru-rs/pull/238)).",
+          "date": "2026-05-12",
+          "aliases": [],
+          "related": [],
+          "collection": "crates",
+          "categories": [
+            "memory-corruption"
+          ],
+          "keywords": [
+            "panic-safety",
+            "memory-safety",
+            "use-after-free",
+            "double-free"
+          ],
+          "cvss": null,
+          "informational": "unsound",
+          "references": [],
+          "source": null,
+          "url": "https://github.com/jeromefroe/lru-rs/pull/238",
+          "withdrawn": null,
+          "license": "CC0-1.0",
+          "expect-deleted": false
+        },
+        "affected": null,
+        "versions": {
+          "patched": [
+            ">=0.18.2"
+          ],
+          "unaffected": []
+        }
+      },
+      {
+        "kind": "unsound",
+        "package": {
+          "name": "rustix",
+          "version": "1.1.4",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "b6fe4565b9518b83ef4f91bb47ce29620ca828bd32cb7e408f0062e9930ba190",
+          "dependencies": [
+            {
+              "name": "bitflags",
+              "version": "2.11.1",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "errno",
+              "version": "0.3.14",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "libc",
+              "version": "0.2.186",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "linux-raw-sys",
+              "version": "0.12.1",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "windows-sys",
+              "version": "0.61.2",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            }
+          ],
+          "replace": null
+        },
+        "advisory": {
+          "id": "RUSTSEC-2026-0486",
+          "package": "rustix",
+          "title": "xattr functions mark unwritten bytes as initialized when given a zero-length buffer",
+          "description": "The extended-attribute functions in `rustix::fs` (`getxattr`, `lgetxattr`, `fgetxattr`, `listxattr`, `llistxattr` and `flistxattr`) write into a `Buffer` and then mark as many bytes initialized as the system call reported. When the buffer has zero length, the operating system treats the call as a size query: it writes nothing and returns the size of the attribute value or of the name list. rustix still marked that many bytes as initialized.\n\nPassing a `Vec` whose length equals its capacity through `spare_capacity` gives such a zero-length buffer, and rustix then set the vector's length past its capacity over memory that was never written. This is undefined behavior reachable from safe code. With an empty `&mut [MaybeUninit<u8>]` the call panics instead.\n\nFrom 1.1.6 these functions return an empty result for a zero-length buffer, and new `getxattr_query`, `lgetxattr_query`, `fgetxattr_query`, `listxattr_query`, `llistxattr_query` and `flistxattr_query` functions return the size. The 0.38 series did not have the `Buffer` API and is not affected.",
+          "date": "2026-10-27",
+          "aliases": [
+            "GHSA-jh2m-fhpj-3vr7"
+          ],
+          "related": [],
+          "collection": "crates",
+          "categories": [],
+          "keywords": [
+            "xattr",
+            "uninitialized-memory"
+          ],
+          "cvss": null,
+          "informational": "unsound",
+          "references": [],
+          "source": null,
+          "url": "https://github.com/bytecodealliance/rustix/commit/8e6aaa6713d2bb64b1fdd8c472e3a32a10a76d70",
+          "withdrawn": null,
+          "license": "CC0-1.0",
+          "expect-deleted": false
+        },
+        "affected": {
+          "arch": [],
+          "os": [],
+          "functions": {
+            "rustix::fs::fgetxattr": [
+              ">=1.0.0, <1.1.6"
+            ],
+            "rustix::fs::flistxattr": [
+              ">=1.0.0, <1.1.6"
+            ],
+            "rustix::fs::getxattr": [
+              ">=1.0.0, <1.1.6"
+            ],
+            "rustix::fs::lgetxattr": [
+              ">=1.0.0, <1.1.6"
+            ],
+            "rustix::fs::listxattr": [
+              ">=1.0.0, <1.1.6"
+            ],
+            "rustix::fs::llistxattr": [
+              ">=1.0.0, <1.1.6"
+            ]
+          }
+        },
+        "versions": {
+          "patched": [
+            ">=1.1.6"
+          ],
+          "unaffected": [
+            "<1.0.0"
+          ]
+        }
+      },
+      {
+        "kind": "unsound",
+        "package": {
+          "name": "tokio",
+          "version": "1.52.2",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "110a78583f19d5cdb2c5ccf321d1290344e71313c6c37d43520d386027d18386",
+          "dependencies": [
+            {
+              "name": "bytes",
+              "version": "1.11.1",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "libc",
+              "version": "0.2.186",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "mio",
+              "version": "1.2.0",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "parking_lot",
+              "version": "0.12.5",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "pin-project-lite",
+              "version": "0.2.17",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "signal-hook-registry",
+              "version": "1.4.8",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "socket2",
+              "version": "0.6.3",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "tokio-macros",
+              "version": "2.7.0",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "windows-sys",
+              "version": "0.61.2",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            }
+          ],
+          "replace": null
+        },
+        "advisory": {
+          "id": "RUSTSEC-2026-0386",
+          "package": "tokio",
+          "title": "`AsyncFd::new` and related constructors violate I/O safety",
+          "description": "`tokio::io::unix::AsyncFd` provides safe constructors (`new`, `with_interest`, `try_new`, and `try_with_interest`) that accept any `T: AsRawFd` rather than requiring proof of ownership or validity of the file descriptor. Because `RawFd` implements `AsRawFd`, safe code can construct an `AsyncFd` from an arbitrary or closed file descriptor, or close/replace the underlying file descriptor while the `AsyncFd` is still alive.\n\nThis violates I/O safety in two ways:\n\n1. `AsyncFd<T>` implements `AsFd` for all `T: AsRawFd` by calling `BorrowedFd::borrow_raw(self.as_raw_fd())`, allowing safe code to obtain an arbitrary `BorrowedFd<'_>` without owning the file descriptor.\n2. Tokio's I/O driver stores a pointer to an internal allocation in the `epoll`/`kqueue` user data for registered file descriptors. If the underlying file descriptor is duplicated and then closed while an `AsyncFd` is alive, and the OS reuses that file descriptor number for a another IO resource on the same runtime, dropping the first `AsyncFd` deregisters the reused file descriptor number and frees the first while the original file description remains registered in `epoll`, leading to a use-after-free when a readiness event fires.\n\nStarting in Tokio 1.51.6, 1.53.3, and 1.54.0, `AsyncFd::new`, `AsyncFd::with_interest`, `AsyncFd::try_new`, and `AsyncFd::try_with_interest` are deprecated in favor of the `unsafe` constructors `AsyncFd::register` and `AsyncFd::register_with_interest`. Callers must ensure that the file descriptor remains valid, open, and unchanged for the lifetime of the `AsyncFd`.",
+          "date": "2026-10-13",
+          "aliases": [],
+          "related": [],
+          "collection": "crates",
+          "categories": [
+            "memory-corruption"
+          ],
+          "keywords": [
+            "io-safety",
+            "use-after-free"
+          ],
+          "cvss": null,
+          "informational": "unsound",
+          "references": [
+            "https://github.com/tokio-rs/tokio/issues/8538",
+            "https://github.com/tokio-rs/tokio/issues/8539"
+          ],
+          "source": null,
+          "url": "https://github.com/tokio-rs/tokio/pull/8587",
+          "withdrawn": null,
+          "license": "CC0-1.0",
+          "expect-deleted": false
+        },
+        "affected": {
+          "arch": [],
+          "os": [],
+          "functions": {
+            "tokio::io::unix::AsyncFd::new": [
+              ">=0.3.2"
+            ],
+            "tokio::io::unix::AsyncFd::try_new": [
+              ">=1.37.0"
+            ],
+            "tokio::io::unix::AsyncFd::try_with_interest": [
+              ">=1.37.0"
+            ],
+            "tokio::io::unix::AsyncFd::with_interest": [
+              ">=0.3.2"
+            ]
+          }
+        },
+        "versions": {
+          "patched": [
+            ">=1.51.6, <1.52.0",
+            ">=1.53.3"
+          ],
+          "unaffected": [
+            "<0.3.2"
+          ]
+        }
+      }
+    ],
+    "yanked": [
+      {
+        "kind": "yanked",
+        "package": {
+          "name": "async-executor",
+          "version": "1.14.0",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "c96bf972d85afc50bf5ab8fe2d54d1586b4e0b46c97c50a0c9e71e2f7bcd812a",
+          "dependencies": [
+            {
+              "name": "async-task",
+              "version": "4.7.1",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "concurrent-queue",
+              "version": "2.5.0",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "fastrand",
+              "version": "2.4.1",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "futures-lite",
+              "version": "2.6.1",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "pin-project-lite",
+              "version": "0.2.17",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "slab",
+              "version": "0.4.12",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            }
+          ],
+          "replace": null
+        },
+        "advisory": null,
+        "affected": null,
+        "versions": null
+      },
+      {
+        "kind": "yanked",
+        "package": {
+          "name": "chacha20",
+          "version": "0.10.1",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "d524456ba66e72eb8b115ff89e01e497f8e6d11d78b70b1aa13c0fbd97540a81",
+          "dependencies": [
+            {
+              "name": "cfg-if",
+              "version": "1.0.4",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "cpufeatures",
+              "version": "0.3.0",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "rand_core",
+              "version": "0.10.1",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            }
+          ],
+          "replace": null
+        },
+        "advisory": null,
+        "affected": null,
+        "versions": null
+      },
+      {
+        "kind": "yanked",
+        "package": {
+          "name": "crypto-bigint",
+          "version": "0.7.8",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "d726facc8b27e604391b232b970cdc19b5468c69f08b466b9734c759216c7415",
+          "dependencies": [
+            {
+              "name": "cpubits",
+              "version": "0.1.1",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "ctutils",
+              "version": "0.4.5",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "getrandom",
+              "version": "0.4.2",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "hybrid-array",
+              "version": "0.4.13",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "num-traits",
+              "version": "0.2.19",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "rand_core",
+              "version": "0.10.1",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "subtle",
+              "version": "2.6.1",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            },
+            {
+              "name": "zeroize",
+              "version": "1.9.1",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            }
+          ],
+          "replace": null
+        },
+        "advisory": null,
+        "affected": null,
+        "versions": null
+      },
+      {
+        "kind": "yanked",
+        "package": {
+          "name": "spin",
+          "version": "0.9.8",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67",
+          "replace": null
+        },
+        "advisory": null,
+        "affected": null,
+        "versions": null
+      },
+      {
+        "kind": "yanked",
+        "package": {
+          "name": "spin",
+          "version": "0.10.0",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "d5fe4ccb98d9c292d56fec89a5e07da7fc4cf0dc11e156b41793132775d3e591",
+          "replace": null
+        },
+        "advisory": null,
+        "affected": null,
+        "versions": null
+      }
+    ]
+  }
+}
