@@ -230,7 +230,7 @@ fn render_info(info: &SecretAccessRequestInfo) -> Html {
         SecretAccessState::Expired => "Expired",
         SecretAccessState::Invalidated => "Invalidated",
     };
-    let duration = if info.expires_in_seconds >= 60 && info.expires_in_seconds % 60 == 0 {
+    let duration = if info.expires_in_seconds >= 60 && info.expires_in_seconds.is_multiple_of(60) {
         let minutes = info.expires_in_seconds / 60;
         format!(
             "{minutes} {}",
@@ -335,10 +335,11 @@ mod tests {
         let info = info();
         let text = super::super::visible_text(&render_info(&info));
         for expected in [
-            "Personal / deploy-key",
+            "Personal",
+            "deploy-key",
             "version 3",
             "DEPLOY_KEY",
-            "900 seconds",
+            "15 minutes",
             "plaintext access",
             &info.owner_user_id.to_string(),
             &info.session_id.to_string(),
