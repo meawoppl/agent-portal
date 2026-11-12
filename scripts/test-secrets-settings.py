@@ -28,9 +28,13 @@ async def exercise(browser, base, output, width):
     requests, errors = [], []
     release = asyncio.Event()
     checks = 0
+    delete_requests = []
+    delete_release = asyncio.Event()
+    delete_started = asyncio.Event()
+    alpha_deleted = False
     page.on('pageerror', lambda e: errors.append(str(e)))
     async def api(route):
-        nonlocal checks
+        nonlocal checks, alpha_deleted
         url = urlparse(route.request.url)
         path = url.path
         requests.append(path)
@@ -47,8 +51,21 @@ async def exercise(browser, base, output, width):
             data = dict(verified=True,providers=['google'])
         elif path == '/api/secrets':
             removed = parse_qs(url.query).get('deleted') == ['true']
-            data = dict(secrets=[secret(4,'Beta',deleted=True)] if removed else [secret(1,'Zulu'),secret(2,'bravo','organization'),secret(3,'Alpha')],can_manage_organization=True)
+            data = dict(secrets=[secret(4,'Beta',deleted=True)] if removed else [secret(1,'Zulu'),secret(2,'bravo','organization')] + ([] if alpha_deleted else [secret(3,'Alpha')]),can_manage_organization=True)
         elif path == '/api/secrets/members': data = dict(members=[dict(user_id=USER,display_name='Fixture',email='fixture@example.invalid',identities=[])])
+        elif path.endswith('/delete'):
+            assert path == '/api/secrets/00000000-0000-4000-8000-000000000003/delete'
+            assert route.request.method == 'POST'
+            assert route.request.headers['x-portal-secrets'] == '1'
+            assert json.loads(route.request.post_data) == dict(expected_generation=1)
+            delete_requests.append(path)
+            delete_started.set()
+            await delete_release.wait()
+            if len(delete_requests) == 1:
+                await route.fulfill(status=503,body='unavailable')
+                return
+            alpha_deleted = True
+            data = {}
         elif path.endswith('/versions'): data = dict(versions=[])
         else: data = {}
         await route.fulfill(content_type='application/json',body=json.dumps(data))
@@ -95,6 +112,40 @@ async def exercise(browser, base, output, width):
     await checkbox.uncheck()
     await expect(names).to_have_text(['▸Alpha','▸bravo','▸Zulu'])
     await expect(expanded).to_have_count(0)
+    # Closing or switching the expanded row cancels an armed deletion.
+    delete = page.get_by_role('button',name='Delete secret',exact=True)
+    confirm = page.get_by_role('button',name='Click again to confirm',exact=True)
+    await alpha.click()
+    await delete.click()
+    await expect(confirm).to_be_visible()
+    assert not delete_requests
+    await alpha.click()
+    await alpha.click()
+    await expect(delete).to_be_enabled()
+    await delete.click()
+    await page.get_by_role('button',name='bravo',exact=True).click()
+    await expect(delete).to_be_enabled()
+    await expect(confirm).to_have_count(0)
+    await alpha.click()
+    await delete.click()
+    await expect(confirm).to_be_visible()
+    assert not delete_requests
+    await confirm.scroll_into_view_if_needed()
+    await page.screenshot(path=str(output/f'secret-delete-confirm-{width}.png'))
+    # Keyboard activation follows the same second-click confirmation.
+    await confirm.press('Enter')
+    await asyncio.wait_for(delete_started.wait(), timeout=5)
+    await expect(delete).to_be_disabled()
+    assert len(delete_requests) == 1
+    delete_release.set()
+    await expect(page.get_by_role('alert')).to_be_visible()
+    await expect(delete).to_be_enabled()
+    await delete.click()
+    await expect(confirm).to_be_enabled()
+    assert len(delete_requests) == 1, 'failure must disarm the button'
+    await confirm.click()
+    await expect(names).to_have_text(['▸bravo','▸Zulu'])
+    assert len(delete_requests) == 2
     assert checks == 2 and not errors, errors
     await context.close()
 
@@ -108,7 +159,7 @@ async def main(args):
             for width in [1100,390]: await exercise(browser,f'http://127.0.0.1:{server.server_port}',args.output,width)
             await browser.close()
     finally: server.shutdown()
-    print('PASS: explicit gate, failed check/retry, sorted scopes, inline actions, collapse, deleted checkbox, mobile fit')
+    print('PASS: inventory, mobile fit, two-click delete, no first-click request, reset on close/switch/failure, keyboard confirmation, pending guard')
 
 if __name__ == '__main__':
     parser=argparse.ArgumentParser(description=__doc__)
