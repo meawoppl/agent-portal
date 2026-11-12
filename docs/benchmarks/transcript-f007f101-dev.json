@@ -1,0 +1,73 @@
+{
+  "label": "f007f101-current",
+  "width": 1440,
+  "height": 1000,
+  "browser_version": "156.0.8078.4",
+  "fixture_version": 3,
+  "text_repeat": 32,
+  "cache_policy": "fresh browser context per sample; replay reuses hydrated page",
+  "build_profile": "dev",
+  "dist": "/home/meawoppl/repos/agent-portal/.worktrees/theorizing-benchmark/frontend/dist",
+  "samples": [
+    {
+      "markers": 0,
+      "iteration": 0,
+      "hydration_wall_ms": 329.9,
+      "replay_wall_ms": 196.9,
+      "dom_nodes": 972
+    },
+    {
+      "markers": 0,
+      "iteration": 1,
+      "hydration_wall_ms": 305.8,
+      "replay_wall_ms": 184.7,
+      "dom_nodes": 972
+    },
+    {
+      "markers": 0,
+      "iteration": 2,
+      "hydration_wall_ms": 286.7,
+      "replay_wall_ms": 202.7,
+      "dom_nodes": 972
+    },
+    {
+      "markers": 5000,
+      "iteration": 0,
+      "hydration_wall_ms": 1271.4,
+      "replay_wall_ms": 1052.9,
+      "dom_nodes": 977
+    },
+    {
+      "markers": 5000,
+      "iteration": 1,
+      "hydration_wall_ms": 1269.7,
+      "replay_wall_ms": 1052.7,
+      "dom_nodes": 977
+    },
+    {
+      "markers": 5000,
+      "iteration": 2,
+      "hydration_wall_ms": 1234.1,
+      "replay_wall_ms": 1086.5,
+      "dom_nodes": 977
+    }
+  ],
+  "medians": [
+    {
+      "markers": 0,
+      "hydration_wall_ms": 305.8,
+      "replay_wall_ms": 196.9
+    },
+    {
+      "markers": 5000,
+      "hydration_wall_ms": 1269.7,
+      "replay_wall_ms": 1052.9
+    }
+  ],
+  "environment": {
+    "system": "Linux",
+    "machine": "x86_64",
+    "logical_cpus": 64,
+    "host_isolation": "not enforced"
+  }
+}
