@@ -25,6 +25,32 @@ pub(super) fn push_message_with_cost_limit<T>(
     retain_newest_items_by_cost(messages, max_cost, counts_toward_limit);
 }
 
+/// Re-delivery is a status notification, not a second transcript event. Keep
+/// the first position, including when history overlaps live delivery.
+pub(super) fn deduplicate_secret_notices(
+    messages: &mut Vec<crate::components::message_renderer::RenderedMessage>,
+) {
+    let mut seen = std::collections::HashSet::new();
+    messages.retain(|message| message.secret_request_id().is_none_or(|id| seen.insert(id)));
+}
+
+/// A status notification may re-broadcast an old persisted row. It must never
+/// rewind replay and cause newer messages to be delivered again on reconnect.
+pub(super) fn advance_replay_watermark(watermark: &mut Option<String>, candidate: Option<&str>) {
+    let Some(candidate) = candidate else {
+        return;
+    };
+    let Ok(next) = chrono::DateTime::parse_from_rfc3339(candidate) else {
+        return;
+    };
+    let previous = watermark
+        .as_deref()
+        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok());
+    if previous.is_none_or(|previous| next > previous) {
+        *watermark = Some(candidate.to_owned());
+    }
+}
+
 /// Claude emits many bodyless cumulative thinking-token markers during one
 /// turn. They render as one compact chip and therefore cost nothing against
 /// the live DOM budget. The rule lives in `shared::render_budget` — the same
@@ -81,6 +107,81 @@ mod tests {
             .total_cost_usd(None)
             .stop_reason(None)
             .build()
+    }
+
+    #[test]
+    fn notice_identity_is_typed_and_accepts_json_escaped_tags() {
+        use crate::components::message_renderer::RenderedMessage;
+        let id = uuid::Uuid::new_v4();
+        let canonical =
+            shared::PortalMessage::with_content(vec![shared::PortalContent::SecretAccessRequest {
+                request_id: id,
+            }])
+            .to_json()
+            .to_string();
+        let escaped = canonical.replace("secret_access_request", r"secr\u0065t_access_request");
+        assert_eq!(
+            RenderedMessage::new(escaped, None).secret_request_id(),
+            Some(id)
+        );
+        let forged = canonical.replace("\"type\":\"portal\"", "\"type\":\"assistant\"");
+        assert_eq!(RenderedMessage::new(forged, None).secret_request_id(), None);
+    }
+
+    #[test]
+    fn secret_notice_replay_keeps_one_original_position_and_distinct_requests() {
+        use crate::components::message_renderer::RenderedMessage;
+        fn marker(id: uuid::Uuid) -> RenderedMessage {
+            RenderedMessage::new(
+                shared::PortalMessage::with_content(vec![
+                    shared::PortalContent::SecretAccessRequest { request_id: id },
+                ])
+                .to_json()
+                .to_string(),
+                None,
+            )
+        }
+        let first = uuid::Uuid::new_v4();
+        let second = uuid::Uuid::new_v4();
+        let text = RenderedMessage::new(
+            shared::PortalMessage::text("TASK STARTED".into())
+                .to_json()
+                .to_string(),
+            None,
+        );
+        let mut messages = vec![marker(first), text.clone(), marker(second)];
+        for _ in 0..8 {
+            messages.push(marker(first));
+            messages.push(text.clone());
+        }
+        deduplicate_secret_notices(&mut messages);
+        assert_eq!(messages.len(), 11);
+        assert_eq!(messages[0].secret_request_id(), Some(first));
+        assert_eq!(messages[1], text);
+        assert_eq!(messages[2].secret_request_id(), Some(second));
+        assert_eq!(
+            messages
+                .iter()
+                .filter(|m| m.secret_request_id().is_some())
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn approval_notifications_cannot_rewind_reconnect_watermark() {
+        let mut watermark = Some("2026-11-12T00:08:00Z".into());
+        for timestamp in [
+            Some("2026-11-12T00:07:52.248753Z"),
+            None,
+            Some("invalid"),
+            Some("2026-11-12T01:08:00+01:00"),
+        ] {
+            advance_replay_watermark(&mut watermark, timestamp);
+            assert_eq!(watermark.as_deref(), Some("2026-11-12T00:08:00Z"));
+        }
+        advance_replay_watermark(&mut watermark, Some("2026-11-12T00:08:01.000001Z"));
+        assert_eq!(watermark.as_deref(), Some("2026-11-12T00:08:01.000001Z"));
     }
 
     #[test]

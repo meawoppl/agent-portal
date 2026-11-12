@@ -54,8 +54,9 @@ use super::session_surface::{
     SessionSurfaceMode,
 };
 use super::state::{
-    counts_toward_render_limit, insert_turn_metrics_sorted, push_message_with_cost_limit,
-    retain_newest_items_by_cost, sort_turn_metrics_by_start,
+    advance_replay_watermark, counts_toward_render_limit, deduplicate_secret_notices,
+    insert_turn_metrics_sorted, push_message_with_cost_limit, retain_newest_items_by_cost,
+    sort_turn_metrics_by_start,
 };
 use super::tasks_panel::{derive_task_events, TasksInbound, TasksPanel};
 use super::types::{PendingPermission, WsSender, MAX_MESSAGES_PER_SESSION};
@@ -1878,9 +1879,7 @@ impl SessionView {
                 // a timestamp (pre-#784 server or an error envelope), keep
                 // the prior watermark — a future timestamped message will
                 // heal it.
-                if let Some(ts) = message.meta.as_ref().and_then(|m| m.created_at.clone()) {
-                    self.last_message_timestamp = Some(ts);
-                }
+                advance_replay_watermark(&mut self.last_message_timestamp, message.raw_iso());
                 ctx.link()
                     .send_message(SessionViewMsg::ReceivedOutput(message));
                 ctx.link().send_message(SessionViewMsg::CheckAwaiting);
@@ -1901,6 +1900,7 @@ impl SessionView {
                     }
                 }
                 self.messages.extend(messages);
+                deduplicate_secret_notices(&mut self.messages);
                 retain_newest_items_by_cost(
                     &mut self.messages,
                     MAX_MESSAGES_PER_SESSION,
@@ -1910,9 +1910,10 @@ impl SessionView {
                 // timestamp of the latest message in the batch (closes
                 // #784). Empty batches (or a pre-#784 backend that didn't
                 // send `last_created_at`) leave the watermark unchanged.
-                if let Some(ts) = last_created_at {
-                    self.last_message_timestamp = Some(ts);
-                }
+                advance_replay_watermark(
+                    &mut self.last_message_timestamp,
+                    last_created_at.as_deref(),
+                );
                 ctx.link().send_message(SessionViewMsg::CheckAwaiting);
                 true
             }
@@ -2262,6 +2263,7 @@ impl SessionView {
             .into_iter()
             .map(|m| RenderedMessage::new(m.content, m.meta))
             .collect();
+        deduplicate_secret_notices(&mut self.messages);
         self.last_message_timestamp = last_timestamp;
         ctx.link().send_message(SessionViewMsg::CheckAwaiting);
     }
@@ -2539,6 +2541,13 @@ impl SessionView {
     }
 
     fn handle_received_output(&mut self, ctx: &Context<Self>, output: RenderedMessage) -> bool {
+        if output.secret_request_id().is_some_and(|id| {
+            self.messages
+                .iter()
+                .any(|message| message.secret_request_id() == Some(id))
+        }) {
+            return false;
+        }
         let tag = classify_output_msg_type(&output.content);
         if let Some(shared::MessageSource::Agent { session_id, .. }) = output.source() {
             ctx.props().on_agent_message.emit((

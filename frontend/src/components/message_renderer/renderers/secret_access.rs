@@ -66,6 +66,15 @@ fn pending(info: Option<&SecretAccessRequestInfo>) -> bool {
 }
 const TRANSIENT_ERROR: &str = "Could not refresh this request. Try again.";
 async fn load(id: Uuid) -> Result<SecretAccessRequestInfo, &'static str> {
+    let fetch = load_response(id);
+    let timeout = gloo::timers::future::TimeoutFuture::new(10_000);
+    futures_util::pin_mut!(fetch, timeout);
+    match futures_util::future::select(fetch, timeout).await {
+        futures_util::future::Either::Left((result, _)) => result,
+        futures_util::future::Either::Right(_) => Err(TRANSIENT_ERROR),
+    }
+}
+async fn load_response(id: Uuid) -> Result<SecretAccessRequestInfo, &'static str> {
     let response = Request::get(&utils::api_url(&format!("/api/secrets/requests/{id}")))
         .send()
         .await
@@ -215,7 +224,7 @@ fn render_info(info: &SecretAccessRequestInfo) -> Html {
             <dt>{"Launcher"}</dt><dd>{info.launcher_id.to_string()}</dd>
             <dt>{"Environment variable"}</dt><dd><code>{&info.env_name}</code></dd>
             <dt>{"Access duration"}</dt><dd>{format!("{} seconds", info.expires_in_seconds)}</dd>
-            <dt>{"Request expires"}</dt><dd>{&info.expires_at}</dd>
+            <dt>{if info.binding_id.is_some() {"Access expires"} else {"Request expires"}}</dt><dd>{&info.expires_at}</dd>
         </dl>
         if info.state == SecretAccessState::Pending {
             <p>{"Approval gives this agent/session plaintext access to this exact secret version. The saved value is never shown here. Requests expire after 10 minutes."}</p>
@@ -243,6 +252,17 @@ mod tests {
             expires_at: "2026-11-11T00:10:00Z".into(),
             binding_id: None,
         }
+    }
+    #[test]
+    fn binding_expiry_is_distinct_from_pending_request_deadline() {
+        let mut info = info();
+        let pending = super::super::visible_text(&render_info(&info));
+        assert!(pending.contains("Request expires"));
+        info.state = SecretAccessState::Approved;
+        info.binding_id = Some(Uuid::new_v4());
+        let approved = super::super::visible_text(&render_info(&info));
+        assert!(approved.contains("Access expires"));
+        assert!(!approved.contains("Request expires"));
     }
     #[test]
     fn metadata_requires_both_request_and_session_identity() {
