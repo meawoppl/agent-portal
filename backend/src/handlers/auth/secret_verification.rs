@@ -1,4 +1,4 @@
-//! Explicit provider verification, separate from login and account linking.
+//! Inline Portal-session verification. Legacy OAuth callbacks remain compatible.
 use super::*;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde::{Deserialize, Serialize};
@@ -61,6 +61,51 @@ pub async fn status(
         providers,
     }))
 }
+/// Recheck the signed Portal login and current account policy, entirely on the
+/// server. This is not Google token introspection or a fresh provider login.
+pub async fn check(
+    State(state): State<Arc<AppState>>,
+    crate::auth::BrowserUserId(user): crate::auth::BrowserUserId,
+    cookies: Cookies,
+    headers: HeaderMap,
+) -> Result<axum::response::Response, AppError> {
+    crate::secrets::auth::csrf(&state, &headers)?;
+    check_account(&state, user)?;
+    crate::secrets::auth::record_verification(&cookies, &state, user);
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(SecretVerificationStatus {
+            verified: true,
+            providers: Vec::new(),
+        }),
+    )
+        .into_response())
+}
+fn check_account(state: &AppState, user: uuid::Uuid) -> Result<(), AppError> {
+    use crate::schema::user_identities;
+    let mut conn = state.conn()?;
+    crate::secrets::store::active_user(&mut conn, user)?;
+    if state.dev_mode {
+        return Ok(());
+    }
+    let identities = user_identities::table
+        .filter(user_identities::user_id.eq(user))
+        .filter(user_identities::email_verified.eq(true))
+        .select((user_identities::provider, user_identities::email))
+        .load::<(String, Option<String>)>(&mut conn)?;
+    // Re-evaluate the allow-list against stored verified provider assertions,
+    // never a mutable display name or an agent-supplied address.
+    if !identities.iter().any(|(provider, email)| {
+        oauth::by_key(provider).is_some()
+            && email
+                .as_deref()
+                .is_some_and(|email| check_email_allowed(state, email).is_ok())
+    }) {
+        return Err(AppError::Forbidden);
+    }
+    Ok(())
+}
+
 pub async fn start(
     State(state): State<Arc<AppState>>,
     crate::auth::BrowserUserId(user): crate::auth::BrowserUserId,
@@ -184,6 +229,129 @@ pub(super) fn finish(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn inline_check_requires_browser_csrf_and_current_account_policy() {
+        use crate::schema::{user_identities, users};
+        use tower::ServiceExt;
+        let Some(db) = crate::handlers::secrets::tests::Database::new() else {
+            return;
+        };
+        let mut state = crate::test_support::test_app_state(db.pool.clone());
+        state.dev_mode = false;
+        let user = crate::test_support::insert_user(&mut state.conn().unwrap(), "inline_check");
+        assert!(check_account(&state, user.id).is_err());
+        let identity = ProviderIdentity {
+            provider: PROVIDER_GOOGLE,
+            subject: uuid::Uuid::new_v4().to_string(),
+            handle: None,
+            email: Some(user.email.clone()),
+            email_verified: true,
+            name: None,
+            avatar_url: None,
+        };
+        identity::resolve_user(&mut state.conn().unwrap(), &identity)
+            .unwrap()
+            .unwrap();
+        assert!(check_account(&state, user.id).is_ok());
+        diesel::update(user_identities::table.filter(user_identities::user_id.eq(user.id)))
+            .set(user_identities::email_verified.eq(false))
+            .execute(&mut state.conn().unwrap())
+            .unwrap();
+        assert!(check_account(&state, user.id).is_err());
+        diesel::update(user_identities::table.filter(user_identities::user_id.eq(user.id)))
+            .set(user_identities::email_verified.eq(true))
+            .execute(&mut state.conn().unwrap())
+            .unwrap();
+        state.allowed_email_domain = Some("not-this-domain.invalid".into());
+        assert!(check_account(&state, user.id).is_err());
+        state.allowed_email_domain = None;
+        let state = Arc::new(state);
+        let jar = Cookies::default();
+        jar.signed(&state.cookie_key)
+            .add(Cookie::new(SESSION_COOKIE_NAME, user.id.to_string()));
+        let cookie = jar
+            .list()
+            .iter()
+            .map(|c| format!("{}={}", c.name(), c.value()))
+            .collect::<Vec<_>>()
+            .join("; ");
+        let app = axum::Router::new()
+            .route("/check", axum::routing::post(check))
+            .route("/status", axum::routing::get(status))
+            .with_state(state.clone())
+            .layer(tower_cookies::CookieManagerLayer::new());
+        for (signed, origin, custom, bearer, success) in [
+            (false, "http://localhost:3000", true, false, false),
+            (true, "https://wrong.invalid", true, false, false),
+            (true, "http://localhost:3000", false, false, false),
+            (true, "http://localhost:3000", true, true, false),
+            (true, "http://localhost:3000", true, false, true),
+        ] {
+            let mut request = axum::http::Request::builder()
+                .method("POST")
+                .uri("/check")
+                .header("origin", origin);
+            if signed {
+                request = request.header("cookie", &cookie);
+            }
+            if custom {
+                request = request.header("x-portal-secrets", "1");
+            }
+            if bearer {
+                request = request.header("authorization", "Bearer agent-token");
+            }
+            let response = app
+                .clone()
+                .oneshot(request.body(axum::body::Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status().is_success(), success);
+            assert!(response.headers().get(header::LOCATION).is_none());
+            if success {
+                assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+                let proof = response
+                    .headers()
+                    .get_all(header::SET_COOKIE)
+                    .iter()
+                    .map(|v| v.to_str().unwrap().split(';').next().unwrap())
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                let body = axum::body::to_bytes(response.into_body(), 8192)
+                    .await
+                    .unwrap();
+                assert!(
+                    serde_json::from_slice::<SecretVerificationStatus>(&body)
+                        .unwrap()
+                        .verified
+                );
+                let response = app
+                    .clone()
+                    .oneshot(
+                        axum::http::Request::builder()
+                            .uri("/status")
+                            .header("cookie", format!("{cookie}; {proof}"))
+                            .body(axum::body::Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                assert!(response.status().is_success());
+                let body = axum::body::to_bytes(response.into_body(), 8192)
+                    .await
+                    .unwrap();
+                assert!(
+                    serde_json::from_slice::<SecretVerificationStatus>(&body)
+                        .unwrap()
+                        .verified
+                );
+            }
+        }
+        diesel::update(users::table.find(user.id))
+            .set(users::disabled.eq(true))
+            .execute(&mut state.conn().unwrap())
+            .unwrap();
+        assert!(check_account(&state, user.id).is_err());
+    }
     fn challenge(user: uuid::Uuid) -> Challenge {
         Challenge {
             user,
