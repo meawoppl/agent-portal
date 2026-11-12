@@ -464,7 +464,7 @@ async fn decision(
 ) -> Result<Json<SecretAccessRequestInfo>, AppError> {
     auth::csrf(&state, &headers)?;
     if request.approve {
-        auth::require_recent_auth(&cookies, &state, user)?
+        auth::require_verification(&cookies, &state, user)?
     };
     let _permit = state
         .secrets

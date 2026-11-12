@@ -73,40 +73,89 @@ pub fn require_read(principal: Principal) -> Result<(), AppError> {
     }
 }
 
-const RECENT_COOKIE: &str = "portal_secrets_recent_auth";
-pub fn record_recent_auth(cookies: &tower_cookies::Cookies, state: &AppState, user: Uuid) {
-    let mut cookie = tower_cookies::Cookie::new(
-        RECENT_COOKIE,
-        format!("{}:{}", user, Utc::now().timestamp()),
-    );
+const BROWSER_COOKIE: &str = "portal_secrets_browser";
+const VERIFIED_COOKIE: &str = "portal_secrets_verified";
+/// Explicit verification lasts for this browser session, not ten minutes from
+/// login. Ordinary login clears it; only the same-account OAuth round-trip sets it.
+pub fn record_verification(cookies: &tower_cookies::Cookies, state: &AppState, user: Uuid) {
+    let mut cookie = verification_cookie(state);
+    let context =
+        browser_context(cookies, state).unwrap_or_else(|| begin_verification(cookies, state));
+    cookie.set_value(format!("{user}:{context}"));
+    cookies.signed(&state.cookie_key).add(cookie);
+}
+fn verification_cookie(state: &AppState) -> tower_cookies::Cookie<'static> {
+    let mut cookie = tower_cookies::Cookie::new(VERIFIED_COOKIE, "");
     cookie.set_path("/api/secrets");
     cookie.set_http_only(true);
     cookie.set_secure(!state.dev_mode);
     cookie.set_same_site(tower_cookies::cookie::SameSite::Strict);
-    cookie.set_max_age(tower_cookies::cookie::time::Duration::minutes(10));
-    cookies.signed(&state.cookie_key).add(cookie);
+    cookie
 }
-pub fn require_recent_auth(
+pub fn browser_context(cookies: &tower_cookies::Cookies, state: &AppState) -> Option<String> {
+    cookies
+        .signed(&state.cookie_key)
+        .get(BROWSER_COOKIE)
+        .map(|c| c.value().to_owned())
+}
+fn browser_cookie(state: &AppState) -> tower_cookies::Cookie<'static> {
+    let mut cookie = tower_cookies::Cookie::new(BROWSER_COOKIE, "");
+    cookie.set_path("/api");
+    cookie.set_http_only(true);
+    cookie.set_secure(!state.dev_mode);
+    cookie.set_same_site(tower_cookies::cookie::SameSite::Lax);
+    cookie
+}
+/// Bind each provider round-trip to this browser's verification attempt.
+pub fn begin_verification(cookies: &tower_cookies::Cookies, state: &AppState) -> String {
+    let context = Uuid::new_v4().to_string();
+    let mut cookie = browser_cookie(state);
+    cookie.set_value(context.clone());
+    cookies.signed(&state.cookie_key).add(cookie);
+    context
+}
+pub fn clear_verification(cookies: &tower_cookies::Cookies, state: &AppState) {
+    let mut cookie = verification_cookie(state);
+    cookie.make_removal();
+    cookies.signed(&state.cookie_key).add(cookie);
+    let mut context = browser_cookie(state);
+    context.make_removal();
+    cookies.signed(&state.cookie_key).add(context);
+}
+pub fn require_verification(
     cookies: &tower_cookies::Cookies,
     state: &AppState,
     user: Uuid,
 ) -> Result<(), AppError> {
     let cookie = cookies
         .signed(&state.cookie_key)
-        .get(RECENT_COOKIE)
+        .get(VERIFIED_COOKIE)
         .ok_or(AppError::Forbidden)?;
-    let (owner, time) = cookie.value().rsplit_once(':').ok_or(AppError::Forbidden)?;
-    let time = time.parse::<i64>().map_err(|_| AppError::Forbidden)?;
-    let age = Utc::now().timestamp() - time;
-    if owner != user.to_string() || !(0..=600).contains(&age) {
+    let context = browser_context(cookies, state).ok_or(AppError::Forbidden)?;
+    if cookie.value() != format!("{user}:{context}") {
         return Err(AppError::Forbidden);
-    };
+    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn explicit_verification_has_browser_session_lifetime() {
+        let Some(pool) = crate::test_support::shared_pool() else {
+            return;
+        };
+        let state = crate::test_support::test_app_state(pool);
+        let cookie = verification_cookie(&state);
+        assert_eq!(cookie.path(), Some("/api/secrets"));
+        assert_eq!(cookie.http_only(), Some(true));
+        assert_eq!(
+            cookie.same_site(),
+            Some(tower_cookies::cookie::SameSite::Strict)
+        );
+        assert_eq!(cookie.max_age(), None);
+    }
     #[test]
     fn browser_csrf_requires_both_exact_origin_and_custom_header() {
         let Some(pool) = crate::test_support::shared_pool() else {

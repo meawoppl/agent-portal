@@ -40,7 +40,7 @@ async fn browser(
             user.to_string(),
         ));
     if recent {
-        auth::record_recent_auth(&cookies, state, user);
+        auth::record_verification(&cookies, state, user);
     }
     let cookie = cookies
         .list()

@@ -22,7 +22,7 @@ pub async fn mutate(method: &str, path: &str, body: &impl Serialize) -> Result<R
     }
     Err(match response.status() {
         401 => "Sign in again before managing secrets.",
-        403 => "This action is not allowed. Sharing, restoring, and CLI access changes require a recent sign-in.",
+        403 => "This action requires permission and account verification. Use the verification button, then retry.",
         409 => "This secret changed. Refresh its metadata before trying again.",
         413 => "The value exceeds the supported size.",
         503 => "The secrets service is unavailable. Try again later.",

@@ -667,7 +667,7 @@ async fn grant(
 ) -> Result<Json<SecretMetadata>, AppError> {
     mutation(&state, &headers, principal)?;
     if principal.browser {
-        auth::require_recent_auth(&cookies, &state, principal.user)?
+        auth::require_verification(&cookies, &state, principal.user)?
     }
     if request.rights.is_empty() {
         return Err(AppError::BadRequest("At least one right is required"));
@@ -862,7 +862,7 @@ async fn restore(
 ) -> Result<Json<SecretMetadata>, AppError> {
     mutation(&state, &headers, principal)?;
     if principal.browser {
-        auth::require_recent_auth(&cookies, &state, principal.user)?
+        auth::require_verification(&cookies, &state, principal.user)?
     }
     if !request.confirm_sharing {
         return Err(AppError::BadRequest(

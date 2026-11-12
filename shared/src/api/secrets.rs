@@ -335,3 +335,19 @@ mod access_request_tests {
         assert!(serde_json::from_str::<SecretAccessState>("\"anything_else\"").is_err());
     }
 }
+
+/// Browser-only explicit verification; no secret values or provider tokens.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SecretVerificationStatus {
+    pub verified: bool,
+    pub providers: Vec<String>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretVerificationStart {
+    pub provider: String,
+    pub return_to: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretVerificationRedirect {
+    pub url: String,
+}

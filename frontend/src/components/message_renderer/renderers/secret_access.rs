@@ -45,8 +45,10 @@ struct RequestCard {
     error: Option<&'static str>,
     busy: bool,
     poll: Option<Timeout>,
+    account_verified: bool,
 }
 enum Msg {
+    AccountVerified(bool),
     Load(bool),
     Loaded(Result<SecretAccessRequestInfo, &'static str>),
     Decide(bool),
@@ -81,7 +83,7 @@ async fn load_response(id: Uuid) -> Result<SecretAccessRequestInfo, &'static str
         .map_err(|_| TRANSIENT_ERROR)?;
     match response.status() {
         200 => response.json().await.map_err(|_| "The server returned an invalid request."),
-        401 | 403 => Err("Only the session owner can review this request. If this is your session, sign out and sign in again, then reopen it."),
+        401 | 403 => Err("Only the session owner can review this request. Check that you are using the correct account."),
         404 | 410 => Err("This request is unavailable or has expired."),
         _ => Err(TRANSIENT_ERROR),
     }
@@ -98,10 +100,12 @@ impl Component for RequestCard {
             error: None,
             busy: false,
             poll: None,
+            account_verified: false,
         }
     }
     fn update(&mut self, ctx: &Context<Self>, msg: Msg) -> bool {
         match msg {
+            Msg::AccountVerified(value) => self.account_verified = value,
             Msg::Load(preserve_error) => {
                 if self.busy || !ctx.props().eligible {
                     return false;
@@ -147,7 +151,8 @@ impl Component for RequestCard {
                 }
             }
             Msg::Decide(approve) => {
-                if self.error.is_some()
+                if (approve && !self.account_verified)
+                    || self.error.is_some()
                     || !can_decide(ctx.props().eligible, self.busy, self.info.as_ref())
                 {
                     return false;
@@ -163,7 +168,7 @@ impl Component for RequestCard {
                     let result = utils::send_json(request, &SecretAccessDecisionRequest { approve }).await;
                     Msg::Decided(match result {
                         Ok(r) if r.ok() => Ok(()),
-                        Ok(r) if r.status() == 401 || r.status() == 403 => Err("Approval requires the session owner and a sign-in within the last 10 minutes. Sign out and sign in again, then reopen this session."),
+                        Ok(r) if r.status() == 401 || r.status() == 403 => Err("Approval requires the session owner and account verification. Use the verification button, then retry."),
                         _ => Err("The decision was not confirmed. Check the refreshed status before trying again."),
                     })
                 });
@@ -189,11 +194,12 @@ impl Component for RequestCard {
                 if let Some(info) = &self.info { {render_info(info)} }
                 else if self.busy { <p>{"Checking request status…"}</p> }
                 if let Some(error) = self.error {
-                    <p role="alert">{error}{" "}<a href="/api/auth/logout">{"Sign out and sign in again"}</a></p>
+                    <p role="alert">{error}</p>
                 }
+                <crate::components::secret_verification::SecretVerification on_verified={ctx.link().callback(Msg::AccountVerified)} />
                 <div class="secret-access-actions">
                     if pending(self.info.as_ref()) {
-                        <button disabled={!actionable} onclick={ctx.link().callback(|_| Msg::Decide(true))}>{"Approve plaintext access"}</button>
+                        <button disabled={!actionable || !self.account_verified} onclick={ctx.link().callback(|_| Msg::Decide(true))}>{"Approve plaintext access"}</button>
                         <button disabled={!actionable} onclick={ctx.link().callback(|_| Msg::Decide(false))}>{"Deny"}</button>
                     }
                     <button disabled={self.busy} onclick={ctx.link().callback(|_| Msg::Load(false))}>{"Refresh status"}</button>

@@ -150,7 +150,7 @@ pub(super) fn validate_callback_state(
     Ok(device_state)
 }
 
-fn add_scopes<'a>(
+pub(super) fn add_scopes<'a>(
     provider: &Provider,
     auth_request: oauth2::AuthorizationRequest<'a>,
 ) -> oauth2::AuthorizationRequest<'a> {

@@ -80,7 +80,9 @@ async fn decide(
     approved: bool,
 ) -> Result<Json<SecretAuthorizePollResponse>, AppError> {
     auth::csrf(&state, &headers)?;
-    auth::require_recent_auth(&cookies, &state, user)?;
+    if approved {
+        auth::require_verification(&cookies, &state, user)?;
+    }
     let mut conn = state.conn()?;
     store::active_user(&mut conn, user)?;
     let changed = diesel::update(
@@ -250,7 +252,7 @@ async fn credentials_revoke(
     Path(id): Path<Uuid>,
 ) -> Result<Json<SecretCredentialsResponse>, AppError> {
     auth::csrf(&state, &headers)?;
-    auth::require_recent_auth(&cookies, &state, user)?;
+    auth::require_verification(&cookies, &state, user)?;
     {
         let mut conn = state.conn()?;
         conn.transaction::<_, AppError, _>(|conn| {
@@ -329,7 +331,7 @@ mod tests {
         )
         .await
         .is_err());
-        auth::record_recent_auth(&cookies, &state, other);
+        auth::record_verification(&cookies, &state, other);
         assert!(decide(
             state.clone(),
             other,
@@ -340,7 +342,7 @@ mod tests {
         )
         .await
         .is_err());
-        auth::record_recent_auth(&cookies, &state, owner);
+        auth::record_verification(&cookies, &state, owner);
         let _approved = decide(
             state.clone(),
             owner,
@@ -388,7 +390,7 @@ mod tests {
             .first::<Uuid>(&mut state.conn().unwrap())
             .unwrap();
         let cookies = Cookies::default();
-        auth::record_recent_auth(&cookies, &state, owner);
+        auth::record_verification(&cookies, &state, owner);
         let mut browser = HeaderMap::new();
         browser.insert("origin", "http://localhost:3000".parse().unwrap());
         browser.insert("x-portal-secrets", "1".parse().unwrap());
