@@ -316,6 +316,27 @@ pub struct SecretAccessRequestInfo {
     pub binding_id: Option<Uuid>,
 }
 
+/// A bounded, all-or-nothing approval set. Its item order is part of retry identity.
+pub const MAX_SECRET_ACCESS_GROUP_ITEMS: usize = 16;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretAccessGroupCreateRequest {
+    pub request_id: Uuid,
+    pub items: Vec<SecretAccessGroupItem>,
+    pub expires_in_seconds: u64,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretAccessGroupItem {
+    pub reference: String,
+    pub env_name: String,
+    pub version: Option<i32>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SecretAccessGroupInfo {
+    pub id: Uuid,
+    pub state: SecretAccessState,
+    pub items: Vec<SecretAccessRequestInfo>,
+}
+
 #[cfg(test)]
 mod access_request_tests {
     use super::*;

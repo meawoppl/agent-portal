@@ -109,9 +109,9 @@ pub enum Action {
             conflicts_with = "binding"
         )]
         mappings: Vec<EnvMapping>,
-        /// Execute a pre-approved binding using this agent session's scoped credential.
+        /// Execute approved bindings using this agent session's scoped credential; repeat for multiple credentials.
         #[arg(long, conflicts_with = "mappings")]
-        binding: Option<uuid::Uuid>,
+        binding: Vec<uuid::Uuid>,
         #[arg(last = true, required = true)]
         command: Vec<OsString>,
     },
@@ -216,15 +216,15 @@ pub async fn run(action: Action, backend: Option<String>, dev: bool) -> anyhow::
         return requests::run(args, dev).await;
     }
     if let Action::Run {
-        binding: Some(id),
-        command,
-        ..
+        binding, command, ..
     } = &action
     {
-        if backend.is_some() {
-            bail!("Bound secret execution uses PORTAL_SESSION_BACKEND; --backend-url cannot override the bound context");
+        if !binding.is_empty() {
+            if backend.is_some() {
+                bail!("Bound secret execution uses PORTAL_SESSION_BACKEND; --backend-url cannot override the bound context");
+            }
+            return bindings::execute(binding, command, dev).await;
         }
-        return bindings::execute(*id, command, dev).await;
     }
     let config = crate::config::load_config_checked()?;
     let backend = crate::resolve_backend_url(backend, config.backend_url);
@@ -465,11 +465,8 @@ pub async fn run(action: Action, backend: Option<String>, dev: bool) -> anyhow::
         Action::Run {
             mappings,
             command,
-            binding: None,
+            binding: _,
         } => execute(&client, mappings, command).await,
-        Action::Run {
-            binding: Some(_), ..
-        } => unreachable!(),
         Action::Expunge {
             reference,
             global,

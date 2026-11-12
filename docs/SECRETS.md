@@ -89,6 +89,28 @@ agent-portal secret request personal/DEPLOY_TOKEN --env DEPLOY_TOKEN --expires-i
 agent-portal secret run --binding BINDING_UUID -- deploy-tool
 ```
 
+Request several credentials in **one approval card** with repeated `--credential` mappings:
+
+```bash
+agent-portal secret request \
+  --credential DEPLOY_TOKEN=personal/DEPLOY_TOKEN \
+  --credential API_KEY=org/API_KEY \
+  --expires-in 900 --wait
+# Use the binding_id of each item in the metadata response:
+agent-portal secret run --binding FIRST_UUID --binding SECOND_UUID -- deploy-tool
+```
+
+The card lists every credential, pinned version, environment variable and lifetime.
+One owner approval commits the entire set; a failing member rolls back all new
+bindings. Individual members cannot be approved separately. The request accepts
+1–16 credentials and rejects duplicate environment variables (case-insensitively).
+A retry must use the same `--request-id`, item order and arguments. The group
+response contains `items`, each with its own binding ID; it never contains values.
+Execution redeems every binding before starting the child, and starts nothing
+if a redemption fails or environments collide. This is atomic command startup,
+not a guarantee that credentials cannot be revoked after redemption.
+
+
 The request uses only the injected session credential; it cannot fall back to a human's CLI vault credential. It creates a durable **Approve / Deny** card in that session. The card fetches authenticated server metadata rather than trusting transcript text, and shows the exact secret/version, owner, target session/launcher, environment variable and requested duration. It never retrieves a saved value. Only the local browser-authenticated session owner can decide; approval also requires a recent sign-in. Session viewers, editors, linked users, launchers and the requesting agent cannot approve themselves.
 
 Requests expire after ten minutes. Approval creates one binding pinned to the requesting process, secret version and ACL generation; approval does not expose a value to the browser. A rotation, deletion, revoked credential, replaced process or changed access cannot silently revive a stale request. Denial and expiry grant nothing. Repeated requests with the same request UUID replay the original outcome without creating duplicate cards or bindings. Use `--request-id UUID` when retrying a command whose response was lost. Archive and linked-portal views show inert history; reconnecting live threads fetch current server state before enabling controls.

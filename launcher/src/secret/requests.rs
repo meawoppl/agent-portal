@@ -14,9 +14,16 @@ const POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Args)]
 pub struct RequestArgs {
-    reference: input::Reference,
-    #[arg(long = "env", value_parser = input::env_name)]
-    env_name: String,
+    #[arg(
+        required_unless_present = "credentials",
+        conflicts_with = "credentials"
+    )]
+    reference: Option<input::Reference>,
+    #[arg(long = "env", value_parser = input::env_name, required_unless_present = "credentials", conflicts_with = "credentials")]
+    env_name: Option<String>,
+    /// Request a credential set in one approval card; repeat NAME=personal/SECRET.
+    #[arg(long = "credential", conflicts_with_all = ["reference", "env_name", "version"])]
+    credentials: Vec<input::EnvMapping>,
     #[arg(long, value_parser = clap::value_parser!(i32).range(1..))]
     version: Option<i32>,
     /// Approved binding lifetime in seconds, starting when the human approves.
@@ -33,8 +40,15 @@ impl RequestArgs {
     fn payload(&self) -> SecretAccessCreateRequest {
         SecretAccessCreateRequest {
             request_id: self.request_id.unwrap_or_else(Uuid::new_v4),
-            reference: self.reference.to_string(),
-            env_name: self.env_name.clone(),
+            reference: self
+                .reference
+                .as_ref()
+                .expect("clap requires a reference for single requests")
+                .to_string(),
+            env_name: self
+                .env_name
+                .clone()
+                .expect("clap requires an environment for single requests"),
             version: self.version,
             expires_in_seconds: self.expires_in,
         }
@@ -194,7 +208,11 @@ fn report(
         _ => Ok(()),
     }
 }
+mod group;
 pub(super) async fn run(args: &RequestArgs, dev: bool) -> anyhow::Result<()> {
+    if !args.credentials.is_empty() {
+        return group::run(args, dev).await;
+    }
     let agent = BoundAgent::from_env(dev)?;
     let request = args.payload();
     eprintln!("Secret access request {}: approval appears in this session's chat. Reuse --request-id {} with identical arguments after a tool retry.", request.request_id, request.request_id);
@@ -211,7 +229,7 @@ pub(super) async fn run(args: &RequestArgs, dev: bool) -> anyhow::Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use clap::Parser;
     fn payload() -> SecretAccessCreateRequest {
@@ -249,7 +267,7 @@ mod tests {
             },
         }
     }
-    fn mock_server(
+    pub(crate) fn mock_server(
         responses: Vec<serde_json::Value>,
     ) -> (String, std::thread::JoinHandle<Vec<String>>) {
         use std::io::Read;

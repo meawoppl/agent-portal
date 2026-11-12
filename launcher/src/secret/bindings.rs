@@ -79,6 +79,25 @@ impl BoundAgent {
             dev,
         )
     }
+    async fn redeem_all(&self, bindings: &[Uuid]) -> anyhow::Result<Vec<(String, SecretString)>> {
+        if bindings.is_empty() || bindings.len() > MAX_SECRET_ACCESS_GROUP_ITEMS {
+            bail!("Provide between 1 and 16 approved bindings");
+        }
+        let mut seen = std::collections::HashSet::new();
+        if bindings.iter().any(|id| !seen.insert(*id)) {
+            bail!("Duplicate binding ID");
+        }
+        let mut values = Vec::with_capacity(bindings.len());
+        let mut envs = std::collections::HashSet::new();
+        for binding in bindings {
+            let value = self.redeem(*binding).await?;
+            if !envs.insert(value.0.to_ascii_uppercase()) {
+                bail!("Bindings use duplicate environment variables");
+            }
+            values.push(value);
+        }
+        Ok(values)
+    }
     async fn redeem(&self, binding: Uuid) -> anyhow::Result<(String, SecretString)> {
         let response: SecretBindingTicketResponse = self
             .client
@@ -134,18 +153,53 @@ fn binding_error(error: anyhow::Error) -> anyhow::Error {
     }
 }
 
-pub(super) async fn execute(binding: Uuid, command: &[OsString], dev: bool) -> anyhow::Result<()> {
+pub(super) async fn execute(
+    bindings: &[Uuid],
+    command: &[OsString],
+    dev: bool,
+) -> anyhow::Result<()> {
     command
         .first()
         .context("Missing child executable after --")?;
     let agent = BoundAgent::from_env(dev)?;
-    let value = agent.redeem(binding).await?;
-    super::run_child(command, vec![value])
+    let values = agent.redeem_all(bindings).await?;
+    // Never start the child with a partially redeemed credential set.
+    super::run_child(command, values)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn redeem_all_checks_every_binding_and_rejects_duplicate_environments() {
+        use super::super::requests::tests::mock_server;
+        for duplicate in [false, true] {
+            let replies = vec![
+                serde_json::json!({"ticket":"ticket-one","expires_in":30}),
+                serde_json::json!({"env_name":"FIRST","value":"one","version":1}),
+                serde_json::json!({"ticket":"ticket-two","expires_in":30}),
+                serde_json::json!({"env_name":if duplicate {"FIRST"} else {"SECOND"},"value":"two","version":1}),
+            ];
+            let (url, server) = mock_server(replies);
+            let agent = BoundAgent::from_values(
+                Some(url),
+                Some("scoped-token".into()),
+                Some(Uuid::new_v4().to_string()),
+                true,
+            )
+            .unwrap();
+            let result = agent.redeem_all(&[Uuid::new_v4(), Uuid::new_v4()]).await;
+            if duplicate {
+                assert!(result.is_err());
+            } else {
+                let values = result.unwrap();
+                assert_eq!(values.len(), 2);
+                assert_eq!(values[0].0, "FIRST");
+                assert_eq!(values[1].0, "SECOND");
+            }
+            assert_eq!(server.join().unwrap().len(), 4);
+        }
+    }
     #[test]
     fn context_requires_injected_session_fields_without_fallbacks() {
         let session = Uuid::new_v4().to_string();
