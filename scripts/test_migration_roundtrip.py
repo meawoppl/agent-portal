@@ -83,6 +83,15 @@ class DisposableDatabaseTests(unittest.TestCase):
             roundtrip.terminate(15, None)
         self.assertEqual(stopped.exception.code, 143)
 
+    def test_only_internal_attribute_versions_are_normalized(self):
+        old = 'ALTER TABLE ONLY public.users ALTER COLUMN name SET (pg_attver=123);'
+        new = old.replace('123', '456')
+        self.assertEqual(roundtrip.normalize_dump(old), roundtrip.normalize_dump(new))
+        for changed in [old.replace('name', 'email'), old.replace('pg_attver', 'user_option'), old.replace(');', ', n_distinct=1);')]:
+            self.assertNotEqual(roundtrip.normalize_dump(old), roundtrip.normalize_dump(changed))
+        sql = "SELECT 'pg_attver=123)';"
+        self.assertEqual(roundtrip.normalize_dump(sql), sql)
+
     def test_schema_drift_is_a_failure(self):
         with contextlib.redirect_stdout(io.StringIO()), self.assertRaisesRegex(RuntimeError, "schema drift"):
             roundtrip.compare("before\n", "after\n", "schema")

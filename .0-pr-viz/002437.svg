@@ -33,6 +33,6 @@
 <text x="1085" y="835" font-size="26">Zulu                                Personal</text>
 <rect x="1055" y="920" width="865" height="140" rx="16" fill="#1e202e" stroke="#9ece6a"/>
 <text x="1085" y="965" font-size="26" fill="#9ece6a">Browser list endpoint also requires verification</text>
-<text x="1085" y="1015" font-size="24">Approved CLI inventory access is preserved</text>
+<text x="1085" y="1015" font-size="24">Saved values never appear in inventory rows</text>
 <text x="55" y="1170" font-size="22" fill="#a9b1d6">Access check validates the Portal session; it is not a fresh Google sign-in or MFA challenge.</text>
 </g></svg>

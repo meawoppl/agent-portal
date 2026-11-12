@@ -1,7 +1,7 @@
 //! Real-PG fault injection verifies the output publication boundary. Each
 //! fixture has its own schema, so triggers cannot affect another test/session.
 use super::*;
-use crate::handlers::secrets::tests::{credential, request, Database};
+use crate::handlers::secrets::tests::{browser_session, request, Database};
 use crate::schema::{messages, secrets_generation, session_attention};
 use diesel::connection::SimpleConnection;
 use std::sync::Arc;
@@ -19,7 +19,7 @@ async fn fixture() -> Option<(Database, Arc<crate::AppState>, crate::models::Ses
     let session =
         crate::test_support::insert_session(&mut state.conn().unwrap(), user.id, "output fence");
     let state = Arc::new(state);
-    let token = credential(&state, user.id, "test human");
+    let token = browser_session(&state, user.id, "test human");
     let router = crate::handlers::secrets::router(state.clone())
         .with_state(state.clone())
         .layer(tower_cookies::CookieManagerLayer::new());

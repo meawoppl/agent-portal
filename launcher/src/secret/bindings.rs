@@ -1,51 +1,13 @@
 //! The injected agent identity can request approval and execute approved bindings.
-//! Plaintext access requires a binding ticket; ordinary reads still require
-//! the separately enrolled human capability and never fall back to this token.
+//! Plaintext access requires a scoped binding ticket; no human credential fallback.
 use super::sensitive::SecretString;
-use super::{client, input, output, resolve};
+use super::{client, input};
 use anyhow::{bail, Context};
-use clap::Args;
 use reqwest::Method;
 use shared::api::*;
 use std::ffi::OsString;
 use uuid::Uuid;
 use zeroize::Zeroize;
-
-#[derive(Debug, Args)]
-pub struct BindArgs {
-    #[arg(long = "secret")]
-    reference: input::Reference,
-    #[arg(long)]
-    session: Uuid,
-    #[arg(long)]
-    launcher: Uuid,
-    #[arg(long = "env", value_parser = input::env_name)]
-    env_name: String,
-    /// Binding lifetime in seconds, at most one hour.
-    #[arg(long, default_value_t = 3600, value_parser = clap::value_parser!(u64).range(1..=3600))]
-    expires_in: u64,
-    #[arg(long, value_parser = clap::value_parser!(i32).range(1..))]
-    version: Option<i32>,
-}
-pub(super) async fn create(client: &client::Client, args: BindArgs) -> anyhow::Result<()> {
-    let metadata = resolve(client, &args.reference).await?;
-    if super::is_deleted(&metadata) {
-        bail!("Cannot bind a deleted secret");
-    }
-    let request = SecretBindingCreateRequest {
-        secret_id: metadata.id,
-        session_id: args.session,
-        launcher_id: args.launcher,
-        version: args.version,
-        env_name: args.env_name,
-        expected_generation: metadata.generation,
-        expires_in_seconds: args.expires_in,
-    };
-    let binding: SecretBindingMetadata = client
-        .request(Method::POST, "/bindings", Some(&request))
-        .await?;
-    output(&binding)
-}
 
 pub(super) struct BoundAgent {
     pub(super) client: client::Client,
@@ -61,7 +23,9 @@ impl BoundAgent {
         let backend = backend.filter(|value| !value.is_empty()).context(
             "Bound execution requires PORTAL_SESSION_BACKEND; no launcher credential fallback",
         )?;
-        let token = SecretString::new(token.filter(|value| !value.is_empty()).context("Bound execution requires PORTAL_SESSION_TOKEN; no launcher or human-secret credential fallback")?);
+        let token = SecretString::new(token.filter(|value| !value.is_empty()).context(
+            "Bound execution requires PORTAL_SESSION_TOKEN; no other credential fallback",
+        )?);
         let session_id: Uuid = session
             .context("Bound execution requires PORTAL_SESSION_ID")?
             .parse()
@@ -241,86 +205,6 @@ mod tests {
             Some(session),
             false
         )
-        .is_ok());
-    }
-    #[test]
-    fn binding_cli_requires_exclusive_binding_or_literal_env_mappings_and_bounded_lifetime() {
-        use clap::Parser;
-        let id = "00000000-0000-0000-0000-000000000001";
-        assert!(
-            crate::Args::try_parse_from(["agent-portal", "--version"])
-                .unwrap()
-                .version
-        );
-        assert!(crate::Args::try_parse_from([
-            "agent-portal",
-            "secret",
-            "read",
-            "personal/T",
-            "--version",
-            "2"
-        ])
-        .is_ok());
-        assert!(crate::Args::try_parse_from([
-            "agent-portal",
-            "secret",
-            "run",
-            "--binding",
-            id,
-            "--",
-            "tool"
-        ])
-        .is_ok());
-        assert!(crate::Args::try_parse_from([
-            "agent-portal",
-            "secret",
-            "run",
-            "--binding",
-            id,
-            "--env",
-            "TOKEN=personal/T",
-            "--",
-            "tool"
-        ])
-        .is_err());
-        assert!(
-            crate::Args::try_parse_from(["agent-portal", "secret", "run", "--", "tool"]).is_err()
-        );
-        for expires in ["0", "3601"] {
-            assert!(crate::Args::try_parse_from([
-                "agent-portal",
-                "secret",
-                "bind",
-                "--secret",
-                "personal/T",
-                "--session",
-                id,
-                "--launcher",
-                id,
-                "--env",
-                "TOKEN",
-                "--expires-in",
-                expires
-            ])
-            .is_err());
-        }
-        assert!(crate::Args::try_parse_from([
-            "agent-portal",
-            "secret",
-            "bind",
-            "--secret",
-            "personal/T",
-            "--session",
-            id,
-            "--launcher",
-            id,
-            "--env",
-            "TOKEN",
-            "--expires-in",
-            "3600",
-            "--version",
-            "2"
-        ])
         .is_ok());
     }
     #[tokio::test]

@@ -49,7 +49,6 @@ async def exercise(browser, base, output, width):
             removed = parse_qs(url.query).get('deleted') == ['true']
             data = dict(secrets=[secret(4,'Beta',deleted=True)] if removed else [secret(1,'Zulu'),secret(2,'bravo','organization'),secret(3,'Alpha')],can_manage_organization=True)
         elif path == '/api/secrets/members': data = dict(members=[dict(user_id=USER,display_name='Fixture',email='fixture@example.invalid',identities=[])])
-        elif path == '/api/secrets/authorize/credentials': data = dict(credentials=[])
         elif path.endswith('/versions'): data = dict(versions=[])
         else: data = {}
         await route.fulfill(content_type='application/json',body=json.dumps(data))

@@ -1,6 +1,6 @@
 # Secrets service
 
-Portal stores immutable, encrypted secret versions in PostgreSQL. The web page manages metadata, sharing, replacement and cleanup. An explicit verified Copy action retrieves a value only for the browser clipboard. Human CLI reads require a separately approved credential; ordinary session, launcher and linked-account credentials do not provide general vault access.
+Portal stores immutable, encrypted secret versions in PostgreSQL. The web page manages metadata, sharing, replacement and cleanup. An explicit verified Copy action retrieves a value only for the browser clipboard. Humans use the OAuth-authenticated web UI; there is no human CLI vault access. Agents receive only explicitly approved, process-bound access. Ordinary session, launcher and linked-account credentials do not provide general vault access.
 
 ## Configure encryption
 
@@ -34,52 +34,45 @@ One Portal deployment is one organization, containing its active local users. Or
 
 Grants are attached to stable Portal user IDs. Login identities remain keyed by the provider and immutable provider subject, so linked Google/GitHub logins and renamed GitHub accounts do not move grants. Select recipients using a Portal UUID, `google:matt@cosmicfrontier.org`, a verified unambiguous email, or `meawoppl@github` / `github:meawoppl`. Display names are not accepted as selectors. GitHub handles are checked against GitHub's current immutable ID before resolution; stale, reassigned, ambiguous and unregistered selections are refused. Resolution never creates or links an account.
 
-Member discovery (`agent-portal secret members`, `GET /api/secrets/members`, and `POST /api/secrets/members/resolve`) requires `ALLOWED_EMAIL_DOMAIN` and a verified provider email in that domain for the caller. Open-signup portals, email-only allowlists, unverified/legacy profile addresses, and out-of-domain allowlist exceptions receive 403. Exact lookup has the same restriction so it cannot enumerate accounts. Administrators retain their separate admin-only user-management endpoint. Direct grants to an already-known Portal UUID remain available; this restriction does not change secret access rights.
+Browser member discovery (`GET /api/secrets/members` and `POST /api/secrets/members/resolve`) requires `ALLOWED_EMAIL_DOMAIN` and a verified provider email in that domain for the caller. Open-signup portals, email-only allowlists, unverified/legacy profile addresses, and out-of-domain allowlist exceptions receive 403. Exact lookup has the same restriction so it cannot enumerate accounts. Administrators retain their separate admin-only user-management endpoint. Direct grants to an already-known Portal UUID remain available; this restriction does not change secret access rights.
 
 Legacy provider assertions have no fabricated verification timestamp. Sign in again to refresh a provider-qualified email/handle; the Portal UUID remains available for existing users. The browser directory labels provider identities and marks unverified addresses.
 
-## Human CLI access
+## Human access: web UI only
 
-First log in normally, then authorize a dedicated secret credential:
+Open **Settings → Secrets** after signing in through the Portal's configured
+OAuth provider. Manage names, versions, sharing, deletion, restoration and
+archive cleanup there. Explicit Copy and approval operations additionally
+require the browser-bound Portal account verification and same-origin CSRF
+checks. Verification checks the current OAuth-backed Portal session; it is not
+a separate computer approval, fresh provider login, or MFA challenge.
 
-```sh
-agent-portal login
-agent-portal secret authorize --label 'My development workstation'
-```
+There is no human CLI enrollment, local vault-token file, or approved-computer
+list. General vault endpoints require the browser cookie and reject all bearer
+credentials, including old `aps_secret_` tokens and normal Portal CLI tokens.
+The old `/api/secrets/authorize/*` endpoints and `/api/secrets/{id}/read` return
+410 Gone. Deployment revokes historical CLI tokens and pending enrollments;
+revocation is not undone on migration rollback. Old local token files are no
+longer read and require no per-computer cleanup to block access.
 
-Approve the displayed code on the Secrets authorization page. Approval requires the matching browser account and an explicit server-side Portal session verification. This checks the Portal login and current account policy; it is not a fresh Google login or MFA challenge. The verification is bound to that browser session. Dedicated credentials are backend-scoped, expire after 30 days, and are stored in an owner-only local file. The Secrets page lists and revokes these approvals without exposing credential hashes or tokens. Disabled accounts and revoked credentials lose subsequent access.
+OAuth authenticates the acting account; the approval card records consent and
+scope. A process that controls that browser or OS account remains within the
+same trust boundary. Approval UI does not provide process isolation.
 
-```sh
-agent-portal secret set personal/DEPLOY_TOKEN
-agent-portal secret set org/DEPLOY_TOKEN --stdin < token.txt
-agent-portal secret members
-agent-portal secret share personal/DEPLOY_TOKEN --user meawoppl@github --access read,use
-agent-portal secret list
-agent-portal secret info personal/DEPLOY_TOKEN
-agent-portal secret versions personal/DEPLOY_TOKEN
-agent-portal secret read personal/DEPLOY_TOKEN --version 1 --raw
-agent-portal secret run --env DEPLOY_TOKEN=personal/DEPLOY_TOKEN -- deploy-tool
-```
-
-Interactive values use hidden input. Stdin preserves UTF-8 bytes, including newlines; `--trim-newline` is explicit. Values are never accepted in a `--value` argument. Read emits exactly the value bytes on stdout; diagnostics go to stderr. Prefer `run` to avoid putting a value in terminal scrollback or an agent tool result. Process injection uses literal environment variables without shell interpolation or secret values in argv. The child process and the local OS account can inspect those variables. The local OS account is a trust boundary: owner-only files do not isolate mutually hostile processes running under that same account.
-
-Read/use, write and manage are independent rights. Arbitrary `run --env` requires both read and use, because a caller controlling the child can print its environment. A reader cannot re-share through Portal without manage permission. Revocation does not retract a previously delivered value or rotate a provider credential.
+Read/use, write and manage remain independent rights. Approval is scoped to the
+specific secret versions, requesting session/process, environment variables and
+lifetime shown in the card. A reader cannot re-share through Portal without
+manage permission. Revocation does not retract previously delivered values or
+rotate the provider credential.
 
 ## Versions and deletion
 
 In Settings → Secrets, click **Check Portal access** before the inventory loads. Secrets are sorted by name across Personal and Organization scopes. Select a name to expand its details and actions directly below that row; select it again to collapse. **Show deleted secrets** adds deleted entries to the same list.
 
-Every replacement appends an encrypted immutable version and advances the current pointer. Older versions remain available for explicit authorized CLI reads. The web page shows version metadata only. Select an active secret and use **Copy secret** after verifying the Portal session to copy its displayed current version. The server requires read permission, the browser-bound verification cookie and same-origin CSRF headers, and rechecks authorization after asynchronous decryption and reader registration. Copy never renders the value in the page or stores it in component state; success appears only after the clipboard write completes. Browser clipboard permission is also required. Clipboard contents may persist or be synchronized by the operating system; revocation cannot recall a copied value. The existing CLI read endpoint remains unavailable to browser cookies.
+Every replacement appends an encrypted immutable version and advances the current pointer. Older encrypted versions remain retained; metadata is available in the web UI and agent requests can explicitly pin a version. The web page shows version metadata only. Select an active secret and use **Copy secret** after verifying the Portal session to copy its displayed current version. The server requires read permission, the browser-bound verification cookie and same-origin CSRF headers, and rechecks authorization after asynchronous decryption and reader registration. Copy never renders the value in the page or stores it in component state; success appears only after the clipboard write completes. Browser clipboard permission is also required. Clipboard contents may persist or be synchronized by the operating system; revocation cannot recall a copied value. The retired CLI read endpoint grants no access to any caller.
 
-```sh
-agent-portal secret rotate personal/DEPLOY_TOKEN --stdin < replacement.txt
-agent-portal secret delete personal/DEPLOY_TOKEN
-agent-portal secret list --deleted
-agent-portal secret info personal/DEPLOY_TOKEN --deleted
-agent-portal secret restore personal/DEPLOY_TOKEN --confirm-sharing
-```
 
-Delete adds the exact reserved `deleted` system tag, records the actor/time, and invalidates access bindings. It removes no version and reserves the name. Deleted keys appear alongside active entries when **Show deleted secrets** is checked, under the same authorization policy. Normal and historical value reads are denied while deleted. Browser sharing and restore also require a verified Portal session, since they can delegate access to retained values. Restore preserves identity/history, requires explicit confirmation of its sharing audience, and never revives old tickets or process approvals. Creating a previously deleted name fails until it is restored or another name is chosen.
+Delete adds the exact reserved `deleted` system tag, records the actor/time, and invalidates access bindings. It removes no version and reserves the name. Deleted keys appear alongside active entries when **Show deleted secrets** is checked under the same authorization policy. Normal and historical value reads are denied while deleted. Browser sharing and restore also require the verified OAuth-backed browser session, since they can delegate access to retained values. Restore preserves identity/history, requires explicit confirmation of its sharing audience, and never revives old tickets or process approvals. Creating a previously deleted name fails until it is restored or another name is chosen.
 
 ## Approved session execution
 
@@ -113,7 +106,7 @@ if a redemption fails or environments collide. This is atomic command startup,
 not a guarantee that credentials cannot be revoked after redemption.
 
 
-The request uses only the injected session credential; it cannot fall back to a human's CLI vault credential. It creates a durable **Approve / Deny** card in that session. The card fetches authenticated server metadata rather than trusting transcript text, and shows the exact secret/version, owner, target session/launcher, environment variable and requested duration. It never retrieves a saved value. Only the local browser-authenticated session owner can decide; approval also requires the explicit Portal session verification. Session viewers, editors, linked users, launchers and the requesting agent cannot approve themselves.
+The request uses only the injected session credential; it cannot fall back to any general vault credential. It creates a durable **Approve / Deny** card in that session. The card fetches authenticated server metadata rather than trusting transcript text, and shows the exact secret/version, owner, target session/launcher, environment variable and requested duration. It never retrieves a saved value. Only the local browser-authenticated session owner can decide; approval also requires the explicit Portal session verification. Session viewers, editors, linked users, launchers and the requesting agent cannot approve themselves.
 
 Click **Approve** once: the card verifies the Portal session server-side, submits the decision, then confirms its status. Inline progress shows verification and approval without navigation or a separate verification button. Failed verification sends no approval. Background polling cannot consume the click or replace the result with stale data, and an uncertain decision is checked rather than automatically submitted again.
 
@@ -121,22 +114,13 @@ Requests expire after ten minutes. Approval creates one binding pinned to the re
 
 Approving lets the agent access the value in its process environment: it is not a promise that an agent controlling a child process cannot print or copy it. The requested approval lasts at most one hour and can be revoked through the existing binding controls.
 
-A human with read/use rights may approve an existing owned session and connected owned launcher:
+The OAuth-authenticated owner with read/use rights approves the request in the session thread.
 
-```sh
-agent-portal secret bind --secret personal/DEPLOY_TOKEN \
-  --session SESSION_UUID --launcher LAUNCHER_UUID --env DEPLOY_TOKEN --expires-in 3600
-agent-portal secret bindings
-agent-portal secret unbind BINDING_UUID
-```
+Approved access stays pinned to the selected secret version, ACL generation and
+active agent process. It lasts at most one hour. Session credentials can request
+access but cannot approve themselves.
 
-The approval pins the secret version, ACL generation and active proxy credential. It lasts at most one hour. Ordinary session credentials cannot create approvals. Within the approved session:
-
-```sh
-agent-portal secret run --binding BINDING_UUID -- deploy-tool
-```
-
-This path uses only the bound session context, without falling back to a human vault credential. It mints a 30-second ticket, redeems it once, and injects the value directly into the child. Tickets are hashed in PostgreSQL and never printed or placed in transcript/pending-input records. Ticket consumption, process/session/launcher identity, expiry, disabled users, rights and deletion are checked before and after decryption. Relaunching with a different proxy credential requires a new human approval. Rotation or delete/restore invalidates the old generation; it does not silently switch a pinned execution to a new value.
+This path uses only the bound session context, without any general vault credential. It mints a 30-second ticket, redeems it once, and injects the value directly into the child. Tickets are hashed in PostgreSQL and never printed or placed in transcript/pending-input records. Ticket consumption, process/session/launcher identity, expiry, disabled users, rights and deletion are checked before and after decryption. Relaunching with a different proxy credential requires a new human approval. Rotation or delete/restore invalidates the old generation; it does not silently switch a pinned execution to a new value.
 
 ## Redaction and archive cleanup
 
@@ -144,11 +128,9 @@ Owner-scoped rules protect personal values. Merely sharing a value does not let 
 
 Matching covers raw values, ordinary JSON string escaping, base64 and bounded URL decoding. Streaming text/tool-argument delta payloads are withheld while applicable rules exist; completed records are sanitized. Provider/control identifiers remain intact, and explicit untrusted tool inputs/results receive semantic JSON redaction. Short or common values may mask unrelated text in the approved scope. Arbitrary transformations, screenshots and model/provider logs are not certified by matching.
 
-```sh
-agent-portal secret expunge id/SECRET_UUID --all-versions --wait
-agent-portal secret expunge id/SECRET_UUID --all-versions --global --wait
-agent-portal secret job JOB_UUID
-```
+Start archive cleanup from the selected secret in **Settings → Secrets**, then
+review its cleanup receipt in the same panel.
+
 
 The default cleans the requester's own sessions and archives. Cross-user cleanup requires an organization curator who also has management access to the key. Its approval captures the exact retained version IDs; a later personal rotation cannot expand the destructive scope without fresh curator approval. Global policy tombstones also protect send-time replay buffers, rather than relying only on rewriting SQL rows.
 
@@ -162,7 +144,7 @@ A receipt distinguishes active-storage work, blocked targets and backup expiry. 
 
 Watch `SECRETS_REDACTION_REFRESH_FAILED`, `SECRET_REDACTION_FAILED` and `SECRET_EXPUNGE_FAILED` alongside the existing archive markers. A stale matcher causes protected reads/writes to fail closed until refresh, rather than logging or publishing raw content. Mutation concurrency, request-body buffers, key loading, matcher sources, JSON trees, archive spools and S3 pagination/deletion are bounded. Metadata responses use `Cache-Control: no-store`; sensitive API errors do not echo request/response bodies.
 
-Tests use isolated PostgreSQL schemas and synthetic local encryption keys. Coverage includes ciphertext authentication/identity substitution, immutable versions, namespace reservation, deletion/restore, provider resolution, scoped permissions, fresh enrollment, credential revocation, idempotency, binding replay/process replacement/expiry, reader consent, rollback/ACK fencing, target-specific archive coverage, source timestamps/order, media resurrection and unsafe-record blocking. S3 request tests use local HTTP fixtures, including paginated version IDs, null versions, races and HTTP-200 per-object delete failures; they do not modify production storage.
+Tests use isolated PostgreSQL schemas and synthetic local encryption keys. Coverage includes ciphertext authentication/identity substitution, immutable versions, namespace reservation, deletion/restore, provider resolution, scoped permissions, retired enrollment/token rejection, browser-only access, idempotency, binding replay/process replacement/expiry, reader consent, rollback/ACK fencing, target-specific archive coverage, source timestamps/order, media resurrection and unsafe-record blocking. S3 request tests use local HTTP fixtures, including paginated version IDs, null versions, races and HTTP-200 per-object delete failures; they do not modify production storage.
 
 ## Inject secret references into a file
 
@@ -174,18 +156,15 @@ API_TOKEN={{ secret://personal/api-token }}
 STABLE_KEY={{ secret://id/01234567-89ab-4cde-8012-3456789abcde }}
 ```
 
-```bash
-agent-portal secret inject --in-file config.env.tpl --out-file config.env
-```
 
 `secret://personal/NAME`, `secret://org/NAME`, and `secret://id/UUID` use the same
 identities as ordinary secret references. IDs are UUIDs, not sequential numbers.
-The URI prefix also works in existing reference-taking commands. Template names
+The URI prefix also works in agent secret requests. Template names
 are literal (including spaces); percent-encoding, URI query strings, and field
 selectors are not interpreted. Only `{{ secret://... }}` placeholders expand;
 other template expressions and bare URIs remain unchanged.
 
-For an agent, first request the credentials together, then supply the resulting
+First request the credentials together, then supply the resulting
 **group request ID** (not a member binding ID):
 
 ```bash
@@ -201,9 +180,8 @@ Every template reference must match exactly one credential in that approved
 group. The existing process-bound tickets, pinned versions and expiry checks
 still apply. The environment-variable labels used during approval are checked
 against the redeemed bindings; the template selects secrets by reference.
-An agent context never falls back to a human CLI credential. Outside an agent
-context, injection uses the separately authorized human CLI credential and
-requires both read and use rights.
+Injection always requires an active bound agent context and the explicitly
+approved group. There is no human-token or unapproved fallback.
 
 Substitution is literal: no shell expansion, recursive interpolation, or
 JSON/YAML/INI escaping occurs. Choose the template syntax appropriately for the

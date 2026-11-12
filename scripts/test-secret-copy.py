@@ -37,7 +37,6 @@ async def exercise(browser, base, output, width):
         elif path == '/api/secrets':
             data = dict(secrets=[dict(id=SECRET,owner_user_id=USER,namespace='personal',name='DEPLOY_TOKEN',description='Deployment credential',tags=[],current_version=3,generation=7,created_at='2026-11-12T00:00:00Z',updated_at='2026-11-12T00:00:00Z',deleted_at=None,deleted_by=None,can_read=True,can_use=True,can_write=True,can_manage=True,grants=[])],can_manage_organization=True)
         elif path == '/api/secrets/members': data = dict(members=[dict(user_id=USER,display_name='Fixture',email='fixture@example.invalid',identities=[])])
-        elif path == '/api/secrets/authorize/credentials': data = dict(credentials=[])
         elif path.endswith('/versions'): data = dict(versions=[dict(version=3,created_at='2026-11-12T00:00:00Z',created_by=USER,current=True)])
         elif path.endswith('/copy'):
             copies.append(route.request)

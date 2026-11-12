@@ -1,19 +1,17 @@
 //! Vault management. Saved plaintext never enters page state or rendered markup;
 //! the explicit verified copy action sends it directly to the clipboard.
 mod api;
-mod authorize;
 mod copy;
 mod value_form;
 use crate::{
     utils::{self, On401},
     Route,
 };
-pub use authorize::SecretAuthorizePage;
 use shared::api::{
-    SecretCreateRequest, SecretCredentialMetadata, SecretCredentialsResponse, SecretExpungeJob,
-    SecretExpungeRequest, SecretExpungeState, SecretGrantRequest, SecretListResponse, SecretMember,
-    SecretMembersResponse, SecretMetadata, SecretMutationRequest, SecretNamespace,
-    SecretRestoreRequest, SecretRight, SecretValue, SecretVersionsResponse, SecretWriteRequest,
+    SecretCreateRequest, SecretExpungeJob, SecretExpungeRequest, SecretExpungeState,
+    SecretGrantRequest, SecretListResponse, SecretMember, SecretMembersResponse, SecretMetadata,
+    SecretMutationRequest, SecretNamespace, SecretRestoreRequest, SecretRight, SecretValue,
+    SecretVersionsResponse, SecretWriteRequest,
 };
 use uuid::Uuid;
 use value_form::{FreshValue, ValueForm};
@@ -84,10 +82,6 @@ pub enum Msg {
     Load,
     CheckAccess,
     AccessChecked(Result<(), &'static str>),
-    RefreshCredentials,
-    Credentials(Result<SecretCredentialsResponse, String>),
-    RevokeCredential(Uuid),
-    CredentialRevoked(Result<(), String>),
     ShowDeleted(bool),
     Loaded(u64, Result<SecretListResponse, String>),
     Select(Uuid),
@@ -129,7 +123,6 @@ pub struct SecretsPage {
     directory_restricted: bool,
     share_user: Option<Uuid>,
     job: Option<SecretExpungeJob>,
-    credentials: Option<Vec<SecretCredentialMetadata>>,
 }
 impl SecretsPage {
     fn current(&self) -> Option<&SecretMetadata> {
@@ -179,7 +172,6 @@ impl Component for SecretsPage {
             directory_restricted: false,
             share_user: None,
             job: None,
-            credentials: None,
         }
     }
     fn changed(&mut self, ctx: &Context<Self>, old: &Self::Properties) -> bool {
@@ -217,7 +209,6 @@ impl Component for SecretsPage {
                         self.verified = true;
                         self.error = None;
                         ctx.link().send_message(Msg::Load);
-                        ctx.link().send_message(Msg::RefreshCredentials);
                         if ctx.props().job_id.is_some() {
                             ctx.link().send_message(Msg::RefreshJob);
                         }
@@ -232,54 +223,6 @@ impl Component for SecretsPage {
                             ));
                         });
                     }
-                }
-                true
-            }
-            Msg::RefreshCredentials => {
-                let link = ctx.link().clone();
-                spawn_local(async move {
-                    link.send_message(Msg::Credentials(
-                        utils::fetch_json::<SecretCredentialsResponse>(
-                            "/api/secrets/authorize/credentials",
-                            On401::Ignore,
-                        )
-                        .await
-                        .map_err(|_| "Could not load approved CLI access.".into()),
-                    ));
-                });
-                false
-            }
-            Msg::Credentials(result) => {
-                match result {
-                    Ok(response) => self.credentials = Some(response.credentials),
-                    Err(error) => self.error = Some(error),
-                }
-                true
-            }
-            Msg::RevokeCredential(id) => {
-                if self.busy {
-                    return false;
-                }
-                self.busy = true;
-                self.error = None;
-                let link = ctx.link().clone();
-                spawn_local(async move {
-                    let result = api::mutate(
-                        "POST",
-                        &format!("/api/secrets/authorize/credentials/{id}/revoke"),
-                        &(),
-                    )
-                    .await
-                    .map(|_| ());
-                    link.send_message(Msg::CredentialRevoked(result));
-                });
-                true
-            }
-            Msg::CredentialRevoked(result) => {
-                self.busy = false;
-                match result {
-                    Ok(()) => ctx.link().send_message(Msg::RefreshCredentials),
-                    Err(error) => self.error = Some(error),
                 }
                 true
             }
@@ -624,7 +567,6 @@ impl Component for SecretsPage {
                 <label class="secrets-check secrets-filter"><input type="checkbox" checked={self.show_deleted} disabled={self.busy} onchange={ctx.link().callback(|event:Event|Msg::ShowDeleted(event.target_unchecked_into::<HtmlInputElement>().checked()))}/>{"Show deleted secrets"}</label>
                 if self.editing == Some(false) {<ValueForm replacing={false} can_publish={can_publish} on_submit={ctx.link().callback(Msg::Save)} on_cancel={ctx.link().callback(|_|Msg::Cancel)} />}
                 {self.inventory(ctx)}
-                {self.credentials_view(ctx)}
                 if let Some(job)=&self.job {{render_job(job,ctx.link().callback(|_|Msg::RefreshJob))}}
             }
         </section>}
@@ -681,7 +623,7 @@ impl SecretsPage {
                     <h3>{"Individual access"}</h3><p>{"Sharing grants read and use. Recipients cannot re-share through Portal. Revocation cannot recall a value already copied or delivered to a process."}</p>
                     <ul>{for secret.grants.iter().map(|grant|{let user=grant.user_id;html!{<li key={user.to_string()}>{self.member_label(user)}{format!(" — {}",grant.rights.iter().map(right_label).collect::<Vec<_>>().join(", "))}<button disabled={self.busy} onclick={ctx.link().callback(move |_|Msg::Unshare(user))}>{"Revoke"}</button></li>}})}</ul>
                     if self.directory_restricted {
-                        <p>{"Member discovery requires a domain-locked Portal and a verified identity in that domain. Sharing by a known Portal user UUID remains available through the CLI."}</p>
+                        <p>{"Member discovery requires a domain-locked Portal and a verified identity in that domain."}</p>
                     } else {
                     <label>{"Existing active member"}<select value={self.share_user.map(|id|id.to_string()).unwrap_or_default()} disabled={self.busy} onchange={ctx.link().callback(|event:Event|Msg::ShareUser(event.target_unchecked_into::<web_sys::HtmlSelectElement>().value()))}><option value="">{"Choose a member"}</option>{for self.members.iter().filter(|member|member.user_id!=secret.owner_user_id).map(|member|html!{<option value={member.user_id.to_string()}>{self.member_label(member.user_id)}</option>})}</select></label>
                     <button disabled={self.busy||self.share_user.is_none()} onclick={ctx.link().callback(|_|Msg::Share)}>{"Grant read and use"}</button>}
@@ -696,11 +638,6 @@ impl SecretsPage {
                 if self.response.as_ref().is_some_and(|response|response.can_manage_organization) {<label class="secrets-check"><input type="checkbox" checked={self.global_cleanup} disabled={self.busy} onchange={ctx.link().callback(|event:Event|Msg::GlobalCleanup(event.target_unchecked_into::<HtmlInputElement>().checked()))}/>{"Include other members' Portal records and archives. I authorize organization-wide cleanup as an administrator."}</label>}
                 <button disabled={self.busy} onclick={ctx.link().callback(|_|Msg::Expunge)}>{"Start cleanup for all versions"}</button>}
         </section>}
-    }
-    fn credentials_view(&self, ctx: &Context<Self>) -> Html {
-        html! {<details class="secrets-job" aria-label="Approved CLI access"><summary>{"Approved CLI access"}</summary><p>{"Computers authorized to access secrets within your grants."}</p><details><summary>{"About approval and revocation"}</summary><p>{"Revoking access stops future requests, but cannot recall values already delivered. Verify your account before approving or revoking CLI access."}</p></details><button disabled={self.busy} onclick={ctx.link().callback(|_|Msg::RefreshCredentials)}>{"Refresh CLI access"}</button>
-            {match &self.credentials {None=>html!{<p>{"Loading approved CLI access…"}</p>},Some(credentials) if credentials.is_empty()=>html!{<p>{"No approved CLI credentials."}</p>},Some(credentials)=>html!{<ul class="secrets-credentials">{for credentials.iter().map(|credential|{let id=credential.id;html!{<li key={id.to_string()}><strong>{&credential.label}</strong><small>{format!("Created {} · Expires {}",utils::format_timestamp(&credential.created_at),utils::format_timestamp(&credential.expires_at))}</small>if let Some(time)=&credential.revoked_at {<span>{format!("Revoked {}",utils::format_timestamp(time))}</span>}else{<button disabled={self.busy} onclick={ctx.link().callback(move |_|Msg::RevokeCredential(id))}>{"Revoke CLI access"}</button>}</li>}})}</ul>}}}
-        </details>}
     }
     fn member_label(&self, id: Uuid) -> String {
         self.members

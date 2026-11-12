@@ -1,4 +1,4 @@
-use super::super::tests::{credential, request, Database};
+use super::super::tests::{browser_session, request, Database};
 use super::*;
 use crate::handlers::websocket::{conn_channel, LauncherConnection};
 use tower::ServiceExt;
@@ -119,7 +119,7 @@ async fn request_requires_owning_browser_and_creates_one_pinned_binding() {
         tokio_util::sync::CancellationToken::new(),
     );
 
-    let human = credential(&state, owner, "human");
+    let human = browser_session(&state, owner, "human");
     let bound = proxy_token(&state, owner, Some(session.id));
     let router = super::super::router(state.clone())
         .with_state(state.clone())
@@ -209,7 +209,7 @@ async fn request_requires_owning_browser_and_creates_one_pinned_binding() {
         .0,
         axum::http::StatusCode::CONFLICT
     );
-    for token in [&bound, &human] {
+    for token in [bound.as_str(), "aps_secret_retired"] {
         assert_eq!(
             request(
                 &router,
@@ -439,7 +439,7 @@ async fn request_caps_include_denied_requests_and_gate_fails_before_checkout() {
         tokio_util::sync::CancellationToken::new(),
     );
 
-    let human = credential(&state, owner, "human");
+    let human = browser_session(&state, owner, "human");
     let bound = proxy_token(&state, owner, Some(session.id));
     let router = super::super::router(state.clone())
         .with_state(state.clone())
@@ -609,7 +609,7 @@ async fn grouped_requests_are_one_notice_and_atomic_owner_approval() {
         tokio_util::sync::CancellationToken::new(),
     );
 
-    let human = credential(&state, owner, "human");
+    let human = browser_session(&state, owner, "human");
     let bound = proxy_token(&state, owner, Some(session.id));
     let router = super::super::router(state.clone())
         .with_state(state.clone())
