@@ -1,7 +1,7 @@
 //! Real vault requests, isolated SQL schemas, and compressed local archives.
 //! Assertions inspect persisted content/receipts, not merely cleanup counters.
 use super::*;
-use crate::handlers::secrets::tests::{credential, request, Database};
+use crate::handlers::secrets::tests::{browser_session, request, Database};
 use archive_format::{
     ArchiveMessageLine, ArchiveTranscriptInfo, SessionArchiveBundle, SessionArchiveManifest,
 };
@@ -52,7 +52,7 @@ impl Fixture {
             let id = crate::test_support::insert_user(&mut state.conn().unwrap(), label).id;
             Actor {
                 id,
-                token: credential(&state, id, label),
+                token: browser_session(&state, id, label),
             }
         };
         let owner = actor("expunge-owner");
@@ -501,7 +501,7 @@ async fn own_cleanup_does_not_touch_another_owner_and_global_cleanup_requires_cu
         &f.router,
         &f.admin.token,
         "POST",
-        &format!("/api/secrets/{}/read", secret.id),
+        &format!("/api/secrets/{}/copy", secret.id),
         serde_json::json!({"version":null}),
         Uuid::new_v4(),
     )
@@ -563,7 +563,7 @@ async fn global_policy_refresh_sanitizes_other_owner_stale_buffers_without_using
         &f.router,
         &f.other.token,
         "POST",
-        &format!("/api/secrets/{}/read", target.id),
+        &format!("/api/secrets/{}/copy", target.id),
         serde_json::json!({}),
         Uuid::new_v4(),
     )

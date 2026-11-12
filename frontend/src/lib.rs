@@ -114,7 +114,7 @@ fn switch(routes: Route) -> Html {
         Route::Aperture => html! { <pages::aperture::AperturePage /> },
         Route::Settings => html! { <SettingsRoute /> },
         Route::Secrets => html! { <LegacySecretsRoute /> },
-        Route::SecretAuthorize => html! { <pages::secrets::SecretAuthorizePage /> },
+        Route::SecretAuthorize => html! { <LegacySecretsRoute /> },
         Route::SecretJob { id } => html! { <LegacySecretsRoute job_id={Some(id)} /> },
         Route::History => html! { <HistoryBrowserPage /> },
         Route::HistorySession { user, session } => html! {

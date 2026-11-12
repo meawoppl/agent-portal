@@ -1,5 +1,5 @@
 use super::*;
-use crate::schema::{secret_credentials, users};
+use crate::schema::users;
 use crate::secrets::{crypto::EnvelopeCrypto, SecretsService};
 use tower::ServiceExt;
 use zeroize::Zeroizing;
@@ -39,22 +39,26 @@ impl Drop for Database {
         }
     }
 }
-pub(crate) fn credential(state: &AppState, user: Uuid, label: &str) -> String {
-    let token = format!("aps_secret_{}", Uuid::new_v4());
-    diesel::insert_into(secret_credentials::table)
-        .values((
-            secret_credentials::id.eq(Uuid::new_v4()),
-            secret_credentials::user_id.eq(user),
-            secret_credentials::token_hash.eq(crate::jwt::hash_token(&token)),
-            secret_credentials::label.eq(label),
-            secret_credentials::metadata_scope.eq(true),
-            secret_credentials::mutation_scope.eq(true),
-            secret_credentials::read_scope.eq(true),
-            secret_credentials::expires_at.eq(Utc::now() + chrono::Duration::hours(1)),
-        ))
-        .execute(&mut state.conn().unwrap())
-        .unwrap();
-    token
+/// A verified browser identity for management/copy tests. The prefix is test
+/// plumbing only: production requests carry the signed cookies directly.
+pub(crate) fn browser_session(state: &AppState, user: Uuid, _label: &str) -> String {
+    let cookies = tower_cookies::Cookies::default();
+    cookies
+        .signed(&state.cookie_key)
+        .add(tower_cookies::Cookie::new(
+            shared::protocol::SESSION_COOKIE_NAME,
+            user.to_string(),
+        ));
+    auth::record_verification(&cookies, state, user);
+    format!(
+        "browser:{}",
+        cookies
+            .list()
+            .iter()
+            .map(|cookie| format!("{}={}", cookie.name(), cookie.value()))
+            .collect::<Vec<_>>()
+            .join("; ")
+    )
 }
 pub(crate) async fn request(
     router: &Router,
@@ -64,15 +68,25 @@ pub(crate) async fn request(
     body: serde_json::Value,
     key: Uuid,
 ) -> (axum::http::StatusCode, serde_json::Value) {
+    let mut builder = axum::http::Request::builder()
+        .method(method)
+        .uri(path)
+        .header("content-type", "application/json")
+        .header("idempotency-key", key.to_string());
+    builder = if let Some(cookie) = token.strip_prefix("browser:") {
+        builder
+            .header("cookie", cookie)
+            .header("origin", "http://localhost:3000")
+            .header("x-portal-secrets", "1")
+    } else {
+        // Real bound-agent JWTs remain bearer-authenticated and cannot become
+        // an approving browser through this fixture adapter.
+        builder.header("authorization", format!("Bearer {token}"))
+    };
     let response = router
         .clone()
         .oneshot(
-            axum::http::Request::builder()
-                .method(method)
-                .uri(path)
-                .header("authorization", format!("Bearer {token}"))
-                .header("content-type", "application/json")
-                .header("idempotency-key", key.to_string())
+            builder
                 .body(axum::body::Body::from(body.to_string()))
                 .unwrap(),
         )
@@ -91,7 +105,7 @@ pub(crate) async fn request(
     )
 }
 #[tokio::test]
-async fn vault_rotation_delete_restore_acl_and_credentials_are_enforced() {
+async fn vault_rotation_delete_restore_acl_and_browser_rights_are_enforced() {
     let Some(db) = Database::new() else { return };
     let mut state = crate::test_support::test_app_state(db.pool.clone());
     state.secrets = Arc::new(SecretsService::new(Some(EnvelopeCrypto {
@@ -105,9 +119,9 @@ async fn vault_rotation_delete_restore_acl_and_credentials_are_enforced() {
         .set(users::is_admin.eq(true))
         .execute(&mut state.conn().unwrap())
         .unwrap();
-    let token = credential(&state, owner, "owner");
-    let other_token = credential(&state, other, "recipient");
-    let admin_token = credential(&state, admin, "curator");
+    let token = browser_session(&state, owner, "owner");
+    let other_token = browser_session(&state, other, "recipient");
+    let admin_token = browser_session(&state, admin, "curator");
     let router = router(state.clone())
         .with_state(state.clone())
         .layer(tower_cookies::CookieManagerLayer::new());
@@ -124,7 +138,9 @@ async fn vault_rotation_delete_restore_acl_and_credentials_are_enforced() {
     let incomplete = axum::http::Request::builder()
         .method("POST")
         .uri("/api/secrets")
-        .header("authorization", format!("Bearer {token}"))
+        .header("cookie", token.strip_prefix("browser:").unwrap())
+        .header("origin", "http://localhost:3000")
+        .header("x-portal-secrets", "1")
         .header("content-type", "application/json")
         .header("idempotency-key", Uuid::new_v4().to_string())
         .body(axum::body::Body::from_stream(stream))
@@ -217,7 +233,7 @@ async fn vault_rotation_delete_restore_acl_and_credentials_are_enforced() {
             &router,
             unauthorized,
             "POST",
-            &format!("/api/secrets/{id}/read"),
+            &format!("/api/secrets/{id}/copy"),
             serde_json::json!({"version":null}),
             Uuid::new_v4(),
         )
@@ -228,7 +244,7 @@ async fn vault_rotation_delete_restore_acl_and_credentials_are_enforced() {
         &router,
         &token,
         "POST",
-        &format!("/api/secrets/{id}/read"),
+        &format!("/api/secrets/{id}/copy"),
         serde_json::json!({"version":null}),
         Uuid::new_v4(),
     )
@@ -251,7 +267,7 @@ async fn vault_rotation_delete_restore_acl_and_credentials_are_enforced() {
         &wrong_router,
         &token,
         "POST",
-        &format!("/api/secrets/{id}/read"),
+        &format!("/api/secrets/{id}/copy"),
         serde_json::json!({}),
         Uuid::new_v4(),
     )
@@ -272,7 +288,7 @@ async fn vault_rotation_delete_restore_acl_and_credentials_are_enforced() {
         &router,
         &token,
         "POST",
-        &format!("/api/secrets/{id}/read"),
+        &format!("/api/secrets/{id}/copy"),
         serde_json::json!({"version":1}),
         Uuid::new_v4(),
     )
@@ -339,8 +355,8 @@ async fn vault_rotation_delete_restore_acl_and_credentials_are_enforced() {
         &router,
         &other_token,
         "POST",
-        &format!("/api/secrets/{id}/read"),
-        serde_json::json!({"for_execution":true}),
+        &format!("/api/secrets/{id}/copy"),
+        serde_json::json!({}),
         Uuid::new_v4(),
     )
     .await;
@@ -390,7 +406,7 @@ async fn vault_rotation_delete_restore_acl_and_credentials_are_enforced() {
             &router,
             &token,
             "POST",
-            &format!("/api/secrets/{id}/read"),
+            &format!("/api/secrets/{id}/copy"),
             serde_json::json!({"version":version}),
             Uuid::new_v4(),
         )
@@ -452,7 +468,7 @@ async fn vault_rotation_delete_restore_acl_and_credentials_are_enforced() {
         &router,
         &other_token,
         "POST",
-        &format!("/api/secrets/{id}/read"),
+        &format!("/api/secrets/{id}/copy"),
         serde_json::json!({}),
         Uuid::new_v4(),
     )
@@ -562,14 +578,14 @@ async fn vault_rotation_delete_restore_acl_and_credentials_are_enforced() {
         .is_err());
     let new_member =
         crate::test_support::insert_user(&mut state.conn().unwrap(), "future_member").id;
-    let new_token = credential(&state, new_member, "future member");
+    let new_token = browser_session(&state, new_member, "future member");
     let org_id = organization["id"].as_str().unwrap();
     let (status, value) = request(
         &router,
         &new_token,
         "POST",
-        &format!("/api/secrets/{org_id}/read"),
-        serde_json::json!({"for_execution":true}),
+        &format!("/api/secrets/{org_id}/copy"),
+        serde_json::json!({}),
         Uuid::new_v4(),
     )
     .await;
@@ -597,8 +613,8 @@ async fn retained_source_quota_rejects_before_rule_generation_or_value_release()
     let state = Arc::new(state);
     let owner = crate::test_support::insert_user(&mut state.conn().unwrap(), "quota_owner").id;
     let reader = crate::test_support::insert_user(&mut state.conn().unwrap(), "quota_reader").id;
-    let token = credential(&state, owner, "owner");
-    let recipient = credential(&state, reader, "reader");
+    let token = browser_session(&state, owner, "owner");
+    let recipient = browser_session(&state, reader, "reader");
     let router = super::router(state.clone())
         .with_state(state.clone())
         .layer(tower_cookies::CookieManagerLayer::new());
@@ -670,7 +686,7 @@ async fn retained_source_quota_rejects_before_rule_generation_or_value_release()
         &router,
         &recipient,
         "POST",
-        &format!("/api/secrets/{id}/read"),
+        &format!("/api/secrets/{id}/copy"),
         serde_json::json!({}),
         Uuid::new_v4(),
     )
@@ -689,7 +705,7 @@ async fn retained_source_quota_rejects_before_rule_generation_or_value_release()
         &router,
         &token,
         "POST",
-        &format!("/api/secrets/{id}/read"),
+        &format!("/api/secrets/{id}/copy"),
         serde_json::json!({}),
         Uuid::new_v4(),
     )
@@ -713,7 +729,7 @@ async fn clipboard_read_requires_verified_browser_csrf_and_live_read_grant() {
     let state = Arc::new(state);
     let owner = crate::test_support::insert_user(&mut state.conn().unwrap(), "copy-owner").id;
     let other = crate::test_support::insert_user(&mut state.conn().unwrap(), "copy-other").id;
-    let token = credential(&state, owner, "owner");
+    let token = browser_session(&state, owner, "owner");
     let router = router(state.clone())
         .with_state(state.clone())
         .layer(tower_cookies::CookieManagerLayer::new());
@@ -776,7 +792,7 @@ async fn clipboard_read_requires_verified_browser_csrf_and_live_read_grant() {
     }
     let (status, _) = request(
         &router,
-        &token,
+        "aps_secret_retired",
         "POST",
         &path,
         serde_json::json!({}),
@@ -786,7 +802,7 @@ async fn clipboard_read_requires_verified_browser_csrf_and_live_read_grant() {
     assert_eq!(
         status,
         axum::http::StatusCode::FORBIDDEN,
-        "CLI credentials cannot use browser copy"
+        "Bearer credentials cannot use browser copy"
     );
     let response = router
         .clone()
@@ -814,8 +830,8 @@ async fn clipboard_read_requires_verified_browser_csrf_and_live_read_grant() {
         .unwrap();
     assert_eq!(
         ordinary.status(),
-        axum::http::StatusCode::FORBIDDEN,
-        "Browser copy must not open CLI read"
+        axum::http::StatusCode::GONE,
+        "The former general CLI read endpoint stays retired"
     );
     let other_cookies = tower_cookies::Cookies::default();
     other_cookies

@@ -1,8 +1,6 @@
-//! Dedicated human vault credentials are deliberately unrelated to proxy JWTs.
-use crate::{errors::AppError, schema::secret_credentials, AppState};
+//! Human vault access is browser-only; agent access uses explicit bound approvals.
+use crate::{errors::AppError, AppState};
 use axum::http::HeaderMap;
-use chrono::Utc;
-use diesel::prelude::*;
 use uuid::Uuid;
 #[derive(Clone, Copy)]
 pub struct Principal {
@@ -10,39 +8,16 @@ pub struct Principal {
     pub browser: bool,
     pub metadata: bool,
     pub mutation: bool,
-    pub read: bool,
 }
-pub fn credential(state: &AppState, headers: &HeaderMap) -> Result<Option<Principal>, AppError> {
-    let Some(token) = crate::auth::bearer_token(headers) else {
-        if headers.contains_key(axum::http::header::AUTHORIZATION) {
-            return Err(AppError::Unauthorized);
-        }
-        return Ok(None);
-    };
-    if !token.starts_with("aps_secret_") {
-        return Err(AppError::Forbidden);
-    };
-    let mut conn = state.conn()?;
-    let (user, metadata, mutation, read) = secret_credentials::table
-        .filter(secret_credentials::token_hash.eq(crate::jwt::hash_token(token)))
-        .filter(secret_credentials::revoked_at.is_null())
-        .filter(secret_credentials::expires_at.gt(Utc::now()))
-        .select((
-            secret_credentials::user_id,
-            secret_credentials::metadata_scope,
-            secret_credentials::mutation_scope,
-            secret_credentials::read_scope,
-        ))
-        .first::<(Uuid, bool, bool, bool)>(&mut conn)
-        .map_err(|_| AppError::Unauthorized)?;
-    super::store::active_user(&mut conn, user)?;
-    Ok(Some(Principal {
-        user,
-        browser: false,
-        metadata,
-        mutation,
-        read,
-    }))
+/// Ordinary, linked and retired vault tokens must never fall through to a
+/// browser cookie or gain general vault authority. Bound agent routes have
+/// their own process/session/approval checks.
+pub fn require_browser_headers(headers: &HeaderMap) -> Result<(), AppError> {
+    if headers.contains_key(axum::http::header::AUTHORIZATION) {
+        Err(AppError::Forbidden)
+    } else {
+        Ok(())
+    }
 }
 pub fn csrf(state: &AppState, headers: &HeaderMap) -> Result<(), AppError> {
     if headers
@@ -65,14 +40,6 @@ pub fn csrf(state: &AppState, headers: &HeaderMap) -> Result<(), AppError> {
     };
     Ok(())
 }
-pub fn require_read(principal: Principal) -> Result<(), AppError> {
-    if principal.browser || !principal.read {
-        Err(AppError::Forbidden)
-    } else {
-        Ok(())
-    }
-}
-
 const BROWSER_COOKIE: &str = "portal_secrets_browser";
 const VERIFIED_COOKIE: &str = "portal_secrets_verified";
 /// Explicit verification lasts for this browser session, not ten minutes from
@@ -183,27 +150,17 @@ mod tests {
             axum::http::HeaderValue::from_static("Basic invalid"),
         );
         assert!(
-            credential(&state, &headers).is_err(),
+            require_browser_headers(&headers).is_err(),
             "Malformed credentials must not fall back to a browser cookie"
         );
     }
     #[test]
-    fn ordinary_credentials_never_gain_value_read_scope() {
-        assert!(require_read(Principal {
-            user: Uuid::new_v4(),
-            browser: true,
-            metadata: true,
-            mutation: true,
-            read: true
-        })
-        .is_err());
-        assert!(require_read(Principal {
-            user: Uuid::new_v4(),
-            browser: false,
-            metadata: true,
-            mutation: true,
-            read: false
-        })
-        .is_err());
+    fn all_bearer_credentials_are_rejected_for_browser_vault_access() {
+        for token in ["aps_secret_retired", "session-jwt", "linked-token"] {
+            let mut headers = HeaderMap::new();
+            headers.insert("authorization", format!("Bearer {token}").parse().unwrap());
+            assert!(require_browser_headers(&headers).is_err());
+        }
+        assert!(require_browser_headers(&HeaderMap::new()).is_ok());
     }
 }

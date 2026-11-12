@@ -307,9 +307,6 @@ pub(super) async fn create(
     if principal.browser {
         auth::require_verification(&cookies, &state, principal.user)?
     }
-    if !principal.browser && !principal.read {
-        return Err(AppError::Forbidden);
-    };
     validate_terms(&request.env_name, request.expires_in_seconds)?;
     state.secrets.crypto()?;
     let id = Uuid::new_v5(&principal.user, idempotency::key(&headers)?.as_bytes());
@@ -581,7 +578,7 @@ pub(super) async fn redeem(
 
 #[cfg(test)]
 mod tests {
-    use super::super::tests::{credential, request, Database};
+    use super::super::tests::{browser_session, request, Database};
     use super::*;
     use crate::handlers::websocket::{conn_channel, LauncherConnection};
     fn proxy_token(state: &AppState, user: Uuid, session: Option<Uuid>) -> String {
@@ -655,8 +652,8 @@ mod tests {
         );
         let different =
             crate::test_support::insert_session(&mut state.conn().unwrap(), owner, "different");
-        let human = credential(&state, owner, "human");
-        let unrelated = credential(&state, other, "unrelated");
+        let human = browser_session(&state, owner, "human");
+        let unrelated = browser_session(&state, other, "unrelated");
         let normal = proxy_token(&state, owner, None);
         let mut bound = proxy_token(&state, owner, Some(session.id));
         let wrong = proxy_token(&state, owner, Some(different.id));
