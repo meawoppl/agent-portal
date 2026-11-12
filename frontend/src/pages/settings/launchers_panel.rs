@@ -449,7 +449,7 @@ fn launcher_row(props: &LauncherRowProps) -> Html {
                             aria-label={update_label}
                             disabled={update_disabled}
                         >
-                            <span aria-hidden="true">{ if update_armed { "✓" } else { "↑" } }</span>
+                            { update_label }
                         </button>
                         <button
                             class={restart_class}
@@ -458,7 +458,7 @@ fn launcher_row(props: &LauncherRowProps) -> Html {
                             aria-label={restart_label}
                             disabled={restart_disabled}
                         >
-                            <span aria-hidden="true">{ if restart_armed { "✓" } else { "↻" } }</span>
+                            { restart_label }
                         </button>
                         <button
                             class={cancel_class}
