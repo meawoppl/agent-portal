@@ -51,15 +51,34 @@ struct RequestCard {
     poll: Option<Timeout>,
     expiry: Option<Timeout>,
     _wake: Vec<EventListener>,
-    account_verified: bool,
+    action: Option<Progress>,
+    decision_error: Option<&'static str>,
+    load_generation: u64,
 }
 enum Msg {
     Expire,
-    AccountVerified(bool),
-    Load(bool),
-    Loaded(Result<SecretAccessGroupInfo, &'static str>),
+    Verified(Result<(), &'static str>),
+    Load,
+    Loaded(u64, Result<SecretAccessGroupInfo, &'static str>),
     Decide(bool),
     Decided(Result<(), &'static str>),
+}
+#[derive(Clone, Copy, PartialEq)]
+enum Progress {
+    Verifying,
+    Approving,
+    Denying,
+    Confirming,
+}
+impl Progress {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Verifying => "Verifying your Portal session…",
+            Self::Approving => "Approving access…",
+            Self::Denying => "Denying access…",
+            Self::Confirming => "Checking the result…",
+        }
+    }
 }
 fn verified(info: &SecretAccessRequestInfo, request: Uuid, session: Uuid) -> bool {
     info.id == request && info.session_id == session
@@ -117,6 +136,34 @@ fn can_decide_group(
     })
 }
 impl RequestCard {
+    fn submit_decision(&mut self, ctx: &Context<Self>, approve: bool) {
+        self.action = Some(if approve {
+            Progress::Approving
+        } else {
+            Progress::Denying
+        });
+        self.busy = true;
+        let id = ctx.props().request_id;
+        let grouped = ctx.props().grouped;
+        ctx.link().send_future(async move {
+            let send = async {
+                let request = Request::post(&utils::api_url(&format!("/api/secrets/{}/{id}/decision", if grouped {"request-groups"} else {"requests"})))
+                    .header("x-portal-secrets", "1")
+                    .header("Idempotency-Key", &Uuid::new_v4().to_string());
+                match utils::send_json(request, &SecretAccessDecisionRequest { approve }).await {
+                    Ok(r) if r.ok() => Ok(()),
+                    Ok(r) if r.status() == 401 || r.status() == 403 => Err("Access was not approved. Check your login and session ownership, then retry."),
+                    _ => Err("The decision was not confirmed. Checking the current request status before you retry."),
+                }
+            };
+            let timeout = gloo::timers::future::TimeoutFuture::new(15_000);
+            futures_util::pin_mut!(send, timeout);
+            Msg::Decided(match futures_util::future::select(send, timeout).await {
+                futures_util::future::Either::Left((result, _)) => result,
+                futures_util::future::Either::Right(_) => Err("The decision timed out. Checking its status; it will not be submitted again automatically."),
+            })
+        });
+    }
     fn schedule_expiry(&mut self, ctx: &Context<Self>) {
         self.expiry = None;
         if let Some(info) = &mut self.info {
@@ -199,7 +246,7 @@ impl Component for RequestCard {
     type Properties = CardProps;
     fn create(ctx: &Context<Self>) -> Self {
         if ctx.props().eligible {
-            ctx.link().send_message(Msg::Load(false));
+            ctx.link().send_message(Msg::Load);
         }
         Self {
             info: None,
@@ -208,29 +255,63 @@ impl Component for RequestCard {
             poll: None,
             expiry: None,
             _wake: Vec::new(),
-            account_verified: false,
+            action: None,
+            decision_error: None,
+            load_generation: 0,
         }
     }
     fn update(&mut self, ctx: &Context<Self>, msg: Msg) -> bool {
         match msg {
             Msg::Expire => self.schedule_expiry(ctx),
-            Msg::AccountVerified(value) => self.account_verified = value,
-            Msg::Load(preserve_error) => {
+            Msg::Verified(result) => {
+                if self.action != Some(Progress::Verifying) {
+                    return false;
+                }
+                match result {
+                    Ok(())
+                        if can_decide_group(
+                            ctx.props().eligible,
+                            false,
+                            self.info.as_ref(),
+                            js_sys::Date::now() as i64,
+                        ) =>
+                    {
+                        self.submit_decision(ctx, true)
+                    }
+                    Ok(()) => {
+                        self.busy = false;
+                        self.action = None;
+                        self.schedule_expiry(ctx);
+                    }
+                    Err(error) => {
+                        self.busy = false;
+                        self.action = None;
+                        self.decision_error = Some(error);
+                        ctx.link().send_message(Msg::Load);
+                    }
+                }
+            }
+            Msg::Load => {
                 if self.busy || !ctx.props().eligible {
                     return false;
                 }
                 self.poll = None;
-                if !preserve_error {
-                    self.error = None;
-                }
                 self.busy = true;
                 let id = ctx.props().request_id;
                 let grouped = ctx.props().grouped;
+                self.load_generation += 1;
+                let generation = self.load_generation;
                 ctx.link()
-                    .send_future(async move { Msg::Loaded(load(id, grouped).await) });
+                    .send_future(async move { Msg::Loaded(generation, load(id, grouped).await) });
             }
-            Msg::Loaded(result) => {
+            Msg::Loaded(generation, result) => {
+                if generation != self.load_generation {
+                    return false;
+                }
                 self.busy = false;
+                if self.action == Some(Progress::Confirming) {
+                    self.action = None;
+                }
                 match result {
                     Ok(info)
                         if verified_group(
@@ -240,6 +321,10 @@ impl Component for RequestCard {
                             ctx.props().grouped,
                         ) =>
                     {
+                        self.error = None;
+                        if !active(info.state) || info.state == SecretAccessState::Approved {
+                            self.decision_error = None;
+                        }
                         self.info = Some(info);
                         self.schedule_expiry(ctx);
                         if self
@@ -248,9 +333,8 @@ impl Component for RequestCard {
                             .is_some_and(|i| i.state == SecretAccessState::Pending)
                         {
                             let link = ctx.link().clone();
-                            self.poll = Some(Timeout::new(5_000, move || {
-                                link.send_message(Msg::Load(false))
-                            }));
+                            self.poll =
+                                Some(Timeout::new(5_000, move || link.send_message(Msg::Load)));
                         }
                     }
                     Ok(_) => {
@@ -278,9 +362,8 @@ impl Component for RequestCard {
                             // Keep polling a previously verified pending request across a reconnect,
                             // but never permit a decision while its status is unconfirmed.
                             let link = ctx.link().clone();
-                            self.poll = Some(Timeout::new(5_000, move || {
-                                link.send_message(Msg::Load(false))
-                            }));
+                            self.poll =
+                                Some(Timeout::new(5_000, move || link.send_message(Msg::Load)));
                         } else {
                             self.info = None;
                         }
@@ -292,11 +375,10 @@ impl Component for RequestCard {
                 }
             }
             Msg::Decide(approve) => {
-                if (approve && !self.account_verified)
-                    || self.error.is_some()
+                if self.error.is_some()
                     || !can_decide_group(
                         ctx.props().eligible,
-                        self.busy,
+                        self.action.is_some(),
                         self.info.as_ref(),
                         js_sys::Date::now() as i64,
                     )
@@ -304,27 +386,28 @@ impl Component for RequestCard {
                     return false;
                 }
                 self.poll = None;
+                // Invalidate a concurrent background poll; it must neither swallow
+                // this click nor overwrite a decision with stale Pending data.
+                self.load_generation += 1;
                 self.busy = true;
-                self.error = None;
-                let id = ctx.props().request_id;
-                let grouped = ctx.props().grouped;
-                ctx.link().send_future(async move {
-                    let request = Request::post(&utils::api_url(&format!("/api/secrets/{}/{id}/decision", if grouped {"request-groups"} else {"requests"})))
-                        .header("x-portal-secrets", "1")
-                        .header("Idempotency-Key", &Uuid::new_v4().to_string());
-                    let result = utils::send_json(request, &SecretAccessDecisionRequest { approve }).await;
-                    Msg::Decided(match result {
-                        Ok(r) if r.ok() => Ok(()),
-                        Ok(r) if r.status() == 401 || r.status() == 403 => Err("Approval requires the session owner and account verification. Use the verification button, then retry."),
-                        _ => Err("The decision was not confirmed. Check the refreshed status before trying again."),
-                    })
-                });
+                self.decision_error = None;
+                if approve {
+                    self.action = Some(Progress::Verifying);
+                    ctx.link().send_future(async {
+                        Msg::Verified(
+                            crate::components::secret_verification::verify_session().await,
+                        )
+                    });
+                } else {
+                    self.submit_decision(ctx, false);
+                }
             }
             Msg::Decided(result) => {
                 self.busy = false;
-                self.error = result.err();
-                // Never trust a stale marker or a POST response as current authority.
-                ctx.link().send_message(Msg::Load(true));
+                self.action = Some(Progress::Confirming);
+                self.decision_error = result.err();
+                // Confirm the outcome via GET; never automatically replay a POST.
+                ctx.link().send_message(Msg::Load);
             }
         }
         true
@@ -334,7 +417,7 @@ impl Component for RequestCard {
         let actionable = self.error.is_none()
             && can_decide_group(
                 eligible,
-                self.busy,
+                self.action.is_some(),
                 self.info.as_ref(),
                 js_sys::Date::now() as i64,
             );
@@ -347,7 +430,7 @@ impl Component for RequestCard {
             ) => "is-closed",
             _ => "is-pending",
         };
-        html! { <section class={classes!("permission-prompt", "secret-access-request", state_class)} aria-live="polite">
+        html! { <section class={classes!("permission-prompt", "secret-access-request", state_class)} aria-live="polite" aria-busy={self.action.is_some().to_string()}>
             <header class="secret-access-summary"><strong>{"Agent secret access"}</strong>
                 if let Some(info) = &self.info {<span class="secret-access-status">{state_text(info.state)}</span>}
             </header>
@@ -358,12 +441,11 @@ impl Component for RequestCard {
                 if let Some(error) = self.error {
                     <p role="alert">{error}</p>
                 }
-                if self.info.as_ref().is_some_and(|i| i.state == SecretAccessState::Pending) {
-                    <crate::components::secret_verification::SecretVerification on_verified={ctx.link().callback(Msg::AccountVerified)} />
-                }
+                if let Some(error) = self.decision_error {<p role="alert">{error}</p>}
+                if let Some(progress) = self.action {<p role="status"><span class="secret-verification-spinner" aria-hidden="true"/>{progress.label()}</p>}
                 if self.info.as_ref().is_some_and(|i| i.state == SecretAccessState::Pending) {
                     <div class="secret-access-actions">
-                        <button type="button" class="secret-button secret-button--primary" disabled={!actionable || !self.account_verified} onclick={ctx.link().callback(|_| Msg::Decide(true))}>{if ctx.props().grouped {"Approve all credentials"} else {"Approve access"}}</button>
+                        <button type="button" class="secret-button secret-button--primary" disabled={!actionable} onclick={ctx.link().callback(|_| Msg::Decide(true))}>{if ctx.props().grouped {"Approve all credentials"} else {"Approve access"}}</button>
                         <button type="button" class="secret-button" disabled={!actionable} onclick={ctx.link().callback(|_| Msg::Decide(false))}>{if ctx.props().grouped {"Deny all"} else {"Deny"}}</button>
                     </div>
                 }
