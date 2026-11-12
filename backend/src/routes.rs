@@ -501,6 +501,10 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
             get(handlers::auth::secret_verification::status),
         )
         .route(
+            "/api/secrets/verification/check",
+            post(handlers::auth::secret_verification::check),
+        )
+        .route(
             "/api/secrets/verification/start",
             post(handlers::auth::secret_verification::start),
         )

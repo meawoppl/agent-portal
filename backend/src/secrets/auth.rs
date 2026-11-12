@@ -76,7 +76,7 @@ pub fn require_read(principal: Principal) -> Result<(), AppError> {
 const BROWSER_COOKIE: &str = "portal_secrets_browser";
 const VERIFIED_COOKIE: &str = "portal_secrets_verified";
 /// Explicit verification lasts for this browser session, not ten minutes from
-/// login. Ordinary login clears it; only the same-account OAuth round-trip sets it.
+/// login. Ordinary login clears it; the explicit browser-only session check sets it.
 pub fn record_verification(cookies: &tower_cookies::Cookies, state: &AppState, user: Uuid) {
     let mut cookie = verification_cookie(state);
     let context =
