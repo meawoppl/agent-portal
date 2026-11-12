@@ -532,3 +532,65 @@
     flex-wrap: wrap;
     gap: 0.5rem;
 }
+
+.secret-access-request {
+    background: var(--bg-secondary, #24283b);
+    border-color: var(--border-color, #565f89);
+    gap: 0.85rem;
+    max-height: none;
+}
+.secret-access-request.is-approved {
+    border-color: var(--success-color, #9ece6a);
+}
+.secret-access-request p, .secret-access-request dl {
+    margin: 0;
+}
+.secret-access-summary {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+}
+.secret-access-summary p {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.secret-access-version {
+    display: block;
+    margin-top: 0.25rem;
+    color: var(--text-muted, #a9b1d6);
+    font-size: 0.875rem;
+}
+.secret-access-status {
+    flex-shrink: 0;
+    padding: 0.25rem 0.6rem;
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    font-size: 0.875rem;
+}
+.is-approved .secret-access-status {
+    color: var(--success-color, #9ece6a);
+}
+.secret-access-details summary {
+    cursor: pointer;
+    color: var(--text-muted, #a9b1d6);
+    padding: 0.25rem 0;
+}
+.secret-access-details[open] dl {
+    margin-top: 0.5rem;
+}
+.secret-access-request .secrets-verification {
+    margin: 0;
+}
+
+@media (max-width: 600px) {
+    .secret-access-request dl {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    .secret-access-request dd {
+        margin-bottom: 0.5rem;
+    }
+    .secret-access-actions .secret-button {
+        flex: 1 1 auto;
+    }
+}

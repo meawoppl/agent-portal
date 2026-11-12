@@ -110,14 +110,14 @@ pub fn secret_verification(props: &Props) -> Html {
             });
         })
     };
-    html! {<section class="secrets-verification" aria-label="Verify your account">
+    html! {<section class={classes!("secrets-verification", status.as_ref().is_some_and(|s|s.verified).then_some("is-verified"))} aria-label="Verify your account">
         if let Some(status)=&*status {
-            if status.verified {<p role="status">{"Account verified for this browser session."}</p>}
+            if status.verified {<p role="status">{"Account verified"}</p>}
             else {
                 <p>{"Verify your account before approving access or changing protected secret settings. You will return here to finish the action."}</p>
                 {for status.providers.iter().map(|provider| {
                     let label=if provider=="google" {"Verify with Google"} else {"Verify with GitHub"};
-                    html!{<button type="button" disabled={*busy} onclick={start(provider.clone())}>{label}</button>}
+                    html!{<button type="button" class="secret-button secret-button--primary" disabled={*busy} onclick={start(provider.clone())}>{label}</button>}
                 })}
                 if status.providers.is_empty() {<p>{"No linked login provider is configured for verification."}</p>}
             }

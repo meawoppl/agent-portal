@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2424 · Make secret approval cards readable</text>
+<text x="55" y="105" font-family="sans-serif" font-size="34" fill="#e6e9f5">Secret cards used to expose internal IDs and unstyled controls.</text>
+<text x="55" y="150" font-family="sans-serif" font-size="34" fill="#e6e9f5">Readable summaries and shared button styles make the decision clear.</text>
+<path d="M55 180 H1945 M1000 200 V1130" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="55" y="235" font-family="sans-serif" font-size="24" fill="#f7768e">BEFORE</text>
+<text x="1055" y="235" font-family="sans-serif" font-size="24" fill="#9ece6a">AFTER</text>
+<rect x="55" y="285" width="890" height="210" rx="16" fill="#1e202e" stroke="#f7768e"/>
+<text x="80" y="330" font-family="sans-serif" font-size="28" fill="#7aa2f7">Card summary</text>
+<text x="80" y="390" font-family="sans-serif" font-size="25" fill="#c0caf5">Owner, secret, session and launcher UUIDs fill the card.</text>
+<text x="80" y="438" font-family="sans-serif" font-size="25" fill="#f7768e">Operational identifiers overwhelm the useful details.</text>
+<rect x="1055" y="285" width="890" height="210" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="330" font-family="sans-serif" font-size="28" fill="#7aa2f7">Card summary</text>
+<text x="1080" y="390" font-family="sans-serif" font-size="25" fill="#c0caf5">Name, version, environment and duration stay visible.</text>
+<text x="1080" y="438" font-family="sans-serif" font-size="25" fill="#9ece6a">Internal IDs collapse under Technical details.</text>
+<rect x="55" y="550" width="890" height="210" rx="16" fill="#1e202e" stroke="#f7768e"/>
+<text x="80" y="595" font-family="sans-serif" font-size="28" fill="#7aa2f7">Approved state</text>
+<text x="80" y="655" font-family="sans-serif" font-size="25" fill="#c0caf5">Large verification banner remains after approval.</text>
+<text x="80" y="703" font-family="sans-serif" font-size="25" fill="#f7768e">Pending-warning styling still surrounds success.</text>
+<rect x="1055" y="550" width="890" height="210" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="595" font-family="sans-serif" font-size="28" fill="#7aa2f7">Approved state</text>
+<text x="1080" y="655" font-family="sans-serif" font-size="25" fill="#c0caf5">Compact Approved badge replaces pending controls.</text>
+<text x="1080" y="703" font-family="sans-serif" font-size="25" fill="#9ece6a">Refresh preserves the existing card content.</text>
+<rect x="55" y="815" width="890" height="210" rx="16" fill="#1e202e" stroke="#f7768e"/>
+<text x="80" y="860" font-family="sans-serif" font-size="28" fill="#7aa2f7">Agent secret access card</text>
+<text x="80" y="920" font-family="sans-serif" font-size="25" fill="#c0caf5">Native buttons miss scoped page styles.</text>
+<text x="80" y="968" font-family="sans-serif" font-size="25" fill="#f7768e">Approved state retains verification clutter.</text>
+<rect x="1055" y="815" width="890" height="210" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="860" font-family="sans-serif" font-size="28" fill="#7aa2f7">Agent secret access card</text>
+<text x="1080" y="920" font-family="sans-serif" font-size="25" fill="#c0caf5">Shared secret-button styles: 44px targets.</text>
+<text x="1080" y="968" font-family="sans-serif" font-size="25" fill="#9ece6a">Compact status; IDs in Technical details.</text>
+<text x="55" y="1170" font-family="sans-serif" font-size="22" fill="#a9b1d6">Presentation only: existing verification and authorization requirements remain unchanged.</text>
+</svg>
