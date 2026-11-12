@@ -102,7 +102,7 @@ async def exercise(browser, base, output, width, grouped=False):
     await card.screenshot(path=str(output / f'secret-controls-{grouped}-pending-{width}.png'))
     count = len(navigations)
     await card.get_by_role('button', name=approve_label, exact=True).click()
-    await expect(card.locator('.secret-access-group > p') if grouped else card.locator('.secret-access-status')).to_contain_text('Approved')
+    await expect(card.locator('.secret-access-group > p').first if grouped else card.locator('.secret-access-status')).to_contain_text('Approved')
     await expect(card.locator('.secrets-verification')).to_have_count(0)
     await expect(card.get_by_role('button', name=approve_label)).to_have_count(0)
     await expect(card.locator('details').first).not_to_have_attribute('open', '')
@@ -113,7 +113,7 @@ async def exercise(browser, base, output, width, grouped=False):
     await refresh.focus()
     assert await refresh.evaluate("e => getComputedStyle(e).outlineStyle") != 'none'
     await refresh.click()
-    await expect(card.locator('.secret-access-group > p') if grouped else card.locator('.secret-access-status')).to_contain_text('Approved')
+    await expect(card.locator('.secret-access-group > p').first if grouped else card.locator('.secret-access-status')).to_contain_text('Approved')
     assert len(navigations) == count and state['approvals'] == 1
     assert await card.evaluate('e => e.scrollWidth <= e.clientWidth + 1')
     await card.screenshot(path=str(output / f'secret-controls-{grouped}-approved-{width}.png'))
