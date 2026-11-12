@@ -305,7 +305,7 @@ pub(super) async fn create(
 ) -> Result<Json<SecretBindingMetadata>, AppError> {
     mutation(&state, &headers, principal)?;
     if principal.browser {
-        auth::require_recent_auth(&cookies, &state, principal.user)?
+        auth::require_verification(&cookies, &state, principal.user)?
     }
     if !principal.browser && !principal.read {
         return Err(AppError::Forbidden);
@@ -735,7 +735,7 @@ mod tests {
             axum::http::StatusCode::FORBIDDEN,
             "An old browser cookie cannot approve saved-value execution"
         );
-        auth::record_recent_auth(&cookies, &state, owner);
+        auth::record_verification(&cookies, &state, owner);
         let response = router
             .clone()
             .oneshot(browser_request(&cookies))

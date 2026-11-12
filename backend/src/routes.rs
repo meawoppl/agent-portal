@@ -496,6 +496,14 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
             axum::routing::patch(handlers::portal_connections::update_portal_connection)
                 .delete(handlers::portal_connections::delete_portal_connection),
         )
+        .route(
+            "/api/secrets/verification",
+            get(handlers::auth::secret_verification::status),
+        )
+        .route(
+            "/api/secrets/verification/start",
+            post(handlers::auth::secret_verification::start),
+        )
         .route(AUTH_ME, get(handlers::auth::me))
         .route(AUTH_REFRESH, post(handlers::auth::refresh_token))
         .route(AUTH_TOKEN_LOGIN, post(handlers::auth::token_login))

@@ -561,6 +561,7 @@ impl Component for SecretsPage {
                 <button type="button" disabled={self.busy} onclick={ctx.link().callback(|_|Msg::Load)}>{"Refresh"}</button>
             </div>
             </header>
+            <crate::components::secret_verification::SecretVerification />
             if let Some(error)=&self.error {<p role="alert" class="secrets-error">{error}</p>}
             if self.tab==Tab::Deleted {<p class="secrets-notice">{"Deleted secrets cannot be used. Restore to enable access again. All versions are retained and names stay reserved."}</p>}
             if let Some(replacing)=self.editing {<ValueForm key={format!("{}-{replacing}",self.selected.map(|id|id.to_string()).unwrap_or_default())} {replacing} can_publish={can_publish} on_submit={ctx.link().callback(Msg::Save)} on_cancel={ctx.link().callback(|_|Msg::Cancel)} />}
@@ -661,7 +662,7 @@ impl SecretsPage {
         </section>}
     }
     fn credentials_view(&self, ctx: &Context<Self>) -> Html {
-        html! {<section class="secrets-job" aria-label="Approved CLI access"><h3>{"Approved CLI access"}</h3><p>{"Computers authorized to access secrets within your grants."}</p><details><summary>{"About approval and revocation"}</summary><p>{"Revoking access stops future requests, but cannot recall values already delivered. Approval and revocation require a sign-in within the last 10 minutes."}</p><p><a href="/api/auth/logout">{"Sign out and sign in again"}</a>{" if a fresh sign-in is required."}</p></details><button disabled={self.busy} onclick={ctx.link().callback(|_|Msg::RefreshCredentials)}>{"Refresh CLI access"}</button>
+        html! {<section class="secrets-job" aria-label="Approved CLI access"><h3>{"Approved CLI access"}</h3><p>{"Computers authorized to access secrets within your grants."}</p><details><summary>{"About approval and revocation"}</summary><p>{"Revoking access stops future requests, but cannot recall values already delivered. Verify your account before approving or revoking CLI access."}</p></details><button disabled={self.busy} onclick={ctx.link().callback(|_|Msg::RefreshCredentials)}>{"Refresh CLI access"}</button>
             {match &self.credentials {None=>html!{<p>{"Loading approved CLI access…"}</p>},Some(credentials) if credentials.is_empty()=>html!{<p>{"No approved CLI credentials."}</p>},Some(credentials)=>html!{<ul class="secrets-credentials">{for credentials.iter().map(|credential|{let id=credential.id;html!{<li key={id.to_string()}><strong>{&credential.label}</strong><small>{format!("Created {} · Expires {}",utils::format_timestamp(&credential.created_at),utils::format_timestamp(&credential.expires_at))}</small>if let Some(time)=&credential.revoked_at {<span>{format!("Revoked {}",utils::format_timestamp(time))}</span>}else{<button disabled={self.busy} onclick={ctx.link().callback(move |_|Msg::RevokeCredential(id))}>{"Revoke CLI access"}</button>}</li>}})}</ul>}}}
         </section>}
     }

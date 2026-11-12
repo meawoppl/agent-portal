@@ -29,6 +29,7 @@ use shared::protocol::SESSION_COOKIE_NAME;
 
 mod identity;
 mod oauth;
+pub mod secret_verification;
 
 pub use identity::{ProviderIdentity, PROVIDER_GITHUB, PROVIDER_GOOGLE};
 
@@ -164,8 +165,9 @@ pub async fn device_login(
 
 #[derive(Debug, Deserialize)]
 pub struct AuthCallbackQuery {
-    code: String,
+    code: Option<String>,
     state: Option<String>,
+    error: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -248,7 +250,11 @@ async fn provider_callback(
         .build()
         .map_err(|e| AppError::Internal(format!("Failed to build OAuth HTTP client: {e}")))?;
 
-    let device_state =
+    let verification =
+        secret_verification::take(provider, &app_state, &cookies, query.state.as_deref())?;
+    let device_state = if verification.is_some() {
+        None
+    } else {
         oauth::validate_callback_state(provider, &cookies, &app_state, query.state.as_deref())
             .inspect_err(|_| {
                 warn!(
@@ -258,14 +264,23 @@ async fn provider_callback(
                     flow = callback_kind,
                     reason = "invalid_state",
                 );
-            })?;
+            })?
+    };
 
+    if query.error.is_some() || query.code.is_none() {
+        return match verification {
+            Some(challenge) => secret_verification::cancel(challenge),
+            None => Err(AppError::Unauthorized),
+        };
+    }
     // Exchange code for token
     let token: oauth2::StandardTokenResponse<
         oauth2::EmptyExtraTokenFields,
         oauth2::basic::BasicTokenType,
     > = client
-        .exchange_code(AuthorizationCode::new(query.code))
+        .exchange_code(AuthorizationCode::new(
+            query.code.ok_or(AppError::Unauthorized)?,
+        ))
         .request_async(&http_client)
         .await
         .map_err(|e| {
@@ -289,6 +304,10 @@ async fn provider_callback(
                 stage = "userinfo",
             );
         })?;
+
+    if let Some(challenge) = verification {
+        return secret_verification::finish(challenge, &resolved_identity, &app_state, &cookies);
+    }
 
     // An address the provider has not vouched for must not satisfy the
     // allow-list — otherwise anyone could claim a permitted domain. Treat it as
@@ -347,8 +366,6 @@ async fn provider_callback(
         );
         return Ok(banned_redirect(reason).into_response());
     }
-
-    crate::secrets::auth::record_recent_auth(&cookies, &app_state, user.id);
 
     if let Some(device_state) = device_state {
         add_session_cookie(&cookies, &app_state, &user);
@@ -622,6 +639,7 @@ fn me_response(user: User) -> MeResponse {
 }
 
 pub async fn logout(State(app_state): State<Arc<AppState>>, cookies: Cookies) -> impl IntoResponse {
+    crate::secrets::auth::clear_verification(&cookies, &app_state);
     cookies
         .signed(&app_state.cookie_key)
         .add(remove_session_cookie());
@@ -665,7 +683,6 @@ pub async fn dev_login(
     );
 
     add_session_cookie(&cookies, &app_state, &user);
-    crate::secrets::auth::record_recent_auth(&cookies, &app_state, user.id);
 
     // Redirect to dashboard
     Ok(Redirect::temporary(routes::DASHBOARD))
@@ -715,6 +732,7 @@ fn check_email_allowed(app_state: &AppState, email: &str) -> Result<(), Redirect
 }
 
 fn add_session_cookie(cookies: &Cookies, app_state: &AppState, user: &User) {
+    crate::secrets::auth::clear_verification(cookies, app_state);
     cookies
         .signed(&app_state.cookie_key)
         .add(session_cookie(user, !app_state.dev_mode));

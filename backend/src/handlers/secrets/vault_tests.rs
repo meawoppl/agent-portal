@@ -318,7 +318,7 @@ async fn vault_rotation_delete_restore_acl_and_credentials_are_enforced() {
         axum::http::StatusCode::FORBIDDEN,
         "Old browser cookies cannot delegate saved-value access"
     );
-    auth::record_recent_auth(&cookies, &state, owner);
+    auth::record_verification(&cookies, &state, owner);
     let response = router
         .clone()
         .oneshot(browser_grant(&cookies))
