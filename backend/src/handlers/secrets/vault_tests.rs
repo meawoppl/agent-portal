@@ -866,3 +866,83 @@ async fn clipboard_read_requires_verified_browser_csrf_and_live_read_grant() {
     )
     .contains("clipboard-canary"));
 }
+
+#[tokio::test]
+async fn inventory_requires_browser_verification_but_preserves_cli_access() {
+    let Some(db) = Database::new() else { return };
+    let mut state = crate::test_support::test_app_state(db.pool.clone());
+    state.secrets = Arc::new(SecretsService::new(Some(EnvelopeCrypto {
+        key: Arc::new(Zeroizing::new(vec![23; 32])),
+    })));
+    let state = Arc::new(state);
+    let owner = crate::test_support::insert_user(&mut state.conn().unwrap(), "inventory-owner").id;
+    let token = credential(&state, owner, "owner");
+    let router = router(state.clone())
+        .with_state(state.clone())
+        .layer(tower_cookies::CookieManagerLayer::new());
+    let (status, _) = request(
+        &router,
+        &token,
+        "POST",
+        "/api/secrets",
+        serde_json::json!({"namespace":"personal","name":"INVENTORY_TEST","value":"synthetic"}),
+        Uuid::new_v4(),
+    )
+    .await;
+    assert!(status.is_success());
+    let cookies = tower_cookies::Cookies::default();
+    cookies
+        .signed(&state.cookie_key)
+        .add(tower_cookies::Cookie::new(
+            shared::protocol::SESSION_COOKIE_NAME,
+            owner.to_string(),
+        ));
+    for verified in [false, true] {
+        if verified {
+            auth::record_verification(&cookies, &state, owner);
+        }
+        let header = cookies
+            .list()
+            .iter()
+            .map(|c| format!("{}={}", c.name(), c.value()))
+            .collect::<Vec<_>>()
+            .join("; ");
+        let response = router
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/api/secrets")
+                    .header("cookie", header)
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            if verified {
+                axum::http::StatusCode::OK
+            } else {
+                axum::http::StatusCode::FORBIDDEN
+            }
+        );
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&body).contains("INVENTORY_TEST"),
+            verified
+        );
+    }
+    let (status, body) = request(
+        &router,
+        &token,
+        "GET",
+        "/api/secrets",
+        serde_json::json!({}),
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(body["secrets"][0]["name"], "INVENTORY_TEST");
+}

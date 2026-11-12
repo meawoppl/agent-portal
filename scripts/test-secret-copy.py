@@ -53,11 +53,11 @@ async def exercise(browser, base, output, width):
         await route.fulfill(content_type='application/json', body=json.dumps(data))
     await context.route('**/api/**', api)
     await page.goto(base + '/settings?tab=secrets')
+    await expect(page.get_by_role('button', name='DEPLOY_TOKEN', exact=True)).to_have_count(0)
+    await page.get_by_role('button', name='Check Portal access', exact=True).click()
     await page.get_by_role('button', name='DEPLOY_TOKEN', exact=True).click()
     copy = page.get_by_role('button', name='Copy secret', exact=True)
-    await expect(copy).to_be_disabled()
     assert not copies
-    await page.get_by_role('button', name='Verify Portal session', exact=True).click()
     await expect(copy).to_be_enabled()
     await copy.click()
     await expect(page.get_by_role('button', name='Copying…', exact=True)).to_be_disabled()

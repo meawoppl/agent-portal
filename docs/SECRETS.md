@@ -67,6 +67,8 @@ Read/use, write and manage are independent rights. Arbitrary `run --env` require
 
 ## Versions and deletion
 
+In Settings → Secrets, click **Check Portal access** before the inventory loads. Secrets are sorted by name across Personal and Organization scopes. Select a name to expand its details and actions directly below that row; select it again to collapse. **Show deleted secrets** adds deleted entries to the same list.
+
 Every replacement appends an encrypted immutable version and advances the current pointer. Older versions remain available for explicit authorized CLI reads. The web page shows version metadata only. Select an active secret and use **Copy secret** after verifying the Portal session to copy its displayed current version. The server requires read permission, the browser-bound verification cookie and same-origin CSRF headers, and rechecks authorization after asynchronous decryption and reader registration. Copy never renders the value in the page or stores it in component state; success appears only after the clipboard write completes. Browser clipboard permission is also required. Clipboard contents may persist or be synchronized by the operating system; revocation cannot recall a copied value. The existing CLI read endpoint remains unavailable to browser cookies.
 
 ```sh
@@ -77,7 +79,7 @@ agent-portal secret info personal/DEPLOY_TOKEN --deleted
 agent-portal secret restore personal/DEPLOY_TOKEN --confirm-sharing
 ```
 
-Delete adds the exact reserved `deleted` system tag, records the actor/time, and invalidates access bindings. It removes no version and reserves the name. Deleted keys appear in a separate masked Deleted view under the same authorization policy. Normal and historical value reads are denied while deleted. Browser sharing and restore also require a recent OAuth sign-in, since they can delegate access to retained values. Restore preserves identity/history, requires explicit confirmation of its sharing audience, and never revives old tickets or process approvals. Creating a previously deleted name fails until it is restored or another name is chosen.
+Delete adds the exact reserved `deleted` system tag, records the actor/time, and invalidates access bindings. It removes no version and reserves the name. Deleted keys appear alongside active entries when **Show deleted secrets** is checked, under the same authorization policy. Normal and historical value reads are denied while deleted. Browser sharing and restore also require a verified Portal session, since they can delegate access to retained values. Restore preserves identity/history, requires explicit confirmation of its sharing audience, and never revives old tickets or process approvals. Creating a previously deleted name fails until it is restored or another name is chosen.
 
 ## Approved session execution
 
