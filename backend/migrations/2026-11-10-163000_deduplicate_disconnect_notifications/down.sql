@@ -1,0 +1,1 @@
+DROP TABLE session_disconnect_notifications;

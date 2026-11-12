@@ -13,6 +13,7 @@
 //! APNs / FCM transports require their platform credentials.
 
 pub mod apns;
+mod disconnect;
 pub mod dispatcher;
 pub mod fcm;
 pub mod transport;
@@ -191,8 +192,9 @@ pub enum NotificationEvent {
         session_id: Uuid,
         session_name: String,
     },
-    /// A running session dropped unexpectedly (an `active` → `disconnected`
-    /// transition, never a user-requested stop/pause).
+    /// A proxy dropped unexpectedly (an `active` → `disconnected`
+    /// transition, never a user-requested stop/pause). Dispatch only alerts
+    /// for unfinished work, once per accepted input across reconnects.
     SessionDisconnected {
         session_id: Uuid,
         session_name: String,
