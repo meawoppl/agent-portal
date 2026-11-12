@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+  <rect width="2000" height="1200" fill="#1a1b26"/>
+  <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0 L8 5 L0 10" fill="none" stroke="#565f89" stroke-width="2"/></marker></defs>
+  <g font-family="sans-serif">
+    <text x="55" y="52" font-size="24" fill="#a9b1d6" letter-spacing="1">PR #2428 · Propose dependency updates and recheck security at review handoff</text>
+    <text x="55" y="108" font-size="34" fill="#e6e9f5">One stale dependency left unrelated PRs failing the same security audit.</text>
+    <text x="55" y="151" font-size="34" fill="#e6e9f5">Daily update proposals and a fresh audit at review handoff close the follow-through gap.</text>
+    <path d="M55 177 H1945" stroke="#3d4666"/>
+    <path d="M1000 190 V1140" stroke="#565f89" stroke-dasharray="8 10"/>
+    <text x="60" y="230" font-size="22" font-weight="bold" letter-spacing="4" fill="#f7768e">BEFORE</text>
+    <text x="1060" y="230" font-size="22" font-weight="bold" letter-spacing="4" fill="#9ece6a">AFTER</text>
+
+    <rect x="60" y="275" width="870" height="180" rx="14" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+    <text x="84" y="319" font-size="26" fill="#7aa2f7">RustSec Audit</text>
+    <text x="84" y="367" font-size="23" fill="#c0caf5">Scans the full Cargo.lock against fresh advisories.</text>
+    <text x="84" y="405" font-size="23" fill="#c0caf5">One finding can fail many unrelated PRs.</text>
+    <path d="M495 470 V525" stroke="#565f89" stroke-width="3" marker-end="url(#arrow)"/>
+    <rect x="60" y="550" width="870" height="180" rx="14" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+    <text x="84" y="594" font-size="26" fill="#f7768e">Update proposals rely on manual discovery</text>
+    <text x="84" y="642" font-size="23" fill="#c0caf5">A passing main branch does not update older PRs.</text>
+    <text x="84" y="680" font-size="23" fill="#c0caf5">Re-running an old checkout keeps its old lockfile.</text>
+    <path d="M495 745 V800" stroke="#565f89" stroke-width="3" marker-end="url(#arrow)"/>
+    <rect x="60" y="825" width="870" height="180" rx="14" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+    <text x="84" y="869" font-size="26" fill="#f7768e">Review handoff can retain a shared failure</text>
+    <text x="84" y="917" font-size="23" fill="#c0caf5">No fresh audit trigger when a draft becomes ready.</text>
+    <text x="84" y="955" font-size="23" fill="#c0caf5">An inherited failure can remain unresolved.</text>
+
+    <rect x="1060" y="275" width="870" height="180" rx="14" fill="#1e202e" stroke="#565f89" stroke-width="2"/>
+    <text x="1084" y="319" font-size="26" fill="#7aa2f7">RustSec Audit</text>
+    <text x="1084" y="367" font-size="23" fill="#c0caf5">The full-lockfile check remains enforced.</text>
+    <text x="1084" y="405" font-size="23" fill="#c0caf5">The reviewed exception policy stays in place.</text>
+    <path d="M1495 470 V525" stroke="#565f89" stroke-width="3" marker-end="url(#arrow)"/>
+    <rect x="1060" y="550" width="870" height="180" rx="14" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1084" y="594" font-size="26" fill="#7aa2f7">.github/dependabot.yml</text>
+    <text x="1084" y="642" font-size="23" fill="#c0caf5">Daily proposals include transitive dependencies.</text>
+    <text x="1084" y="680" font-size="23" fill="#9ece6a">Lockfile only; five open version-update PRs maximum.</text>
+    <path d="M1495 745 V800" stroke="#565f89" stroke-width="3" marker-end="url(#arrow)"/>
+    <rect x="1060" y="825" width="870" height="180" rx="14" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1084" y="869" font-size="26" fill="#7aa2f7">ready_for_review + AGENTS.md</text>
+    <text x="1084" y="917" font-size="23" fill="#9ece6a">Re-audit at handoff; resolve inherited failures.</text>
+    <text x="1084" y="955" font-size="23" fill="#c0caf5">Refresh from fixed main and verify each new head.</text>
+    <text x="55" y="1172" font-size="22" fill="#a9b1d6">Scope: proposals require review and merge; incompatible fixes remain manual. Alert-driven updates need repository settings.</text>
+  </g>
+</svg>
