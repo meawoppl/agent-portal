@@ -1,8 +1,3 @@
-use super::sensitive::SecretString;
-use anyhow::{bail, Context};
-use std::io::Read;
-use zeroize::Zeroizing;
-
 pub const MAX_VALUE_BYTES: usize = 64 * 1024;
 
 /// Only explicit namespaces can select a value; names never fall back across audiences.
@@ -15,6 +10,7 @@ pub enum Reference {
 impl std::str::FromStr for Reference {
     type Err = String;
     fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let value = value.strip_prefix("secret://").unwrap_or(value);
         let (namespace, name) = value
             .split_once('/')
             .ok_or("Use personal/NAME, org/NAME, or id/UUID")?;
@@ -40,30 +36,6 @@ impl std::fmt::Display for Reference {
             Self::Id(id) => write!(f, "id/{id}"),
         }
     }
-}
-
-pub fn read_value(mut reader: impl Read, trim_newline: bool) -> anyhow::Result<SecretString> {
-    let mut bytes = Zeroizing::new(Vec::new());
-    reader
-        .by_ref()
-        .take((MAX_VALUE_BYTES + 1) as u64)
-        .read_to_end(&mut bytes)
-        .context("Could not read secret input")?;
-    if bytes.len() > MAX_VALUE_BYTES {
-        bail!("Secret exceeds 64 KiB limit");
-    }
-    if trim_newline && bytes.last() == Some(&b'\n') {
-        bytes.pop();
-        if bytes.last() == Some(&b'\r') {
-            bytes.pop();
-        }
-    }
-    if bytes.is_empty() {
-        bail!("Secret must not be empty");
-    }
-    let text = std::str::from_utf8(&bytes)
-        .map_err(|_| anyhow::anyhow!("Secret input must be UTF-8 text; no bytes were uploaded"))?;
-    Ok(SecretString::new(text.to_owned()))
 }
 
 pub fn env_name(value: &str) -> Result<String, String> {
@@ -100,24 +72,6 @@ impl std::str::FromStr for EnvMapping {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn stdin_is_byte_preserving_and_trimming_is_explicit() {
-        assert_eq!(
-            &*read_value(&b" \tvalue\r\n"[..], false).unwrap(),
-            " \tvalue\r\n"
-        );
-        assert_eq!(&*read_value(&b"value\n\n"[..], true).unwrap(), "value\n");
-        assert_eq!(&*read_value(&b"value\r\n"[..], true).unwrap(), "value");
-        assert!(read_value(&b"\xff"[..], false).is_err());
-        assert!(read_value(&b""[..], false).is_err());
-        assert!(read_value(vec![b'a'; MAX_VALUE_BYTES + 1].as_slice(), false).is_err());
-        assert_eq!(
-            read_value(vec![b'a'; MAX_VALUE_BYTES].as_slice(), false)
-                .unwrap()
-                .len(),
-            MAX_VALUE_BYTES
-        );
-    }
     #[test]
     fn references_require_exact_explicit_namespaces() {
         for bad in [

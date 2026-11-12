@@ -1,51 +1,13 @@
 //! The injected agent identity can request approval and execute approved bindings.
-//! Plaintext access requires a binding ticket; ordinary reads still require
-//! the separately enrolled human capability and never fall back to this token.
+//! Plaintext access requires a scoped binding ticket; no human credential fallback.
 use super::sensitive::SecretString;
-use super::{client, input, output, resolve};
+use super::{client, input};
 use anyhow::{bail, Context};
-use clap::Args;
 use reqwest::Method;
 use shared::api::*;
 use std::ffi::OsString;
 use uuid::Uuid;
 use zeroize::Zeroize;
-
-#[derive(Debug, Args)]
-pub struct BindArgs {
-    #[arg(long = "secret")]
-    reference: input::Reference,
-    #[arg(long)]
-    session: Uuid,
-    #[arg(long)]
-    launcher: Uuid,
-    #[arg(long = "env", value_parser = input::env_name)]
-    env_name: String,
-    /// Binding lifetime in seconds, at most one hour.
-    #[arg(long, default_value_t = 3600, value_parser = clap::value_parser!(u64).range(1..=3600))]
-    expires_in: u64,
-    #[arg(long, value_parser = clap::value_parser!(i32).range(1..))]
-    version: Option<i32>,
-}
-pub(super) async fn create(client: &client::Client, args: BindArgs) -> anyhow::Result<()> {
-    let metadata = resolve(client, &args.reference).await?;
-    if super::is_deleted(&metadata) {
-        bail!("Cannot bind a deleted secret");
-    }
-    let request = SecretBindingCreateRequest {
-        secret_id: metadata.id,
-        session_id: args.session,
-        launcher_id: args.launcher,
-        version: args.version,
-        env_name: args.env_name,
-        expected_generation: metadata.generation,
-        expires_in_seconds: args.expires_in,
-    };
-    let binding: SecretBindingMetadata = client
-        .request(Method::POST, "/bindings", Some(&request))
-        .await?;
-    output(&binding)
-}
 
 pub(super) struct BoundAgent {
     pub(super) client: client::Client,
@@ -61,7 +23,9 @@ impl BoundAgent {
         let backend = backend.filter(|value| !value.is_empty()).context(
             "Bound execution requires PORTAL_SESSION_BACKEND; no launcher credential fallback",
         )?;
-        let token = SecretString::new(token.filter(|value| !value.is_empty()).context("Bound execution requires PORTAL_SESSION_TOKEN; no launcher or human-secret credential fallback")?);
+        let token = SecretString::new(token.filter(|value| !value.is_empty()).context(
+            "Bound execution requires PORTAL_SESSION_TOKEN; no other credential fallback",
+        )?);
         let session_id: Uuid = session
             .context("Bound execution requires PORTAL_SESSION_ID")?
             .parse()
@@ -79,7 +43,33 @@ impl BoundAgent {
             dev,
         )
     }
+    async fn redeem_all(&self, bindings: &[Uuid]) -> anyhow::Result<Vec<(String, SecretString)>> {
+        if bindings.is_empty() || bindings.len() > MAX_SECRET_ACCESS_GROUP_ITEMS {
+            bail!("Provide between 1 and 16 approved bindings");
+        }
+        let mut seen = std::collections::HashSet::new();
+        if bindings.iter().any(|id| !seen.insert(*id)) {
+            bail!("Duplicate binding ID");
+        }
+        let mut values = Vec::with_capacity(bindings.len());
+        let mut envs = std::collections::HashSet::new();
+        for binding in bindings {
+            let value = self.redeem(*binding).await?;
+            if !envs.insert(value.0.to_ascii_uppercase()) {
+                bail!("Bindings use duplicate environment variables");
+            }
+            values.push(value);
+        }
+        Ok(values)
+    }
     async fn redeem(&self, binding: Uuid) -> anyhow::Result<(String, SecretString)> {
+        self.redeem_version(binding, None).await
+    }
+    pub(super) async fn redeem_version(
+        &self,
+        binding: Uuid,
+        expected: Option<i32>,
+    ) -> anyhow::Result<(String, SecretString)> {
         let response: SecretBindingTicketResponse = self
             .client
             .request::<_, ()>(Method::POST, &format!("/bindings/{binding}/ticket"), None)
@@ -103,7 +93,11 @@ impl BoundAgent {
         request.ticket.0.zeroize();
         let response = response.map_err(binding_error)?;
         let value = SecretString::new(response.value.0);
-        if value.is_empty() || value.len() > input::MAX_VALUE_BYTES || response.version < 1 {
+        if value.is_empty()
+            || value.len() > input::MAX_VALUE_BYTES
+            || response.version < 1
+            || expected.is_some_and(|v| v != response.version)
+        {
             bail!("Binding returned an invalid version or value size");
         }
         let env_name = input::env_name(&response.env_name).map_err(|_| {
@@ -134,18 +128,53 @@ fn binding_error(error: anyhow::Error) -> anyhow::Error {
     }
 }
 
-pub(super) async fn execute(binding: Uuid, command: &[OsString], dev: bool) -> anyhow::Result<()> {
+pub(super) async fn execute(
+    bindings: &[Uuid],
+    command: &[OsString],
+    dev: bool,
+) -> anyhow::Result<()> {
     command
         .first()
         .context("Missing child executable after --")?;
     let agent = BoundAgent::from_env(dev)?;
-    let value = agent.redeem(binding).await?;
-    super::run_child(command, vec![value])
+    let values = agent.redeem_all(bindings).await?;
+    // Never start the child with a partially redeemed credential set.
+    super::run_child(command, values)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn redeem_all_checks_every_binding_and_rejects_duplicate_environments() {
+        use super::super::requests::tests::mock_server;
+        for duplicate in [false, true] {
+            let replies = vec![
+                serde_json::json!({"ticket":"ticket-one","expires_in":30}),
+                serde_json::json!({"env_name":"FIRST","value":"one","version":1}),
+                serde_json::json!({"ticket":"ticket-two","expires_in":30}),
+                serde_json::json!({"env_name":if duplicate {"FIRST"} else {"SECOND"},"value":"two","version":1}),
+            ];
+            let (url, server) = mock_server(replies);
+            let agent = BoundAgent::from_values(
+                Some(url),
+                Some("scoped-token".into()),
+                Some(Uuid::new_v4().to_string()),
+                true,
+            )
+            .unwrap();
+            let result = agent.redeem_all(&[Uuid::new_v4(), Uuid::new_v4()]).await;
+            if duplicate {
+                assert!(result.is_err());
+            } else {
+                let values = result.unwrap();
+                assert_eq!(values.len(), 2);
+                assert_eq!(values[0].0, "FIRST");
+                assert_eq!(values[1].0, "SECOND");
+            }
+            assert_eq!(server.join().unwrap().len(), 4);
+        }
+    }
     #[test]
     fn context_requires_injected_session_fields_without_fallbacks() {
         let session = Uuid::new_v4().to_string();
@@ -176,86 +205,6 @@ mod tests {
             Some(session),
             false
         )
-        .is_ok());
-    }
-    #[test]
-    fn binding_cli_requires_exclusive_binding_or_literal_env_mappings_and_bounded_lifetime() {
-        use clap::Parser;
-        let id = "00000000-0000-0000-0000-000000000001";
-        assert!(
-            crate::Args::try_parse_from(["agent-portal", "--version"])
-                .unwrap()
-                .version
-        );
-        assert!(crate::Args::try_parse_from([
-            "agent-portal",
-            "secret",
-            "read",
-            "personal/T",
-            "--version",
-            "2"
-        ])
-        .is_ok());
-        assert!(crate::Args::try_parse_from([
-            "agent-portal",
-            "secret",
-            "run",
-            "--binding",
-            id,
-            "--",
-            "tool"
-        ])
-        .is_ok());
-        assert!(crate::Args::try_parse_from([
-            "agent-portal",
-            "secret",
-            "run",
-            "--binding",
-            id,
-            "--env",
-            "TOKEN=personal/T",
-            "--",
-            "tool"
-        ])
-        .is_err());
-        assert!(
-            crate::Args::try_parse_from(["agent-portal", "secret", "run", "--", "tool"]).is_err()
-        );
-        for expires in ["0", "3601"] {
-            assert!(crate::Args::try_parse_from([
-                "agent-portal",
-                "secret",
-                "bind",
-                "--secret",
-                "personal/T",
-                "--session",
-                id,
-                "--launcher",
-                id,
-                "--env",
-                "TOKEN",
-                "--expires-in",
-                expires
-            ])
-            .is_err());
-        }
-        assert!(crate::Args::try_parse_from([
-            "agent-portal",
-            "secret",
-            "bind",
-            "--secret",
-            "personal/T",
-            "--session",
-            id,
-            "--launcher",
-            id,
-            "--env",
-            "TOKEN",
-            "--expires-in",
-            "3600",
-            "--version",
-            "2"
-        ])
         .is_ok());
     }
     #[tokio::test]

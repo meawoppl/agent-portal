@@ -1,30 +1,61 @@
-//! Explicit account check; returning never approves a pending action automatically.
+//! Inline verification. Only a server-confirmed success enables the pending action.
 use crate::utils::{self, On401};
 use gloo_net::http::Request;
-use shared::api::{SecretVerificationRedirect, SecretVerificationStart, SecretVerificationStatus};
+use shared::api::SecretVerificationStatus;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
 #[derive(Properties, PartialEq)]
 pub struct Props {
-    /// Preserve a manually entered enrollment code across the provider redirect.
-    #[prop_or_default]
-    pub return_to: Option<String>,
     #[prop_or_default]
     pub on_verified: Callback<bool>,
 }
+#[derive(Clone, PartialEq)]
+enum CheckState {
+    Loading,
+    Ready,
+    Checking,
+    Verified,
+    Failed(String),
+}
+/// Explicit user-initiated verification, shared by standalone and approval flows.
+pub(crate) async fn verify_session() -> Result<(), &'static str> {
+    let request = async {
+        let response = Request::post(&utils::api_url("/api/secrets/verification/check"))
+            .header("x-portal-secrets", "1")
+            .send()
+            .await
+            .map_err(|_| "Could not verify your account. Try again.")?;
+        if response.status() == 401 {
+            return Err("Your Portal login has expired. Sign in again before approving access.");
+        }
+        if !response.ok() {
+            return Err(
+                "Account verification did not succeed. Try again or check your account access.",
+            );
+        }
+        let status = response
+            .json::<SecretVerificationStatus>()
+            .await
+            .map_err(|_| "Invalid verification response. Try again.")?;
+        if !status.verified {
+            return Err("Account verification did not succeed. Try again.");
+        }
+        Ok(())
+    };
+    let timeout = gloo::timers::future::TimeoutFuture::new(15_000);
+    futures_util::pin_mut!(request, timeout);
+    match futures_util::future::select(request, timeout).await {
+        futures_util::future::Either::Left((result, _)) => result,
+        futures_util::future::Either::Right(_) => Err("Verification timed out. Try again."),
+    }
+}
 #[function_component(SecretVerification)]
 pub fn secret_verification(props: &Props) -> Html {
-    let status = use_state(|| None::<SecretVerificationStatus>);
-    let error = use_state(|| {
-        web_sys::window().and_then(|w| w.location().search().ok())
-            .filter(|q| q.contains("secret_verification=failed"))
-            .map(|_| "Verification was cancelled or used a different account. Try again with your Portal account.".to_string())
-    });
-    let busy = use_state(|| false);
+    let state = use_state(|| CheckState::Loading);
+    let busy = use_mut_ref(|| false);
     {
-        let status = status.clone();
-        let error = error.clone();
+        let state = state.clone();
         let on_verified = props.on_verified.clone();
         use_effect_with((), move |_| {
             spawn_local(async move {
@@ -34,94 +65,53 @@ pub fn secret_verification(props: &Props) -> Html {
                 )
                 .await
                 {
-                    Ok(value) => {
-                        if value.verified {
-                            error.set(None);
-                        }
-                        on_verified.emit(value.verified);
-                        status.set(Some(value));
+                    Ok(status) if status.verified => {
+                        state.set(CheckState::Verified);
+                        on_verified.emit(true);
                     }
-                    Err(_) => error.set(Some(
-                        "Could not check account verification. Refresh to retry.".into(),
+                    Ok(_) => state.set(CheckState::Ready),
+                    Err(_) => state.set(CheckState::Failed(
+                        "Could not check your account. Try again.".into(),
                     )),
                 }
             });
             || ()
         });
     }
-    let start = |provider: String| {
-        let error = error.clone();
+    let check = {
+        let state = state.clone();
         let busy = busy.clone();
-        let return_to = props.return_to.clone();
+        let on_verified = props.on_verified.clone();
         Callback::from(move |_| {
-            if *busy {
+            if *busy.borrow() || *state == CheckState::Verified {
                 return;
             }
-            busy.set(true);
-            error.set(None);
-            let busy = busy.clone();
-            let error = error.clone();
-            let provider = provider.clone();
-            let return_to = return_to.clone();
+            *busy.borrow_mut() = true;
+            state.set(CheckState::Checking);
+            let (state, busy, on_verified) = (state.clone(), busy.clone(), on_verified.clone());
             spawn_local(async move {
-                let result: Result<(), String> = async {
-                    let window = web_sys::window().ok_or("Browser unavailable")?;
-                    let location = window.location();
-                    let return_to = match return_to {
-                        Some(value) => value,
-                        None => format!(
-                            "{}{}{}",
-                            location.pathname().map_err(|_| "Page unavailable")?,
-                            location.search().map_err(|_| "Page unavailable")?,
-                            location.hash().map_err(|_| "Page unavailable")?
-                        ),
-                    };
-                    let request = Request::post(&utils::api_url("/api/secrets/verification/start"))
-                        .header("x-portal-secrets", "1");
-                    let response = utils::send_json(
-                        request,
-                        &SecretVerificationStart {
-                            provider,
-                            return_to,
-                        },
-                    )
-                    .await
-                    .map_err(|_| "Could not start verification")?;
-                    if !response.ok() {
-                        return Err(
-                            "Verification unavailable for this account. Refresh and try again."
-                                .into(),
-                        );
+                let result = verify_session().await;
+                *busy.borrow_mut() = false;
+                match result {
+                    Ok(()) => {
+                        state.set(CheckState::Verified);
+                        on_verified.emit(true);
                     }
-                    let redirect = response
-                        .json::<SecretVerificationRedirect>()
-                        .await
-                        .map_err(|_| "Invalid verification response")?;
-                    location
-                        .set_href(&redirect.url)
-                        .map_err(|_| "Could not open account verification")?;
-                    Ok(())
-                }
-                .await;
-                if let Err(message) = result {
-                    error.set(Some(message));
-                    busy.set(false);
+                    Err(error) => state.set(CheckState::Failed(error.into())),
                 }
             });
         })
     };
-    html! {<section class="secrets-verification" aria-label="Verify your account">
-        if let Some(status)=&*status {
-            if status.verified {<p role="status">{"Account verified for this browser session."}</p>}
-            else {
-                <p>{"Verify your account before approving access or changing protected secret settings. You will return here to finish the action."}</p>
-                {for status.providers.iter().map(|provider| {
-                    let label=if provider=="google" {"Verify with Google"} else {"Verify with GitHub"};
-                    html!{<button type="button" disabled={*busy} onclick={start(provider.clone())}>{label}</button>}
-                })}
-                if status.providers.is_empty() {<p>{"No linked login provider is configured for verification."}</p>}
-            }
-        } else if error.is_none() {<p>{"Checking account verification…"}</p>}
-        if let Some(error)=&*error {<p role="alert">{error}</p>}
+    let working = matches!(*state, CheckState::Loading | CheckState::Checking);
+    html! {<section class={classes!("secrets-verification", (*state == CheckState::Verified).then_some("is-verified"))} aria-label="Verify your account" aria-busy={working.to_string()}>
+        {match &*state {
+            CheckState::Verified => html!{<p role="status">{"Portal session verified"}</p>},
+            CheckState::Loading | CheckState::Checking => html!{<p role="status"><span class="secret-verification-spinner" aria-hidden="true"/>{"Checking your Portal session…"}</p>},
+            _ => html!{<>
+                if let CheckState::Failed(message) = &*state {<p role="alert">{message}</p>}
+                else {<p>{"Check your Portal session before approving secret access."}</p>}
+                <button type="button" class="secret-button secret-button--primary" onclick={check}>{if matches!(*state,CheckState::Failed(_)) {"Try again"} else {"Verify Portal session"}}</button>
+            </>},
+        }}
     </section>}
 }

@@ -1,4 +1,4 @@
-//! Typed JSONB list columns.
+//! Typed JSONB columns with explicit legacy-read policies.
 
 use diesel::deserialize::{self, FromSql, FromSqlRow};
 use diesel::expression::AsExpression;
@@ -55,9 +55,93 @@ impl<T: Serialize + std::fmt::Debug> ToSql<Jsonb, Pg> for JsonVec<T> {
     }
 }
 
+/// Notification preferences stored as the unchanged bare JSON object.
+///
+/// Partial objects use the shared field defaults; unknown fields are ignored
+/// on read and omitted on replacement, matching the HTTP replacement contract.
+/// Malformed legacy values fall back to the entire default preference set,
+/// consistently for user rows, the settings endpoint and push dispatch. Reads
+/// never rewrite the stored value. SQL NULL remains None on the user model.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, AsExpression, FromSqlRow,
+)]
+#[serde(transparent)]
+#[diesel(sql_type = Jsonb)]
+pub struct NotificationPrefsJson(pub shared::api::NotificationPrefs);
+
+impl FromSql<Jsonb, Pg> for NotificationPrefsJson {
+    fn from_sql(value: PgValue<'_>) -> deserialize::Result<Self> {
+        let value = <serde_json::Value as FromSql<Jsonb, Pg>>::from_sql(value)?;
+        Ok(Self(serde_json::from_value(value).unwrap_or_default()))
+    }
+}
+
+impl ToSql<Jsonb, Pg> for NotificationPrefsJson {
+    fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> serialize::Result {
+        out.write_all(&[1])?;
+        serde_json::to_writer(out, &self.0)?;
+        Ok(IsNull::No)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn notification_preferences_preserve_storage_shape_and_legacy_reads() {
+        use crate::schema::users;
+        use crate::test_support::{insert_user, shared_pool};
+        use diesel::prelude::*;
+        use shared::api::NotificationPrefs;
+        let Some(pool) = shared_pool() else { return };
+        let mut conn = pool.get().unwrap();
+        conn.test_transaction::<_, diesel::result::Error, _>(|conn| {
+            let owner = insert_user(conn, "typed-prefs");
+            let load = |conn: &mut diesel::pg::PgConnection| {
+                users::table
+                    .find(owner.id)
+                    .select(users::notification_prefs)
+                    .first::<Option<NotificationPrefsJson>>(conn)
+            };
+            assert_eq!(load(conn)?, None);
+            let custom = NotificationPrefs {
+                turn_complete: false,
+                ..NotificationPrefs::default()
+            };
+            diesel::update(users::table.find(owner.id))
+                .set(users::notification_prefs.eq(Some(NotificationPrefsJson(custom))))
+                .execute(conn)?;
+            let raw: serde_json::Value = users::table
+                .find(owner.id)
+                .select(users::notification_prefs.assume_not_null())
+                .first(conn)?;
+            assert_eq!(raw, serde_json::to_value(custom).unwrap());
+            assert_eq!(load(conn)?.unwrap().0, custom);
+            for (wire, expected) in [
+                (r#"{"turn_complete":false,"future_toggle":true}"#, custom),
+                (r#"{"turn_complete":"bad"}"#, NotificationPrefs::default()),
+                ("null", NotificationPrefs::default()),
+                ("42", NotificationPrefs::default()),
+            ] {
+                let value: serde_json::Value = serde_json::from_str(wire).unwrap();
+                diesel::update(users::table.find(owner.id))
+                    .set(users::notification_prefs.eq(Some(value.clone())))
+                    .execute(conn)?;
+                assert_eq!(load(conn)?.unwrap().0, expected);
+                let row = users::table
+                    .find(owner.id)
+                    .first::<crate::models::User>(conn)?;
+                assert_eq!(row.notification_prefs.unwrap().0, expected);
+                let retained: serde_json::Value = users::table
+                    .find(owner.id)
+                    .select(users::notification_prefs.assume_not_null())
+                    .first(conn)?;
+                assert_eq!(retained, value, "a read must not normalize legacy storage");
+            }
+            Ok(())
+        });
+    }
 
     #[test]
     fn serializes_as_the_bare_array() {

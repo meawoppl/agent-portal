@@ -49,13 +49,12 @@ struct DeepLinkQuery {
     session: Option<String>,
 }
 
-const MOBILE_DASHBOARD_BREAKPOINT_PX: f64 = 768.0;
-
-fn mobile_dashboard_viewport() -> bool {
-    web_sys::window()
-        .and_then(|window| window.inner_width().ok())
-        .and_then(|width| width.as_f64())
-        .is_some_and(|width| width <= MOBILE_DASHBOARD_BREAKPOINT_PX)
+fn mobile_dashboard_query() -> Option<web_sys::MediaQueryList> {
+    // Keep this query aligned with session-mobile.css. On mobile browsers,
+    // innerWidth can include overflowing content even when CSS still matches
+    // the phone viewport, which would incorrectly mount the desktop rail and
+    // hydrate background sessions.
+    web_sys::window().and_then(|window| window.match_media("(max-width: 768px)").ok().flatten())
 }
 
 /// Mirror the dashboard's CSS breakpoint in component state because mobile
@@ -63,13 +62,16 @@ fn mobile_dashboard_viewport() -> bool {
 /// hydration and websocket subscription) exists at all.
 #[hook]
 fn use_mobile_dashboard() -> bool {
-    let is_mobile = use_state_eq(mobile_dashboard_viewport);
+    let is_mobile = use_state_eq(|| mobile_dashboard_query().is_some_and(|query| query.matches()));
     {
         let is_mobile = is_mobile.clone();
         use_effect_with((), move |_| {
-            let listener = web_sys::window().map(|window| {
-                EventListener::new(&window.clone(), "resize", move |_| {
-                    is_mobile.set(mobile_dashboard_viewport());
+            let listener = mobile_dashboard_query().map(|query| {
+                // Reconcile any viewport change between first render and
+                // effect installation, then follow the CSS breakpoint itself.
+                is_mobile.set(query.matches());
+                EventListener::new(&query.clone(), "change", move |_| {
+                    is_mobile.set(query.matches());
                 })
             });
             move || drop(listener)

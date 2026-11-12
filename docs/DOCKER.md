@@ -177,7 +177,7 @@ docker buildx build \
 | `GOOGLE_CLIENT_ID` | Google OAuth client ID |
 | `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
 | `GOOGLE_REDIRECT_URI` | OAuth callback URL (e.g., `https://your-domain.com/api/auth/google/callback`) |
-| `SESSION_SECRET` | Session encryption key (32+ chars recommended) |
+| `SESSION_SECRET` or `SESSION_SECRET_FILE` | Session secret (64+ bytes recommended). See [Session secret](#session-secret). |
 
 ### Optional
 
@@ -195,6 +195,40 @@ docker buildx build \
 | `SESSION_MAX_AGE_DAYS` | `14` | Delete sessions older than N days (0 = disabled) |
 | `PORTAL_MAX_IMAGE_MB` | `10` | Max image size in MB for proxy inlining |
 | `PORTAL_REMINDER_FILE` | _(unset)_ | Proxy/launcher-side: path to a markdown file that overrides the bundled portal-features reminder, which is prepended to the first user input at session start and after each compaction. Falls back to default if missing/unreadable. |
+
+### Session secret
+
+The session secret signs browser session cookies **and** the JWTs that proxies
+and launchers authenticate with. Provide it one of two ways:
+
+- `SESSION_SECRET` — the value itself.
+- `SESSION_SECRET_FILE` — a path to a file holding the value, typically a
+  read-only bind mount such as `/run/secrets/session.key`. Exactly one trailing
+  `\n` (or `\r\n`) is stripped; the rest is used byte-for-byte as
+  `SESSION_SECRET` would be, so moving an existing value from the env var into a
+  file keeps every cookie and launcher token valid.
+
+Setting both is a startup error. With `SESSION_SECRET_FILE`, a missing,
+unreadable, empty or non-UTF-8 file also fails startup. The file must be a
+regular file owned by root or the container user (UID 1001) and must not be
+group- or world-writable — root-owned `0444` and UID-1001-owned `0400`/`0600`
+both work:
+
+```bash
+openssl rand -hex 64 | sudo install -m 0400 -o 1001 -g 1001 /dev/stdin /etc/agent-portal/session.key
+docker run ... \
+  -v /etc/agent-portal/session.key:/run/secrets/session.key:ro \
+  -e SESSION_SECRET_FILE=/run/secrets/session.key \
+  agent-portal-backend
+```
+
+The value must be stable across restarts. If neither variable is set, the
+backend generates an ephemeral secret and logs a warning, so every restart logs
+everyone out. The startup log records which source was used (`env`, `file` or
+`ephemeral`), never the value.
+
+**Rotation blast radius:** changing the secret logs out every browser **and**
+forces every launcher and proxy to re-authenticate (`agent-portal login`).
 
 ## Troubleshooting
 
@@ -230,7 +264,7 @@ docker exec agent-portal-backend curl -f http://localhost:3000/
 - [ ] Use a production PostgreSQL database (not the dev docker-compose db)
 - [ ] Set up database backups
 - [ ] Configure TLS/SSL (via Traefik, nginx, or cloud load balancer)
-- [ ] Set strong `SESSION_SECRET`
+- [ ] Set a strong, stable `SESSION_SECRET` (or `SESSION_SECRET_FILE`)
 - [ ] Configure access restrictions (`ALLOWED_EMAIL_DOMAIN` or `ALLOWED_EMAILS`)
 - [ ] Set up monitoring and log aggregation
 - [ ] Configure resource limits

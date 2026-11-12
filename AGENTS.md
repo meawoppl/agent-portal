@@ -1036,6 +1036,7 @@ When making changes, verify:
 | `GITHUB_CLIENT_SECRET` | GitHub login | Required if any `GITHUB_*` var is set |
 | `GITHUB_REDIRECT_URI` | GitHub OAuth callback | Required if any `GITHUB_*` var is set |
 | `SESSION_SECRET` | Cookie signing + JWT secret | Production only |
+| `SESSION_SECRET_FILE` | Path to a file holding `SESSION_SECRET` (one trailing newline stripped). Both set, or a missing/empty/unsafe file, fails startup | Optional (alternative to `SESSION_SECRET`) |
 | `HOST` | Bind address | Optional (default: 0.0.0.0) |
 | `PORT` | Listen port | Optional (default: 3000) |
 | `BASE_URL` | Public URL for OAuth callbacks | Optional |

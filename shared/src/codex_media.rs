@@ -1,4 +1,4 @@
-//! Portal-owned references on normalized Codex image-generation items.
+//! Portal-owned references on normalized Codex generated-image and image-view items.
 //! Provider `fileId` is never interpreted as a Portal image identifier.
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

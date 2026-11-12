@@ -244,6 +244,15 @@ diesel::table! {
 }
 
 diesel::table! {
+    secret_access_request_groups (request_id) {
+        request_id -> Uuid,
+        group_id -> Uuid,
+        group_size -> Int4,
+        position -> Int4,
+    }
+}
+
+diesel::table! {
     secret_access_requests (id) {
         id -> Uuid,
         owner_user_id -> Uuid,
@@ -512,6 +521,13 @@ diesel::table! {
 }
 
 diesel::table! {
+    session_disconnect_notifications (session_id) {
+        session_id -> Uuid,
+        input_seq -> Int8,
+    }
+}
+
+diesel::table! {
     session_edit_stack_items (id) {
         id -> Uuid,
         session_id -> Uuid,
@@ -748,6 +764,7 @@ diesel::joinable!(proxy_auth_tokens -> sessions (session_id));
 diesel::joinable!(proxy_auth_tokens -> users (user_id));
 diesel::joinable!(push_subscriptions -> users (user_id));
 diesel::joinable!(scheduled_tasks -> users (user_id));
+diesel::joinable!(secret_access_request_groups -> secret_access_requests (request_id));
 diesel::joinable!(secret_access_requests -> messages (notice_message_id));
 diesel::joinable!(secret_access_requests -> proxy_auth_tokens (proxy_token_id));
 diesel::joinable!(secret_access_requests -> secret_bindings (binding_id));
@@ -781,6 +798,7 @@ diesel::joinable!(session_attention_views -> sessions (session_id));
 diesel::joinable!(session_attention_views -> users (user_id));
 diesel::joinable!(session_continuations -> sessions (session_id));
 diesel::joinable!(session_continuations -> users (user_id));
+diesel::joinable!(session_disconnect_notifications -> sessions (session_id));
 diesel::joinable!(session_edit_stack_items -> sessions (session_id));
 diesel::joinable!(session_edit_stack_items -> users (created_by));
 diesel::joinable!(session_follow_heads -> sessions (session_id));
@@ -812,6 +830,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     proxy_auth_tokens,
     push_subscriptions,
     scheduled_tasks,
+    secret_access_request_groups,
     secret_access_requests,
     secret_acl_history,
     secret_audit_events,
@@ -832,6 +851,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     session_attention_receipts,
     session_attention_views,
     session_continuations,
+    session_disconnect_notifications,
     session_edit_stack_items,
     session_follow_heads,
     session_follow_messages,

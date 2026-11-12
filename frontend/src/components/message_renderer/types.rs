@@ -37,7 +37,8 @@ impl RenderedMessage {
             .filter(|frame| frame.kind == shared::PortalMessage::MESSAGE_TYPE)
             .and_then(|_| serde_json::from_str::<shared::PortalMessage>(&content).ok())
             .and_then(|message| match message.content.as_slice() {
-                [shared::PortalContent::SecretAccessRequest { request_id }] => Some(*request_id),
+                [shared::PortalContent::SecretAccessRequest { request_id }]
+                | [shared::PortalContent::SecretAccessGroup { request_id }] => Some(*request_id),
                 _ => None,
             });
         Self {

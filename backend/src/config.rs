@@ -13,8 +13,9 @@ use oauth2::{
     TokenUrl,
 };
 use std::env;
+use std::ffi::OsString;
 use std::fmt::Display;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use tower_cookies::Key;
 
@@ -32,6 +33,166 @@ fn log_source(name: &str, from_env: bool) {
         var = name,
         source = if from_env { "env" } else { "default" },
     );
+}
+
+/// Names the file holding the session secret, as an alternative to putting it
+/// in `SESSION_SECRET` directly.
+const SESSION_SECRET_FILE_VAR: &str = "SESSION_SECRET_FILE";
+
+/// Upper bound on the session secret file. A secret is tens of bytes; anything
+/// this large is the wrong file.
+const SESSION_SECRET_FILE_MAX_BYTES: u64 = 4096;
+
+/// Where the session secret came from. Logged at boot; the value never is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SessionSecretSource {
+    Env,
+    File,
+    Ephemeral,
+}
+
+impl SessionSecretSource {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Env => "env",
+            Self::File => "file",
+            Self::Ephemeral => "ephemeral",
+        }
+    }
+}
+
+/// Resolve the session secret, which backs both the signed-cookie key and the
+/// proxy/launcher JWT secret. Rotating it logs out every browser and forces
+/// every launcher to re-authenticate.
+///
+/// - `SESSION_SECRET_FILE` set: the file's contents, minus one trailing
+///   `\n` or `\r\n`, are used exactly as `SESSION_SECRET` would be. A missing,
+///   unreadable, unsafe, empty or non-UTF-8 file is an error, never a fallback.
+/// - Both set: an error, so it is never ambiguous which one is live.
+/// - Only `SESSION_SECRET` set: its value, unchanged.
+/// - Neither set: a random ephemeral secret, so a dev server still boots at the
+///   cost of invalidating every cookie and token on restart. It must never be a
+///   hard-coded constant: a known secret lets anyone forge tokens for any user.
+///
+/// Error messages never contain the secret or its length.
+fn resolve_session_secret(
+    env_value: Option<OsString>,
+    file_path: Option<OsString>,
+) -> Result<(String, SessionSecretSource), String> {
+    match (env_value, file_path) {
+        (Some(_), Some(_)) => Err(format!(
+            "SESSION_SECRET and {SESSION_SECRET_FILE_VAR} are both set; set exactly one"
+        )),
+        (None, Some(path)) if path.is_empty() => {
+            Err(format!("{SESSION_SECRET_FILE_VAR} is set but empty"))
+        }
+        (None, Some(path)) => {
+            read_session_secret_file(Path::new(&path)).map(|s| (s, SessionSecretSource::File))
+        }
+        // A non-UTF-8 SESSION_SECRET is treated as unset.
+        (Some(value), None) => match value.into_string() {
+            Ok(secret) => Ok((secret, SessionSecretSource::Env)),
+            Err(_) => Ok(ephemeral_session_secret()),
+        },
+        (None, None) => Ok(ephemeral_session_secret()),
+    }
+}
+
+fn ephemeral_session_secret() -> (String, SessionSecretSource) {
+    (
+        hex::encode(Key::generate().master()),
+        SessionSecretSource::Ephemeral,
+    )
+}
+
+/// Read the session secret from an injected file (typically a read-only bind
+/// mount). Validates the opened descriptor rather than the path, so the checks
+/// apply to exactly what is read. The file must be a regular file owned by root
+/// or the backend user and not group- or world-writable: root-owned 0444 and
+/// backend-user-owned 0400/0600 are accepted.
+fn read_session_secret_file(path: &Path) -> Result<String, String> {
+    let name = SESSION_SECRET_FILE_VAR;
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Err(format!("{name} requires Unix permission checks"))
+    }
+    #[cfg(unix)]
+    {
+        use std::{
+            io::Read,
+            os::unix::fs::{MetadataExt, OpenOptionsExt},
+        };
+        use zeroize::Zeroizing;
+        let shown = path.display();
+        // O_NONBLOCK so a FIFO at the path fails the regular-file check below
+        // instead of blocking boot.
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(path)
+            .map_err(|e| format!("{name}: cannot open {shown}: {e}"))?;
+        let metadata = file
+            .metadata()
+            .map_err(|e| format!("{name}: cannot stat {shown}: {e}"))?;
+        if !metadata.is_file() {
+            return Err(format!("{name}: {shown} is not a regular file"));
+        }
+        if metadata.mode() & 0o022 != 0 {
+            return Err(format!(
+                "{name}: {shown} is group- or world-writable (mode {:04o}); use 0400, 0600 or 0444",
+                metadata.mode() & 0o7777
+            ));
+        }
+        // SAFETY: geteuid has no preconditions and cannot fail.
+        let euid = unsafe { libc::geteuid() };
+        if metadata.uid() != 0 && metadata.uid() != euid {
+            return Err(format!(
+                "{name}: {shown} is owned by uid {}; it must be owned by root or the backend user (uid {euid})",
+                metadata.uid()
+            ));
+        }
+        let mut bytes = Zeroizing::new(Vec::new());
+        file.take(SESSION_SECRET_FILE_MAX_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|e| format!("{name}: cannot read {shown}: {e}"))?;
+        if bytes.len() as u64 > SESSION_SECRET_FILE_MAX_BYTES {
+            return Err(format!(
+                "{name}: {shown} exceeds {SESSION_SECRET_FILE_MAX_BYTES} bytes"
+            ));
+        }
+        session_secret_from_file_bytes(&bytes)
+            .map_err(|problem| format!("{name}: {shown} {problem}"))
+    }
+}
+
+/// Strip exactly one trailing `\n` or `\r\n` (the newline `echo` or an editor
+/// appends) and require a non-empty UTF-8 value.
+fn session_secret_from_file_bytes(bytes: &[u8]) -> Result<String, &'static str> {
+    let trimmed = bytes
+        .strip_suffix(b"\r\n")
+        .or_else(|| bytes.strip_suffix(b"\n"))
+        .unwrap_or(bytes);
+    if trimmed.is_empty() {
+        return Err("is empty");
+    }
+    std::str::from_utf8(trimmed)
+        .map(str::to_owned)
+        .map_err(|_| "is not valid UTF-8")
+}
+
+/// Derive the signed-cookie key from the session secret: its first 64 bytes,
+/// zero-padded if shorter.
+fn cookie_key_from_secret(secret: &str) -> Key {
+    let bytes = secret.as_bytes();
+    if bytes.len() < 64 {
+        tracing::warn!("SESSION_SECRET should be at least 64 bytes, padding with zeros");
+        let mut padded = vec![0u8; 64];
+        padded[..bytes.len()].copy_from_slice(bytes);
+        Key::from(&padded)
+    } else {
+        Key::from(&bytes[..64])
+    }
 }
 
 /// Pure core of [`parse_or`]: resolve a raw optional value to either the parsed
@@ -326,41 +487,33 @@ impl ServerConfig {
             }
         };
 
-        // SESSION_SECRET backs both the signed-cookie key and the proxy/launcher
-        // JWT secret. Set it to a stable 64+ byte value in production so cookies
-        // and tokens survive a redeploy. When it is absent we generate a random
-        // ephemeral secret so the server still boots — at the cost of invalidating
-        // every cookie and token on restart. (It must never be a hard-coded
-        // constant: a known secret lets anyone forge tokens for any user.)
-        let session_secret = match env::var("SESSION_SECRET") {
-            Ok(secret) => {
-                log_source("SESSION_SECRET", true);
-                secret
-            }
-            Err(_) => {
-                log_source("SESSION_SECRET", false);
-                tracing::warn!(
-                    "SESSION_SECRET is not set — generating a random ephemeral secret. \
-                     All signed cookies and proxy/launcher JWTs will be invalidated on \
-                     restart; set SESSION_SECRET to a stable 64+ byte value in production."
+        // The session secret backs both the signed-cookie key and the
+        // proxy/launcher JWT secret; see `resolve_session_secret`.
+        let session_secret = match resolve_session_secret(
+            env::var_os("SESSION_SECRET"),
+            env::var_os(SESSION_SECRET_FILE_VAR),
+        ) {
+            Ok((secret, source)) => {
+                tracing::info!(
+                    target: "config",
+                    var = "SESSION_SECRET",
+                    source = source.as_str(),
                 );
-                hex::encode(Key::generate().master())
+                if source == SessionSecretSource::Ephemeral {
+                    tracing::warn!(
+                        "Neither SESSION_SECRET nor SESSION_SECRET_FILE is set — generating a \
+                         random ephemeral secret. All signed cookies and proxy/launcher JWTs \
+                         will be invalidated on restart; provide a stable 64+ byte secret in \
+                         production."
+                    );
+                }
+                Some(secret)
+            }
+            Err(message) => {
+                errors.push(message);
+                None
             }
         };
-        let cookie_key = {
-            let bytes = session_secret.as_bytes();
-            if bytes.len() < 64 {
-                tracing::warn!("SESSION_SECRET should be at least 64 bytes, padding with zeros");
-                let mut padded = vec![0u8; 64];
-                padded[..bytes.len()].copy_from_slice(bytes);
-                Key::from(&padded)
-            } else {
-                Key::from(&bytes[..64])
-            }
-        };
-
-        // JWT secret for proxy tokens — same source as the cookie key above.
-        let jwt_secret = session_secret;
 
         // App title (customizable via environment variable)
         // In dev mode, override with a warning to make it obvious
@@ -548,6 +701,13 @@ impl ServerConfig {
                 errors.join("\n  - ")
             );
         }
+
+        let Some(session_secret) = session_secret else {
+            anyhow::bail!("session secret unresolved");
+        };
+        let cookie_key = cookie_key_from_secret(&session_secret);
+        // JWT secret for proxy tokens — same source as the cookie key above.
+        let jwt_secret = session_secret;
 
         Ok(ServerConfig {
             host,
@@ -838,5 +998,145 @@ mod tests {
         let value: u32 = parse_or(&mut errors, "PORTAL_NONEXISTENT_TEST_VAR", 42);
         assert_eq!(value, 42, "unset var yields the default");
         assert!(errors.is_empty(), "unset var is not an error");
+    }
+
+    #[cfg(unix)]
+    mod session_secret {
+        use super::*;
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+
+        const SECRET: &str =
+            "a-stable-session-secret-that-is-comfortably-over-64-bytes-long-0123456789";
+
+        /// A secret file with the given contents and mode, inside a temp dir
+        /// that is dropped (and removed) with the returned guard.
+        fn secret_file(contents: &[u8], mode: u32) -> (tempfile::TempDir, OsString) {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("session.key");
+            std::fs::File::create(&path)
+                .unwrap()
+                .write_all(contents)
+                .unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+            (dir, path.into_os_string())
+        }
+
+        fn from_file(path: OsString) -> Result<(String, SessionSecretSource), String> {
+            resolve_session_secret(None, Some(path))
+        }
+
+        #[test]
+        fn file_contents_are_used_as_the_secret() {
+            let (_dir, path) = secret_file(SECRET.as_bytes(), 0o400);
+            let (secret, source) = from_file(path).unwrap();
+            assert_eq!(secret, SECRET);
+            assert_eq!(source, SessionSecretSource::File);
+        }
+
+        #[test]
+        fn exactly_one_trailing_newline_is_stripped() {
+            for (contents, expected) in [
+                (format!("{SECRET}\n"), SECRET.to_string()),
+                (format!("{SECRET}\r\n"), SECRET.to_string()),
+                (format!("{SECRET}\n\n"), format!("{SECRET}\n")),
+                (format!(" {SECRET} "), format!(" {SECRET} ")),
+            ] {
+                let (_dir, path) = secret_file(contents.as_bytes(), 0o600);
+                assert_eq!(from_file(path).unwrap().0, expected, "{contents:?}");
+            }
+        }
+
+        #[test]
+        fn file_and_env_yield_byte_identical_keys() {
+            let (_dir, path) = secret_file(format!("{SECRET}\n").as_bytes(), 0o444);
+            let (from_file, _) = from_file(path).unwrap();
+            let (from_env, source) =
+                resolve_session_secret(Some(OsString::from(SECRET)), None).unwrap();
+            assert_eq!(source, SessionSecretSource::Env);
+            assert_eq!(from_file.as_bytes(), from_env.as_bytes());
+            assert_eq!(
+                cookie_key_from_secret(&from_file).master(),
+                cookie_key_from_secret(&from_env).master()
+            );
+        }
+
+        #[test]
+        fn both_set_is_an_error() {
+            let (_dir, path) = secret_file(SECRET.as_bytes(), 0o400);
+            let err = resolve_session_secret(Some(OsString::from(SECRET)), Some(path))
+                .expect_err("ambiguous configuration must not boot");
+            assert!(err.contains("SESSION_SECRET_FILE"), "{err}");
+            assert!(!err.contains(SECRET), "error must not leak the secret");
+        }
+
+        #[test]
+        fn missing_file_is_an_error_not_a_fallback() {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("absent.key").into_os_string();
+            let err = from_file(path).expect_err("missing file must not boot");
+            assert!(err.contains("cannot open"), "{err}");
+        }
+
+        #[test]
+        fn empty_file_is_an_error() {
+            for contents in [&b""[..], b"\n", b"\r\n"] {
+                let (_dir, path) = secret_file(contents, 0o400);
+                let err = from_file(path).expect_err("empty secret must not boot");
+                assert!(err.contains("is empty"), "{contents:?}: {err}");
+            }
+        }
+
+        #[test]
+        fn empty_path_is_an_error() {
+            assert!(from_file(OsString::new()).is_err());
+        }
+
+        #[test]
+        fn non_utf8_file_is_an_error() {
+            let (_dir, path) = secret_file(&[0xff, 0xfe, 0x00], 0o400);
+            let err = from_file(path).expect_err("non-UTF-8 must not boot");
+            assert!(err.contains("UTF-8"), "{err}");
+        }
+
+        #[test]
+        fn oversized_file_is_an_error() {
+            let contents = vec![b'a'; SESSION_SECRET_FILE_MAX_BYTES as usize + 1];
+            let (_dir, path) = secret_file(&contents, 0o400);
+            assert!(from_file(path).is_err());
+        }
+
+        #[test]
+        fn group_or_world_writable_file_is_refused() {
+            for mode in [0o620, 0o602, 0o666] {
+                let (_dir, path) = secret_file(SECRET.as_bytes(), mode);
+                let err = from_file(path).expect_err("writable-by-others must not boot");
+                assert!(err.contains("writable"), "{mode:o}: {err}");
+            }
+        }
+
+        #[test]
+        fn directory_is_refused() {
+            let dir = tempfile::tempdir().unwrap();
+            let err = from_file(dir.path().as_os_str().to_owned())
+                .expect_err("a directory is not a secret file");
+            assert!(err.contains("regular file"), "{err}");
+        }
+
+        #[test]
+        fn env_only_and_neither_are_unchanged() {
+            let (secret, source) =
+                resolve_session_secret(Some(OsString::from(SECRET)), None).unwrap();
+            assert_eq!(
+                (secret.as_str(), source),
+                (SECRET, SessionSecretSource::Env)
+            );
+
+            let (a, source) = resolve_session_secret(None, None).unwrap();
+            let (b, _) = resolve_session_secret(None, None).unwrap();
+            assert_eq!(source, SessionSecretSource::Ephemeral);
+            assert_eq!(a.len(), 128, "hex of a 64-byte key");
+            assert_ne!(a, b, "ephemeral secrets are random");
+        }
     }
 }

@@ -399,3 +399,17 @@ turn clocks as a fallback for undated items. The original clock is stored as
 `source_created_at` for display and archived with the record. Portal ingestion
 time remains the replay cursor and retention age. Old launchers and records
 without a source clock continue to display the ingestion time.
+
+### Viewed images
+
+With an updated launcher and Codex session process, completed `imageView` items
+automatically upload the viewed local image
+through the session-authenticated Portal media endpoint. The normal image message
+provides its preview/lightbox and archive copy; the tool card retains its path and
+upload outcome. Relative paths resolve against the session working directory.
+Transfers are capped at 10 MiB and repeated lifecycle notifications reuse a
+bounded per-turn reference cache. Missing, oversized, non-regular, unsupported,
+or rejected files produce an explicit status instead of an image.
+
+Existing imported history without an uploaded media copy retains the path-only
+card; the backend never reads paths from the launcher's filesystem.

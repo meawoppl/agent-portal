@@ -6,7 +6,9 @@
 //! 1. resolves the recipient (the session's owning user) and a display name;
 //! 2. respects session muting and recent visible-conversation heartbeats;
 //! 3. filters on the user's notification preferences;
-//! 4. loads the user's non-disabled subscriptions and delivers to each via the
+//! 4. loads the user's non-disabled subscriptions and claims disconnect alerts
+//!    only for interrupted work which has not already notified;
+//! 5. delivers to each subscription via the
 //!    [`PushTransport`], updating `last_success_at` / `disabled_at` and logging
 //!    real failures under the stable `PUSH_DISPATCH_FAILED` marker.
 
@@ -24,6 +26,10 @@ use crate::models::PushSubscription;
 use crate::push::transport::{PushTransport, SendOutcome};
 use crate::push::{ConfiguredTransport, NotificationEvent};
 use crate::AppState;
+
+#[cfg(test)]
+#[path = "disconnect_tests.rs"]
+mod disconnect_tests;
 
 /// Spawn the dispatcher task. Consumes the receiver end of the notification
 /// channel; runs until the channel closes (backend shutdown).
@@ -112,8 +118,6 @@ async fn dispatch_one<T: PushTransport>(
     } else {
         event.session_name().to_string()
     };
-    let payload = event.into_payload(name, prefs.content_detail);
-
     // (d) Fan out to every non-disabled subscription for the user.
     let subs: Vec<PushSubscription> = match crate::schema::push_subscriptions::table
         .filter(crate::schema::push_subscriptions::user_id.eq(user_id))
@@ -131,6 +135,18 @@ async fn dispatch_one<T: PushTransport>(
         debug!("push: user {user_id} has no active subscriptions for session {session_id}");
         return;
     }
+
+    if matches!(event, NotificationEvent::SessionDisconnected { .. }) {
+        match super::disconnect::claim_disconnect(&mut conn, session_id) {
+            Ok(true) => {}
+            Ok(false) => return,
+            Err(e) => {
+                error!("{PUSH_DISPATCH_FAILED}: disconnect claim failed for {session_id}: {e:?}");
+                return;
+            }
+        }
+    }
+    let payload = event.into_payload(name, prefs.content_detail);
 
     for sub in &subs {
         let result =
@@ -193,12 +209,14 @@ fn resolve_recipient(
             sessions::session_name,
             users::notification_prefs,
         ))
-        .first::<(Uuid, String, Option<serde_json::Value>)>(conn)
+        .first::<(
+            Uuid,
+            String,
+            Option<crate::db::jsonb::NotificationPrefsJson>,
+        )>(conn)
         .optional()?;
     Ok(row.map(|(user_id, name, stored)| {
-        let prefs = stored
-            .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_default();
+        let prefs = stored.map(|v| v.0).unwrap_or_default();
         (user_id, name, prefs)
     }))
 }
@@ -230,7 +248,7 @@ mod db_tests {
     use super::*;
     use crate::models::{NewPushSubscription, PushSubscription};
 
-    fn make_sub(conn: &mut DbConnection, user_id: Uuid) -> PushSubscription {
+    pub(super) fn make_sub(conn: &mut DbConnection, user_id: Uuid) -> PushSubscription {
         use crate::schema::push_subscriptions;
         let new_sub = NewPushSubscription {
             user_id,

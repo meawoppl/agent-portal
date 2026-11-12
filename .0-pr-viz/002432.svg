@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2432 · Consistent computer action buttons</text>
+<text x="55" y="106" font-family="sans-serif" font-size="34" fill="#e6e9f5">Update and Restart used filled icon tiles beside outlined Install controls.</text>
+<text x="55" y="148" font-family="sans-serif" font-size="34" fill="#e6e9f5">They now share the install treatment, with readable labels and existing confirmation behavior.</text>
+<path d="M55 175 H1945 M1000 190 V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="70" y="230" font-family="sans-serif" font-size="24" fill="#f7768e">BEFORE</text>
+<text x="1070" y="230" font-family="sans-serif" font-size="24" fill="#9ece6a">AFTER</text>
+<rect x="70" y="280" width="840" height="190" rx="12" fill="#1e202e" stroke="#f7768e"/>
+<text x="94" y="322" font-family="sans-serif" font-size="28" fill="#f7768e">Computer lifecycle controls</text>
+<text x="94" y="370" font-family="sans-serif" font-size="24" fill="#c0caf5">Filled gray square buttons with icons.</text>
+<text x="94" y="406" font-family="sans-serif" font-size="24" fill="#c0caf5">Separate padding, font size and background rules.</text>
+<rect x="70" y="550" width="840" height="190" rx="12" fill="#1e202e" stroke="#7aa2f7"/>
+<text x="94" y="592" font-family="sans-serif" font-size="28" fill="#7aa2f7">Agent Install controls</text>
+<text x="94" y="640" font-family="sans-serif" font-size="24" fill="#c0caf5">Compact text labels with an accent outline.</text>
+<text x="94" y="676" font-family="sans-serif" font-size="24" fill="#c0caf5">Different visual treatment within the same table.</text>
+<rect x="1070" y="280" width="840" height="190" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1094" y="322" font-family="sans-serif" font-size="28" fill="#9ece6a">Shared install-button styling</text>
+<text x="1094" y="370" font-family="sans-serif" font-size="24" fill="#c0caf5">Same accent, outline, padding and typography.</text>
+<text x="1094" y="406" font-family="sans-serif" font-size="24" fill="#c0caf5">Update &amp; Restart and Restart use text labels.</text>
+<rect x="1070" y="550" width="840" height="190" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1094" y="592" font-family="sans-serif" font-size="28" fill="#9ece6a">Compact stacked actions</text>
+<text x="1094" y="640" font-family="sans-serif" font-size="24" fill="#c0caf5">Wider action column fits the readable labels.</text>
+<text x="1094" y="676" font-family="sans-serif" font-size="24" fill="#c0caf5">Confirmation color, Cancel and disabled states stay.</text>
+<rect x="1070" y="820" width="840" height="190" rx="12" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1094" y="862" font-family="sans-serif" font-size="28" fill="#9ece6a">Touch layout retained</text>
+<text x="1094" y="910" font-family="sans-serif" font-size="24" fill="#c0caf5">44px minimum height on coarse pointers.</text>
+<text x="1094" y="946" font-family="sans-serif" font-size="24" fill="#c0caf5">Table scrolling keeps agent columns usable.</text>
+<text x="55" y="1170" font-family="sans-serif" font-size="22" fill="#a9b1d6">Scope: presentation only. Update/restart dispatch and lifecycle tracking are unchanged.</text>
+</svg>

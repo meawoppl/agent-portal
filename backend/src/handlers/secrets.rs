@@ -1,5 +1,5 @@
-//! Browser responses contain metadata only. Dedicated credentials are checked
-//! here AND by the service policy before any saved value is released.
+//! Browser metadata is separate from the explicit, verified clipboard read.
+//! Credentials and current policy are rechecked before saved values are released.
 use crate::{
     errors::AppError,
     schema::{secret_grants, secret_versions, secrets, secrets_generation},
@@ -14,7 +14,7 @@ use axum::{
     extract::{DefaultBodyLimit, FromRequestParts, Path, Query, State},
     http::{header, request::Parts, HeaderMap},
     response::{IntoResponse, Response},
-    routing::{delete, get, post},
+    routing::{any, delete, get, post},
     Json, Router,
 };
 use chrono::Utc;
@@ -24,7 +24,6 @@ use std::sync::Arc;
 use uuid::Uuid;
 mod access_requests;
 mod bindings;
-mod enrollment;
 mod idempotency;
 mod members;
 const MAX_RULE_SOURCE_BYTES: i64 = 1024 * 1024;
@@ -51,19 +50,13 @@ impl FromRequestParts<Arc<AppState>> for SecretPrincipal {
         parts: &mut Parts,
         state: &Arc<AppState>,
     ) -> Result<Self, Self::Rejection> {
-        match auth::credential(state, &parts.headers).map_err(IntoResponse::into_response)? {
-            Some(principal) => Ok(Self(principal)),
-            None => {
-                let user = crate::auth::BrowserUserId::from_request_parts(parts, state).await?;
-                Ok(Self(Principal {
-                    user: user.0,
-                    browser: true,
-                    metadata: true,
-                    mutation: true,
-                    read: false,
-                }))
-            }
-        }
+        let user = crate::auth::BrowserUserId::from_request_parts(parts, state).await?;
+        Ok(Self(Principal {
+            user: user.0,
+            browser: true,
+            metadata: true,
+            mutation: true,
+        }))
     }
 }
 pub fn principal(
@@ -72,22 +65,18 @@ pub fn principal(
     cookies: &tower_cookies::Cookies,
     is_mutation: bool,
 ) -> Result<Principal, AppError> {
-    let principal = if let Some(principal) = auth::credential(state, headers)? {
-        principal
-    } else {
-        let cookie = cookies
-            .signed(&state.cookie_key)
-            .get(shared::protocol::SESSION_COOKIE_NAME)
-            .ok_or(AppError::Unauthorized)?;
-        let user = Uuid::parse_str(cookie.value()).map_err(|_| AppError::Unauthorized)?;
-        store::active_user(&mut *state.conn()?, user)?;
-        Principal {
-            user,
-            browser: true,
-            metadata: true,
-            mutation: true,
-            read: false,
-        }
+    auth::require_browser_headers(headers)?;
+    let cookie = cookies
+        .signed(&state.cookie_key)
+        .get(shared::protocol::SESSION_COOKIE_NAME)
+        .ok_or(AppError::Unauthorized)?;
+    let user = Uuid::parse_str(cookie.value()).map_err(|_| AppError::Unauthorized)?;
+    store::active_user(&mut *state.conn()?, user)?;
+    let principal = Principal {
+        user,
+        browser: true,
+        metadata: true,
+        mutation: true,
     };
     if let Some(expected) = headers.get("X-Portal-Account") {
         if expected.to_str().ok().and_then(|v| Uuid::parse_str(v).ok()) != Some(principal.user) {
@@ -548,14 +537,46 @@ fn register_reader(
         Ok(true)
     })
 }
-async fn read(
+/// Retired human CLI endpoints intentionally return a terminal response. No
+/// credential, cookie, or legacy enrollment can restore this access path.
+async fn retired_cli_access() -> axum::http::StatusCode {
+    axum::http::StatusCode::GONE
+}
+
+// A browser must explicitly verify its OAuth-backed session and
+// pass same-origin CSRF checks. Re-run this policy after each asynchronous step.
+fn clipboard_principal(
+    state: &AppState,
+    headers: &HeaderMap,
+    cookies: &tower_cookies::Cookies,
+) -> Result<Principal, AppError> {
+    let user = principal(state, headers, cookies, true)?;
+    if !user.browser {
+        return Err(AppError::Forbidden);
+    }
+    auth::require_verification(cookies, state, user.user)?;
+    Ok(user)
+}
+async fn copy_value(
     State(state): State<Arc<AppState>>,
-    SecretPrincipal(principal): SecretPrincipal,
     headers: HeaderMap,
+    cookies: tower_cookies::Cookies,
     Path(id): Path<Uuid>,
-    SecretJson(request): SecretJson<SecretReadRequest>,
+    SecretJson(mut request): SecretJson<SecretReadRequest>,
 ) -> Result<Json<SecretReadResponse>, AppError> {
-    auth::require_read(principal)?;
+    let principal = clipboard_principal(&state, &headers, &cookies)?;
+    request.for_execution = false;
+    read_value(state, principal, headers, id, request, cookies).await
+}
+async fn read_value(
+    state: Arc<AppState>,
+    principal: Principal,
+    headers: HeaderMap,
+    id: Uuid,
+    request: SecretReadRequest,
+    cookies: tower_cookies::Cookies,
+) -> Result<Json<SecretReadResponse>, AppError> {
+    let recheck = || clipboard_principal(&state, &headers, &cookies);
     state.secrets.refresh_redaction(&state.db_pool).await?;
     let (row, version) = {
         let mut conn = state.conn()?;
@@ -594,8 +615,7 @@ async fn read(
         .map_err(crypto_error)?;
     // Recheck after the asynchronous key operation. A revoked credential, grant,
     // disabled account, deleted key or changed generation cannot release a value.
-    let verified = auth::credential(&state, &headers)?.ok_or(AppError::Forbidden)?;
-    auth::require_read(verified)?;
+    let verified = recheck()?;
     {
         let mut conn = state.conn()?;
         let latest = store::load(&mut conn, id)?;
@@ -612,11 +632,7 @@ async fn read(
             &mut conn,
             principal.user,
             Some(id),
-            if request.for_execution {
-                "execute_read"
-            } else {
-                "read"
-            },
+            "clipboard_read",
             "allowed",
         )?;
     }
@@ -629,8 +645,7 @@ async fn read(
     }
     // Installing a newly consented reader rule is asynchronous. Revalidate
     // credentials and current policy once more before releasing plaintext.
-    let verified = auth::credential(&state, &headers)?.ok_or(AppError::Forbidden)?;
-    auth::require_read(verified)?;
+    let verified = recheck()?;
     {
         let mut conn = state.conn()?;
         let latest = store::load(&mut conn, id)?;
@@ -927,7 +942,8 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
             .route("/api/secrets/resolve", post(resolve))
             .route("/api/secrets/{id}", get(info))
             .route("/api/secrets/{id}/versions", get(versions).post(write))
-            .route("/api/secrets/{id}/read", post(read))
+            .route("/api/secrets/{id}/read", post(retired_cli_access))
+            .route("/api/secrets/{id}/copy", post(copy_value))
             .route("/api/secrets/{id}/grants", post(grant))
             .route("/api/secrets/{id}/grants/{user}", delete(revoke))
             .route("/api/secrets/{id}/delete", post(soft_delete))
@@ -940,13 +956,17 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
                 "/api/secrets/jobs/{id}",
                 get(crate::secrets::expunge::get_job),
             )
-            .merge(enrollment::router())
+            .route("/api/secrets/authorize/{*rest}", any(retired_cli_access))
             .merge(access_requests::router())
             .layer(DefaultBodyLimit::max(400_000)),
         state,
     )
     .layer(axum::middleware::from_fn(no_store))
 }
+
+#[cfg(test)]
+#[path = "secrets/retired_cli_tests.rs"]
+mod retired_cli_tests;
 
 #[cfg(test)]
 #[path = "secrets/vault_tests.rs"]

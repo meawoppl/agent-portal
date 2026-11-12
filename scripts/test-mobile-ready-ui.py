@@ -112,6 +112,29 @@ async def exercise(browser, base, device, name):
     await page.route_web_socket('**/ws/**', ws)
     await page.goto(f'{base}/dashboard?session={A}')
     await expect(page.get_by_role('button', name='Ready sessions: 1', exact=True)).to_be_visible(timeout=60000)
+    # Mobile Chromium can include overflowing content in innerWidth
+    # while CSS still matches the phone viewport. A keyboard-height resize
+    # must not replace the mobile session controls with the desktop rail or
+    # start loading background transcripts.
+    await page.evaluate("""() => {
+        const overflow = document.createElement('div');
+        overflow.id = 'viewport-overflow-fixture';
+        overflow.style.width = '1400px';
+        overflow.textContent = 'Oversized content';
+        document.body.append(overflow);
+    }""")
+    await page.set_viewport_size(dict(width=device['viewport']['width'], height=600))
+    await page.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+    assert await page.evaluate('matchMedia("(max-width: 768px)").matches')
+    if name == 'android':
+        assert await page.evaluate('innerWidth > 768'), 'fixture must reproduce the Chromium mismatch'
+    await expect(page.locator('.mobile-ready-bar')).to_be_visible()
+    await expect(page.locator('.session-rail')).to_have_count(0)
+    assert B not in fetched and C not in fetched, 'overflow must not activate desktop hydration'
+    (ROOT/'builds').mkdir(exist_ok=True)
+    await page.screenshot(path=str(ROOT/'builds'/f'mobile-viewport-{name}.png'))
+    await page.locator('#viewport-overflow-fixture').evaluate('(el) => el.remove()')
+    await page.set_viewport_size(device['viewport'])
     textarea = page.locator('.session-view-wrapper.focused textarea').first
     await expect(textarea).to_be_enabled()
     await textarea.fill('Keep this unsent draft')
@@ -241,9 +264,17 @@ async def exercise(browser, base, device, name):
     # The new row actions fit the narrowest supported phone viewport.
     await page.set_viewport_size(dict(width=320, height=520))
     assert await page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+    # Real breakpoint changes still replace the controls in both directions.
+    await page.keyboard.press('Escape')
+    await page.set_viewport_size(dict(width=769, height=900))
+    await expect(page.locator('.session-rail')).to_be_visible()
+    await expect(page.locator('.mobile-ready-bar')).to_have_count(0)
+    await page.set_viewport_size(dict(width=768, height=900))
+    await expect(page.locator('.mobile-ready-bar')).to_be_visible()
+    await expect(page.locator('.session-rail')).to_have_count(0)
     assert not errors, errors
     await context.close()
-    print(f'PASS {name}: background completion, queue, approval, mute, precise receipt, draft, reload, narrow viewport, settings releases presence, setup guidance, settings draft, round-robin Next, retained reply acknowledgment, stale acknowledgment, retry')
+    print(f'PASS {name}: overflow-safe mobile layout, breakpoint changes, background completion, queue, approval, mute, precise receipt, draft, reload, narrow viewport, settings releases presence, setup guidance, settings draft, round-robin Next, retained reply acknowledgment, stale acknowledgment, retry')
 
 async def main(selected):
     server = http.server.ThreadingHTTPServer(('127.0.0.1',0),functools.partial(Handler,directory=str(ROOT/'frontend/dist')))

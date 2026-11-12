@@ -121,40 +121,6 @@ pub struct SecretGrantRequest {
     pub user_id: Uuid,
     pub rights: Vec<SecretRight>,
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SecretAuthorizeStartRequest {
-    pub label: String,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SecretAuthorizeStartResponse {
-    pub device_code: SecretValue,
-    pub user_code: String,
-    pub verification_uri: String,
-    pub expires_in: u64,
-    pub interval: u64,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SecretAuthorizeApproveRequest {
-    pub user_code: String,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SecretAuthorizePollRequest {
-    pub device_code: SecretValue,
-}
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum SecretAuthorizeState {
-    Pending,
-    Approved,
-    Denied,
-    Expired,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SecretAuthorizePollResponse {
-    pub state: SecretAuthorizeState,
-    pub credential: Option<SecretValue>,
-    pub expires_at: Option<String>,
-}
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SecretExpungeState {
@@ -205,19 +171,6 @@ pub struct SecretMember {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecretMembersResponse {
     pub members: Vec<SecretMember>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SecretCredentialMetadata {
-    pub id: Uuid,
-    pub label: String,
-    pub created_at: String,
-    pub expires_at: String,
-    pub revoked_at: Option<String>,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SecretCredentialsResponse {
-    pub credentials: Vec<SecretCredentialMetadata>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -314,6 +267,27 @@ pub struct SecretAccessRequestInfo {
     pub created_at: String,
     pub expires_at: String,
     pub binding_id: Option<Uuid>,
+}
+
+/// A bounded, all-or-nothing approval set. Its item order is part of retry identity.
+pub const MAX_SECRET_ACCESS_GROUP_ITEMS: usize = 16;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretAccessGroupCreateRequest {
+    pub request_id: Uuid,
+    pub items: Vec<SecretAccessGroupItem>,
+    pub expires_in_seconds: u64,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretAccessGroupItem {
+    pub reference: String,
+    pub env_name: String,
+    pub version: Option<i32>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SecretAccessGroupInfo {
+    pub id: Uuid,
+    pub state: SecretAccessState,
+    pub items: Vec<SecretAccessRequestInfo>,
 }
 
 #[cfg(test)]

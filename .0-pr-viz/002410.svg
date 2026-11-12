@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+  <rect width="2000" height="1200" fill="#1a1b26"/>
+  <g font-family="Arial, sans-serif">
+    <text x="55" y="52" fill="#a9b1d6" font-size="24" letter-spacing="1">PR #2410 · Stop repeated disconnect alerts for old sessions</text>
+    <text x="55" y="105" fill="#e6e9f5" font-size="34">A connected proxy can be idle; reconnecting it does not create new work.</text>
+    <text x="55" y="149" fill="#e6e9f5" font-size="34">Only interrupted work can alert, once per accepted input across restarts.</text>
+    <path d="M55 177 H1945" stroke="#3d4666"/>
+    <path d="M1000 205 V1120" stroke="#3d4666" stroke-dasharray="9 9"/>
+    <text x="75" y="235" fill="#f7768e" font-size="22" font-weight="bold" letter-spacing="4">BEFORE</text>
+    <text x="1055" y="235" fill="#9ece6a" font-size="22" font-weight="bold" letter-spacing="4">AFTER</text>
+<rect x="75" y="275" width="870" height="190" rx="16" fill="#1e202e" stroke="#3d4666"/>
+<text x="105" y="320" fill="#7aa2f7" font-size="26">SessionDisconnected</text>
+<text x="105" y="365" fill="#c0caf5" font-size="23">Proxy teardown, launch failure or startup sweep</text>
+<text x="105" y="403" fill="#c0caf5" font-size="23">Candidate emitted on an active-to-disconnected drop.</text>
+<text x="105" y="441" fill="#c0caf5" font-size="23">Registration can make an old idle session active.</text>
+<rect x="1055" y="275" width="870" height="190" rx="16" fill="#1e202e" stroke="#3d4666"/>
+<text x="1085" y="320" fill="#7aa2f7" font-size="26">SessionDisconnected</text>
+<text x="1085" y="365" fill="#c0caf5" font-size="23">The same producers emit disconnect candidates.</text>
+<text x="1085" y="403" fill="#c0caf5" font-size="23">Preferences, mute, presence and subscriptions checked.</text>
+<text x="1085" y="441" fill="#c0caf5" font-size="23">Only eligible recipients reach the new claim.</text>
+<rect x="75" y="535" width="870" height="225" rx="16" fill="#1e202e" stroke="#f7768e"/>
+<text x="105" y="580" fill="#7aa2f7" font-size="26">dispatch_one</text>
+<text x="105" y="625" fill="#c0caf5" font-size="23">Every enabled disconnect event reaches fan-out.</text>
+<text x="105" y="663" fill="#c0caf5" font-size="23">No check for unfinished agent work.</text>
+<text x="105" y="701" fill="#c0caf5" font-size="23">No durable record of a previous disconnect alert.</text>
+<text x="105" y="739" fill="#c0caf5" font-size="23">Each reconnect/drop can notify again.</text>
+<rect x="1055" y="535" width="870" height="225" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1085" y="580" fill="#7aa2f7" font-size="26">claim_disconnect</text>
+<text x="1085" y="625" fill="#c0caf5" font-size="23">Require disconnected status and paused = false.</text>
+<text x="1085" y="663" fill="#c0caf5" font-size="23">persisted_activity_states must report Busy.</text>
+<text x="1085" y="701" fill="#c0caf5" font-size="23">Claim session_disconnect_notifications.input_seq.</text>
+<text x="1085" y="739" fill="#c0caf5" font-size="23">Only a higher input_seq can replace the claim.</text>
+<rect x="75" y="835" width="870" height="250" rx="16" fill="#1e202e" stroke="#3d4666"/>
+<text x="105" y="880" fill="#7aa2f7" font-size="26">Repeated alerts for the same session</text>
+<text x="105" y="925" fill="#c0caf5" font-size="23">Old completed session drops: alert.</text>
+<text x="105" y="963" fill="#c0caf5" font-size="23">Proxy reconnects, then drops again: another alert.</text>
+<text x="105" y="1001" fill="#c0caf5" font-size="23">Server restart forgets any transient context.</text>
+<text x="105" y="1039" fill="#c0caf5" font-size="23">Notification collapse does not prevent new deliveries.</text>
+<rect x="1055" y="835" width="870" height="250" rx="16" fill="#1e202e" stroke="#3d4666"/>
+<text x="1085" y="880" fill="#7aa2f7" font-size="26">One attempt for interrupted work</text>
+<text x="1085" y="925" fill="#c0caf5" font-size="23">Idle or recovered session: silent.</text>
+<text x="1085" y="963" fill="#c0caf5" font-size="23">Same input after reconnect or restart: silent.</text>
+<text x="1085" y="1001" fill="#c0caf5" font-size="23">New input rearms the disconnect alert.</text>
+<text x="1085" y="1039" fill="#c0caf5" font-size="23">The first claim fans out to all subscribed devices.</text>
+<path d="M510 480 V515 l-10 -14 m10 14 l10 -14" fill="none" stroke="#a9b1d6" stroke-width="3"/>
+<path d="M510 780 V815 l-10 -14 m10 14 l10 -14" fill="none" stroke="#a9b1d6" stroke-width="3"/>
+<path d="M1490 480 V515 l-10 -14 m10 14 l10 -14" fill="none" stroke="#a9b1d6" stroke-width="3"/>
+<path d="M1490 780 V815 l-10 -14 m10 14 l10 -14" fill="none" stroke="#a9b1d6" stroke-width="3"/>
+<text x="55" y="1172" fill="#a9b1d6" font-size="22">Delivery stays best-effort: a failed or partial fan-out is not retried by reconnecting the same input.</text>
+</g>
+</svg>
+

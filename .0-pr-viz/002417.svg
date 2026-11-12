@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="Arial, sans-serif" font-size="24" fill="#a9b1d6">PR #2417 · Remove duplicate proxy build</text>
+<text x="55" y="112" font-family="Arial, sans-serif" font-size="34" fill="#e6e9f5">Build Backend no longer repeats the Linux proxy compilation.</text>
+<path d="M55 160 H1945 M1000 190 V1130" stroke="#565f89" stroke-dasharray="7 7"/>
+<text x="55" y="220" font-family="Arial, sans-serif" font-size="24" fill="#f7768e">BEFORE</text>
+<rect x="55" y="265" width="900" height="225" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="310" font-family="Arial, sans-serif" font-size="28" fill="#7aa2f7">Build Backend</text>
+<text x="80" y="360" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">cargo build -p backend</text>
+<text x="80" y="403" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">also selects claude-portal and shared.</text>
+<rect x="55" y="535" width="900" height="225" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="580" font-family="Arial, sans-serif" font-size="28" fill="#7aa2f7">Build Proxy (Linux x86_64)</text>
+<text x="80" y="630" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Compiles proxy and launcher again.</text>
+<text x="80" y="673" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Separate job and cache.</text>
+<rect x="55" y="805" width="900" height="225" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="850" font-family="Arial, sans-serif" font-size="28" fill="#7aa2f7">Measured baseline</text>
+<text x="80" y="900" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Backend job: 117 s; build step: 70 s.</text>
+<text x="80" y="943" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">One main run with a restored cache.</text>
+<text x="1045" y="220" font-family="Arial, sans-serif" font-size="24" fill="#9ece6a">AFTER</text>
+<rect x="1045" y="265" width="900" height="225" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1070" y="310" font-family="Arial, sans-serif" font-size="28" fill="#7aa2f7">Build Backend</text>
+<text x="1070" y="360" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">cargo build -p backend</text>
+<text x="1070" y="403" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">shared remains a transitive dependency.</text>
+<rect x="1045" y="535" width="900" height="225" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1070" y="580" font-family="Arial, sans-serif" font-size="28" fill="#7aa2f7">Build Proxy (Linux x86_64)</text>
+<text x="1070" y="630" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Retains proxy and launcher coverage.</text>
+<text x="1070" y="673" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Other platform builds remain unchanged.</text>
+<rect x="1045" y="805" width="900" height="225" rx="12" fill="#1e202e" stroke="#565f89"/>
+<text x="1070" y="850" font-family="Arial, sans-serif" font-size="28" fill="#7aa2f7">Measured candidate</text>
+<text x="1070" y="900" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">Backend job: 126 s; build step: 80 s.</text>
+<text x="1070" y="943" font-family="Arial, sans-serif" font-size="26" fill="#c0caf5">No wall-time improvement established.</text>
+<text x="55" y="1172" font-family="Arial, sans-serif" font-size="22" fill="#a9b1d6">Single-run timing is noisy: this removes duplicated build work, but does not claim a measured speedup.</text>
+</svg>

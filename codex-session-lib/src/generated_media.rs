@@ -1,4 +1,4 @@
-//! Move generated images through Portal's authenticated, archived media path
+//! Move generated and viewed images through Portal's authenticated, archived media path
 //! before serializing the transcript item. Failed uploads retain a bounded
 //! local recovery file and an explicit diagnostic, never an inline DB payload.
 use std::collections::HashMap;
@@ -40,6 +40,7 @@ pub(crate) struct GeneratedMediaNormalizer {
     credentials: Option<PortalCredentials>,
     client: Option<reqwest::Client>,
     recovery_root: PathBuf,
+    working_directory: PathBuf,
     // Only small references; never image bytes. Cleared at the next turn and
     // capped independently so unexpected lifecycle streams cannot grow it.
     references: HashMap<String, CodexImageMedia>,
@@ -56,6 +57,7 @@ impl GeneratedMediaNormalizer {
                 .build()
                 .ok(),
             recovery_root: session_lib::paths::config_dir().join("generated-image-recovery"),
+            working_directory: config.working_directory.clone(),
             references: HashMap::new(),
         }
     }
@@ -67,7 +69,7 @@ impl GeneratedMediaNormalizer {
     /// `Some` owns the visible output for this item. All other notifications
     /// continue through the ordinary classifier, preserving output ordering.
     pub async fn normalize(&mut self, msg: &mut ServerMessage) -> Option<serde_json::Value> {
-        let (kind, item) = match msg {
+        let (kind, item, thread_id) = match msg {
             ServerMessage::Notification(Notification::TurnStarted(p)) => {
                 if self.main_thread_id.as_deref() == Some(p.thread_id.as_str()) {
                     self.references.clear();
@@ -75,13 +77,42 @@ impl GeneratedMediaNormalizer {
                 return None;
             }
             ServerMessage::Notification(Notification::ItemStarted(p)) => {
-                ("item.started", &mut p.item)
+                ("item.started", &mut p.item, p.thread_id.as_str())
             }
             ServerMessage::Notification(Notification::ItemCompleted(p)) => {
-                ("item.completed", &mut p.item)
+                ("item.completed", &mut p.item, p.thread_id.as_str())
             }
             _ => return None,
         };
+        if let ThreadItemPayload::ImageView { id, path } = &item.payload {
+            // A completed, typed view is evidence that the agent opened this
+            // image. Transfer it on the launcher, never ask the backend or
+            // browser to read an agent-local path. Starts stay metadata-only.
+            if kind != "item.completed" {
+                return None;
+            }
+            let key = format!("view:{}:{thread_id}{id}", thread_id.len());
+            let media = if let Some(media) = self.references.get(&key) {
+                media.clone()
+            } else {
+                let path = Path::new(&path.0);
+                let path = if path.is_absolute() {
+                    path.to_path_buf()
+                } else {
+                    self.working_directory.join(path)
+                };
+                let media = self.transfer(String::new(), Some(&path)).await;
+                if self.references.len() >= MAX_RECOVERY_FILES {
+                    self.references.clear();
+                }
+                self.references.insert(key, media.clone());
+                media
+            };
+            return Some(crate::events::to_raw_output(&GeneratedItemOutput {
+                kind,
+                item: GeneratedItem { item, media },
+            }));
+        }
         let ThreadItemPayload::ImageGeneration {
             id,
             image,
@@ -97,7 +128,8 @@ impl GeneratedMediaNormalizer {
             GeneratedImageRef::Inline { result } => std::mem::take(result),
             GeneratedImageRef::File { .. } => String::new(),
         };
-        let media = if let Some(media) = self.references.get(id) {
+        let key = format!("generated:{}:{thread_id}{id}", thread_id.len());
+        let media = if let Some(media) = self.references.get(&key) {
             media.clone()
         } else {
             // Empty start notifications and provider-only attachments have no
@@ -111,7 +143,7 @@ impl GeneratedMediaNormalizer {
                 self.references.clear();
             }
             if media.uploaded || kind == "item.completed" {
-                self.references.insert(id.clone(), media.clone());
+                self.references.insert(key, media.clone());
             }
             media
         };
@@ -150,8 +182,14 @@ impl GeneratedMediaNormalizer {
             shared::media::media_kind(content_type) == Some(shared::media::MediaKind::Image)
         });
         let result = match content_type {
-            Some(content_type) => self.upload(&bytes, content_type).await,
-            None => Err("Generated data is not a supported image format.".to_string()),
+            Some(content_type) => {
+                let filename = saved_path
+                    .and_then(Path::file_name)
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("codex-generated-image");
+                self.upload(&bytes, content_type, filename).await
+            }
+            None => Err("Data is not a supported image format.".to_string()),
         };
         match result {
             Ok(response) if response.persisted => CodexImageMedia {
@@ -197,6 +235,7 @@ impl GeneratedMediaNormalizer {
         &self,
         bytes: &[u8],
         content_type: &str,
+        filename: &str,
     ) -> Result<shared::api::ShowMediaResponse, String> {
         let credentials = self
             .credentials
@@ -215,7 +254,7 @@ impl GeneratedMediaNormalizer {
         let response = client
             .post(url)
             .bearer_auth(&credentials.token)
-            .query(&[("filename", "codex-generated-image")])
+            .query(&[("filename", filename)])
             .header(reqwest::header::CONTENT_TYPE, content_type)
             .body(bytes.to_vec())
             .send()
@@ -347,14 +386,23 @@ async fn decode_image(inline: &str, saved_path: Option<&Path>) -> Result<Vec<u8>
         return Ok(bytes);
     }
     let path = saved_path.ok_or("Generated image has no local bytes or saved path.")?;
+    let metadata = tokio::fs::metadata(path)
+        .await
+        .map_err(|_| "Image file could not be inspected.".to_string())?;
+    if !metadata.is_file() {
+        return Err("Image path is not a regular file.".to_string());
+    }
+    if metadata.len() > MAX_IMAGE_BYTES as u64 {
+        return Err("Image exceeds the 10 MiB display limit.".to_string());
+    }
     let file = tokio::fs::File::open(path)
         .await
-        .map_err(|_| "Generated image's saved file could not be opened.".to_string())?;
+        .map_err(|_| "Image file could not be opened.".to_string())?;
     let mut bytes = Vec::new();
     file.take(MAX_IMAGE_BYTES as u64 + 1)
         .read_to_end(&mut bytes)
         .await
-        .map_err(|_| "Generated image's saved file could not be read.".to_string())?;
+        .map_err(|_| "Image file could not be read.".to_string())?;
     if bytes.len() > MAX_IMAGE_BYTES {
         return Err("Generated image exceeds the 10 MiB display limit.".to_string());
     }
@@ -376,12 +424,121 @@ mod tests {
     fn normalizer(root: &Path, credentials: Option<PortalCredentials>) -> GeneratedMediaNormalizer {
         let config = SessionConfig {
             session_id: Uuid::new_v4(),
+            working_directory: root.to_path_buf(),
             portal_credentials: credentials,
             ..Default::default()
         };
         let mut normalizer = GeneratedMediaNormalizer::new(&config);
         normalizer.recovery_root = root.to_path_buf();
         normalizer
+    }
+
+    fn viewed_frame(kind: &str, path: &Path) -> ServerMessage {
+        let path = serde_json::to_string(&path.to_string_lossy()).unwrap();
+        ServerMessage::from_json_str(&format!(r#"{{"method":"{kind}","params":{{"threadId":"t","turnId":"turn","item":{{"type":"imageView","id":"view-1","path":{path}}}}}}}"#)).unwrap()
+    }
+
+    #[tokio::test]
+    async fn viewed_image_uploads_once_on_completion_and_resolves_session_relative_path() {
+        let dir = tempfile::tempdir().unwrap();
+        tokio::fs::write(dir.path().join("fixture.png"), png())
+            .await
+            .unwrap();
+        let id = Uuid::new_v4();
+        let (base, server) = media_server(id, "200 OK").await;
+        let mut normalizer = normalizer(
+            dir.path(),
+            Some(PortalCredentials {
+                backend_url: base,
+                token: "test-token".into(),
+            }),
+        );
+        let mut start = viewed_frame("item/started", Path::new("fixture.png"));
+        assert!(normalizer.normalize(&mut start).await.is_none());
+        let mut complete = viewed_frame("item/completed", Path::new("fixture.png"));
+        let output = normalizer.normalize(&mut complete).await.unwrap();
+        server.await.unwrap();
+        assert_eq!(output["item"]["type"], "imageView");
+        assert_eq!(output["item"]["path"], "fixture.png");
+        assert_eq!(output["item"]["portalMedia"]["image_id"], id.to_string());
+        assert_eq!(output["item"]["portalMedia"]["uploaded"], true);
+        assert!(!output
+            .to_string()
+            .contains(&base64::engine::general_purpose::STANDARD.encode(png())));
+        tokio::fs::remove_file(dir.path().join("fixture.png"))
+            .await
+            .unwrap();
+        let mut repeat = viewed_frame("item/completed", Path::new("fixture.png"));
+        assert_eq!(normalizer.normalize(&mut repeat).await.unwrap(), output);
+    }
+
+    #[tokio::test]
+    async fn viewed_images_report_missing_oversized_non_image_and_upload_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut normalizer = normalizer(dir.path(), None);
+        for (name, bytes, expected) in [
+            ("missing.png", None, "inspected"),
+            (
+                "text.png",
+                Some(b"not an image".to_vec()),
+                "supported image",
+            ),
+            ("large.png", Some(vec![0; MAX_IMAGE_BYTES + 1]), "10 MiB"),
+            ("valid.png", Some(png()), "credentials"),
+        ] {
+            if let Some(bytes) = bytes {
+                tokio::fs::write(dir.path().join(name), bytes)
+                    .await
+                    .unwrap();
+            }
+            normalizer.references.clear();
+            let mut frame = viewed_frame("item/completed", Path::new(name));
+            let output = normalizer.normalize(&mut frame).await.unwrap();
+            assert_eq!(output["item"]["portalMedia"]["uploaded"], false);
+            assert!(
+                output["item"]["portalMedia"]["error"]
+                    .as_str()
+                    .unwrap()
+                    .contains(expected),
+                "{output}"
+            );
+        }
+        normalizer.references.clear();
+        let mut frame = viewed_frame("item/completed", dir.path());
+        assert!(
+            normalizer.normalize(&mut frame).await.unwrap()["item"]["portalMedia"]["error"]
+                .as_str()
+                .unwrap()
+                .contains("regular file")
+        );
+    }
+
+    #[tokio::test]
+    async fn viewed_image_http_failure_keeps_the_original_recovery_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("viewed.png");
+        tokio::fs::write(&path, png()).await.unwrap();
+        let (base, server) = media_server(Uuid::new_v4(), "503 Service Unavailable").await;
+        let mut normalizer = normalizer(
+            dir.path(),
+            Some(PortalCredentials {
+                backend_url: base,
+                token: "test-token".into(),
+            }),
+        );
+        let mut frame = viewed_frame("item/completed", &path);
+        let output = normalizer.normalize(&mut frame).await.unwrap();
+        server.await.unwrap();
+        assert_eq!(output["item"]["portalMedia"]["uploaded"], false);
+        assert!(output["item"]["portalMedia"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("503"));
+        assert_eq!(
+            output["item"]["portalMedia"]["recovery_path"],
+            path.to_string_lossy().as_ref()
+        );
+        assert_eq!(tokio::fs::read(path).await.unwrap(), png());
     }
 
     #[tokio::test]

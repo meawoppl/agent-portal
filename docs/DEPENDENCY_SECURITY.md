@@ -87,6 +87,60 @@ uses its old checkout and cannot pick up a later lockfile fix. When no safe
 patch is available, report the unresolved blocker and follow the existing
 exception review policy; do not weaken the gate to unblock unrelated work.
 
+## Current warning dispositions
+
+Reviewed 2026-11-11 against `f007f10116fe0449db552ddebbc05c1883391bcf`,
+using cargo-audit 0.22.2 and advisory database commit
+`fd6f39814c4d3c359fdbe223d0280dec4933f78f`. The full-lock scan reports zero
+**unignored vulnerabilities**, 12 unmaintained-package warnings, five unsoundness
+warnings and five yanked package versions. The RSA exception below remains in
+force; a successful audit does not mean an empty advisory set.
+
+Owner for all dispositions: the repository maintainer (@meawoppl). Recheck by
+**2026-11-18**, or sooner when a parent dependency or affected feature changes.
+These are visible follow-ups under #1209 R7, not new ignore entries or a claim
+that known-unsound dependencies are safe. The machine-readable snapshot is
+[`dependency-audit-2026-11-11.json`](benchmarks/dependency-audit-2026-11-11.json).
+
+### Unsoundness warnings
+
+| Locked package and advisory | Reachability and concrete disposition |
+|---|---|
+| Diesel 2.3.9 — [RUSTSEC-2026-0172](https://rustsec.org/advisories/RUSTSEC-2026-0172.html) | Backend uses PostgreSQL, not the affected SQLite byte-buffer deserialization API. No direct call in Portal. Upgrade to >=2.3.10 in the next database dependency update; validate migration/schema checks. PostgreSQL-only use limits this particular exposure, not all Diesel risk. |
+| glib 0.18.5 — [RUSTSEC-2024-0429](https://rustsec.org/advisories/RUSTSEC-2024-0429.html) | Linux desktop shell reaches GTK/glib through Tauri/wry/tao/muda; this is not the server/WASM path. No direct Portal `VariantStrIter` use was found, but transitive use is not ruled out. A fix requires the GTK/Tauri parent chain to adopt glib >=0.20; review that chain before distributing Linux desktop builds. |
+| lru 0.16.4 — [RUSTSEC-2026-0253](https://rustsec.org/advisories/RUSTSEC-2026-0253.html) | Backend S3 SDK's S3 Express identity cache uses this crate. The advisory requires a panicking key destructor during `pop` and subsequent use; lock reachability alone does not establish that trigger. Update the S3 SDK to a version using lru >=0.18.2, then test archive operations. No local semver-incompatible override. |
+| rustix 1.1.4 — [RUSTSEC-2026-0486](https://rustsec.org/advisories/RUSTSEC-2026-0486.html) | Native launcher dependencies (`listeners`, temporary files) and desktop dependencies reach rustix. No direct Portal xattr calls found; transitive xattr use has not been excluded. Targeted update to >=1.1.6 with native file/transfer tests is the disposition. |
+| Tokio 1.52.2 — [RUSTSEC-2026-0386](https://rustsec.org/advisories/RUSTSEC-2026-0386.html) | Native server and agents use Tokio throughout. No direct Portal `AsyncFd` constructors found; that is not proof about dependencies. Upgrade to >=1.53.3 and validate Unix I/O plus reconnect tests; audit constructor deprecations rather than suppressing warnings. |
+
+### Maintenance warnings
+
+| Packages and advisory IDs | Parent chain and disposition |
+|---|---|
+| anymap2 0.13.0 (2026-0319), bincode 1.3.3 (2025-0141) | Yew/prokio/gloo-worker, including frontend WASM dependencies. Track a compatible Yew/gloo upgrade removing these; replacing bincode locally could break worker serialization. Keep visible until the parent chain changes. |
+| pin-utils 0.1.0 (2026-0441) | Async ecosystem, including AWS Smithy; several native paths. Remove direct usage in favor of core::pin::pin if introduced; consume parent releases that replace this transitive crate. |
+| proc-macro-error 1.0.4 (2024-0370) | Compile-time macros, including glib-macros/GTK. Resolve through parent macro crates; maintenance status alone is not a runtime vulnerability. |
+| unic-char-property, unic-char-range, unic-common, unic-ucd-ident, unic-ucd-version 0.9.0 (2025-0081, 2025-0075, 2025-0080, 2025-0100, 2025-0098) | Tauri utilities -> urlpattern, including build-time/mobile-shell dependencies. Track a parent upgrade using maintained Unicode implementations; do not replace tables without URL-pattern compatibility tests. |
+| zbus_names 4.3.3, zvariant 5.13.0, zvariant_derive 5.13.0 (2026-0371, 2026-0370, 2026-0372) | Linux desktop opener -> zbus and its macros. Upgrade the opener/zbus chain together when a maintained compatible path is available; no change to server or browser auth is needed. |
+
+Advisory identifiers in the maintenance table use the `RUSTSEC-` prefix; their
+full source descriptions and URLs are in the snapshot. None is suppressed.
+
+### Yanked releases
+
+The lockfile contains `async-executor 1.14.0` (desktop zbus), `chacha20 0.10.1`
+(rand via web-push/object_store), `crypto-bigint 0.7.8` (web-push's signing
+chain), and `spin 0.9.8` / `0.10.0` (lazy_static/RSA and other native parents).
+Yanking alone does not establish why a release was withdrawn or its
+exploitability. Resolve each to a non-yanked compatible release with a targeted
+lockfile update and upstream release-note review; if a parent constrains it,
+record that exact constraint in the dependency-update PR. Do not run a blanket
+workspace update to clear this list.
+
+Reproduce dependency paths with `cargo tree --locked --target all --invert
+PACKAGE@VERSION`. This is lock/feature reachability, not a call-graph proof.
+The per-target distinction matters: desktop warnings are retained by the
+full-lock gate even when the server and WASM artifacts do not contain them.
+
 ## Specific RSA exposure exception
 
 [RUSTSEC-2023-0071](https://rustsec.org/advisories/RUSTSEC-2023-0071.html) affects

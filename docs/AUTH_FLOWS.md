@@ -623,10 +623,15 @@ GET  /api/auth/device/error     → Error page
 | `GOOGLE_CLIENT_ID` | Production | OAuth client ID |
 | `GOOGLE_CLIENT_SECRET` | Production | OAuth client secret |
 | `GOOGLE_REDIRECT_URI` | Production | OAuth callback URL |
-| `SESSION_SECRET` | Production | Cookie signing key |
+| `SESSION_SECRET` | Production | Cookie signing key and proxy/launcher JWT secret |
+| `SESSION_SECRET_FILE` | Alternative | Path to a file holding `SESSION_SECRET` (one trailing newline stripped). Mutually exclusive with `SESSION_SECRET`; a missing/empty/unsafe file fails startup. See [DOCKER.md](DOCKER.md#session-secret) |
 | `ALLOWED_EMAIL_DOMAIN` | Optional | Restrict to email domain |
 | `ALLOWED_EMAILS` | Optional | Restrict to specific emails |
 | `--dev-mode` (CLI flag) | Development | Enable dev mode (not an env var) |
+
+Rotating the session secret invalidates every signed cookie **and** every
+proxy/launcher JWT: all browsers are logged out and every launcher must
+re-authenticate.
 
 ### Linked portals (federation)
 
@@ -687,30 +692,28 @@ this binding. Do not assume a new mutation is protected merely because it is
 home-only; use `PortalClient` for account-bound requests.
 
 
-## Explicit verification for Secrets
+## Inline session verification for Secrets
 
-Protected browser actions use an explicit **Verify with Google** button (or
-GitHub for an already-linked GitHub identity), rather than requiring the ordinary
-Portal login to be less than ten minutes old. Verification returns to the same
-approval/settings page, preserving the CLI code, session query and cleanup-job
-query. Returning does not approve the operation: the user still clicks Approve.
+Protected browser actions offer **Verify Portal session**. The button sends a
+same-origin POST to `/api/secrets/verification/check`, shows a local spinner,
+and becomes a stable verified status on success. There is no redirect, popup,
+page reload or automatic approval. The user still explicitly approves the action.
 
-The browser-only start endpoint requires the Portal cookie and same-origin CSRF
-checks. A signed, short-lived OAuth challenge binds provider, current user,
-browser context and an allow-listed local return path. The callback must find an
-already-linked provider subject belonging to that exact user; it does not create
-accounts, link identities or replace the Portal session. Cancellation or another
-account returns to the pending page with a verification error.
+The server requires the signed Portal browser cookie, rejects bearer tokens,
+checks CSRF, checks that the user is active, and re-evaluates the login allow-list
+against a linked provider's stored verified email assertion. It never links a new
+identity. Secret ACLs, owner-only approvals and process-bound execution policies
+are still checked separately when the protected operation runs.
 
-Success sets a signed HttpOnly verification cookie bound to the browser context.
-It has browser-session lifetime; normal login and logout clear that context.
-Browser session restoration may preserve session cookies, so this is not a claim
-that closing every browser always clears verification. The Portal login must
-still be valid and the user active. Secret ACLs, owner-only approval, process
-bindings and CSRF checks remain required. Ordinary login and API/agent tokens
-cannot grant browser verification.
+This checks **Portal's session and current account policy**, not the current
+Google/GitHub session. Portal discards provider access tokens after ordinary
+login; this change does not retain them, contact the provider, revalidate a
+Google ID token, or claim a new password/MFA challenge. A fresh provider check
+would require a separate credential-retention design or another login.
 
-The OAuth challenge still expires after ten minutes to limit an unfinished
-round-trip. This is independent of login age. Pending secret-access requests and
-CLI enrollment codes retain their own expiration. Provider verification confirms
-the current provider session; it does not guarantee a fresh password or MFA prompt.
+Success sets the existing signed HttpOnly verification cookie, bound to the
+browser context. Ordinary login and logout clear that context. The UI does not
+poll a successful result back to an earlier state; server authorization remains
+authoritative on every protected action. Request and CLI enrollment expirations
+are unchanged. Legacy OAuth verification routes remain available for already
+loaded older clients; the new UI never invokes them.

@@ -1,5 +1,5 @@
-//! Home-portal metadata requests only. Never fetch saved values or surface
-//! server bodies, which could accidentally echo sensitive input on failure.
+//! Home-portal requests. Never surface server error bodies, which could echo
+//! sensitive input. Clipboard values are handled only by the copy component.
 use crate::utils;
 use gloo_net::http::{Request, Response};
 use serde::Serialize;

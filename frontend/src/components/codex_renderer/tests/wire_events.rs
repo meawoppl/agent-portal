@@ -388,3 +388,30 @@ fn exec_compatible_items_keep_app_server_phase_and_clocks() {
         assert!(matches!(roundtrip, CodexItem::ThreadWithMetadata { .. }));
     }
 }
+
+#[test]
+fn viewed_image_preserves_media_reference_and_reports_upload_outcome() {
+    let wire = r#"{"type":"item.completed","item":{"type":"imageView","id":"view","path":"/tmp/fixture.png","portalMedia":{"uploaded":true,"image_id":"01890000-0000-7000-8000-000000000001"}}}"#;
+    let event: CodexEvent = serde_json::from_str(wire).unwrap();
+    let CodexEvent::ItemCompleted {
+        item: Some(CodexItem::AppServer(item)),
+    } = &event
+    else {
+        panic!("view item missing")
+    };
+    assert!(item.portal_media.as_ref().unwrap().uploaded);
+    let rendered = super::super::render_codex_frame_content(&event, uuid::Uuid::nil()).unwrap();
+    fn text(node: &yew::Html) -> String {
+        use yew::virtual_dom::VNode;
+        match node {
+            VNode::VText(value) => value.text.to_string(),
+            VNode::VTag(tag) => tag.children().map(text).unwrap_or_default(),
+            VNode::VList(children) => children.iter().map(text).collect(),
+            _ => String::new(),
+        }
+    }
+    let text = text(&rendered);
+    assert!(text.contains("View image"));
+    assert!(text.contains("/tmp/fixture.png"));
+    assert!(text.contains("Viewed image saved in the media message."));
+}

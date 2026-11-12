@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2431 · Copy a secret after browser verification</text>
+<text x="55" y="106" font-family="sans-serif" font-size="34" fill="#e6e9f5">The Secrets page had no copy action; verified readers can now copy directly to the clipboard.</text>
+<text x="55" y="148" font-family="sans-serif" font-size="34" fill="#e6e9f5">Existing verification and live permissions gate the read; values never render in the page.</text>
+<path d="M55 175 H1945 M1000 190 V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="70" y="230" font-family="sans-serif" font-size="24" fill="#f7768e">BEFORE</text>
+<text x="1070" y="230" font-family="sans-serif" font-size="24" fill="#9ece6a">AFTER</text>
+<rect x="70" y="270" width="840" height="170" rx="12" fill="#1e202e" stroke="#7aa2f7" stroke-width="2"/>
+<text x="94" y="310" font-family="sans-serif" font-size="28" fill="#7aa2f7">Secrets settings</text>
+<text x="94" y="353" font-family="sans-serif" font-size="24" fill="#c0caf5">Select a secret to manage access and versions.</text>
+<text x="94" y="387" font-family="sans-serif" font-size="24" fill="#c0caf5">Saved values stay hidden.</text>
+<path d="M490 440 v55 m-8 -10 l8 10 l8 -10" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="70" y="500" width="840" height="170" rx="12" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="94" y="540" font-family="sans-serif" font-size="28" fill="#f7768e">No browser copy action</text>
+<text x="94" y="583" font-family="sans-serif" font-size="24" fill="#c0caf5">Browser cookies cannot use the CLI read endpoint.</text>
+<text x="94" y="617" font-family="sans-serif" font-size="24" fill="#c0caf5">Users cannot copy a saved value from Settings.</text>
+<path d="M490 670 v55 m-8 -10 l8 10 l8 -10" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="70" y="730" width="840" height="170" rx="12" fill="#1e202e" stroke="#7aa2f7" stroke-width="2"/>
+<text x="94" y="770" font-family="sans-serif" font-size="28" fill="#7aa2f7">Human CLI credential</text>
+<text x="94" y="813" font-family="sans-serif" font-size="24" fill="#c0caf5">Separately authorized CLI reads remain available.</text>
+<text x="94" y="847" font-family="sans-serif" font-size="24" fill="#c0caf5">The browser has metadata and management controls.</text>
+<rect x="1070" y="270" width="840" height="170" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1094" y="310" font-family="sans-serif" font-size="28" fill="#9ece6a">Verify Portal session, then Copy secret</text>
+<text x="1094" y="353" font-family="sans-serif" font-size="24" fill="#c0caf5">Copy is enabled for verified readers of live secrets.</text>
+<text x="1094" y="387" font-family="sans-serif" font-size="24" fill="#c0caf5">A promised Blob preserves the click gesture.</text>
+<path d="M1490 440 v55 m-8 -10 l8 10 l8 -10" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="1070" y="500" width="840" height="170" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1094" y="540" font-family="sans-serif" font-size="28" fill="#9ece6a">POST /api/secrets/{id}/copy</text>
+<text x="1094" y="583" font-family="sans-serif" font-size="24" fill="#c0caf5">Browser verification + same-origin CSRF + read grant.</text>
+<text x="1094" y="617" font-family="sans-serif" font-size="24" fill="#c0caf5">Recheck authority after decrypt and reader setup.</text>
+<path d="M1490 670 v55 m-8 -10 l8 10 l8 -10" fill="none" stroke="#565f89" stroke-width="3"/>
+<rect x="1070" y="730" width="840" height="170" rx="12" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1094" y="770" font-family="sans-serif" font-size="28" fill="#9ece6a">Clipboard write completes</text>
+<text x="1094" y="813" font-family="sans-serif" font-size="24" fill="#c0caf5">Copying -&gt; Copied, or a safe retryable error.</text>
+<text x="1094" y="847" font-family="sans-serif" font-size="24" fill="#c0caf5">No plaintext in page state, markup or stored receipts.</text>
+<text x="1070" y="967" font-family="sans-serif" font-size="28" fill="#c0caf5">CLI read policy remains unchanged.</text>
+<text x="1070" y="1011" font-family="sans-serif" font-size="24" fill="#c0caf5">Server replies use Cache-Control: no-store.</text>
+<text x="55" y="1170" font-family="sans-serif" font-size="22" fill="#a9b1d6">Scope: Portal session verification, not a fresh Google login. Clipboard retention and synchronization remain controlled by the OS/browser.</text>
+</svg>
