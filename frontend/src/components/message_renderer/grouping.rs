@@ -113,6 +113,9 @@ impl MessageGroup {
                 }
             },
         };
+        if let Some(id) = first.secret_request_id() {
+            return yew::virtual_dom::Key::from(format!("secret-request-{id}"));
+        }
         match first.raw_iso() {
             Some(iso) => yew::virtual_dom::Key::from(format!("{}-{}", prefix, iso)),
             None => yew::virtual_dom::Key::from(format!("{}{}", prefix, index)),
@@ -530,6 +533,7 @@ pub fn group_messages(
     let mut groups = Vec::new();
     let mut current: Option<(MessageIdentity, Vec<RenderedMessage>)> = None;
     let mut seen_wakeups = std::collections::HashSet::new();
+    let mut seen_secret_requests = std::collections::HashSet::new();
 
     fn flush(
         out: &mut Vec<MessageGroup>,
@@ -548,6 +552,15 @@ pub fn group_messages(
     }
 
     for message in messages {
+        // Approval cards own state and async work. Give each request a stable
+        // parent independent of neighboring Portal runs, and tolerate replay.
+        if let Some(id) = message.secret_request_id() {
+            if seen_secret_requests.insert(id) {
+                flush(&mut groups, &mut current, agent_type);
+                groups.push(MessageGroup::Single(message.clone()));
+            }
+            continue;
+        }
         let frame = AgentFrameRegistry::parse(&message.content, agent_type);
 
         // Transport churn with nothing for the reader: reconnect notices and

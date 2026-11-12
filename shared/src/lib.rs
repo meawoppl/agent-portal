@@ -1217,6 +1217,12 @@ pub enum PortalContent {
         path: String,
         file_size: u64,
     },
+    /// Inert history pointer. Live controls must fetch and authorize server
+    /// request state for the current session; a transcript cannot grant access.
+    #[serde(rename = "secret_access_request")]
+    SecretAccessRequest {
+        request_id: Uuid,
+    },
 }
 
 /// A bounded, declarative slider exposed by a portable figure. The host owns
@@ -1314,6 +1320,10 @@ impl std::fmt::Debug for PortalContent {
                 .field("from_agent_type", from_agent_type)
                 .field("from_session_id", from_session_id)
                 .field("text", text)
+                .finish(),
+            Self::SecretAccessRequest { request_id } => f
+                .debug_struct("SecretAccessRequest")
+                .field("request_id", request_id)
                 .finish(),
             Self::SecretDrop { path, file_size } => f
                 .debug_struct("SecretDrop")

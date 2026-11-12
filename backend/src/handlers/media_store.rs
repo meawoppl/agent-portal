@@ -182,7 +182,7 @@ impl MediaStore {
         self.evict_until_fits(0);
     }
 
-    fn remove(&self, id: &Uuid) {
+    pub(crate) fn remove(&self, id: &Uuid) {
         if let Some((_, entry)) = self.inner.entries.remove(id) {
             let _ = std::fs::remove_file(&entry.path);
             self.inner
@@ -318,6 +318,14 @@ pub async fn serve_media(
             return Err(AppError::NotFound("Media not found"));
         }
     }
+
+    let inspect_state = app_state.clone();
+    let inspect_path = meta.path.clone();
+    tokio::task::spawn_blocking(move || {
+        crate::secrets::expunge::ensure_media_file(&inspect_state, id, meta.user_id, &inspect_path)
+    })
+    .await
+    .map_err(|_| AppError::ServiceUnavailable("Media inspection unavailable"))??;
 
     let total = meta.size;
     let range = parse_range(&headers, total);

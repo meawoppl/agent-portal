@@ -588,6 +588,7 @@ pub(crate) fn persist_child(
     child: &ChildLaunch,
 ) -> Result<crate::models::Message, AppError> {
     use crate::schema::pending_inputs;
+    crate::secrets::redaction::lock_generation(conn)?;
     // The expiry sweep takes this same request lock. Either preparation wins
     // and commits a recoverable child, or the expired claim rejects preparation
     // and the outer transaction rolls the child row back.
@@ -612,7 +613,7 @@ pub(crate) fn persist_child(
                 .eq(chrono::Utc::now().naive_utc() + chrono::Duration::seconds(60)),
         ))
         .execute(conn)?;
-    let content = shared::PortalMessage::agent_message(
+    let mut content = shared::PortalMessage::agent_message(
         child.parent.agent_type.clone(),
         child.parent.id.to_string(),
         format!(
@@ -621,6 +622,8 @@ pub(crate) fn persist_child(
         ),
     )
     .to_json();
+    crate::secrets::redaction::snapshot_for_user(conn, child.parent.user_id)?
+        .redact_agent_json(&mut content);
     diesel::insert_into(pending_inputs::table)
         .values(crate::models::NewPendingInput {
             session_id: child.session_id,
@@ -758,8 +761,9 @@ fn persist_notice(
     text: String,
 ) -> Result<crate::models::Message, AppError> {
     let content = shared::PortalMessage::text(text).to_json();
-    Ok(diesel::insert_into(crate::schema::messages::table)
-        .values(crate::models::NewMessage {
+    crate::secrets::redaction::insert_message(
+        conn,
+        crate::models::NewMessage {
             session_id: parent.id,
             role: shared::MessageRole::Portal.to_string(),
             content: content.to_string(),
@@ -768,8 +772,8 @@ fn persist_notice(
             provenance_kind: None,
             provenance_session_id: None,
             provenance_agent_type: None,
-        })
-        .get_result(conn)?)
+        },
+    )
 }
 pub(crate) fn broadcast_notice(
     state: &AppState,

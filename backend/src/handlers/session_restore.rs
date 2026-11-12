@@ -14,7 +14,7 @@ use crate::auth::extract_user;
 use crate::db::session_lifecycle::{create_desired_session, DesiredSessionDraft};
 use crate::handlers::history::{archive_runtime, on_blocking};
 use crate::handlers::launcher_rpc::launcher_rpc;
-use crate::schema::{messages, sessions};
+use crate::schema::sessions;
 use crate::{errors::AppError, AppState};
 use archive_format::ArchiveMessageLine;
 use axum::extract::{Path, State};
@@ -257,11 +257,7 @@ fn store_restore(
             },
         });
         // Stay below PostgreSQL's bind-parameter limit on long transcripts.
-        for chunk in rows.chunks(500) {
-            diesel::insert_into(messages::table)
-                .values(chunk)
-                .execute(conn)?;
-        }
+        crate::secrets::redaction::insert_historical(conn,rows).map_err(|_|diesel::result::Error::RollbackTransaction)?;
         Ok(())
     })
 }

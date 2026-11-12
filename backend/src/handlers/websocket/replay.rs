@@ -42,8 +42,17 @@ fn stream_history(
     initial_replay_limit: i64,
     mut send: impl FnMut(ServerToClient) -> std::io::Result<()>,
 ) -> std::io::Result<()> {
-    use crate::schema::{messages, users};
+    use crate::schema::{messages, sessions, users};
     let mut conn = db_pool.get().map_err(std::io::Error::other)?;
+    // Resolve the authorized session's owner before opening the streaming
+    // cursor; a row's author or provider-supplied session_id is not authority.
+    let owner = sessions::table
+        .find(session_id)
+        .select(sessions::user_id)
+        .first::<Uuid>(&mut conn)
+        .map_err(std::io::Error::other)?;
+    let owner_rules = crate::secrets::redaction::snapshot_for_user(&mut conn, owner)
+        .map_err(|_| std::io::Error::other("History redaction unavailable"))?;
     let after = replay_after.as_deref().and_then(parse_iso_cursor);
     let mut query = messages::table
         .left_join(users::table.on(messages::user_id.eq(users::id)))
@@ -88,11 +97,14 @@ fn stream_history(
         {
             // A timestamp group may span batches. Only advance past a group
             // once all its rows have been sent, so reconnect cannot skip ties.
-            send(ServerToClient::HistoryBatch {
-                entries: std::mem::take(&mut entries),
-                last_created_at: complete_timestamp
-                    .map(|ts| ts.format("%Y-%m-%dT%H:%M:%S%.6f").to_string()),
-            })?;
+            send(redact_replay_frame(
+                ServerToClient::HistoryBatch {
+                    entries: std::mem::take(&mut entries),
+                    last_created_at: complete_timestamp
+                        .map(|ts| ts.format("%Y-%m-%dT%H:%M:%S%.6f").to_string()),
+                },
+                &owner_rules,
+            )?)?;
             bytes = 0;
         }
         bytes += msg.content.len();
@@ -109,13 +121,32 @@ fn stream_history(
         });
     }
     if !entries.is_empty() {
-        send(ServerToClient::HistoryBatch {
-            entries,
-            last_created_at: last_timestamp
-                .map(|ts| ts.format("%Y-%m-%dT%H:%M:%S%.6f").to_string()),
-        })?;
+        send(redact_replay_frame(
+            ServerToClient::HistoryBatch {
+                entries,
+                last_created_at: last_timestamp
+                    .map(|ts| ts.format("%Y-%m-%dT%H:%M:%S%.6f").to_string()),
+            },
+            &owner_rules,
+        )?)?;
     }
     Ok(())
+}
+
+/// Preserve transport types, UUIDs and replay watermarks even for a one-byte
+/// private value. Only serialized content-bearing fields are redacted.
+fn redact_replay_frame(
+    frame: ServerToClient,
+    rules: &crate::secrets::redaction::Redactor,
+) -> std::io::Result<ServerToClient> {
+    if rules.is_empty() {
+        return Ok(frame);
+    }
+    let mut value = serde_json::to_value(frame)
+        .map_err(|_| std::io::Error::other("Cannot sanitize history transport"))?;
+    rules.redact_transport_json(&mut value);
+    serde_json::from_value(value)
+        .map_err(|_| std::io::Error::other("Cannot sanitize history transport"))
 }
 
 // =============================================================================
@@ -408,5 +439,101 @@ mod replay_tests {
         assert_eq!(entries.len(), 3, "expected all rows to be replayed");
         let expected_last = stamps[2].format("%Y-%m-%dT%H:%M:%S%.6f").to_string();
         assert_eq!(last_created_at.as_deref(), Some(expected_last.as_str()));
+    }
+}
+
+#[cfg(test)]
+mod owner_redaction_tests {
+    use super::*;
+    #[test]
+    fn legacy_replay_is_redacted_before_mailbox_using_session_owner_not_row_author() {
+        let Some(db) = crate::handlers::secrets::tests::Database::new() else {
+            return;
+        };
+        let mut conn = db.pool.get().unwrap();
+        let owner = crate::test_support::insert_user(&mut conn, "replay-secret-owner");
+        let author = crate::test_support::insert_user(&mut conn, "replay-other-author");
+        let session = crate::test_support::insert_session(&mut conn, owner.id, "legacy replay");
+        use crate::schema::{messages, secrets_generation as generation};
+        let organization = generation::table
+            .find(1i16)
+            .select(generation::organization_id)
+            .first::<Uuid>(&mut conn)
+            .unwrap();
+        diesel::update(generation::table.find(1i16))
+            .set(generation::generation.eq(1i64))
+            .execute(&mut conn)
+            .unwrap();
+        let runtime = crate::secrets::redaction::RedactionRuntime::new();
+        runtime
+            .install(
+                organization,
+                1,
+                vec![
+                    (
+                        Uuid::new_v4(),
+                        shared::api::SecretValue("a".into()),
+                        Some(owner.id),
+                    ),
+                    (
+                        Uuid::new_v4(),
+                        shared::api::SecretValue("EDITOR_55".into()),
+                        Some(author.id),
+                    ),
+                ],
+            )
+            .unwrap();
+        let content=serde_json::json!({"type":"assistant","uuid":"a-provider-id","session_id":"a-native-session","message":{"role":"assistant","content":[{"type":"text","text":"a EDITOR_55"}]}}).to_string();
+        let id = diesel::insert_into(messages::table)
+            .values(&crate::models::NewMessage {
+                session_id: session.id,
+                role: "assistant".into(),
+                content,
+                user_id: author.id,
+                agent_type: "claude".into(),
+                provenance_kind: None,
+                provenance_session_id: None,
+                provenance_agent_type: None,
+            })
+            .returning(messages::id)
+            .get_result::<Uuid>(&mut conn)
+            .unwrap();
+        let created = messages::table
+            .find(id)
+            .select(messages::created_at)
+            .first::<chrono::NaiveDateTime>(&mut conn)
+            .unwrap();
+        drop(conn);
+        let mut batches = Vec::new();
+        stream_history(&db.pool, session.id, None, 100, |frame| {
+            batches.push(frame);
+            Ok(())
+        })
+        .unwrap();
+        let ServerToClient::HistoryBatch {
+            entries,
+            last_created_at,
+        } = batches.remove(0)
+        else {
+            panic!("history transport changed");
+        };
+        assert_eq!(
+            last_created_at,
+            Some(created.format("%Y-%m-%dT%H:%M:%S%.6f").to_string())
+        );
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].content["type"], "assistant");
+        assert_eq!(entries[0].content["uuid"], "a-provider-id");
+        assert_eq!(entries[0].content["session_id"], "a-native-session");
+        assert_eq!(entries[0].content["message"]["role"], "assistant");
+        let text = entries[0].content["message"]["content"][0]["text"]
+            .as_str()
+            .unwrap();
+        assert!(text.starts_with(crate::secrets::redaction::MASK));
+        assert!(text.contains("EDITOR_55"));
+        assert_eq!(
+            entries[0].meta.as_ref().unwrap().created_at.as_deref(),
+            Some(created.format("%Y-%m-%dT%H:%M:%S%.6f").to_string().as_str())
+        );
     }
 }

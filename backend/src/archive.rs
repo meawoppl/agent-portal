@@ -82,6 +82,14 @@ pub const HISTORY_SCAN_SELF_HEAL: std::time::Duration =
 
 /// Store plus the settings the archival sweep needs at write time.
 pub struct ArchiveRuntime {
+    // Ephemeral HMAC key for cleanup coverage; never persist a value-derived
+    // bare hash. A restart deliberately treats the inventory as cold.
+    pub(crate) cleanup_cache_key: [u8; 32],
+    pub(crate) read_slots: std::sync::Arc<tokio::sync::Semaphore>,
+    /// Durable cleanup tombstones are restored from SQL before reuse. Suppress
+    /// delayed media write-through tasks so deletion cannot resurrect a blob.
+    pub media_db_pool: std::sync::RwLock<Option<crate::db::DbPool>>,
+    pub suppressed_media: std::sync::RwLock<std::collections::HashSet<uuid::Uuid>>,
     pub store: ArchiveStore,
     pub config: ArchiveConfig,
     pub stats: ArchiveStats,
@@ -109,6 +117,10 @@ impl ArchiveRuntime {
     /// after enabling.
     pub fn new(config: ArchiveConfig) -> Result<Self, String> {
         Ok(Self {
+            cleanup_cache_key: rand::random(),
+            read_slots: std::sync::Arc::new(tokio::sync::Semaphore::new(2)),
+            media_db_pool: std::sync::RwLock::new(None),
+            suppressed_media: std::sync::RwLock::new(std::collections::HashSet::new()),
             store: ArchiveStore::from_config(&config)?,
             config,
             stats: ArchiveStats::default(),

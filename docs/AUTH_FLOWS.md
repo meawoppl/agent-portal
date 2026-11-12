@@ -685,3 +685,32 @@ and account hint is rejected. Legacy clients without a hint retain cookie auth.
 Home settings and other legacy `utils`/raw-request call sites do not yet carry
 this binding. Do not assume a new mutation is protected merely because it is
 home-only; use `PortalClient` for account-bound requests.
+
+
+## Explicit verification for Secrets
+
+Protected browser actions use an explicit **Verify with Google** button (or
+GitHub for an already-linked GitHub identity), rather than requiring the ordinary
+Portal login to be less than ten minutes old. Verification returns to the same
+approval/settings page, preserving the CLI code, session query and cleanup-job
+query. Returning does not approve the operation: the user still clicks Approve.
+
+The browser-only start endpoint requires the Portal cookie and same-origin CSRF
+checks. A signed, short-lived OAuth challenge binds provider, current user,
+browser context and an allow-listed local return path. The callback must find an
+already-linked provider subject belonging to that exact user; it does not create
+accounts, link identities or replace the Portal session. Cancellation or another
+account returns to the pending page with a verification error.
+
+Success sets a signed HttpOnly verification cookie bound to the browser context.
+It has browser-session lifetime; normal login and logout clear that context.
+Browser session restoration may preserve session cookies, so this is not a claim
+that closing every browser always clears verification. The Portal login must
+still be valid and the user active. Secret ACLs, owner-only approval, process
+bindings and CSRF checks remain required. Ordinary login and API/agent tokens
+cannot grant browser verification.
+
+The OAuth challenge still expires after ten minutes to limit an unfinished
+round-trip. This is independent of login age. Pending secret-access requests and
+CLI enrollment codes retain their own expiration. Provider verification confirms
+the current provider session; it does not guarantee a fresh password or MFA prompt.

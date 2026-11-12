@@ -238,6 +238,8 @@ jobs:
           cargo test -p backend --lib handlers::messages::db_tests
           cargo test -p backend --lib handlers::agent_follow::tests
           cargo test -p backend --lib handlers::session_activity::tests
+          cargo test -p backend --lib handlers::auth::secret_verification::tests
+          cargo test -p backend --lib secrets::auth::tests
           cargo test -p backend --lib handlers::session_access::db_tests
           cargo test -p backend --lib handlers::websocket::replay::replay_tests
           cargo test -p backend --lib db::session_lifecycle::tests
@@ -249,6 +251,10 @@ jobs:
           cargo test -p backend --test rename_sessions
           cargo test -p backend --lib handlers::dashboard_rpc::tests
           cargo test -p backend --lib push::vapid::tests
+          # Vault authorization, archive cleanup and rollback fences need real SQL.
+          cargo test -p backend --lib secrets:: -- --test-threads=4
+          cargo test -p backend --lib handlers::websocket::message_handlers::secret_tests -- --test-threads=4
+          cargo test -p backend --lib handlers::websocket::web_client_socket::owner_redaction_tests -- --test-threads=4
 
   build-binaries:
     name: ${{ matrix.job-name }}

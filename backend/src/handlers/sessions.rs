@@ -41,6 +41,29 @@ pub struct SessionListResponse {
     pub sessions: Vec<SessionWithRole>,
 }
 
+fn redact_session_metadata(session: &mut Session, rules: &crate::secrets::redaction::Redactor) {
+    session.session_name = rules.redact_str(&session.session_name);
+    session.working_directory = rules.redact_str(&session.working_directory);
+    session.hostname = rules.redact_str(&session.hostname);
+    for text in [
+        &mut session.git_branch,
+        &mut session.pr_url,
+        &mut session.repo_url,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        *text = rules.redact_str(text);
+    }
+    for arg in &mut session.claude_args.0 {
+        *arg = rules.redact_str(arg);
+    }
+    for pr in &mut session.open_prs.0 {
+        pr.url = rules.redact_str(&pr.url);
+        pr.branch = rules.redact_str(&pr.branch);
+    }
+}
+
 pub async fn list_sessions(
     State(app_state): State<Arc<AppState>>,
     CurrentUserId(current_user_id): CurrentUserId,
@@ -74,12 +97,14 @@ pub async fn list_sessions(
             session.launcher_version = app_state
                 .session_manager
                 .launcher_version(session.launcher_id);
-            SessionWithRole {
+            let rules = crate::secrets::redaction::snapshot_for_user(&mut conn, session.user_id)?;
+            redact_session_metadata(&mut session, &rules);
+            Ok::<_, AppError>(SessionWithRole {
                 session,
                 my_role: role.parse().unwrap_or(SessionRole::Unknown),
-            }
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, _>>()?;
 
     Ok(Json(SessionListResponse {
         sessions: sessions_with_role,
@@ -200,7 +225,7 @@ pub async fn get_session(
 
     use crate::schema::{messages, session_members, sessions};
 
-    let session = sessions::table
+    let mut session = sessions::table
         .inner_join(session_members::table.on(session_members::session_id.eq(sessions::id)))
         .filter(sessions::id.eq(session_id))
         .filter(session_members::user_id.eq(current_user_id))
@@ -209,12 +234,17 @@ pub async fn get_session(
         .optional()?
         .ok_or(AppError::NotFound("Session not found"))?;
 
-    let recent_messages = messages::table
+    let mut recent_messages = messages::table
         .filter(messages::session_id.eq(session_id))
         .order(messages::created_at.desc())
         .limit(50)
         .load::<Message>(&mut conn)?;
 
+    let rules = crate::secrets::redaction::snapshot_for_user(&mut conn, session.user_id)?;
+    redact_session_metadata(&mut session, &rules);
+    for message in &mut recent_messages {
+        message.content = rules.redact_agent_content(&message.content);
+    }
     Ok(Json(SessionDetailResponse {
         session,
         recent_messages,
