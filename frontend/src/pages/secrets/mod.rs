@@ -91,7 +91,6 @@ pub enum Msg {
     Cancel,
     Save(FreshValue),
     Finished(Result<(), String>),
-    ConfirmDelete(bool),
     Delete,
     ConfirmRestore(bool),
     Restore,
@@ -137,6 +136,7 @@ impl SecretsPage {
         request: T,
     ) {
         self.busy = true;
+        self.confirm_delete = false;
         self.error = None;
         self.editing = None;
         let link = ctx.link().clone();
@@ -273,6 +273,7 @@ impl Component for SecretsPage {
                 if self.busy {
                     return false;
                 }
+                self.confirm_delete = false;
                 if self.selected == Some(id) {
                     self.selected = None;
                     self.versions = None;
@@ -309,16 +310,19 @@ impl Component for SecretsPage {
                 true
             }
             Msg::Create => {
+                self.confirm_delete = false;
                 self.editing = Some(false);
                 self.error = None;
                 true
             }
             Msg::Replace => {
+                self.confirm_delete = false;
                 self.editing = Some(true);
                 self.error = None;
                 true
             }
             Msg::Cancel => {
+                self.confirm_delete = false;
                 self.editing = None;
                 true
             }
@@ -374,21 +378,24 @@ impl Component for SecretsPage {
                 }
                 true
             }
-            Msg::ConfirmDelete(value) => {
-                self.confirm_delete = value;
-                true
-            }
             Msg::ConfirmRestore(value) => {
                 self.confirm_restore = value;
                 true
             }
             Msg::Delete => {
-                if !self.confirm_delete || self.busy {
+                if self.busy {
                     return false;
                 }
                 let Some(secret) = self.current() else {
                     return false;
                 };
+                if deleted(secret) || !secret.can_manage {
+                    return false;
+                }
+                if !self.confirm_delete {
+                    self.confirm_delete = true;
+                    return true;
+                }
                 self.mutate(
                     ctx,
                     "POST",
@@ -596,7 +603,8 @@ impl SecretsPage {
                     <button disabled={self.busy||self.share_user.is_none()} onclick={ctx.link().callback(|_|Msg::Share)}>{"Grant read and use"}</button>}
                     }
                     <h3>{"Delete"}</h3><p>{"Delete adds the deleted tag, disables reads and use, and keeps all encrypted versions. It does not clean up leaked copies. The name stays reserved."}</p>
-                    <label class="secrets-check"><input type="checkbox" checked={self.confirm_delete} disabled={self.busy} onchange={ctx.link().callback(|event:Event|Msg::ConfirmDelete(event.target_unchecked_into::<HtmlInputElement>().checked()))}/>{"I understand deletion is reversible and retains the vault history."}</label><button disabled={self.busy||!self.confirm_delete} onclick={ctx.link().callback(|_|Msg::Delete)}>{"Delete secret"}</button>
+                    <button type="button" class={classes!("secret-delete",self.confirm_delete.then_some("confirming"))} disabled={self.busy} onclick={ctx.link().callback(|_|Msg::Delete)}>{if self.confirm_delete {"Click again to confirm"} else {"Delete secret"}}</button>
+                    if self.confirm_delete {<p role="status">{"Deletion is reversible. Encrypted versions stay in the vault."}</p>}
                 }
             }
             <h3>{"Retained versions"}</h3><p>{"All versions remain encrypted. This page shows metadata only, including for deleted secrets."}</p>
