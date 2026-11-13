@@ -1,0 +1,13 @@
+DROP TRIGGER IF EXISTS audit_secret_sharing ON secret_acl_history;
+DROP FUNCTION IF EXISTS audit_secret_sharing();
+DROP INDEX IF EXISTS secret_audit_events_time;
+DROP TRIGGER audit_token_transition ON proxy_auth_tokens;
+DROP FUNCTION audit_token_transition();
+DROP TRIGGER audit_identity_transition ON user_identities;
+DROP FUNCTION audit_identity_transition();
+DROP TRIGGER audit_binding_transition ON secret_bindings;
+DROP TRIGGER audit_access_transition ON secret_access_requests;
+DROP TRIGGER audit_deposit_transition ON secret_deposit_proposals;
+DROP TRIGGER audit_cleanup_transition ON secret_expunge_jobs;
+DROP FUNCTION audit_secret_transition();
+DROP TABLE audit_events;

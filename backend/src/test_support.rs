@@ -69,6 +69,7 @@ pub fn test_app_state(pool: DbPool) -> AppState {
         allowed_emails: None,
         message_retention_count: 100,
         message_retention_days: 30,
+        audit_retention_days: Some(365),
         session_max_age_days: 14,
         max_image_mb: 10,
         image_store: ImageStore::new(1024 * 1024, Duration::from_secs(60)),

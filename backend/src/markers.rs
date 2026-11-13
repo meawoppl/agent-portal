@@ -20,6 +20,10 @@
 //!   `AGENTS.md` ("Operational log markers"). The `markers` unit test enforces
 //!   uniqueness and naming.
 
+/// Audit observations or retention could not persist. Recurring failures mean
+/// DB/schema trouble; restore storage and inspect the resulting coverage gap.
+pub const AUDIT_PERSIST_FAILED: &str = "AUDIT_PERSIST_FAILED";
+
 /// Redaction before input/output persistence or fanout could not use current
 /// rules. A burst indicates stale rules or unavailable key provider; restore
 /// key-provider health and verify refresh. Content is rejected/held, not leaked.
@@ -227,6 +231,7 @@ mod tests {
     /// the tests below can enforce uniqueness, naming, and that each is wired to
     /// a real emit site.
     const ALL_MARKERS: &[&str] = &[
+        AUDIT_PERSIST_FAILED,
         SECRET_REDACTION_FAILED,
         SECRET_EXPUNGE_FAILED,
         SECRET_PROPOSAL_EXPIRY_FAILED,
@@ -299,6 +304,7 @@ mod tests {
     #[test]
     fn every_marker_is_referenced_by_an_emit_site() {
         let sources: &[&str] = &[
+            include_str!("audit.rs"),
             include_str!("background.rs"),
             include_str!("lib.rs"),
             include_str!("secrets/mod.rs"),

@@ -965,8 +965,9 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
             .merge(access_requests::router())
             .merge(deposits::router())
             .layer(DefaultBodyLimit::max(400_000)),
-        state,
+        state.clone(),
     )
+    .layer(axum::middleware::from_fn_with_state(state, audit_failures))
     .layer(axum::middleware::from_fn(no_store))
 }
 
@@ -977,3 +978,73 @@ mod retired_cli_tests;
 #[cfg(test)]
 #[path = "secrets/vault_tests.rs"]
 pub(crate) mod tests;
+
+/// Failed mutations roll back their business transaction. Record the attempt
+/// afterwards, with a fixed route label and IDs only, so denials survive.
+async fn audit_failures(
+    State(state): State<Arc<AppState>>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::extract::MatchedPath;
+    let route = request
+        .extensions()
+        .get::<MatchedPath>()
+        .map(|p| p.as_str());
+    let event = match (request.method().as_str(), route) {
+        ("POST", Some("/api/secrets/bindings/{id}/redeem")) => {
+            Some("secret.binding.redemption_failed")
+        }
+        ("POST", Some("/api/secrets/bindings/{id}/ticket")) => Some("secret.binding.ticket_failed"),
+        ("POST", Some("/api/secrets/{id}/copy")) => Some("secret.copy_failed"),
+        ("POST" | "DELETE", Some(path))
+            if path.starts_with("/api/secrets/") || path == "/api/secrets" =>
+        {
+            Some("secret.request_failed")
+        }
+        _ => None,
+    };
+    let actor = event.and_then(|_| {
+        request
+            .extensions()
+            .get::<tower_cookies::Cookies>()
+            .and_then(|cookies| {
+                crate::auth::extract_user_id(&state, Some(request.headers()), cookies).ok()
+            })
+    });
+    // Only parse UUIDs from resource routes, never store raw URLs or bodies.
+    let target = request
+        .uri()
+        .path()
+        .split('/')
+        .find_map(|p| Uuid::parse_str(p).ok());
+    let response = next.run(request).await;
+    if let Some(event) =
+        event.filter(|_| response.status().is_client_error() || response.status().is_server_error())
+    {
+        let outcome = match response.status().as_u16() {
+            401 | 403 => "denied",
+            409 => "conflict",
+            _ => "failed",
+        };
+        let result = state.conn().and_then(|mut conn| {
+            crate::audit::write(
+                &mut conn,
+                shared::audit::AuditCategory::Secrets,
+                event,
+                actor,
+                "request",
+                target,
+                outcome,
+                Default::default(),
+            )
+        });
+        if result.is_err() {
+            tracing::error!(
+                "{} rejected secret attempt was not saved",
+                crate::markers::AUDIT_PERSIST_FAILED
+            );
+        }
+    }
+    response
+}

@@ -177,21 +177,14 @@ mod tests {
     use crate::handlers::websocket::{conn_channel, LauncherConnection, LauncherRpcKind};
     use shared::{LauncherToServer, ServerToLauncher};
 
-    fn fixture() -> (
+    fn fixture() -> Option<(
         Arc<AppState>,
         Uuid,
         Uuid,
         crate::handlers::websocket::ConnReceiver<ServerToLauncher>,
-    ) {
-        // These owner/correlation paths do not need database access.
-        let pool = diesel::r2d2::Pool::builder()
-            .max_size(1)
-            .min_idle(Some(0))
-            .build_unchecked(
-                diesel::r2d2::ConnectionManager::<diesel::PgConnection>::new(
-                    "postgresql://unused@127.0.0.1:1/unused",
-                ),
-            );
+    )> {
+        // Computer mutations now persist an audit request before dispatch.
+        let pool = crate::test_support::shared_pool()?;
         let state = Arc::new(crate::test_support::test_app_state(pool));
         let owner = Uuid::new_v4();
         let host = Uuid::new_v4();
@@ -217,7 +210,7 @@ mod tests {
                 },
             )
             .unwrap();
-        (state, owner, host, receiver)
+        Some((state, owner, host, receiver))
     }
 
     async fn execute_adapter(
@@ -251,7 +244,9 @@ mod tests {
 
     #[tokio::test]
     async fn websocket_adapters_keep_host_ownership_for_reads_and_writes() {
-        let (state, _owner, host, mut receiver) = fixture();
+        let Some((state, _owner, host, mut receiver)) = fixture() else {
+            return;
+        };
         let attacker = Uuid::new_v4();
         for request in [
             Request::ProbeAgents { launcher_id: host },
@@ -282,7 +277,9 @@ mod tests {
 
     #[tokio::test]
     async fn slow_probe_does_not_block_independent_restart() {
-        let (state, owner, host, mut receiver) = fixture();
+        let Some((state, owner, host, mut receiver)) = fixture() else {
+            return;
+        };
         let probe = tokio::spawn({
             let state = state.clone();
             async move {

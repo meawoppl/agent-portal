@@ -270,6 +270,7 @@ and a row here.**
 
 | Marker | Emitted by (when) | Recurring burst means | Action |
 |--------|-------------------|-----------------------|--------|
+| `AUDIT_PERSIST_FAILED` | Audit observation or retention persistence failed | DB/schema trouble; observations may be missing | Restore DB health and inspect the coverage gap; retention retries |
 | `PERMISSION_CANCEL_PERSIST_FAILED` | Permission cancellation when deleting the matching replay row fails | DB/pool trouble; withdrawn prompts can replay | Check DB health and remove the named stale request if replayed |
 | `SPAWN_LIFECYCLE_FAILED` | Child registration, failure or lifecycle sweep | Database failure or schema drift; cleanup may be delayed | Check database health and spawn migrations; sweep retries |
 | `INPUT_REJECTION_PERSIST_FAILED` | Terminal input rejection when deleting its exact pending row fails | DB/schema trouble leaves a definitely-unsent prompt replayable on reconnect | Restore DB health and remove the identified session/sequence before retrying the prompt |

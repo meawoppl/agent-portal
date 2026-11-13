@@ -287,12 +287,18 @@ pub(super) fn approve(
             bindings::proxy_token_id.eq(candidate.proxy_token_id),
         ))
         .execute(conn)?;
-    store::audit(
+    store::audit_context(
         conn,
         candidate.created_by,
         Some(row.id),
         "binding_created",
         "allowed",
+        crate::audit::Context {
+            session: Some(candidate.session_id),
+            launcher: Some(candidate.launcher_id),
+            operation: Some(candidate.id),
+            agent: false,
+        },
     )?;
     metadata(conn, &candidate)
 }
@@ -398,12 +404,18 @@ pub(super) async fn revoke(
         diesel::update(bindings::table.find(id))
             .set(bindings::revoked_at.eq(Some(Utc::now())))
             .execute(&mut conn)?;
-        store::audit(
+        store::audit_context(
             &mut conn,
             principal.user,
             Some(row.secret_id),
             "binding_revoked",
             "allowed",
+            crate::audit::Context {
+                session: Some(row.session_id),
+                launcher: Some(row.launcher_id),
+                operation: Some(row.id),
+                agent: false,
+            },
         )?
     };
     let latest = load(&mut conn, id)?;
@@ -454,12 +466,18 @@ pub(super) async fn ticket(
                 tickets::expires_at.eq(expires),
             ))
             .execute(conn)?;
-        store::audit(
+        store::audit_context(
             conn,
             verified.user_id,
             Some(row.secret_id),
             "binding_ticket",
             "allowed",
+            crate::audit::Context {
+                session: Some(row.session_id),
+                launcher: Some(row.launcher_id),
+                operation: Some(row.id),
+                agent: true,
+            },
         )?;
         Ok(Json(SecretBindingTicketResponse {
             ticket: SecretValue(token),
@@ -497,12 +515,18 @@ pub(super) async fn redeem(
             let version = secret_versions::table
                 .find(row.version_id)
                 .first::<VersionRow>(conn)?;
-            store::audit(
+            store::audit_context(
                 conn,
                 verified.user_id,
                 Some(row.secret_id),
                 "binding_redemption_claimed",
                 "allowed",
+                crate::audit::Context {
+                    session: Some(row.session_id),
+                    launcher: Some(row.launcher_id),
+                    operation: Some(row.id),
+                    agent: true,
+                },
             )?;
             Ok((
                 row,
@@ -558,12 +582,18 @@ pub(super) async fn redeem(
         };
         policy(&state, &mut conn, &current, user)?;
         state.secrets.redaction.snapshot(&mut conn)?;
-        store::audit(
+        store::audit_context(
             &mut conn,
             user,
             Some(secret.id),
             "binding_redeemed",
             "allowed",
+            crate::audit::Context {
+                session: Some(current.session_id),
+                launcher: Some(current.launcher_id),
+                operation: Some(current.id),
+                agent: true,
+            },
         )?;
     }
     Ok(Json(SecretBindingRedeemResponse {

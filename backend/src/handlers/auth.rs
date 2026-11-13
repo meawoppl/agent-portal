@@ -228,6 +228,25 @@ async fn provider_callback(
     cookies: Cookies,
     query: AuthCallbackQuery,
 ) -> Result<axum::response::Response, AppError> {
+    let result = provider_callback_inner(provider, app_state.clone(), cookies, query).await;
+    if result.is_err() {
+        crate::audit::observe(
+            &app_state,
+            None,
+            None,
+            crate::audit::Action::Login,
+            "failed",
+            None,
+        );
+    }
+    result
+}
+async fn provider_callback_inner(
+    provider: &oauth::Provider,
+    app_state: Arc<AppState>,
+    cookies: Cookies,
+    query: AuthCallbackQuery,
+) -> Result<axum::response::Response, AppError> {
     let callback_kind = if oauth::is_device_oauth_state(query.state.as_deref()) {
         "device"
     } else {
@@ -321,6 +340,14 @@ async fn provider_callback(
             flow = callback_kind,
             reason = "email_not_allowed",
         );
+        crate::audit::observe(
+            &app_state,
+            None,
+            None,
+            crate::audit::Action::Login,
+            "denied",
+            None,
+        );
         return Ok(redirect.into_response());
     }
 
@@ -348,6 +375,14 @@ async fn provider_callback(
                 flow = callback_kind,
                 reason = "unverified_email",
             );
+            crate::audit::observe(
+                &app_state,
+                None,
+                None,
+                crate::audit::Action::Login,
+                "denied",
+                None,
+            );
             return Ok(unverified_email_redirect().into_response());
         }
     };
@@ -364,9 +399,25 @@ async fn provider_callback(
             user_id = %user.id,
             user_email = %user.email,
         );
+        crate::audit::observe(
+            &app_state,
+            None,
+            None,
+            crate::audit::Action::Login,
+            "denied",
+            None,
+        );
         return Ok(banned_redirect(reason).into_response());
     }
 
+    crate::audit::record(
+        &mut conn,
+        Some(user.id),
+        Some(user.id),
+        crate::audit::Action::Login,
+        "success",
+        None,
+    )?;
     if let Some(device_state) = device_state {
         add_session_cookie(&cookies, &app_state, &user);
 
@@ -572,6 +623,24 @@ pub async fn token_login(
     headers: HeaderMap,
     cookies: Cookies,
 ) -> Result<Json<MeResponse>, AppError> {
+    let result = token_login_inner(State(app_state.clone()), headers, cookies).await;
+    if result.is_err() {
+        crate::audit::observe(
+            &app_state,
+            None,
+            None,
+            crate::audit::Action::Login,
+            "failed",
+            None,
+        );
+    }
+    result
+}
+async fn token_login_inner(
+    State(app_state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    cookies: Cookies,
+) -> Result<Json<MeResponse>, AppError> {
     let token = bearer_token(&headers).ok_or(AppError::Unauthorized)?;
     let mut conn = app_state.conn()?;
     let verified = verify_and_get_user_with_token(&app_state, &mut conn, token)?;
@@ -586,6 +655,14 @@ pub async fn token_login(
         return Err(AppError::Forbidden);
     }
 
+    crate::audit::record(
+        &mut conn,
+        Some(user.id),
+        Some(user.id),
+        crate::audit::Action::Login,
+        "success",
+        None,
+    )?;
     add_session_cookie(&cookies, &app_state, &user);
     info!(
         target: "auth_audit",
@@ -639,6 +716,15 @@ fn me_response(user: User) -> MeResponse {
 }
 
 pub async fn logout(State(app_state): State<Arc<AppState>>, cookies: Cookies) -> impl IntoResponse {
+    let actor = crate::auth::extract_user_id(&app_state, None, &cookies).ok();
+    crate::audit::observe(
+        &app_state,
+        actor,
+        actor,
+        crate::audit::Action::Logout,
+        "success",
+        None,
+    );
     crate::secrets::auth::clear_verification(&cookies, &app_state);
     cookies
         .signed(&app_state.cookie_key)
