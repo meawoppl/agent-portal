@@ -56,6 +56,7 @@ async fn registration_checks_server_version_even_on_success() {
             scheduled_task_id: None,
             codex_thread_id_sink: None,
             claude_conversation_id_sink: None,
+            resume_expectation: Default::default(),
             media_display_sink: None,
             fork_from_session_id: None,
             fork_point_turn_id: None,

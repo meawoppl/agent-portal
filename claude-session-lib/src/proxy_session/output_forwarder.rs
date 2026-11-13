@@ -42,6 +42,7 @@ pub fn spawn_output_forwarder(
     output_buffer: std::sync::Arc<tokio::sync::Mutex<PendingOutputBuffer>>,
     agent_type: AgentType,
     claude_conversation_id_sink: Option<super::ClaudeConversationIdSink>,
+    resume_expectation: super::ResumeExpectation,
     media_display_sink: Option<MediaDisplaySink>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
@@ -100,6 +101,28 @@ pub fn spawn_output_forwarder(
                         if let Some(sink) = claude_conversation_id_sink.as_ref() {
                             sink(current);
                         }
+                    }
+                }
+
+                // Backstop for silent context loss: a process started to resume
+                // one conversation must report that same conversation. Anything
+                // else (a fork, or a fresh start) means the agent no longer has
+                // the history the user expects, so say so in the transcript
+                // before its first reply rather than let it deny earlier work.
+                if let Some(warning) =
+                    context_loss_warning(&resume_expectation, output.session_id())
+                {
+                    warn!(session = %session_id, "{}", warning.log);
+                    let content = shared::PortalMessage::text(warning.transcript).to_json();
+                    let seq = output_buffer.lock().await.push(content.clone());
+                    let msg = ProxyToServer::SequencedOutput {
+                        seq,
+                        content,
+                        agent_type,
+                    };
+                    if ws_write.lock().await.send(msg).await.is_err() {
+                        error!("Failed to send context-loss warning to backend");
+                        break;
                     }
                 }
 
@@ -439,5 +462,73 @@ fn format_unknown_tool_input(input: &serde_json::Value) -> String {
             .unwrap_or_default()
     } else {
         String::new()
+    }
+}
+
+struct ContextLossWarning {
+    log: String,
+    transcript: String,
+}
+
+/// Check the first conversation id claude reports against the one this process
+/// was started to resume. Consumes the expectation, so it fires at most once
+/// per agent process no matter how many connections carry its frames.
+fn context_loss_warning(
+    expectation: &super::ResumeExpectation,
+    reported: Option<&str>,
+) -> Option<ContextLossWarning> {
+    let reported = Uuid::parse_str(reported?).ok()?;
+    let expected = expectation.lock().ok()?.take()?;
+    if reported == expected {
+        return None;
+    }
+    Some(ContextLossWarning {
+        log: format!(
+            "Agent context lost: started to resume conversation {expected} but claude is running {reported}"
+        ),
+        transcript: format!(
+            "**This agent is missing its earlier conversation.** It was restarted to resume conversation `{}…`, but it is running conversation `{}…` instead, so it does not remember the work in that history. The earlier conversation is still on this computer. Don't rely on the agent's account of previous work until it is restored.",
+            shared::short_uuid(&expected),
+            shared::short_uuid(&reported),
+        ),
+    })
+}
+
+#[cfg(test)]
+mod context_loss_tests {
+    use super::*;
+
+    fn expecting(id: Option<Uuid>) -> super::super::ResumeExpectation {
+        std::sync::Arc::new(std::sync::Mutex::new(id))
+    }
+
+    #[test]
+    fn matching_resume_is_silent_and_consumes_the_expectation() {
+        let id = Uuid::from_u128(1);
+        let expectation = expecting(Some(id));
+        assert!(context_loss_warning(&expectation, Some(&id.to_string())).is_none());
+        assert!(expectation.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn a_different_conversation_warns_once() {
+        let expected = Uuid::from_u128(1);
+        let forked = Uuid::from_u128(2).to_string();
+        let expectation = expecting(Some(expected));
+        let warning = context_loss_warning(&expectation, Some(&forked)).unwrap();
+        assert!(warning.transcript.contains(&shared::short_uuid(&expected)));
+        assert!(context_loss_warning(&expectation, Some(&forked)).is_none());
+    }
+
+    #[test]
+    fn fresh_launches_and_frames_without_an_id_never_warn() {
+        let other = Uuid::from_u128(2).to_string();
+        assert!(context_loss_warning(&expecting(None), Some(&other)).is_none());
+        let expectation = expecting(Some(Uuid::from_u128(1)));
+        assert!(context_loss_warning(&expectation, None).is_none());
+        assert!(
+            expectation.lock().unwrap().is_some(),
+            "kept for a frame with an id"
+        );
     }
 }

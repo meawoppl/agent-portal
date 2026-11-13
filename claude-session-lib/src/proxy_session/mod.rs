@@ -58,6 +58,11 @@ pub type CodexThreadIdSink = Arc<dyn Fn(String) + Send + Sync>;
 /// the portal's session id. The launcher persists it so the next `--resume`
 /// re-opens the live transcript instead of the pre-clear one.
 pub type ClaudeConversationIdSink = Arc<dyn Fn(uuid::Uuid) + Send + Sync>;
+/// The conversation the current agent process was started to `--resume`.
+/// The output forwarder takes it at the first frame that names a conversation;
+/// a different id means the agent is running without its earlier history, and
+/// the transcript says so. Shared so a reconnect never repeats the check.
+pub type ResumeExpectation = Arc<std::sync::Mutex<Option<uuid::Uuid>>>;
 
 /// Configuration for a proxy session
 #[derive(Clone)]
@@ -93,6 +98,8 @@ pub struct ProxySessionConfig {
     pub codex_thread_id_sink: Option<CodexThreadIdSink>,
     /// Claude counterpart to `codex_thread_id_sink` (see the type docs).
     pub claude_conversation_id_sink: Option<ClaudeConversationIdSink>,
+    /// Set by the launcher before each spawn; see [`ResumeExpectation`].
+    pub resume_expectation: ResumeExpectation,
     /// Displays an image the agent read; see [`MediaDisplaySink`].
     pub media_display_sink: Option<MediaDisplaySink>,
     /// First-spawn-only source session for Claude/Codex fork semantics.
@@ -443,6 +450,7 @@ async fn run_message_loop<A: Agent>(
         session.output_buffer.clone(),
         config.agent_type,
         config.claude_conversation_id_sink.clone(),
+        config.resume_expectation.clone(),
         config.media_display_sink.clone(),
     );
 
