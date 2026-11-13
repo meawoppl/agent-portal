@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2469 · Repository layout cleanup</text>
+<text x="55" y="105" font-family="sans-serif" font-size="34" fill="#e6e9f5">Loose artifacts and split exhibit ownership obscured the workspace and its build inputs.</text>
+<text x="55" y="148" font-family="sans-serif" font-size="34" fill="#e6e9f5">Docs now live under docs/, the exhibit owns its assets, and Docker receives only its binary.</text>
+<path d="M55 175 H1945 M1000 190 V1140" stroke="#565f89" stroke-dasharray="6 6"/>
+<text x="55" y="225" font-family="sans-serif" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1055" y="225" font-family="sans-serif" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="55" y="270" width="880" height="200" rx="14" fill="#1e202e" stroke="#f7768e"/>
+<text x="80" y="315" font-family="sans-serif" font-size="26" fill="#f7768e">Loose root files</text>
+<text x="80" y="360" font-family="sans-serif" font-size="23" fill="#c0caf5">CHANGELOG.md, detergent diagram, fix.png</text>
+<text x="80" y="405" font-family="sans-serif" font-size="23" fill="#c0caf5">Demo walkthrough and refactor plan at the root</text>
+<rect x="55" y="535" width="880" height="200" rx="14" fill="#1e202e" stroke="#f7768e"/>
+<text x="80" y="580" font-family="sans-serif" font-size="26" fill="#f7768e">Exhibit files mixed into frontend/</text>
+<text x="80" y="625" font-family="sans-serif" font-size="23" fill="#c0caf5">aperture-frontend depends on Portal asset paths</text>
+<text x="80" y="670" font-family="sans-serif" font-size="23" fill="#c0caf5">105 media files plus stylesheet owned elsewhere</text>
+<rect x="55" y="800" width="880" height="200" rx="14" fill="#1e202e" stroke="#f7768e"/>
+<text x="80" y="845" font-family="sans-serif" font-size="26" fill="#f7768e">Stale Docker references and broad context</text>
+<text x="80" y="890" font-family="sans-serif" font-size="23" fill="#c0caf5">Compose points to missing backend/Dockerfile</text>
+<text x="80" y="935" font-family="sans-serif" font-size="23" fill="#c0caf5">Runtime image copies only build-output/backend</text>
+<rect x="1055" y="270" width="880" height="200" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="315" font-family="sans-serif" font-size="26" fill="#9ece6a">Root: workspace and configuration</text>
+<text x="1080" y="360" font-family="sans-serif" font-size="23" fill="#c0caf5">Stale changelog and loose images removed</text>
+<text x="1080" y="405" font-family="sans-serif" font-size="23" fill="#c0caf5">Guides in docs/; historical plan in docs/design/</text>
+<rect x="1055" y="535" width="880" height="200" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="580" font-family="sans-serif" font-size="26" fill="#9ece6a">Self-contained aperture-frontend/</text>
+<text x="1080" y="625" font-family="sans-serif" font-size="23" fill="#c0caf5">Assets and styles moved without changing bytes</text>
+<text x="1080" y="670" font-family="sans-serif" font-size="23" fill="#c0caf5">Trunk, captions, CSS lint and Pages paths updated</text>
+<rect x="1055" y="800" width="880" height="200" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="845" font-family="sans-serif" font-size="26" fill="#9ece6a">Explicit runtime inputs</text>
+<text x="1080" y="890" font-family="sans-serif" font-size="23" fill="#c0caf5">Dockerfile + build-output/backend only</text>
+<text x="1080" y="935" font-family="sans-serif" font-size="23" fill="#c0caf5">Compose uses published image; reports are ignored</text>
+<text x="55" y="1172" font-family="sans-serif" font-size="22" fill="#a9b1d6">Published exhibit URLs and licensed assets are preserved. This cleans the current checkout; it does not rewrite Git history.</text>
+</svg>
