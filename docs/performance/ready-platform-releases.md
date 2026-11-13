@@ -29,11 +29,17 @@ This is observed pipeline delay, not compilation time or a predicted speedup.
 4. The release is published without changing GitHub's `latest` designation.
    Its existing assets are never overwritten. Retry reuses a completed manifest;
    interrupted uploads reuse existing assets from the same source commit.
-5. A non-force Git push advances `release-ready/<platform>` to that source commit.
-   This is the readiness transaction: readers resolve this ref first, then use
-   immutable source-tag URLs. Git's fast-forward check rejects older or divergent
-   sources, including old workflow reruns and racing publication.
-6. The updater resolves exactly one platform ref. No release-list pagination or
+5. A non-force Git push advances `release-ready-v2/<platform>` to a data-only commit
+   containing `readiness.json` (`schema`, `channel`, source SHA). The marker's
+   parent is the prior marker, never the application source. Ordinary Actions
+   credentials can publish this tree without permission to write workflow files.
+   Before each push/retry, the publisher checks SOURCE ancestry against the prior
+   marker. Git's fast-forward check supplies atomic compare-and-swap; a racing
+   writer must reread and repeat the ancestry check.
+6. Readers pin `readiness.json` to the data commit SHA they resolved, validate its
+   schema/channel/source, and then use immutable source-tag URLs. Concurrent
+   ref advancement cannot mix pointer and artifact snapshots.
+7. The updater resolves exactly one platform ref. No release-list pagination or
    publication-order assumptions are involved. It validates the manifest, both
    asset digests and the actual downloaded bytes before replacing anything.
    A locally newer semantic version stays installed.
@@ -74,10 +80,28 @@ and new platform-channel clients do not use it.
   Compare the first production run's signed-binary-ready/publication timestamps
   against the 276-second baseline after merge. **No live speedup is claimed yet.**
 
-The platform refs point at ordinary main-source commits and should not be
-force-pushed or manually edited. A host policy that makes GitHub release assets
+The platform refs contain only readiness data and should not be force-pushed or
+manually edited. Their source field points at the ordinary main-source commit. A host policy that makes GitHub release assets
 immutable immediately upon publication must be disabled for these incrementally
 populated releases, or replaced with separate per-platform releases.
 
 GitHub API contract: [release create/update and assets](https://docs.github.com/en/rest/releases/releases),
 [Git reference fast-forward updates](https://docs.github.com/en/rest/git/refs#update-a-reference).
+
+## First deployment correction
+
+Run [43357760313](https://github.com/meawoppl/agent-portal/actions/runs/43357760313)
+proved asset/manifest publication, but GitHub rejected source-pointing branches
+because the normal Actions token cannot introduce `.github/workflows` files on
+a new branch. No readiness ref advanced and the complete legacy release stayed
+unchanged. The data-only pointer history fixes this without broadening token
+permissions. Legacy tag replacement also uses the Releases API (`--cleanup-tag`
+then `--target SOURCE`) rather than pushing a source tree as a Git tag.
+
+Default existing clients were not offered the failed release through `latest`.
+The new pointer format uses `release-ready-v2/` deliberately. A manually downloaded
+2.15.1911/1912 updater still looks for the absent `release-ready/` source-ref
+format, falls back to the complete `latest` release, and upgrades normally once
+the corrected full matrix finishes. New clients never place data commits under
+the old prefix. Legacy retry also inspects and safely removes an orphan `latest`
+tag before `--target` creation; an existing newer/divergent source is retained.

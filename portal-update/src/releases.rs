@@ -1,4 +1,4 @@
-//! Platform readiness is a fast-forward-only source ref, not a mutable asset URL.
+//! Read a pinned data-only readiness commit, then immutable source artifacts.
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -15,6 +15,26 @@ struct GitObject {
     #[serde(rename = "type")]
     kind: String,
 }
+#[derive(Debug, Deserialize)]
+struct ReadinessPointer {
+    schema: u32,
+    channel: String,
+    source: String,
+}
+
+impl ReadinessPointer {
+    fn source(self, target: &str) -> Result<String> {
+        if self.schema != 1 || self.channel != target || !hex_sha(&self.source, 40) {
+            bail!("Invalid ready-platform source pointer");
+        }
+        Ok(self.source)
+    }
+}
+
+fn pointer_url(commit: &str) -> String {
+    format!("https://raw.githubusercontent.com/{GITHUB_REPO}/{commit}/readiness.json")
+}
+
 #[derive(Debug, Deserialize)]
 struct ReadyManifest {
     schema: u32,
@@ -114,7 +134,7 @@ pub(crate) async fn available(client: &reqwest::Client, platform: &Platform) -> 
     let target = format!("{}-{}", platform.os, platform.arch);
     let reference = client
         .get(format!(
-            "https://api.github.com/repos/{GITHUB_REPO}/git/ref/heads/release-ready/{target}"
+            "https://api.github.com/repos/{GITHUB_REPO}/git/ref/heads/release-ready-v2/{target}"
         ))
         .send()
         .await
@@ -147,7 +167,16 @@ pub(crate) async fn available(client: &reqwest::Client, platform: &Platform) -> 
     if reference.object.kind != "commit" || !hex_sha(&reference.object.sha, 40) {
         bail!("Invalid ready-platform source reference");
     }
-    let sha = reference.object.sha;
+    // Pin the data read to the ref's commit, not its mutable branch name.
+    // A concurrent publisher can advance the ref without mixing snapshots.
+    let pointer: ReadinessPointer = client
+        .get(pointer_url(&reference.object.sha))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let sha = pointer.source(&target)?;
     let release: GitHubRelease = client
         .get(format!(
             "https://api.github.com/repos/{GITHUB_REPO}/releases/tags/cli-{sha}"
@@ -219,6 +248,28 @@ mod tests {
             },
             platform,
         )
+    }
+
+    #[test]
+    fn pointer_schema_channel_and_source_are_validated_and_fetch_is_pinned() {
+        let data_commit = "d".repeat(40);
+        assert_eq!(
+            pointer_url(&data_commit),
+            format!("https://raw.githubusercontent.com/{GITHUB_REPO}/{data_commit}/readiness.json")
+        );
+        for (schema, channel, source, valid) in [
+            (1, "linux-x86_64", "a".repeat(40), true),
+            (2, "linux-x86_64", "a".repeat(40), false),
+            (1, "windows-x86_64", "a".repeat(40), false),
+            (1, "linux-x86_64", "../main".into(), false),
+        ] {
+            let pointer = ReadinessPointer {
+                schema,
+                channel: channel.into(),
+                source,
+            };
+            assert_eq!(pointer.source("linux-x86_64").is_ok(), valid);
+        }
     }
 
     #[test]

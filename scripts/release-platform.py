@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Publish a ready platform without waiting for unrelated matrix lanes.
 
-Only this script advances release-ready refs. Non-force Git pushes enforce
-source ancestry even if an older workflow finishes or is retried later.
+Only this script advances data-only release-ready refs. Source ancestry checks
+and non-force Git pushes prevent older workflows regressing readiness.
 """
 import argparse
 import hashlib
@@ -75,35 +75,82 @@ def validate_manifest(manifest, platform, sha, assets):
         assert asset["digest"] == "sha256:" + expected["sha256"]
 
 
+def pointer_source(pointer, channel):
+    source = pointer.get("source", "")
+    if (
+        pointer.get("schema") != 1
+        or pointer.get("channel") != channel
+        or len(source) != 40
+        or any(c not in "0123456789abcdef" for c in source)
+    ):
+        raise RuntimeError("Invalid readiness pointer")
+    return source
+
+
 def channel_advance(repo, channel, sha):
-    ref = f"refs/heads/release-ready/{channel}"
+    ref = f"refs/heads/release-ready-v2/{channel}"
+    pointer = {"schema": 1, "channel": channel, "source": sha}
+    pointer_source(pointer, channel)
     for _ in range(3):
         remote = run("git", "ls-remote", "origin", ref).split()
-        if remote:
-            old = remote[0]
+        old = remote[0] if remote else None
+        if old:
             run("git", "fetch", "--no-tags", "origin", ref)
-            if old == sha:
+            if run("git", "ls-tree", "-r", "--name-only", old) != "readiness.json":
+                raise RuntimeError("Readiness branch must contain only readiness.json")
+            prior_source = pointer_source(
+                json.loads(run("git", "show", f"{old}:readiness.json")), channel
+            )
+            if prior_source == sha:
                 return True
+            if subprocess.run(
+                ["git", "cat-file", "-e", f"{prior_source}^{{commit}}"],
+                capture_output=True,
+            ).returncode:
+                run("git", "fetch", "--no-tags", "origin", prior_source)
             if (
                 subprocess.run(
-                    ["git", "merge-base", "--is-ancestor", sha, old]
+                    ["git", "merge-base", "--is-ancestor", sha, prior_source]
                 ).returncode
                 == 0
             ):
                 print(
-                    f"{channel}: newer source commit already published; keeping {old}"
+                    f"{channel}: newer source already published; keeping {prior_source}"
                 )
                 return False
             if (
                 subprocess.run(
-                    ["git", "merge-base", "--is-ancestor", old, sha]
+                    ["git", "merge-base", "--is-ancestor", prior_source, sha]
                 ).returncode
                 != 0
             ):
                 raise RuntimeError("Refusing divergent release source history")
-        # Git's fast-forward check is atomic; a racing newer publisher wins.
-        result = subprocess.run(["git", "push", "origin", f"{sha}:{ref}"])
-        if result.returncode == 0:
+        # The channel has its own data-only history. Pointing a new branch at
+        # the application source copies .github/workflows and is rejected by
+        # the normal GITHUB_TOKEN (which intentionally lacks workflows scope).
+        blob = run(
+            "git",
+            "hash-object",
+            "-w",
+            "--stdin",
+            input=json.dumps(pointer, sort_keys=True) + "\n",
+        )
+        tree = run("git", "mktree", input=f"100644 blob {blob}\treadiness.json\n")
+        parents = ["-p", old] if old else []
+        commit = run(
+            "git",
+            "-c",
+            "user.name=github-actions[bot]",
+            "-c",
+            "user.email=41898282+github-actions[bot]@users.noreply.github.com",
+            "commit-tree",
+            tree,
+            *parents,
+            input=f"Ready {channel} from {sha}\n",
+        )
+        # Non-force push is the atomic compare-and-swap. After a race, reread
+        # the pointer and recheck SOURCE ancestry, never overwrite blindly.
+        if subprocess.run(["git", "push", "origin", f"{commit}:{ref}"]).returncode == 0:
             return True
     raise RuntimeError(f"Could not advance {repo} {channel}; retry the workflow")
 
@@ -262,6 +309,28 @@ def legacy(repo, sha, directory):
                 != 0
             ):
                 raise RuntimeError("Refusing divergent legacy release source history")
+    # A failed prior delete can leave a tag without a release. --target does
+    # not retarget an existing tag, so validate its source before removing it.
+    orphan_tag = run("git", "ls-remote", "origin", "refs/tags/latest").split()
+    if orphan_tag:
+        run("git", "fetch", "--no-tags", "origin", "refs/tags/latest")
+        tag_source = run("git", "rev-parse", "FETCH_HEAD^{commit}")
+        if tag_source != sha:
+            if (
+                subprocess.run(
+                    ["git", "merge-base", "--is-ancestor", sha, tag_source]
+                ).returncode
+                == 0
+            ):
+                print("Keeping newer legacy tag source")
+                return
+            if (
+                subprocess.run(
+                    ["git", "merge-base", "--is-ancestor", tag_source, sha]
+                ).returncode
+                != 0
+            ):
+                raise RuntimeError("Refusing divergent legacy tag source history")
     if not channel_advance(repo, "complete", sha):
         return
     expected = [name for platform in PLATFORMS for name in artifact_names(platform)]
@@ -269,8 +338,18 @@ def legacy(repo, sha, directory):
         expected
     )
     if current.returncode == 0:
-        run("gh", "release", "delete", "latest", "--repo", repo, "--yes")
-    run("git", "push", "--force", "origin", f"{sha}:refs/tags/latest")
+        run(
+            "gh",
+            "release",
+            "delete",
+            "latest",
+            "--repo",
+            repo,
+            "--yes",
+            "--cleanup-tag",
+        )
+    elif orphan_tag:
+        run("gh", "api", f"repos/{repo}/git/refs/tags/latest", "--method", "DELETE")
     run(
         "gh",
         "release",
@@ -278,7 +357,8 @@ def legacy(repo, sha, directory):
         "latest",
         "--repo",
         repo,
-        "--verify-tag",
+        "--target",
+        sha,
         "--latest",
         "--title",
         f"Latest CLI {version()}",
