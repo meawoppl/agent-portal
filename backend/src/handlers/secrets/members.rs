@@ -402,10 +402,14 @@ mod tests {
     fn missing_and_unverified_email_recipients_get_identical_guidance() {
         let user = member("google", "42", None, "legacy@example.test", false);
         let selector = Selector::GoogleEmail(user.email.clone());
-        let missing = select_member(&[], &selector, None).unwrap_err().to_string();
-        let unverified = select_member(std::slice::from_ref(&user), &selector, None)
-            .unwrap_err()
-            .to_string();
+        let AppError::NotFound(missing) = select_member(&[], &selector, None).unwrap_err() else {
+            panic!("expected not found")
+        };
+        let AppError::NotFound(unverified) =
+            select_member(std::slice::from_ref(&user), &selector, None).unwrap_err()
+        else {
+            panic!("expected not found")
+        };
         assert_eq!(missing, unverified);
         assert!(missing.contains("sign in through their provider"));
         assert!(missing.contains("Portal user UUID"));
