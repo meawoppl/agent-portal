@@ -154,41 +154,65 @@ self.addEventListener("push", (event) => {
   event.waitUntil(self.registration.showNotification(title, options));
 });
 
-// Clicking a notification focuses an already-open portal tab (navigating it to
-// the session if we have an id) or opens a fresh window. The app has no
-// per-session route yet (routes live in dashboard state), so we deep-link to
-// `/dashboard` and carry `?session=<id>` for a future consumer — harmless
-// today, forward-compatible tomorrow.
+// Ask the app to route inside its existing document. In particular, do not
+// focus an arbitrary Chrome tab or force a WindowClient.navigate() over the
+// installed Android app's working viewport. Older/loading pages may not have
+// a listener, so every request is bounded and falls back to openWindow().
+function askClient(client, message) {
+  return new Promise((resolve) => {
+    const channel = new MessageChannel();
+    const finish = (value) => {
+      clearTimeout(timer);
+      channel.port1.close();
+      channel.port2.close();
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish(null), 500);
+    channel.port1.onmessage = (event) => finish(event.data);
+    try {
+      client.postMessage(message, [channel.port2]);
+    } catch (_) {
+      finish(null);
+    }
+  });
+}
+
+async function openNotification(sessionId) {
+  const target = new URL("/dashboard", self.location.origin);
+  if (sessionId) target.searchParams.set("session", sessionId);
+
+  const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+  const candidates = await Promise.all(clients
+    .filter((client) => client.frameType === "top-level" &&
+      new URL(client.url).origin === self.location.origin)
+    .map(async (client) => ({
+      client,
+      standalone: await askClient(client, { type: "portal-notification-client" }),
+    })));
+
+  // matchAll() orders by recent focus, which may put a browser tab ahead of
+  // the home-screen app. Prefer the installed app; retain recency within each
+  // group. Only reuse pages that confirmed they understand this protocol.
+  candidates.sort((a, b) => Number(b.standalone === true) - Number(a.standalone === true));
+  for (const { client, standalone } of candidates) {
+    if (typeof standalone !== "boolean") continue;
+    try {
+      await client.focus();
+      if (await askClient(client, { type: "portal-open-session", session_id: sessionId }) === true) {
+        return;
+      }
+    } catch (_) {
+      // The window may have closed between enumeration and focus.
+    }
+  }
+  // Chrome can launch/reuse the installed app for this in-scope URL. This
+  // also loads the current app when a stale page cannot handle the message.
+  return self.clients.openWindow(target.href);
+}
+
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-
   const sessionId =
-    event.notification.data && event.notification.data.session_id;
-  const target = sessionId ? `/dashboard?session=${sessionId}` : "/dashboard";
-  const targetUrl = new URL(target, self.location.origin).href;
-
-  event.waitUntil(
-    self.clients
-      .matchAll({ type: "window", includeUncontrolled: true })
-      .then((clientList) => {
-        for (const client of clientList) {
-          // Reuse any same-origin portal tab: focus it and route to the target.
-          if (new URL(client.url).origin === self.location.origin) {
-            if ("focus" in client) {
-              return client
-                .focus()
-                .then((focused) =>
-                  "navigate" in focused
-                    ? focused.navigate(targetUrl).catch(() => focused)
-                    : focused,
-                );
-            }
-          }
-        }
-        if (self.clients.openWindow) {
-          return self.clients.openWindow(targetUrl);
-        }
-        return undefined;
-      }),
-  );
+    event.notification.data?.session_id || null;
+  event.waitUntil(openNotification(sessionId));
 });

@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+  <rect width="2000" height="1200" fill="#1a1b26"/>
+  <g font-family="Arial, sans-serif">
+    <text x="55" y="55" font-size="24" fill="#a9b1d6">PR #2446 · Preserve the installed app when opening notification sessions</text>
+    <text x="55" y="108" font-size="34" fill="#e6e9f5">Notification taps now prefer the installed app and select a session inside its existing document.</text>
+    <text x="55" y="152" font-size="28" fill="#c0caf5">The working viewport and unsent drafts survive a warm notification launch.</text>
+    <path d="M55 178H1945" stroke="#3d4666"/>
+    <path d="M1000 200V1110" stroke="#565f89" stroke-dasharray="8 10"/>
+    <text x="65" y="230" font-size="22" font-weight="bold" letter-spacing="4" fill="#f7768e">BEFORE</text>
+    <text x="1055" y="230" font-size="22" font-weight="bold" letter-spacing="4" fill="#9ece6a">AFTER</text>
+
+    <rect x="65" y="265" width="870" height="125" rx="14" fill="#1e202e" stroke="#3d4666"/>
+    <text x="90" y="310" font-size="27" fill="#7aa2f7">notificationclick</text>
+    <text x="90" y="350" font-size="24" fill="#c0caf5">Find same-origin window clients.</text>
+    <path d="M500 390V435m-9-12 9 12 9-12" fill="none" stroke="#565f89" stroke-width="3"/>
+    <rect x="65" y="440" width="870" height="165" rx="14" fill="#1e202e" stroke="#f7768e"/>
+    <text x="90" y="486" font-size="27" fill="#f7768e">Choose the first window</text>
+    <text x="90" y="529" font-size="24" fill="#c0caf5">A recently used browser tab can outrank the installed app.</text>
+    <text x="90" y="568" font-size="24" fill="#c0caf5">No check that the selected page can route the session.</text>
+    <path d="M500 605V650m-9-12 9 12 9-12" fill="none" stroke="#565f89" stroke-width="3"/>
+    <rect x="65" y="655" width="870" height="165" rx="14" fill="#1e202e" stroke="#f7768e"/>
+    <text x="90" y="700" font-size="27" fill="#7aa2f7">focus() then navigate()</text>
+    <text x="90" y="743" font-size="24" fill="#c0caf5">Replace the current document to select a session.</text>
+    <text x="90" y="782" font-size="24" fill="#c0caf5">A focus failure ends the click without a fallback launch.</text>
+    <rect x="65" y="880" width="870" height="175" rx="14" fill="#1e202e" stroke="#3d4666"/>
+    <text x="90" y="927" font-size="27" fill="#c0caf5">Reported symptom</text>
+    <text x="90" y="970" font-size="24" fill="#c0caf5">Home-screen launch looks mobile.</text>
+    <text x="90" y="1009" font-size="24" fill="#c0caf5">Notification launch can look like desktop.</text>
+
+    <rect x="1055" y="265" width="890" height="125" rx="14" fill="#1e202e" stroke="#3d4666"/>
+    <text x="1080" y="310" font-size="27" fill="#7aa2f7">notificationclick</text>
+    <text x="1080" y="350" font-size="24" fill="#c0caf5">Probe same-origin, top-level clients over MessageChannel.</text>
+    <path d="M1500 390V435m-9-12 9 12 9-12" fill="none" stroke="#565f89" stroke-width="3"/>
+    <rect x="1055" y="440" width="890" height="165" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+    <text x="1080" y="486" font-size="27" fill="#9ece6a">Prefer the responding installed app</text>
+    <text x="1080" y="529" font-size="24" fill="#c0caf5">The page reports its display mode; each probe is bounded.</text>
+    <text x="1080" y="568" font-size="24" fill="#c0caf5">Regular browser windows remain reusable.</text>
+    <path d="M1500 605V650m-9-12 9 12 9-12" fill="none" stroke="#565f89" stroke-width="3"/>
+    <rect x="1055" y="655" width="890" height="165" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+    <text x="1080" y="700" font-size="27" fill="#7aa2f7">portal-open-session</text>
+    <text x="1080" y="743" font-size="24" fill="#c0caf5">Yew routes the session and dismisses dashboard overlays.</text>
+    <text x="1080" y="782" font-size="24" fill="#9ece6a">The document stays loaded, preserving layout and drafts.</text>
+    <rect x="1055" y="880" width="890" height="175" rx="14" fill="#1e202e" stroke="#e0af68"/>
+    <text x="1080" y="927" font-size="27" fill="#e0af68">No usable window or no routing acknowledgement?</text>
+    <text x="1080" y="970" font-size="24" fill="#c0caf5">openWindow() loads the in-scope dashboard deep link.</text>
+    <text x="1080" y="1009" font-size="24" fill="#c0caf5">Session IDs remain encoded in the cold-launch URL.</text>
+    <text x="55" y="1170" font-size="22" fill="#a9b1d6">Scope: routing and browser regressions are tested; Android WebAPK tray behavior still needs a physical-phone check after deployment.</text>
+  </g>
+</svg>

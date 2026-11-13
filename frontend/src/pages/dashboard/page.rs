@@ -38,11 +38,9 @@ use yew_router::prelude::*;
 // Dashboard Page - Main Orchestrating Component
 // =============================================================================
 
-/// Query string consumed on dashboard mount for push-notification deep links
-/// (mobile-apps plan item D4). `sw.js`'s `notificationclick` handler opens
-/// `/dashboard?session=<uuid>`; we read `session` once, select that session as
-/// a rail click would, then strip the query so a refresh / back-nav can't
-/// re-fire a stale selection.
+/// Notification launches route to `/dashboard?session=<uuid>` both on cold
+/// loads and inside an existing app. Strip the query after selecting the
+/// session so refresh / back navigation cannot re-fire a stale selection.
 #[derive(Clone, PartialEq, Eq, Deserialize)]
 struct DeepLinkQuery {
     #[serde(default)]
@@ -233,37 +231,29 @@ pub fn dashboard_page() -> Html {
         session_state.clone(),
     );
 
-    // Push-notification deep link (mobile-apps plan D4). `sw.js` opens
-    // `/dashboard?session=<uuid>` on notification click; parse that id once at
-    // mount and hold it until the target session shows up in `active_sessions`
-    // (it may arrive before the list finishes loading). When it does, select it
-    // via the same `on_select_session` path a rail click uses, then clear the
-    // target *and* strip the query (`navigator.replace(Route::Dashboard)`) so a
-    // refresh or back-nav can't re-fire a stale selection. An unknown or
-    // inaccessible id simply never matches and is silently ignored. Push
-    // notifications come from the home portal, so the id names a home session.
+    // Follow query changes as well as initial mount: notification taps now
+    // route within the running app. Keep the target until sessions finish
+    // loading, and only select a session the home portal made accessible.
     let navigator = use_navigator();
     let location = use_location();
-    let deep_link_target = use_state(move || {
-        location
-            .and_then(|loc| loc.query::<DeepLinkQuery>().ok())
-            .and_then(|q| q.session)
-            .and_then(|s| Uuid::parse_str(&s).ok())
-            .map(SessionKey::home)
-    });
+    let deep_link_target = location
+        .and_then(|loc| loc.query::<DeepLinkQuery>().ok())
+        .and_then(|q| q.session)
+        .and_then(|s| Uuid::parse_str(&s).ok())
+        .map(SessionKey::home);
     {
         let on_select = focus.on_select_session.clone();
-        let deep_link_target = deep_link_target.clone();
+        let ui_state = ui_state.clone();
         use_effect_with(
-            (active_session_ids(&active_sessions), *deep_link_target),
+            (active_session_ids(&active_sessions), deep_link_target),
             move |(session_ids, target)| {
                 if let Some(target_id) = *target {
                     if let Some(index) = session_ids.iter().position(|id| *id == target_id) {
                         on_select.emit(index);
+                        ui_state.dispatch(DashboardUiAction::DismissOverlays);
                         if let Some(navigator) = navigator {
                             navigator.replace(&crate::Route::Dashboard);
                         }
-                        deep_link_target.set(None);
                     }
                 }
                 || ()

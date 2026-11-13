@@ -64,6 +64,8 @@ web-sys = { workspace = true, features = [
     "MediaQueryList",
     "ServiceWorkerContainer",
     "ServiceWorkerRegistration",
+    "MessageEvent",
+    "MessagePort",
     # Web Push subscribe flow (mobile-apps plan D2)
     "PushManager",
     "PushSubscription",

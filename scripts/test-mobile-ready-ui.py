@@ -179,6 +179,37 @@ async def exercise(browser, base, device, name):
     await expect(page.locator('.ready-current')).to_contain_text('Portal dev')
     await expect(page.locator('.session-view-wrapper.focused textarea').first).to_have_value('Keep this unsent draft')
     assert await page.evaluate('window.readyDraftDocument === true'), 'settings must not reload the document'
+    # Exercise the page side of the worker's MessageChannel protocol. Native
+    # notification tray/window focus is covered separately by the worker
+    # tests; Playwright cannot reproduce Android's installed WebAPK shell.
+    async def notification_message(message):
+        return await page.evaluate('''message => new Promise(resolve => {
+            const channel = new MessageChannel();
+            const timer = setTimeout(() => finish(null), 1500);
+            function finish(reply) {
+                clearTimeout(timer);
+                channel.port1.close(); channel.port2.close();
+                resolve(reply);
+            }
+            channel.port1.onmessage = event => finish(event.data);
+            navigator.serviceWorker.dispatchEvent(new MessageEvent('message', {
+                data: message, ports: [channel.port2]
+            }));
+        })''', message)
+    assert await notification_message({'type': 'portal-notification-client'}) is False
+    await page.get_by_role('button', name='Settings', exact=True).click()
+    await expect(page.get_by_role('heading', name='Settings', exact=True)).to_be_visible()
+    for session, label in [(B, 'AstroPIC'), (A, 'Portal dev'), (C, 'Alignment Tools'), (A, 'Portal dev')]:
+        assert await notification_message({'type': 'portal-open-session', 'session_id': session}) is True
+        await expect(page.get_by_role('heading', name='Settings', exact=True)).not_to_be_visible()
+        await expect(page.locator('.ready-current')).to_contain_text(label)
+        await expect(page.locator('.session-rail')).to_have_count(0)
+        await expect(page.locator('.mobile-ready-bar')).to_be_visible()
+        await expect(page).to_have_url(f'{base}/dashboard')
+        assert await page.evaluate('window.readyDraftDocument === true'), 'notification must not reload the document'
+    await expect(page.locator('.session-view-wrapper.focused textarea').first).to_have_value('Keep this unsent draft')
+    assert await notification_message({'type': 'portal-open-session', 'session_id': 'invalid-id'}) is None
+    await expect(page.locator('.ready-current')).to_contain_text('Portal dev')
     # Receipt survives reload; queue is not reconstructed from every idle session.
     # Observe the new page's lease, not the previous page's final heartbeat.
     updates.clear()
@@ -274,7 +305,7 @@ async def exercise(browser, base, device, name):
     await expect(page.locator('.session-rail')).to_have_count(0)
     assert not errors, errors
     await context.close()
-    print(f'PASS {name}: overflow-safe mobile layout, breakpoint changes, background completion, queue, approval, mute, precise receipt, draft, reload, narrow viewport, settings releases presence, setup guidance, settings draft, round-robin Next, retained reply acknowledgment, stale acknowledgment, retry')
+    print(f'PASS {name}: notification routing without reload, overflow-safe mobile layout, breakpoint changes, background completion, queue, approval, mute, precise receipt, draft, reload, narrow viewport, settings releases presence, setup guidance, settings draft, round-robin Next, retained reply acknowledgment, stale acknowledgment, retry')
 
 async def main(selected):
     server = http.server.ThreadingHTTPServer(('127.0.0.1',0),functools.partial(Handler,directory=str(ROOT/'frontend/dist')))

@@ -9,7 +9,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
-function loadWorker() {
+function loadWorker(clients = []) {
   const handlers = {};
   const shown = [];
   const self = {
@@ -19,12 +19,20 @@ function loadWorker() {
     registration: {
       showNotification: async (title, options) => shown.push({ title, options }),
     },
-    clients: { claim: async () => {}, matchAll: async () => [] },
+    clients: {
+      claim: async () => {},
+      matchAll: async () => clients,
+      openWindow: async (url) => opened.push(url),
+    },
     skipWaiting: () => {},
     location: { origin: "https://portal.example" },
   };
   const source = fs.readFileSync(path.join(__dirname, "..", "sw.js"), "utf8");
-  vm.runInNewContext(source, { self, caches: {}, fetch: async () => {}, URL, console });
+  const opened = [];
+  vm.runInNewContext(source, {
+    self, caches: {}, fetch: async () => {}, URL, console,
+    MessageChannel, setTimeout, clearTimeout,
+  });
   const push = (payload) =>
     new Promise((resolve) =>
       handlers.push({
@@ -32,7 +40,13 @@ function loadWorker() {
         waitUntil: (work) => Promise.resolve(work).then(resolve),
       }),
     );
-  return { push, shown };
+  const click = (session_id) => new Promise((resolve, reject) => {
+    handlers.notificationclick({
+      notification: { data: { session_id }, close: () => {} },
+      waitUntil: (work) => Promise.resolve(work).then(resolve, reject),
+    });
+  });
+  return { push, shown, click, opened };
 }
 
 const wire = (session, body) => ({
@@ -75,4 +89,86 @@ test("test notifications have no fake session destination", async () => {
   const worker = loadWorker();
   await worker.push({ ...wire("00000000-0000-0000-0000-000000000000", "test"), event_kind: "test" });
   assert.equal(worker.shown[0].options.data.session_id, null);
+});
+
+function appClient({ standalone = false, responds = true, focusFails = false,
+  accepts = true, frameType = "top-level", origin = "https://portal.example" } = {}) {
+  const received = [];
+  let focused = 0;
+  let navigated = 0;
+  const client = {
+    url: `${origin}/dashboard`, frameType,
+    focus: async () => {
+      if (focusFails) throw new Error("Window closed");
+      focused++;
+      return client;
+    },
+    navigate: async () => { navigated++; return client; },
+    postMessage: (message, [port]) => {
+      received.push(message);
+      if (responds) port.postMessage(message.type === "portal-notification-client" ? standalone : accepts);
+    },
+  };
+  return { client, received, focused: () => focused, navigated: () => navigated };
+}
+
+test("notification prefers the installed app over a more recently focused browser tab", async () => {
+  const tab = appClient();
+  const app = appClient({ standalone: true });
+  const worker = loadWorker([tab.client, app.client]);
+  await worker.click("s-9");
+  assert.equal(tab.focused(), 0);
+  assert.equal(app.focused(), 1);
+  assert.equal(app.navigated(), 0, "must retain the app's mobile document");
+  assert.equal(app.received.at(-1).session_id, "s-9");
+  assert.deepEqual(worker.opened, []);
+});
+
+test("a browser-only session is reused without reload on successive notification taps", async () => {
+  const tab = appClient();
+  const worker = loadWorker([tab.client]);
+  await worker.click("s-1");
+  await worker.click("s-2");
+  assert.deepEqual(tab.received.filter(m => m.type === "portal-open-session").map(m => m.session_id), ["s-1", "s-2"]);
+  assert.equal(tab.navigated(), 0);
+  assert.deepEqual(worker.opened, []);
+});
+
+test("a closed installed app does not swallow the click", async () => {
+  const app = appClient({ standalone: true, focusFails: true });
+  const worker = loadWorker([app.client]);
+  await worker.click("s-1");
+  assert.deepEqual(worker.opened, ["https://portal.example/dashboard?session=s-1"]);
+});
+
+test("stale or nonresponsive pages fall back to an in-scope app launch", async () => {
+  const old = appClient({ responds: false });
+  const worker = loadWorker([old.client]);
+  await worker.click("s-1");
+  assert.equal(old.focused(), 0);
+  assert.deepEqual(worker.opened, ["https://portal.example/dashboard?session=s-1"]);
+});
+
+test("routing must be acknowledged before a notification click is considered handled", async () => {
+  const app = appClient({ standalone: true, accepts: false });
+  const worker = loadWorker([app.client]);
+  await worker.click("s-1");
+  assert.deepEqual(worker.opened, ["https://portal.example/dashboard?session=s-1"]);
+});
+
+test("iframes and foreign-origin pages cannot take notification launches", async () => {
+  const frame = appClient({ frameType: "nested", standalone: true });
+  const foreign = appClient({ origin: "https://other.example", standalone: true });
+  const worker = loadWorker([frame.client, foreign.client]);
+  await worker.click(null);
+  assert.equal(frame.received.length + foreign.received.length, 0);
+  assert.deepEqual(worker.opened, ["https://portal.example/dashboard"]);
+});
+
+test("cold notification launches preserve the session without query injection", async () => {
+  const worker = loadWorker();
+  await worker.click("s-1&other=x");
+  const target = new URL(worker.opened[0]);
+  assert.equal(target.searchParams.get("session"), "s-1&other=x");
+  assert.equal(target.searchParams.size, 1);
 });

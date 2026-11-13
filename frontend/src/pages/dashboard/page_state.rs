@@ -195,6 +195,7 @@ pub(super) enum DashboardUiAction {
     CloseHistorySession,
     ShowHelp,
     CloseHelp,
+    DismissOverlays,
     SetInactiveHidden(bool),
     SetRailPosition(RailPosition),
     SetGroupByHost(bool),
@@ -210,6 +211,15 @@ impl Reducible for DashboardUiState {
         let mut state = (*self).clone();
 
         match action {
+            DashboardUiAction::DismissOverlays => {
+                state.show_launch_dialog = false;
+                state.show_admin = false;
+                state.show_settings = false;
+                state.show_history = false;
+                state.history_session = None;
+                state.show_help = false;
+                state.pending_leave = None;
+            }
             DashboardUiAction::ToggleLaunchDialog => {
                 state.show_launch_dialog = !state.show_launch_dialog;
             }
