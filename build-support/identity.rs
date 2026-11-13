@@ -60,14 +60,14 @@ pub fn emit() {
         .unwrap_or_else(|| "unknown".into());
     println!("cargo:rustc-env=PORTAL_BUILD_TIME={build_time}");
 
-    // The helper is shared source, not a compiled dependency of runtime crates.
-    println!("cargo:rerun-if-changed=../build-support/identity.rs");
-
     // Recompute only when the commit count / hash could have changed: HEAD
     // moving (branch switch / detached commit) or the reflog appending (any
     // commit/reset/checkout). This also refreshes the build time per deploy.
     // Without git, fall through to Cargo's default.
     if let Some(git_dir) = git(&["rev-parse", "--absolute-git-dir"]) {
+        // Without Git, retain Cargo's default source-change tracking. With Git,
+        // this shared helper is source rather than a runtime dependency.
+        println!("cargo:rerun-if-changed=../build-support/identity.rs");
         println!("cargo:rerun-if-changed={git_dir}/HEAD");
         println!("cargo:rerun-if-changed={git_dir}/logs/HEAD");
         // Also cover ref updates without a reflog and shallow-history changes.

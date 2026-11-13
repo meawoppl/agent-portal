@@ -137,10 +137,11 @@ class BuildIdentity(unittest.TestCase):
     def test_source_tarball_has_explicit_unknown_revision(self):
         tarball = self.root / "tarball"
         tarball.mkdir()
-        info, _ = self.identity(tarball)
+        info, output = self.identity(tarball)
         self.assertEqual(info["PORTAL_VERSION"], "2.15.17")
         self.assertEqual(info["PORTAL_GIT_HASH"], "unknown")
         self.assertTrue(info["PORTAL_BUILD_TIME"])
+        self.assertNotIn("cargo:rerun-if-changed=", output)
 
 
 if __name__ == "__main__":
