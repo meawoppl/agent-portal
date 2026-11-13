@@ -40,9 +40,8 @@ python3 scripts/test-aperture-static.py --base https://meawoppl.github.io/agent-
 
 Python Playwright and Chromium must be installed. Artwork, captions, source
 files, recorded evidence, licenses and provenance remain under
-`frontend/assets/aperture`. Static HTML return links are rewritten in the
-standalone output only, leaving the current embedded exhibit working during
-migration.
+`aperture-frontend/assets/aperture`. Static HTML return links are rewritten in the
+standalone output; the Portal serves redirects to the separately deployed exhibit.
 
 ## Bundle measurements
 
