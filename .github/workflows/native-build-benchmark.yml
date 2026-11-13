@@ -53,9 +53,11 @@ jobs:
           du -sb dist >> ../benchmark-results/frontend-environment.txt
       - name: Record reused frontend provenance
         if: inputs.frontend_run_id != ''
+        env:
+          FRONTEND_RUN_ID: ${{ inputs.frontend_run_id }}
         run: |
           mkdir -p benchmark-results
-          printf 'frontend_artifact_run=%s\n' '${{ inputs.frontend_run_id }}' > benchmark-results/frontend-environment.txt
+          printf 'frontend_artifact_run=%s\n' "$FRONTEND_RUN_ID" > benchmark-results/frontend-environment.txt
           du -sb frontend/dist >> benchmark-results/frontend-environment.txt
       - uses: actions/upload-artifact@v7
         with:
@@ -135,7 +137,6 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: benchmark-frontend
-          overwrite: true
           path: frontend/dist
       # Shared cache storage is already at its 10GB limit. These runners
       # measure local zstd retention/restoration without evicting production
@@ -143,6 +144,10 @@ jobs:
       # remains unmeasured until there is explicit cache headroom.
       - name: Benchmark native profile and local retained artifacts
         run: python3 scripts/benchmarks/native-build.py --disposable-checkout --local-cache-roundtrip --retention '${{ matrix.incremental == 'true' && 'workspace' || 'dependencies' }}' --output benchmark-results
+      - name: Show measurements in the job summary
+        if: always()
+        shell: bash
+        run: python3 scripts/benchmarks/summarize-native.py benchmark-results >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v7
         if: always()
         with:

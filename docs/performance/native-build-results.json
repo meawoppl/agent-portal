@@ -1,0 +1,971 @@
+{
+  "run_url": "https://github.com/meawoppl/agent-portal/actions/runs/43357864725",
+  "raw_artifact_pattern": "native-benchmark-*",
+  "lanes": {
+    "baseline-fat-z": {
+      "commit": "e94cc589811d5f35a79346b45a347a1d782663a6",
+      "runner": "Linux-7.0.0-1017-azure-x86_64-with-glibc2.39",
+      "cpu_count": 4,
+      "cpu": "AMD EPYC 7763 64-Core Processor",
+      "rustc": "rustc 1.96.0 (ac68faa20 2026-05-25)\nbinary: rustc\ncommit-hash: ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96\ncommit-date: 2026-05-25\nhost: x86_64-unknown-linux-gnu\nrelease: 1.96.0\nLLVM version: 22.1.2",
+      "cargo": "cargo 1.96.0 (30a34c682 2026-05-25)",
+      "runner_image": "20261101.360.1",
+      "cache_hit": false,
+      "retention": "dependencies",
+      "settings": {
+        "CARGO_PROFILE_RELEASE_OPT_LEVEL": "z",
+        "RUSTFLAGS": "",
+        "CARGO_BUILD_JOBS": "2",
+        "CARGO_PROFILE_RELEASE_LTO": "fat",
+        "CARGO_PROFILE_RELEASE_INCREMENTAL": "false",
+        "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "1",
+        "CARGO_INCREMENTAL": "0"
+      },
+      "initial_target_bytes": 0,
+      "scenarios": [
+        {
+          "scenario": "initial",
+          "wall_seconds": 583.3541963,
+          "binary_bytes": 54411736,
+          "binary_sha256": "d5cabeae00a025dc52234525da7af1788da58d924434e953726b4c983ea7d7cb",
+          "target_bytes": 1882631682,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f",
+            "server_version": "2.15.1911",
+            "git_hash": "e94cc589",
+            "build_time": "2026-11-12 19:19 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.6834040420000065,
+          "artifact_counts": {
+            "fresh": 0,
+            "rebuilt": 573
+          }
+        },
+        {
+          "scenario": "unchanged",
+          "wall_seconds": 0.441953978000015,
+          "binary_bytes": 54411736,
+          "binary_sha256": "d5cabeae00a025dc52234525da7af1788da58d924434e953726b4c983ea7d7cb",
+          "target_bytes": 1882611057,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f",
+            "server_version": "2.15.1911",
+            "git_hash": "e94cc589",
+            "build_time": "2026-11-12 19:19 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.657084839999925,
+          "artifact_counts": {
+            "fresh": 573,
+            "rebuilt": 0
+          }
+        },
+        {
+          "scenario": "backend-edit",
+          "wall_seconds": 247.31799675399998,
+          "binary_bytes": 54412184,
+          "binary_sha256": "b5a2f92e85455cec06cf085543a461a372ced37d53b896e593acc456b6c9ccc6",
+          "target_bytes": 1882959217,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f native-benchmark",
+            "server_version": "2.15.1911",
+            "git_hash": "e94cc589",
+            "build_time": "2026-11-12 19:19 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.6789582450001035,
+          "artifact_counts": {
+            "fresh": 571,
+            "rebuilt": 2
+          }
+        },
+        {
+          "scenario": "restore-backend",
+          "wall_seconds": 247.9865906729999,
+          "binary_bytes": 54411736,
+          "binary_sha256": "d5cabeae00a025dc52234525da7af1788da58d924434e953726b4c983ea7d7cb",
+          "target_bytes": 1883264128,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f",
+            "server_version": "2.15.1911",
+            "git_hash": "e94cc589",
+            "build_time": "2026-11-12 19:19 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.6750109360000351,
+          "artifact_counts": {
+            "fresh": 571,
+            "rebuilt": 2
+          }
+        },
+        {
+          "scenario": "frontend-edit",
+          "wall_seconds": 331.695662072,
+          "binary_bytes": 54411832,
+          "binary_sha256": "22673f954fe01b61c871a04aa49b5ea9dcecd0bb4e43ddee95340e61d98d1d7b",
+          "target_bytes": 1883591797,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f",
+            "server_version": "2.15.1911",
+            "git_hash": "e94cc589",
+            "build_time": "2026-11-12 19:19 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.6629665890000069,
+          "artifact_counts": {
+            "fresh": 571,
+            "rebuilt": 2
+          }
+        },
+        {
+          "scenario": "restore-frontend",
+          "wall_seconds": 336.2976629440002,
+          "binary_bytes": 54411736,
+          "binary_sha256": "d5cabeae00a025dc52234525da7af1788da58d924434e953726b4c983ea7d7cb",
+          "target_bytes": 1883906203,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f",
+            "server_version": "2.15.1911",
+            "git_hash": "e94cc589",
+            "build_time": "2026-11-12 19:19 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.6639091730000928,
+          "artifact_counts": {
+            "fresh": 571,
+            "rebuilt": 2
+          }
+        },
+        {
+          "scenario": "restored-new-commit",
+          "wall_seconds": 331.0847401210001,
+          "binary_bytes": 54411736,
+          "binary_sha256": "cb405f98e57ec9f2eaf9be9e4f117014a8436948b0f730be52da456438396f4d",
+          "target_bytes": 1884227165,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f",
+            "server_version": "2.15.1912",
+            "git_hash": "6dd82aa4",
+            "build_time": "2026-11-12 19:47 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.6762286700000004,
+          "artifact_counts": {
+            "fresh": 565,
+            "rebuilt": 8
+          }
+        }
+      ],
+      "local_cache": {
+        "retained_bytes": 1453554992,
+        "compressed_bytes": 427159331,
+        "compression_seconds": 6.032437324999819,
+        "restoration_seconds": 2.2691312279998783,
+        "restored_commit": "6dd82aa427d3f291594e9d7ea6ba54b422dbb922",
+        "network_transfer_measured": false
+      },
+      "final_target_bytes": 1884227165
+    },
+    "thin-2": {
+      "commit": "e94cc589811d5f35a79346b45a347a1d782663a6",
+      "runner": "Linux-7.0.0-1017-azure-x86_64-with-glibc2.39",
+      "cpu_count": 4,
+      "cpu": "AMD EPYC 9V74 80-Core Processor",
+      "rustc": "rustc 1.96.0 (ac68faa20 2026-05-25)\nbinary: rustc\ncommit-hash: ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96\ncommit-date: 2026-05-25\nhost: x86_64-unknown-linux-gnu\nrelease: 1.96.0\nLLVM version: 22.1.2",
+      "cargo": "cargo 1.96.0 (30a34c682 2026-05-25)",
+      "runner_image": "20261101.360.1",
+      "cache_hit": false,
+      "retention": "dependencies",
+      "settings": {
+        "CARGO_PROFILE_RELEASE_OPT_LEVEL": "2",
+        "RUSTFLAGS": "",
+        "CARGO_BUILD_JOBS": "2",
+        "CARGO_PROFILE_RELEASE_LTO": "thin",
+        "CARGO_PROFILE_RELEASE_INCREMENTAL": "false",
+        "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "16",
+        "CARGO_INCREMENTAL": "0"
+      },
+      "initial_target_bytes": 0,
+      "scenarios": [
+        {
+          "scenario": "initial",
+          "wall_seconds": 557.1316890420001,
+          "binary_bytes": 75654160,
+          "binary_sha256": "a1addb86d5b6dd6304f7503a99d7f11f143eb66b115911d62af144241e8f6254",
+          "target_bytes": 2256293771,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f",
+            "server_version": "2.15.1911",
+            "git_hash": "e94cc589",
+            "build_time": "2026-11-12 19:19 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.48499095199997555,
+          "artifact_counts": {
+            "fresh": 0,
+            "rebuilt": 573
+          }
+        },
+        {
+          "scenario": "unchanged",
+          "wall_seconds": 0.37990035100006025,
+          "binary_bytes": 75654160,
+          "binary_sha256": "a1addb86d5b6dd6304f7503a99d7f11f143eb66b115911d62af144241e8f6254",
+          "target_bytes": 2256277561,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f",
+            "server_version": "2.15.1911",
+            "git_hash": "e94cc589",
+            "build_time": "2026-11-12 19:19 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.47807662800005346,
+          "artifact_counts": {
+            "fresh": 573,
+            "rebuilt": 0
+          }
+        },
+        {
+          "scenario": "backend-edit",
+          "wall_seconds": 240.605612995,
+          "binary_bytes": 75530176,
+          "binary_sha256": "c140ae7eedd6c4959d4de7e14d4ae46a395bdcd0ab1a8324f87ed2b82ae1bafb",
+          "target_bytes": 2255532672,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f native-benchmark",
+            "server_version": "2.15.1911",
+            "git_hash": "e94cc589",
+            "build_time": "2026-11-12 19:19 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.481077052000046,
+          "artifact_counts": {
+            "fresh": 571,
+            "rebuilt": 2
+          }
+        },
+        {
+          "scenario": "restore-backend",
+          "wall_seconds": 241.59314052600007,
+          "binary_bytes": 75654160,
+          "binary_sha256": "a1addb86d5b6dd6304f7503a99d7f11f143eb66b115911d62af144241e8f6254",
+          "target_bytes": 2256928839,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f",
+            "server_version": "2.15.1911",
+            "git_hash": "e94cc589",
+            "build_time": "2026-11-12 19:19 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.5000068739998369,
+          "artifact_counts": {
+            "fresh": 571,
+            "rebuilt": 2
+          }
+        },
+        {
+          "scenario": "frontend-edit",
+          "wall_seconds": 310.274248058,
+          "binary_bytes": 75654224,
+          "binary_sha256": "e64cec6a0abc0c43f0d75b7a9eb238617276d59712f2d78aa3030ccd7e01ec14",
+          "target_bytes": 2257253199,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f",
+            "server_version": "2.15.1911",
+            "git_hash": "e94cc589",
+            "build_time": "2026-11-12 19:19 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.4872053600001891,
+          "artifact_counts": {
+            "fresh": 571,
+            "rebuilt": 2
+          }
+        },
+        {
+          "scenario": "restore-frontend",
+          "wall_seconds": 309.42845405599996,
+          "binary_bytes": 75654160,
+          "binary_sha256": "a1addb86d5b6dd6304f7503a99d7f11f143eb66b115911d62af144241e8f6254",
+          "target_bytes": 2257564898,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f",
+            "server_version": "2.15.1911",
+            "git_hash": "e94cc589",
+            "build_time": "2026-11-12 19:19 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.471091523000041,
+          "artifact_counts": {
+            "fresh": 571,
+            "rebuilt": 2
+          }
+        },
+        {
+          "scenario": "restored-new-commit",
+          "wall_seconds": 309.3360813920001,
+          "binary_bytes": 75654160,
+          "binary_sha256": "225df7fd6c786a53c89b23fadc9c0317a9777dd75962ea4c94dba9e4f2c066c6",
+          "target_bytes": 2257885248,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f",
+            "server_version": "2.15.1912",
+            "git_hash": "c1c9bb00",
+            "build_time": "2026-11-12 19:45 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.48884631299983994,
+          "artifact_counts": {
+            "fresh": 565,
+            "rebuilt": 8
+          }
+        }
+      ],
+      "local_cache": {
+        "retained_bytes": 1695699927,
+        "compressed_bytes": 503421944,
+        "compression_seconds": 5.243836875999932,
+        "restoration_seconds": 2.117234976999953,
+        "restored_commit": "c1c9bb00837fd294b0263e7ae5a8f3dc30da4ff6",
+        "network_transfer_measured": false
+      },
+      "final_target_bytes": 2257885248
+    },
+    "thin-3": {
+      "commit": "e94cc589811d5f35a79346b45a347a1d782663a6",
+      "runner": "Linux-7.0.0-1017-azure-x86_64-with-glibc2.39",
+      "cpu_count": 4,
+      "cpu": "INTEL(R) XEON(R) PLATINUM 8573C",
+      "rustc": "rustc 1.96.0 (ac68faa20 2026-05-25)\nbinary: rustc\ncommit-hash: ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96\ncommit-date: 2026-05-25\nhost: x86_64-unknown-linux-gnu\nrelease: 1.96.0\nLLVM version: 22.1.2",
+      "cargo": "cargo 1.96.0 (30a34c682 2026-05-25)",
+      "runner_image": "20261101.360.1",
+      "cache_hit": false,
+      "retention": "dependencies",
+      "settings": {
+        "CARGO_PROFILE_RELEASE_OPT_LEVEL": "3",
+        "RUSTFLAGS": "",
+        "CARGO_BUILD_JOBS": "2",
+        "CARGO_PROFILE_RELEASE_LTO": "thin",
+        "CARGO_PROFILE_RELEASE_INCREMENTAL": "false",
+        "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "16",
+        "CARGO_INCREMENTAL": "0"
+      },
+      "initial_target_bytes": 0,
+      "scenarios": [
+        {
+          "scenario": "initial",
+          "wall_seconds": 602.175079708,
+          "binary_bytes": 75416112,
+          "binary_sha256": "6f7d45875af166aa32b549aa0fdcab58eeba9e1b425a03058dd82a2f6783f68c",
+          "target_bytes": 2236272310,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f",
+            "server_version": "2.15.1911",
+            "git_hash": "e94cc589",
+            "build_time": "2026-11-12 19:19 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.48684368300007463,
+          "artifact_counts": {
+            "fresh": 0,
+            "rebuilt": 573
+          }
+        },
+        {
+          "scenario": "unchanged",
+          "wall_seconds": 0.3406686240000454,
+          "binary_bytes": 75416112,
+          "binary_sha256": "6f7d45875af166aa32b549aa0fdcab58eeba9e1b425a03058dd82a2f6783f68c",
+          "target_bytes": 2236252761,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f",
+            "server_version": "2.15.1911",
+            "git_hash": "e94cc589",
+            "build_time": "2026-11-12 19:19 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.4772746469999447,
+          "artifact_counts": {
+            "fresh": 573,
+            "rebuilt": 0
+          }
+        },
+        {
+          "scenario": "backend-edit",
+          "wall_seconds": 267.77781023800003,
+          "binary_bytes": 75337128,
+          "binary_sha256": "467f97a17f2559fb61c825b64e64ce6264af7dd6126607bb60b7c1e7afb6429d",
+          "target_bytes": 2235046670,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f native-benchmark",
+            "server_version": "2.15.1911",
+            "git_hash": "e94cc589",
+            "build_time": "2026-11-12 19:19 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.47943558600002234,
+          "artifact_counts": {
+            "fresh": 571,
+            "rebuilt": 2
+          }
+        },
+        {
+          "scenario": "restore-backend",
+          "wall_seconds": 281.780461223,
+          "binary_bytes": 75416112,
+          "binary_sha256": "6f7d45875af166aa32b549aa0fdcab58eeba9e1b425a03058dd82a2f6783f68c",
+          "target_bytes": 2236913378,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f",
+            "server_version": "2.15.1911",
+            "git_hash": "e94cc589",
+            "build_time": "2026-11-12 19:19 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.5065640729999359,
+          "artifact_counts": {
+            "fresh": 571,
+            "rebuilt": 2
+          }
+        },
+        {
+          "scenario": "frontend-edit",
+          "wall_seconds": 332.02003231799995,
+          "binary_bytes": 75416208,
+          "binary_sha256": "033bd47b31c3c38af74de4e8f9b90a9d86d15e3f5c2985ad2a0d4ad7f2f52773",
+          "target_bytes": 2237237404,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f",
+            "server_version": "2.15.1911",
+            "git_hash": "e94cc589",
+            "build_time": "2026-11-12 19:19 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.4692856690001008,
+          "artifact_counts": {
+            "fresh": 571,
+            "rebuilt": 2
+          }
+        },
+        {
+          "scenario": "restore-frontend",
+          "wall_seconds": 334.564845055,
+          "binary_bytes": 75416112,
+          "binary_sha256": "6f7d45875af166aa32b549aa0fdcab58eeba9e1b425a03058dd82a2f6783f68c",
+          "target_bytes": 2237552082,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f",
+            "server_version": "2.15.1911",
+            "git_hash": "e94cc589",
+            "build_time": "2026-11-12 19:19 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.4699631619998854,
+          "artifact_counts": {
+            "fresh": 571,
+            "rebuilt": 2
+          }
+        },
+        {
+          "scenario": "restored-new-commit",
+          "wall_seconds": 324.30134585199994,
+          "binary_bytes": 75416112,
+          "binary_sha256": "c810936fbae63647caade391fefb83ce08eb8eff91b0b56fff7333ce11eb597c",
+          "target_bytes": 2237871350,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f",
+            "server_version": "2.15.1912",
+            "git_hash": "b28325d1",
+            "build_time": "2026-11-12 19:48 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.4697661750001316,
+          "artifact_counts": {
+            "fresh": 565,
+            "rebuilt": 8
+          }
+        }
+      ],
+      "local_cache": {
+        "retained_bytes": 1690192165,
+        "compressed_bytes": 503171593,
+        "compression_seconds": 5.359545220999962,
+        "restoration_seconds": 1.9623583259999577,
+        "restored_commit": "b28325d1821806105eb32e168cc52b3b51855309",
+        "network_transfer_measured": false
+      },
+      "final_target_bytes": 2237871350
+    },
+    "thin-3-incremental": {
+      "commit": "e94cc589811d5f35a79346b45a347a1d782663a6",
+      "runner": "Linux-7.0.0-1014-aws-x86_64-with-glibc2.39",
+      "cpu_count": 4,
+      "cpu": "Intel(R) Xeon(R) 6975P-C",
+      "rustc": "rustc 1.96.0 (ac68faa20 2026-05-25)\nbinary: rustc\ncommit-hash: ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96\ncommit-date: 2026-05-25\nhost: x86_64-unknown-linux-gnu\nrelease: 1.96.0\nLLVM version: 22.1.2",
+      "cargo": "cargo 1.96.0 (30a34c682 2026-05-25)",
+      "runner_image": "20261111.127.1",
+      "cache_hit": false,
+      "retention": "workspace",
+      "settings": {
+        "CARGO_PROFILE_RELEASE_OPT_LEVEL": "3",
+        "RUSTFLAGS": "",
+        "CARGO_BUILD_JOBS": "2",
+        "CARGO_PROFILE_RELEASE_LTO": "thin",
+        "CARGO_PROFILE_RELEASE_INCREMENTAL": "true",
+        "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "16",
+        "CARGO_INCREMENTAL": "1"
+      },
+      "initial_target_bytes": 0,
+      "scenarios": [
+        {
+          "scenario": "initial",
+          "wall_seconds": 561.404082501,
+          "binary_bytes": 74919528,
+          "binary_sha256": "bd4d7d55a7f1f23bbf4fb51120d0b68c71a67eb1adc75b3dd6df1cffc69a42b5",
+          "target_bytes": 3311393677,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f",
+            "server_version": "2.15.1911",
+            "git_hash": "e94cc589",
+            "build_time": "2026-11-12 19:20 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.3826918759999671,
+          "artifact_counts": {
+            "fresh": 0,
+            "rebuilt": 573
+          }
+        },
+        {
+          "scenario": "unchanged",
+          "wall_seconds": 0.34790719499994793,
+          "binary_bytes": 74919528,
+          "binary_sha256": "bd4d7d55a7f1f23bbf4fb51120d0b68c71a67eb1adc75b3dd6df1cffc69a42b5",
+          "target_bytes": 3311378636,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f",
+            "server_version": "2.15.1911",
+            "git_hash": "e94cc589",
+            "build_time": "2026-11-12 19:20 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.38917945000002874,
+          "artifact_counts": {
+            "fresh": 573,
+            "rebuilt": 0
+          }
+        },
+        {
+          "scenario": "backend-edit",
+          "wall_seconds": 223.41057456500005,
+          "binary_bytes": 74972736,
+          "binary_sha256": "a36fb5e9284d5b980f0e22dd9d74af536280b6235a246a33ecc8a7ece235d939",
+          "target_bytes": 4234066327,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f native-benchmark",
+            "server_version": "2.15.1911",
+            "git_hash": "e94cc589",
+            "build_time": "2026-11-12 19:20 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.3807362080000303,
+          "artifact_counts": {
+            "fresh": 571,
+            "rebuilt": 2
+          }
+        },
+        {
+          "scenario": "restore-backend",
+          "wall_seconds": 222.62971760599987,
+          "binary_bytes": 74919528,
+          "binary_sha256": "bd4d7d55a7f1f23bbf4fb51120d0b68c71a67eb1adc75b3dd6df1cffc69a42b5",
+          "target_bytes": 4239376671,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f",
+            "server_version": "2.15.1911",
+            "git_hash": "e94cc589",
+            "build_time": "2026-11-12 19:20 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.383182639999859,
+          "artifact_counts": {
+            "fresh": 571,
+            "rebuilt": 2
+          }
+        },
+        {
+          "scenario": "frontend-edit",
+          "wall_seconds": 235.670129589,
+          "binary_bytes": 74919624,
+          "binary_sha256": "7b0c32b7cd22551dd7aa0bda576c502a6e58caf3838f933cdbbfbcec38feed40",
+          "target_bytes": 4233257207,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f",
+            "server_version": "2.15.1911",
+            "git_hash": "e94cc589",
+            "build_time": "2026-11-12 19:20 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.38472776100002193,
+          "artifact_counts": {
+            "fresh": 571,
+            "rebuilt": 2
+          }
+        },
+        {
+          "scenario": "restore-frontend",
+          "wall_seconds": 230.1625531709999,
+          "binary_bytes": 74919528,
+          "binary_sha256": "bd4d7d55a7f1f23bbf4fb51120d0b68c71a67eb1adc75b3dd6df1cffc69a42b5",
+          "target_bytes": 4227200471,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f",
+            "server_version": "2.15.1911",
+            "git_hash": "e94cc589",
+            "build_time": "2026-11-12 19:20 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.38203621900015605,
+          "artifact_counts": {
+            "fresh": 571,
+            "rebuilt": 2
+          }
+        },
+        {
+          "scenario": "restored-new-commit",
+          "wall_seconds": 233.91638982799986,
+          "binary_bytes": 74919528,
+          "binary_sha256": "46c54f40eb88abe23d5aeb06c7029819ccf991f61bfbb4b4cb27fdbb621867ee",
+          "target_bytes": 4400753033,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f",
+            "server_version": "2.15.1912",
+            "git_hash": "98724e1b",
+            "build_time": "2026-11-12 19:43 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.39115282800003115,
+          "artifact_counts": {
+            "fresh": 567,
+            "rebuilt": 6
+          }
+        }
+      ],
+      "local_cache": {
+        "retained_bytes": 4227200471,
+        "compressed_bytes": 1392012921,
+        "compression_seconds": 11.316091442000015,
+        "restoration_seconds": 11.880902257000116,
+        "restored_commit": "98724e1b8e344dd1de475eb9676a23f174601c16",
+        "network_transfer_measured": false
+      },
+      "final_target_bytes": 4400753033
+    },
+    "thin-z": {
+      "commit": "e94cc589811d5f35a79346b45a347a1d782663a6",
+      "runner": "Linux-7.0.0-1017-azure-x86_64-with-glibc2.39",
+      "cpu_count": 4,
+      "cpu": "AMD EPYC 9V45 96-Core Processor",
+      "rustc": "rustc 1.96.0 (ac68faa20 2026-05-25)\nbinary: rustc\ncommit-hash: ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96\ncommit-date: 2026-05-25\nhost: x86_64-unknown-linux-gnu\nrelease: 1.96.0\nLLVM version: 22.1.2",
+      "cargo": "cargo 1.96.0 (30a34c682 2026-05-25)",
+      "runner_image": "20261111.370.1",
+      "cache_hit": false,
+      "retention": "dependencies",
+      "settings": {
+        "CARGO_PROFILE_RELEASE_OPT_LEVEL": "z",
+        "RUSTFLAGS": "",
+        "CARGO_BUILD_JOBS": "2",
+        "CARGO_PROFILE_RELEASE_LTO": "thin",
+        "CARGO_PROFILE_RELEASE_INCREMENTAL": "false",
+        "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "16",
+        "CARGO_INCREMENTAL": "0"
+      },
+      "initial_target_bytes": 0,
+      "scenarios": [
+        {
+          "scenario": "initial",
+          "wall_seconds": 368.91215601299996,
+          "binary_bytes": 63078640,
+          "binary_sha256": "51890f51661aa32654957740fd9f0806607016e94908ed39647e3d07301ff089",
+          "target_bytes": 1963482288,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f",
+            "server_version": "2.15.1911",
+            "git_hash": "e94cc589",
+            "build_time": "2026-11-12 19:19 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.40156226900001,
+          "artifact_counts": {
+            "fresh": 0,
+            "rebuilt": 573
+          }
+        },
+        {
+          "scenario": "unchanged",
+          "wall_seconds": 0.2848553270000025,
+          "binary_bytes": 63078640,
+          "binary_sha256": "51890f51661aa32654957740fd9f0806607016e94908ed39647e3d07301ff089",
+          "target_bytes": 1963482666,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f",
+            "server_version": "2.15.1911",
+            "git_hash": "e94cc589",
+            "build_time": "2026-11-12 19:19 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.41182786199999555,
+          "artifact_counts": {
+            "fresh": 573,
+            "rebuilt": 0
+          }
+        },
+        {
+          "scenario": "backend-edit",
+          "wall_seconds": 134.78533510399996,
+          "binary_bytes": 63078832,
+          "binary_sha256": "5f6c8425a7d918f45c7af7f6196f275d6b52798b794be78df040b6788c4936b3",
+          "target_bytes": 1963804876,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f native-benchmark",
+            "server_version": "2.15.1911",
+            "git_hash": "e94cc589",
+            "build_time": "2026-11-12 19:19 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.3883879910000587,
+          "artifact_counts": {
+            "fresh": 571,
+            "rebuilt": 2
+          }
+        },
+        {
+          "scenario": "restore-backend",
+          "wall_seconds": 137.468905209,
+          "binary_bytes": 63078640,
+          "binary_sha256": "51890f51661aa32654957740fd9f0806607016e94908ed39647e3d07301ff089",
+          "target_bytes": 1964106700,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f",
+            "server_version": "2.15.1911",
+            "git_hash": "e94cc589",
+            "build_time": "2026-11-12 19:19 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.3772345339999674,
+          "artifact_counts": {
+            "fresh": 571,
+            "rebuilt": 2
+          }
+        },
+        {
+          "scenario": "frontend-edit",
+          "wall_seconds": 182.76561807200005,
+          "binary_bytes": 63078736,
+          "binary_sha256": "7627ee5cde92b11821435f067dc81c9b83a143c5b60acb5c1ef523e791b69f13",
+          "target_bytes": 1964417634,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f",
+            "server_version": "2.15.1911",
+            "git_hash": "e94cc589",
+            "build_time": "2026-11-12 19:19 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.3699501869999722,
+          "artifact_counts": {
+            "fresh": 571,
+            "rebuilt": 2
+          }
+        },
+        {
+          "scenario": "restore-frontend",
+          "wall_seconds": 182.50427978900007,
+          "binary_bytes": 63078640,
+          "binary_sha256": "51890f51661aa32654957740fd9f0806607016e94908ed39647e3d07301ff089",
+          "target_bytes": 1964717675,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f",
+            "server_version": "2.15.1911",
+            "git_hash": "e94cc589",
+            "build_time": "2026-11-12 19:19 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.3747311059998992,
+          "artifact_counts": {
+            "fresh": 571,
+            "rebuilt": 2
+          }
+        },
+        {
+          "scenario": "restored-new-commit",
+          "wall_seconds": 187.7687774169999,
+          "binary_bytes": 63078640,
+          "binary_sha256": "446357fcec368ebabc40b489ff55775a06f78aafae840fff86577e6304fceb02",
+          "target_bytes": 1965026217,
+          "identity": {
+            "protocol_version": 1,
+            "app_title": "\u26a0\ufe0f INSECURE DEV MODE \u26a0\ufe0f",
+            "server_version": "2.15.1912",
+            "git_hash": "1fe7af4f",
+            "build_time": "2026-11-12 19:34 PST",
+            "splash_text": null,
+            "archive_enabled": false,
+            "auth_providers": [],
+            "stt_enabled": false
+          },
+          "http_1000_requests_seconds": 0.4296512599999005,
+          "artifact_counts": {
+            "fresh": 565,
+            "rebuilt": 8
+          }
+        }
+      ],
+      "local_cache": {
+        "retained_bytes": 1496575265,
+        "compressed_bytes": 439422580,
+        "compression_seconds": 3.208808142999942,
+        "restoration_seconds": 1.5103871250000793,
+        "restored_commit": "1fe7af4f1cda7fa70ab43a63d7d3a1734fda8187",
+        "network_transfer_measured": false
+      },
+      "final_target_bytes": 1965026217
+    }
+  }
+}
