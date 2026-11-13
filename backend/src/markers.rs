@@ -313,6 +313,7 @@ mod tests {
             include_str!("handlers/media_archive.rs"),
             include_str!("handlers/websocket/launcher_socket.rs"),
             include_str!("handlers/plugins.rs"),
+            include_str!("handlers/secrets/deposits.rs"),
             include_str!("handlers/websocket/member_status.rs"),
         ];
         for m in ALL_MARKERS {
