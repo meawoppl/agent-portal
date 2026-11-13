@@ -355,6 +355,17 @@ pub async fn device_deny(
         .values_mut()
         .find(|s| s.user_code == req.user_code && s.status == DeviceFlowStatus::Pending)
     {
+        crate::audit::record(
+            &mut *app_state
+                .conn()
+                .map_err(|_| DeviceFlowApiError::service_unavailable())?,
+            Some(user_id),
+            Some(user_id),
+            crate::audit::Action::DeviceDenied,
+            "denied",
+            None,
+        )
+        .map_err(|_| DeviceFlowApiError::service_unavailable())?;
         state.status = DeviceFlowStatus::Denied;
         info!("Device flow denied for user_code: {}", req.user_code);
         info!(
@@ -438,6 +449,15 @@ async fn complete_device_flow_with_expiry(
         .values_mut()
         .find(|s| s.user_code == user_code && s.status == DeviceFlowStatus::Pending)
     {
+        crate::audit::record(
+            &mut conn,
+            Some(user_id),
+            Some(issued.row_id),
+            crate::audit::Action::DeviceApproved,
+            "success",
+            Some(issued.row_id),
+        )
+        .map_err(|_| ())?;
         state.user_id = Some(user_id);
         state.access_token = Some(issued.token);
         state.status = DeviceFlowStatus::Complete;

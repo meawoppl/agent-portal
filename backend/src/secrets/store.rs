@@ -200,18 +200,53 @@ pub fn audit(
     action: &str,
     outcome: &str,
 ) -> Result<(), AppError> {
-    use crate::schema::secret_audit_events as table;
-    diesel::insert_into(table::table)
-        .values((
-            table::id.eq(Uuid::new_v4()),
-            table::actor_user_id.eq(Some(actor)),
-            table::secret_id.eq(target),
-            table::action.eq(action),
-            table::outcome.eq(outcome),
-        ))
-        .execute(conn)?;
-    Ok(())
+    audit_context(
+        conn,
+        actor,
+        target,
+        action,
+        outcome,
+        crate::audit::Context::default(),
+    )
 }
+pub fn audit_context(
+    conn: &mut PgConnection,
+    actor: Uuid,
+    target: Option<Uuid>,
+    action: &str,
+    outcome: &str,
+    context: crate::audit::Context,
+) -> Result<(), AppError> {
+    use crate::schema::secret_audit_events as table;
+    // Keep the existing secrets trail compatible, atomically with the admin trail.
+    conn.transaction(|conn| {
+        diesel::insert_into(table::table)
+            .values((
+                table::id.eq(Uuid::new_v4()),
+                table::actor_user_id.eq(Some(actor)),
+                table::secret_id.eq(target),
+                table::action.eq(action),
+                table::outcome.eq(outcome),
+            ))
+            .execute(conn)?;
+        // Sharing is captured with recipient/permission details by the ACL
+        // history trigger in this same transaction.
+        if matches!(action, "grant" | "revoke") {
+            return Ok(());
+        }
+        crate::audit::write(
+            conn,
+            shared::audit::AuditCategory::Secrets,
+            &format!("secret.{action}"),
+            Some(actor),
+            "secret",
+            target,
+            outcome,
+            context,
+        )
+    })
+}
+
 pub fn require_generation(row: &SecretRow, expected: i64) -> Result<(), AppError> {
     if row.acl_generation != expected {
         Err(AppError::Conflict("Secret changed; reload metadata"))

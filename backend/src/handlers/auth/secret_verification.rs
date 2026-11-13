@@ -70,7 +70,16 @@ pub async fn check(
     headers: HeaderMap,
 ) -> Result<axum::response::Response, AppError> {
     crate::secrets::auth::csrf(&state, &headers)?;
-    check_account(&state, user)?;
+    let checked = check_account(&state, user);
+    crate::audit::record(
+        &mut *state.conn()?,
+        Some(user),
+        Some(user),
+        crate::audit::Action::Verification,
+        if checked.is_ok() { "success" } else { "denied" },
+        None,
+    )?;
+    checked?;
     crate::secrets::auth::record_verification(&cookies, &state, user);
     Ok((
         [(header::CACHE_CONTROL, "no-store")],

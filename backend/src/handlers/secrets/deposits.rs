@@ -350,7 +350,19 @@ async fn create(
                     provenance_agent_type: None,
                 },
             )?;
-            store::audit(conn, process.user, None, "deposit_proposed", "pending")?;
+            store::audit_context(
+                conn,
+                process.user,
+                None,
+                "deposit_proposed",
+                "pending",
+                crate::audit::Context {
+                    session: Some(process.session),
+                    launcher: Some(process.launcher),
+                    operation: Some(row.id),
+                    agent: true,
+                },
+            )?;
             Ok((row.info()?, Some(message)))
         })?
     };
@@ -419,6 +431,7 @@ fn insert_approved_item(
     user: Uuid,
     item: &SecretDepositItem,
     envelope: &Envelope,
+    context: crate::audit::Context,
 ) -> Result<(), AppError> {
     if item.namespace == SecretNamespace::Organization && !store::curator(conn, user)? {
         return Err(AppError::Forbidden);
@@ -541,7 +554,7 @@ fn insert_approved_item(
         )?;
     }
     generation(conn, item.secret_id, "version_created")?;
-    store::audit(
+    store::audit_context(
         conn,
         user,
         Some(item.secret_id),
@@ -551,6 +564,7 @@ fn insert_approved_item(
             "deposit_created"
         },
         "allowed",
+        context,
     )
 }
 
@@ -652,7 +666,19 @@ async fn decision(
                     return Err(AppError::Conflict("Sharing quota reached"));
                 }
                 for (item, envelope) in items.iter().zip(envelopes) {
-                    insert_approved_item(conn, row.organization_id, user, item, &envelope)?;
+                    insert_approved_item(
+                        conn,
+                        row.organization_id,
+                        user,
+                        item,
+                        &envelope,
+                        crate::audit::Context {
+                            session: Some(row.session_id),
+                            launcher: Some(row.launcher_id),
+                            operation: Some(id),
+                            agent: false,
+                        },
+                    )?;
                 }
                 // Check again at commit boundary; expired batches never commit.
                 if row.expires_at <= Utc::now() {
@@ -671,7 +697,19 @@ async fn decision(
                     proposals::envelopes.eq(None::<serde_json::Value>),
                 ))
                 .execute(conn)?;
-            store::audit(conn, user, None, "deposit_decision", result)?;
+            store::audit_context(
+                conn,
+                user,
+                None,
+                "deposit_decision",
+                result,
+                crate::audit::Context {
+                    session: Some(row.session_id),
+                    launcher: Some(row.launcher_id),
+                    operation: Some(id),
+                    agent: false,
+                },
+            )?;
             load(conn, id)?.info()
         })?
     };

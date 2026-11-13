@@ -409,6 +409,7 @@ pub struct ServerConfig {
     pub allowed_emails: Option<Vec<String>>,
     pub message_retention_count: i64,
     pub message_retention_days: u32,
+    pub audit_retention_days: Option<u32>,
     pub session_max_age_days: u32,
     pub max_image_mb: u32,
     pub image_store_max_bytes: u64,
@@ -559,6 +560,20 @@ impl ServerConfig {
         // efficiency fix rather than an urgent one — bound the replay separately
         // instead of lowering retention to compensate.
         let message_retention_count: i64 = parse_or(&mut errors, "MESSAGE_RETENTION_COUNT", 1000);
+        let audit_retention_days = match env::var("PORTAL_AUDIT_RETENTION_DAYS") {
+            Ok(value) => match crate::audit::parse_retention(&value) {
+                Ok(days) => days,
+                Err(error) => {
+                    errors.push(error);
+                    Some(365)
+                }
+            },
+            Err(env::VarError::NotPresent) => Some(365),
+            Err(_) => {
+                errors.push("PORTAL_AUDIT_RETENTION_DAYS must be UTF-8".into());
+                Some(365)
+            }
+        };
         let message_retention_days: u32 = parse_or(&mut errors, "MESSAGE_RETENTION_DAYS", 30);
 
         let session_max_age_days: u32 = parse_or(&mut errors, "SESSION_MAX_AGE_DAYS", 14);
@@ -721,6 +736,7 @@ impl ServerConfig {
             allowed_emails,
             message_retention_count,
             message_retention_days,
+            audit_retention_days,
             session_max_age_days,
             max_image_mb,
             image_store_max_bytes,

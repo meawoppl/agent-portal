@@ -566,6 +566,15 @@ pub async fn update_launcher(
     Path(launcher_id): Path<Uuid>,
 ) -> Result<EmptyResponse, AppError> {
     require_launcher_owner(&app_state, launcher_id, user_id)?;
+    crate::audit::required(
+        &app_state,
+        Some(user_id),
+        Some(launcher_id),
+        crate::audit::Action::ComputerUpdateRequested,
+        "requested",
+        None,
+    )
+    .await?;
 
     // Route through the evicting sender (not a cloned raw sender) so a dead
     // channel tears the stale connection down instead of lingering.
@@ -574,6 +583,14 @@ pub async fn update_launcher(
         .send_to_launcher(&launcher_id, ServerToLauncher::UpdateAndRestart)
     {
         warn!("Launcher {} disconnected while sending update", launcher_id);
+        crate::audit::observe(
+            &app_state,
+            Some(user_id),
+            Some(launcher_id),
+            crate::audit::Action::ComputerUpdateRequested,
+            "dispatch_failed",
+            None,
+        );
         return Err(AppError::Internal("Launcher disconnected".to_string()));
     }
 
@@ -592,6 +609,15 @@ pub async fn restart_launcher(
     Path(launcher_id): Path<Uuid>,
 ) -> Result<EmptyResponse, AppError> {
     require_launcher_owner(&app_state, launcher_id, user_id)?;
+    crate::audit::required(
+        &app_state,
+        Some(user_id),
+        Some(launcher_id),
+        crate::audit::Action::ComputerRestartRequested,
+        "requested",
+        None,
+    )
+    .await?;
 
     if !app_state
         .session_manager
@@ -611,6 +637,14 @@ pub async fn restart_launcher(
         warn!(
             "Launcher {} disconnected while sending restart",
             launcher_id
+        );
+        crate::audit::observe(
+            &app_state,
+            Some(user_id),
+            Some(launcher_id),
+            crate::audit::Action::ComputerRestartRequested,
+            "dispatch_failed",
+            None,
         );
         return Err(AppError::Internal("Launcher disconnected".to_string()));
     }
@@ -673,6 +707,15 @@ pub async fn start_agent_login(
 
     let request_id = Uuid::new_v4();
     let flow_id = Uuid::new_v4();
+    crate::audit::required(
+        &app_state,
+        Some(user_id),
+        Some(launcher_id),
+        crate::audit::Action::AgentLoginStarted,
+        "requested",
+        Some(flow_id),
+    )
+    .await?;
     // Starting can wait on the CLI printing its URL (claude ~30s); allow slack.
     let reply = launcher_rpc(
         &app_state,
@@ -729,7 +772,17 @@ pub async fn submit_agent_login_code(
         90,
     )
     .await?;
-    login_outcome(reply)
+    let result = login_outcome(reply)?;
+    if result.done {
+        crate::audit::computer_login_result(
+            &app_state,
+            user_id,
+            launcher_id,
+            flow_id,
+            result.success,
+        );
+    }
+    Ok(result)
 }
 
 /// GET /api/launchers/:id/agent-login/:flow_id — poll an in-browser login
@@ -752,7 +805,17 @@ pub async fn poll_agent_login(
         8,
     )
     .await?;
-    login_outcome(reply)
+    let result = login_outcome(reply)?;
+    if result.done {
+        crate::audit::computer_login_result(
+            &app_state,
+            user_id,
+            launcher_id,
+            flow_id,
+            result.success,
+        );
+    }
+    Ok(result)
 }
 
 /// POST /api/launchers/:id/agent-login/:flow_id/cancel — abandon a flow
@@ -763,6 +826,15 @@ pub async fn cancel_agent_login(
     Path((launcher_id, flow_id)): Path<(Uuid, Uuid)>,
 ) -> Result<crate::handlers::responses::EmptyResponse, AppError> {
     require_launcher_owner(&app_state, launcher_id, user_id)?;
+    crate::audit::required(
+        &app_state,
+        Some(user_id),
+        Some(launcher_id),
+        crate::audit::Action::AgentLoginCancelled,
+        "requested",
+        Some(flow_id),
+    )
+    .await?;
     app_state
         .session_manager
         .send_to_launcher(&launcher_id, ServerToLauncher::CancelAgentLogin { flow_id });
@@ -788,6 +860,15 @@ pub async fn install_agent(
 ) -> Result<Json<InstallAgentResponse>, AppError> {
     require_launcher_owner(&app_state, launcher_id, user_id)?;
     let request_id = Uuid::new_v4();
+    crate::audit::required(
+        &app_state,
+        Some(user_id),
+        Some(launcher_id),
+        crate::audit::Action::AgentInstallRequested,
+        "requested",
+        Some(request_id),
+    )
+    .await?;
     // A global npm install can run for tens of seconds — allow generous slack.
     let reply = launcher_rpc(
         &app_state,
@@ -799,11 +880,31 @@ pub async fn install_agent(
         },
         180,
     )
-    .await?;
+    .await
+    .inspect_err(|_| {
+        crate::audit::observe(
+            &app_state,
+            Some(user_id),
+            Some(launcher_id),
+            crate::audit::Action::AgentInstallResult,
+            "transport_failed",
+            Some(request_id),
+        )
+    })?;
     match reply {
         LauncherToServer::InstallAgentResult {
             success, message, ..
-        } => Ok(Json(InstallAgentResponse { success, message })),
+        } => {
+            crate::audit::observe(
+                &app_state,
+                Some(user_id),
+                Some(launcher_id),
+                crate::audit::Action::AgentInstallResult,
+                if success { "success" } else { "failed" },
+                Some(request_id),
+            );
+            Ok(Json(InstallAgentResponse { success, message }))
+        }
         _ => Err(AppError::Internal(
             "Unexpected launcher install response".into(),
         )),

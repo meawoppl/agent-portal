@@ -6,6 +6,7 @@
 //! Postgres (#1209 item 1, the E2E WS/protocol harness).
 
 pub mod archive;
+pub mod audit;
 pub mod auth;
 pub mod background;
 pub mod config;
@@ -84,6 +85,7 @@ pub struct AppState {
     pub message_retention_count: i64,
     /// Days to retain messages before deletion (default: 30, 0 = disabled)
     pub message_retention_days: u32,
+    pub audit_retention_days: Option<u32>,
     /// Days to keep sessions before auto-deletion (default: 14, 0 = disabled)
     pub session_max_age_days: u32,
     /// Maximum image size in MB that proxies should inline (default: 10)
@@ -223,6 +225,7 @@ pub async fn run() -> anyhow::Result<()> {
         allowed_emails: config.allowed_emails,
         message_retention_count: config.message_retention_count,
         message_retention_days: config.message_retention_days,
+        audit_retention_days: config.audit_retention_days,
         session_max_age_days: config.session_max_age_days,
         max_image_mb: config.max_image_mb,
         max_audio_mb: config.max_audio_mb,
@@ -280,6 +283,13 @@ pub async fn run() -> anyhow::Result<()> {
         Duration::from_secs(30),
         app_state.clone(),
         handlers::secrets::deposits::sweep,
+    );
+
+    background::spawn_periodic(
+        "audit retention",
+        Duration::from_secs(60),
+        app_state.clone(),
+        audit::sweep,
     );
 
     // Spawn background maintenance tasks

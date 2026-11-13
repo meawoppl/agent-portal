@@ -158,6 +158,7 @@ pub use model_version::{compact_model_version, context_window_for};
 
 // API client types and trait
 pub mod api;
+pub mod audit;
 pub mod local_frame;
 
 /// Consumer-specific views of the plugin manifest format.

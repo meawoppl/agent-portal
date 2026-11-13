@@ -1,6 +1,26 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
+    audit_events (id) {
+        id -> Uuid,
+        occurred_at -> Timestamptz,
+        category -> Text,
+        event_type -> Text,
+        actor_kind -> Text,
+        actor_user_id -> Nullable<Uuid>,
+        owner_user_id -> Nullable<Uuid>,
+        session_id -> Nullable<Uuid>,
+        launcher_id -> Nullable<Uuid>,
+        target_kind -> Text,
+        target_id -> Nullable<Uuid>,
+        operation_id -> Nullable<Uuid>,
+        outcome -> Text,
+        details -> Jsonb,
+        schema_version -> Int4,
+    }
+}
+
+diesel::table! {
     claude_result_cost_ledger (session_id, result_uuid) {
         session_id -> Uuid,
         result_uuid -> Text,
@@ -832,6 +852,7 @@ diesel::joinable!(turn_metrics -> users (user_id));
 diesel::joinable!(user_identities -> users (user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
+    audit_events,
     claude_result_cost_ledger,
     custom_subdomains,
     deleted_session_costs,

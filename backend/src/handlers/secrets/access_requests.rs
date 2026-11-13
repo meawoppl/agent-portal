@@ -401,12 +401,18 @@ fn create_row(
             .execute(conn)?;
         Some(message)
     };
-    store::audit(
+    store::audit_context(
         conn,
         process.user,
         Some(secret.id),
         "access_requested",
         "pending",
+        crate::audit::Context {
+            session: Some(process.session),
+            launcher: Some(process.launcher),
+            operation: Some(request.request_id),
+            agent: true,
+        },
     )?;
     let row = load(conn, request.request_id)?;
     Ok((info(conn, &row)?, message, true))
@@ -535,12 +541,18 @@ fn decide_row(
                 .execute(conn)?;
             row.state = "denied".into();
         }
-        store::audit(
+        store::audit_context(
             conn,
             user,
             Some(row.secret_id),
             "access_decision",
             &row.state,
+            crate::audit::Context {
+                session: Some(row.session_id),
+                launcher: Some(row.launcher_id),
+                operation: Some(row.id),
+                agent: false,
+            },
         )?;
     }
     // Read back PostgreSQL timestamp precision so retries return the same metadata.

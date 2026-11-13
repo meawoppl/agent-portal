@@ -478,6 +478,15 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
         }
     };
 
+    crate::audit::observe(
+        &app_state,
+        Some(user_id),
+        Some(launcher_id),
+        crate::audit::Action::ComputerRegistered,
+        "success",
+        None,
+    );
+
     // Send RegisterAck
     let _ = ws_sender
         .send(ServerToLauncher::LauncherRegisterAck {

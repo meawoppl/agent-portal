@@ -3,7 +3,9 @@
 //! Restricted to users with is_admin=true. Provides system overview,
 //! user management, and session management capabilities.
 
+mod audit_tab;
 mod federation_tab;
+use audit_tab::AdminAuditTab;
 mod overview_tab;
 mod sessions_tab;
 mod subdomains_tab;
@@ -41,6 +43,7 @@ enum AdminTab {
     Sessions,
     Subdomains,
     Federation,
+    Audit,
 }
 
 // ============================================================================
@@ -444,6 +447,7 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
     let on_sessions_tab = make_tab_handler(AdminTab::Sessions);
     let on_subdomains_tab = make_tab_handler(AdminTab::Subdomains);
     let on_federation_tab = make_tab_handler(AdminTab::Federation);
+    let on_audit_tab = make_tab_handler(AdminTab::Audit);
 
     // Cancel confirmation
     let on_cancel_confirm = {
@@ -515,6 +519,7 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
                                     { "Subdomains" }
                                 </button>
                                 <button class={classes!("tab-btn", if *active_tab == AdminTab::Federation { Some("active") } else { None })} onclick={on_federation_tab}>{"Federation"}</button>
+                                <button class={classes!("tab-btn", (*active_tab == AdminTab::Audit).then_some("active"))} onclick={on_audit_tab}>{"Audit log"}</button>
                             </nav>
 
                             <div class="admin-content">
@@ -543,6 +548,7 @@ pub fn admin_page(props: &AdminPageProps) -> Html {
                                                 />
                                             }
                                         }
+                                        AdminTab::Audit => html! { <AdminAuditTab users={(*users).clone()} /> },
                                         AdminTab::Federation => html! { <AdminFederationTab /> },
                                         AdminTab::Subdomains => {
                                             html! { <AdminSubdomainsTab /> }
