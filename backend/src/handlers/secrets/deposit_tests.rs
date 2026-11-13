@@ -23,7 +23,7 @@ fn proxy_token(state: &AppState, user: Uuid, session: Option<Uuid>) -> String {
     issued.token
 }
 
-fn setup() -> Option<(
+type Fixture = (
     Database,
     Arc<AppState>,
     Router,
@@ -32,7 +32,8 @@ fn setup() -> Option<(
     Uuid,
     String,
     String,
-)> {
+);
+fn setup() -> Option<Fixture> {
     let db = Database::new()?;
     let mut state = crate::test_support::test_app_state(db.pool.clone());
     state.secrets = Arc::new(crate::secrets::SecretsService::new(Some(

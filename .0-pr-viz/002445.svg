@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="Arial, sans-serif" fill="#c0caf5">
+<text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2445 - Owner-approved secret deposit batches</text>
+<text x="55" y="110" font-size="34" fill="#e6e9f5">Agents can propose new secrets without receiving general vault access.</text>
+<text x="55" y="155" font-size="28">One owner decision creates the entire batch and its reviewed sharing grants.</text>
+<path d="M55 185H1945 M1000 210V1120" stroke="#565f89" stroke-width="2" stroke-dasharray="8 8"/>
+<text x="65" y="240" font-size="22" fill="#f7768e" letter-spacing="4">BEFORE</text>
+<text x="1055" y="240" font-size="22" fill="#9ece6a" letter-spacing="4">AFTER</text>
+<rect x="65" y="285" width="865" height="185" rx="16" fill="#1e202e" stroke="#565f89"/>
+<text x="95" y="340" font-size="28">Agent holds a user-provided credential file</text>
+<text x="95" y="400" font-size="25">CLI supports request, run and inject.</text>
+<text x="95" y="440" font-size="25">These use existing, approved credentials.</text>
+<path d="M490 470V540" stroke="#565f89" stroke-width="3"/>
+<rect x="65" y="540" width="865" height="230" rx="16" fill="#1e202e" stroke="#f7768e"/>
+<text x="95" y="595" font-size="28" fill="#f7768e">No agent deposit workflow</text>
+<text x="95" y="655" font-size="25">The owner must enter new values in Settings.</text>
+<text x="95" y="710" font-size="25">Several credentials require separate creation.</text>
+<text x="95" y="875" font-size="25">Browser-only vault management is intentional.</text>
+<text x="95" y="925" font-size="25">Restoring broad CLI credentials would weaken it.</text>
+<rect x="1055" y="285" width="865" height="185" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1085" y="340" font-size="28" fill="#9ece6a">agent-portal secret propose</text>
+<text x="1085" y="395" font-size="25">stdin / file input; 1-16 secrets per batch</text>
+<text x="1085" y="440" font-size="25">Encrypted staging; transcript holds only an ID.</text>
+<path d="M1485 470V510" stroke="#9ece6a" stroke-width="3"/>
+<rect x="1055" y="510" width="865" height="245" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1085" y="565" font-size="28" fill="#9ece6a">One owner review card</text>
+<text x="1085" y="620" font-size="25">Edit names/descriptions; remove recipients.</text>
+<text x="1085" y="670" font-size="25">Approve verifies Portal access, then commits.</text>
+<text x="1085" y="720" font-size="25">Sharing grants read/use only to displayed users.</text>
+<path d="M1485 755V800" stroke="#9ece6a" stroke-width="3"/>
+<rect x="1055" y="800" width="865" height="255" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1085" y="855" font-size="28" fill="#9ece6a">All created, or none created</text>
+<text x="1085" y="910" font-size="25">No overwrite; no agent read binding.</text>
+<text x="1085" y="960" font-size="25">Recheck owner, process, rights and recipients.</text>
+<text x="1085" y="1010" font-size="25" fill="#e0af68">Denial / ten-minute expiry clears staging.</text>
+<text x="55" y="1172" font-size="22" fill="#a9b1d6">Scope: new secrets only. Encrypted records in backups follow backup retention. Existing general vault access restrictions remain.</text>
+</g>
+</svg>

@@ -167,7 +167,6 @@ mod tests {
 
 #[cfg(test)]
 mod cli_tests {
-    use super::*;
     use clap::Parser;
     #[test]
     fn propose_cli_accepts_file_batches_and_metadata_status() {
