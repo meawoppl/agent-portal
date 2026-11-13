@@ -199,19 +199,19 @@ of version control and remove it when no longer needed.
 
 ## Agent-proposed secret deposits
 
-An agent holding a user-provided credential can propose **new** secrets without
+An agent holding a user-provided credential can request creation or replacement of secrets without
 getting general vault access. The owner reviews one combined card, edits names
 or descriptions, optionally removes recipients, and clicks **Approve** once.
-The card verifies Portal access server-side, shows progress, then creates the
+The card verifies Portal access server-side, shows progress, then saves the
 whole batch atomically. A name conflict, disabled recipient, or expired request
-creates nothing. Existing secrets are never overwritten and no read binding is
-created for the agent. Organization proposals require a curator and retain the
+changes nothing. Existing names append an immutable version after explicit owner confirmation; no read binding is
+created for the agent. Updates pin the current version and permission generation, so concurrent changes reject the entire batch. Existing sharing is preserved, and update targets cannot be renamed in the card. Organization proposals require a curator and retain the
 normal organization-wide read/use audience.
 
 Single value, read from a local file (or use `--stdin`):
 
 ```sh
-agent-portal secret propose personal/AWS_ACCESS_KEY_ID \
+agent-portal secret set personal/AWS_ACCESS_KEY_ID \
   --value-file /secure/path/access-key-id \
   --description 'AWS automation access key ID' \
   --share google:jazz@cosmicfrontier.org --wait
@@ -224,11 +224,15 @@ example, a locally prepared file can contain both an AWS access key ID and its
 secret access key. Do not paste the file contents into a prompt or tool output.
 
 ```sh
-agent-portal secret propose --batch-file /secure/path/credentials.json --wait
-agent-portal secret propose --status REQUEST_UUID
+agent-portal secret set --batch-file /secure/path/credentials.json --wait
+agent-portal secret set --status REQUEST_UUID
 ```
 
-Selected-user sharing grants only **read/use**, never write/manage. Selectors
+The old `propose` spelling remains a compatibility alias. Omitted descriptions
+preserve the current description on updates.
+
+New selected-user grants provide only **read/use**, never write/manage. Existing
+grants retain their permissions and expiry; changing those belongs in Settings. Selectors
 accept `google:EMAIL`, a verified email, or an existing Portal user UUID, using
 the same verified organization-directory boundary as the web UI. GitHub handles
 must first be resolved to a stable Portal UUID in the web UI. Sharing metadata

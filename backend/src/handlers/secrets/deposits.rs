@@ -180,12 +180,36 @@ async fn create(
             ));
         }
         let mut recipients = Vec::new();
+        let existing;
         {
             let mut conn = state.conn()?;
             if input.namespace == SecretNamespace::Organization
                 && !store::curator(&mut conn, process.user)?
             {
                 return Err(AppError::Forbidden);
+            }
+            let namespace = if input.namespace == SecretNamespace::Personal {
+                "personal"
+            } else {
+                "organization"
+            };
+            let query = secrets::table
+                .filter(secrets::organization_id.eq(organization))
+                .filter(secrets::namespace.eq(namespace))
+                .filter(secrets::name.eq(&input.name));
+            existing = if input.namespace == SecretNamespace::Personal {
+                query
+                    .filter(secrets::owner_user_id.eq(process.user))
+                    .first::<SecretRow>(&mut conn)
+                    .optional()?
+            } else {
+                query.first::<SecretRow>(&mut conn).optional()?
+            };
+            if let Some(row) = &existing {
+                store::require_live(row)?;
+                if !store::rights(&mut conn, row, process.user)?.write {
+                    return Err(AppError::Forbidden);
+                }
             }
             for selector in input.share {
                 let recipient =
@@ -198,12 +222,40 @@ async fn create(
                 }
             }
         }
+        let update = if let Some(row) = &existing {
+            let version_id = row
+                .current_version_id
+                .ok_or(AppError::Conflict("Secret has no current version"))?;
+            let version = secret_versions::table
+                .find(version_id)
+                .select(secret_versions::ordinal)
+                .first::<i32>(&mut *state.conn()?)?;
+            Some(SecretDepositUpdate {
+                version_id,
+                version,
+                generation: row.acl_generation,
+            })
+        } else {
+            None
+        };
+        let description = if input.description.is_empty() {
+            existing
+                .as_ref()
+                .map(|row| row.description.clone())
+                .unwrap_or_default()
+        } else {
+            input.description
+        };
         let item = SecretDepositItem {
-            secret_id: Uuid::new_v4(),
+            update,
+            secret_id: existing
+                .as_ref()
+                .map(|row| row.id)
+                .unwrap_or_else(Uuid::new_v4),
             version_id: Uuid::new_v4(),
             namespace: input.namespace,
             name: input.name,
-            description: input.description,
+            description,
             recipients,
         };
         let envelope = state
@@ -348,6 +400,11 @@ fn edited(
             {
                 return Err(AppError::BadRequest("Approval cannot add new recipients"));
             }
+            if item.update.is_some() && item.name != edit.name {
+                return Err(AppError::BadRequest(
+                    "Update targets cannot be renamed during approval",
+                ));
+            }
             item.name = edit.name;
             item.description = edit.description;
             item.recipients
@@ -371,22 +428,53 @@ fn insert_approved_item(
     } else {
         "organization"
     };
-    diesel::insert_into(secrets::table)
-        .values((
-            secrets::id.eq(item.secret_id),
-            secrets::organization_id.eq(organization),
-            secrets::owner_user_id.eq(user),
-            secrets::namespace.eq(namespace),
-            secrets::name.eq(&item.name),
-            secrets::description.eq(&item.description),
-            secrets::current_version_id.eq(Some(item.version_id)),
-        ))
-        .execute(conn)
-        .map_err(|_| {
-            AppError::Conflict(
-                "A proposed secret name is reserved or unavailable; edit it and retry",
-            )
-        })?;
+    let (ordinal, acl_generation) = if let Some(expected) = &item.update {
+        let row = lock(conn, item.secret_id)?;
+        store::require_live(&row)?;
+        store::require_generation(&row, expected.generation)?;
+        if row.organization_id != organization
+            || row.namespace != namespace
+            || row.name != item.name
+            || (item.namespace == SecretNamespace::Personal && row.owner_user_id != user)
+            || row.current_version_id != Some(expected.version_id)
+        {
+            return Err(AppError::Conflict(
+                "Secret changed since review; submit a new set request",
+            ));
+        }
+        if !store::rights(conn, &row, user)?.write {
+            return Err(AppError::Forbidden);
+        }
+        let version = secret_versions::table
+            .find(expected.version_id)
+            .select(secret_versions::ordinal)
+            .first::<i32>(conn)?;
+        if version != expected.version {
+            return Err(AppError::Conflict("Secret version changed"));
+        }
+        (
+            version
+                .checked_add(1)
+                .ok_or(AppError::Conflict("Version limit"))?,
+            row.acl_generation + 1,
+        )
+    } else {
+        diesel::insert_into(secrets::table)
+            .values((
+                secrets::id.eq(item.secret_id),
+                secrets::organization_id.eq(organization),
+                secrets::owner_user_id.eq(user),
+                secrets::namespace.eq(namespace),
+                secrets::name.eq(&item.name),
+                secrets::description.eq(&item.description),
+                secrets::current_version_id.eq(Some(item.version_id)),
+            ))
+            .execute(conn)
+            .map_err(|_| {
+                AppError::Conflict("A new secret name is now unavailable; submit a new set request")
+            })?;
+        (1, 1)
+    };
     version_quota(conn, envelope.ciphertext.len())?;
     insert_version(
         conn,
@@ -395,12 +483,37 @@ fn insert_approved_item(
             secret: item.secret_id,
             version: item.version_id,
         },
-        1,
+        ordinal,
         user,
         envelope,
     )?;
+    if item.update.is_some() {
+        diesel::update(secrets::table.find(item.secret_id))
+            .set((
+                secrets::current_version_id.eq(Some(item.version_id)),
+                secrets::description.eq(&item.description),
+                secrets::acl_generation.eq(acl_generation),
+                secrets::updated_at.eq(Utc::now()),
+            ))
+            .execute(conn)?;
+    }
     for recipient in &item.recipients {
         store::active_user(conn, recipient.user_id)?;
+        if let Some(grant) = secret_grants::table
+            .find((item.secret_id, recipient.user_id))
+            .first::<store::GrantRow>(conn)
+            .optional()?
+        {
+            if !grant.can_read
+                || !grant.can_use
+                || grant.expires_at.is_some_and(|time| time <= Utc::now())
+            {
+                return Err(AppError::Conflict(
+                    "Use Settings to change an existing recipient grant",
+                ));
+            }
+            continue; // Preserve existing rights and expiration exactly.
+        }
         diesel::insert_into(secret_grants::table)
             .values((
                 secret_grants::secret_id.eq(item.secret_id),
@@ -409,7 +522,7 @@ fn insert_approved_item(
                 secret_grants::can_use.eq(true),
                 secret_grants::can_write.eq(false),
                 secret_grants::can_manage.eq(false),
-                secret_grants::generation.eq(1i64),
+                secret_grants::generation.eq(acl_generation),
             ))
             .execute(conn)?;
         store::record_acl_change(
@@ -423,7 +536,7 @@ fn insert_approved_item(
                 write: false,
                 manage: false,
             },
-            1,
+            acl_generation,
             "grant",
         )?;
     }
@@ -432,7 +545,11 @@ fn insert_approved_item(
         conn,
         user,
         Some(item.secret_id),
-        "deposit_created",
+        if item.update.is_some() {
+            "deposit_updated"
+        } else {
+            "deposit_created"
+        },
         "allowed",
     )
 }
@@ -508,6 +625,18 @@ async fn decision(
                 row.info()?.items
             };
             if request.approve {
+                let updates: std::collections::BTreeSet<_> = items
+                    .iter()
+                    .filter(|item| item.update.is_some())
+                    .map(|item| item.secret_id)
+                    .collect();
+                let confirmed: std::collections::BTreeSet<_> =
+                    request.confirm_updates.into_iter().collect();
+                if updates != confirmed {
+                    return Err(AppError::BadRequest(
+                        "Review and explicitly confirm every secret update",
+                    ));
+                }
                 current(&state, conn, &row)?;
                 let envelopes: Vec<Envelope> = serde_json::from_value(
                     row.envelopes

@@ -165,6 +165,16 @@ fn review(props: &ReviewProps) -> Html {
             );
             let decision = SecretDepositDecision {
                 approve,
+                confirm_updates: info
+                    .as_ref()
+                    .map(|v| {
+                        v.items
+                            .iter()
+                            .filter(|item| item.update.is_some())
+                            .map(|item| item.secret_id)
+                            .collect()
+                    })
+                    .unwrap_or_default(),
                 items: approve.then(|| (*draft).clone()),
             };
             wasm_bindgen_futures::spawn_local(async move {
@@ -176,7 +186,7 @@ fn review(props: &ReviewProps) -> Html {
                         return Err("Review closed.");
                     }
                     progress.set(Some(if approve {
-                        "Creating secrets…"
+                        "Saving secrets…"
                     } else {
                         "Denying proposal…"
                     }));
@@ -191,7 +201,7 @@ fn review(props: &ReviewProps) -> Html {
                         .await
                         .map_err(|_| "Could not confirm the decision. Checking status…")?;
                     if response.status() == 409 {
-                        return Err("A name is unavailable or the proposal is no longer valid. Edit the name or submit a new proposal.");
+                        return Err("A secret changed or a name is unavailable. Nothing was saved; submit a new set request.");
                     }
                     if !response.ok() {
                         return Err("The decision was not accepted. Check your account and proposal status.");
@@ -233,8 +243,8 @@ fn review(props: &ReviewProps) -> Html {
     let disabled = !pending || progress.is_some() || error.is_some();
     html! {
         <section class="permission-prompt secret-access-request secret-deposit-card" aria-busy={progress.is_some().to_string()}>
-            <strong>{"Create proposed secrets"}</strong>
-            <p class="secret-access-summary">{"Values are encrypted and hidden. Approval creates the entire batch; it does not grant the agent read access."}</p>
+            <strong>{"Set secrets"}</strong>
+            <p class="secret-access-summary">{"Values are encrypted and hidden. Approval saves the entire batch; it does not grant the agent read access."}</p>
             {if let Some(value)=info.as_ref() {html!{
                 <>
                 {for value.items.iter().enumerate().map(|(index,item)| {
@@ -242,8 +252,10 @@ fn review(props: &ReviewProps) -> Html {
                     let onname={let draft=draft.clone(); Callback::from(move |e:InputEvent|{let mut next=(*draft).clone();if let Some(i)=next.get_mut(index){i.name=e.target_unchecked_into::<web_sys::HtmlInputElement>().value();}draft.set(next);})};
                     let ondescription={let draft=draft.clone(); Callback::from(move |e:InputEvent|{let mut next=(*draft).clone();if let Some(i)=next.get_mut(index){i.description=e.target_unchecked_into::<web_sys::HtmlInputElement>().value();}draft.set(next);})};
                     html!{<div class="secret-deposit-item">
+                        <strong class="secret-deposit-operation">{if let Some(update)=&item.update {format!("Update version {} to {}",update.version,update.version.saturating_add(1))}else{"Create new secret".to_string()}}</strong>
+                        {if item.update.is_some() {html!{<p>{"Existing sharing is retained."}</p>}}else{Html::default()}}
                         <label>{if item.namespace==SecretNamespace::Personal {"Personal secret"} else {"Organization secret (all members can read/use)"}}
-                            <input value={edit.name} oninput={onname} disabled={!pending || progress.is_some()} maxlength="128"/>
+                            <input value={edit.name} oninput={onname} disabled={!pending || progress.is_some() || item.update.is_some()} maxlength="128"/>
                         </label>
                         <label>{"Description"}<input value={edit.description} oninput={ondescription} disabled={!pending || progress.is_some()} maxlength="2048"/></label>
                         {for item.recipients.iter().map(|recipient| {

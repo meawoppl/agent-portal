@@ -350,7 +350,16 @@ pub struct SecretDepositRecipient {
     pub email: String,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SecretDepositUpdate {
+    pub version_id: Uuid,
+    pub version: i32,
+    pub generation: i64,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SecretDepositItem {
+    /// Absent for old create-only proposals; pins the exact update target.
+    #[serde(default)]
+    pub update: Option<SecretDepositUpdate>,
     pub secret_id: Uuid,
     pub version_id: Uuid,
     pub namespace: SecretNamespace,
@@ -369,6 +378,9 @@ pub struct SecretDepositInfo {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SecretDepositDecision {
     pub approve: bool,
+    /// Explicitly acknowledge every replacement; older create-only UIs fail closed.
+    #[serde(default)]
+    pub confirm_updates: Vec<Uuid>,
     /// Optional owner edits, in original item order. Recipient IDs may only be removed.
     pub items: Option<Vec<SecretDepositEdit>>,
 }
