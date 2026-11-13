@@ -6,6 +6,7 @@ mod health_timer;
 mod hooks;
 mod linked_credentials;
 mod linked_media;
+mod notification_launch;
 mod notification_sound;
 mod pages;
 mod portal_client;
@@ -132,6 +133,7 @@ fn app() -> Html {
         <federation::FederationProvider>
             <hooks::ClientWebSocketProvider>
             <BrowserRouter>
+                <notification_launch::NotificationLaunch />
                 <Switch<Route> render={switch} />
                 <HealthTimerReminder />
             </BrowserRouter>
