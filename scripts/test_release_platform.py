@@ -3,6 +3,7 @@
 import contextlib
 import copy
 import hashlib
+import io
 import importlib.util
 import json
 import os
@@ -74,6 +75,12 @@ class PublicationTests(unittest.TestCase):
                     (root / name).write_bytes(b"rebuilt")
                 m.publish("owner/repo", sha, "linux-x86_64", root)
                 self.assertEqual(len(uploads), 3)
+                with patch.object(
+                    m, "channel_advance", return_value=False
+                ), contextlib.redirect_stdout(io.StringIO()) as output:
+                    m.publish("owner/repo", sha, "linux-x86_64", root)
+                self.assertIn("READY_PLATFORM_SKIPPED", output.getvalue())
+                self.assertNotIn("READY_PLATFORM_SECONDS", output.getvalue())
 
     def test_manifest_rejects_missing_or_corrupt_pair(self):
         with tempfile.TemporaryDirectory() as directory:
