@@ -46,6 +46,10 @@ Only a missing readiness ref permits the migration fallback to `latest`.
 
 ## Existing clients and installers
 
+Before merging this workflow change, let older Release runs finish: those older
+workflow definitions do not participate in the new publisher serialization or
+ancestry guard and could otherwise overwrite the compatibility release.
+
 The existing install script continues to bootstrap from the **complete** `latest`
 release; it never attempts a partially populated release. Its first normal
 launcher startup checks the platform-ready channel once the bootstrap binary

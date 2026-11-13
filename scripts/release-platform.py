@@ -197,7 +197,10 @@ def publish(repo, sha, platform, directory):
                 "-",
                 input=json.dumps({"draft": False, "make_latest": "false"}),
             )
-        channel_advance(repo, platform, sha)
+        advanced = channel_advance(repo, platform, sha)
+    if not advanced:
+        print(f"READY_PLATFORM_SKIPPED= superseded platform={platform} commit={sha}")
+        return
     elapsed = time.monotonic() - started
     print(f"READY_PLATFORM_SECONDS={elapsed:.3f} platform={platform} commit={sha}")
     if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
