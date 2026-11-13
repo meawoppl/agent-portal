@@ -24,7 +24,12 @@ for path in sorted(a.artifacts.glob("native-benchmark-*/results.json")):
 
     initial = scenarios.get("initial", {})
     cache = path.parent / "cache-size.txt"
-    retained = int(cache.read_text().split()[0]) / 2**20 if cache.exists() else None
+    retained = data.get("local_cache", {}).get("retained_bytes")
+    retained = (
+        retained / 2**20
+        if retained is not None
+        else (int(cache.read_text().split()[0]) / 2**20 if cache.exists() else None)
+    )
     print(
         f"| {path.parent.name.removeprefix('native-benchmark-')} | {bool(data['cache_hit'])} | {elapsed('initial')} | {elapsed('unchanged')} | {elapsed('backend-edit')} | {elapsed('frontend-edit')} | {initial.get('binary_bytes',0)/2**20:.2f} | {retained if retained is not None else 'INCOMPLETE'} |"
     )

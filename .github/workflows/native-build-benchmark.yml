@@ -2,6 +2,11 @@ name: Native Build Benchmark
 
 on:
   workflow_dispatch:
+    inputs:
+      frontend_run_id:
+        description: Optional successful benchmark run whose frontend artifact should be reused
+        required: false
+        default: ''
   pull_request:
     types: [labeled, synchronize]
 
@@ -11,6 +16,7 @@ concurrency:
   cancel-in-progress: true
 permissions:
   contents: read
+  actions: read
 
 jobs:
   frontend:
@@ -20,12 +26,23 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Reuse an existing optimized frontend fixture
+        if: inputs.frontend_run_id != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: benchmark-frontend
+          path: frontend/dist
+          run-id: ${{ inputs.frontend_run_id }}
+          github-token: ${{ github.token }}
       - uses: ./.github/actions/setup-rust
+        if: inputs.frontend_run_id == ''
         with:
           cache-key: native-benchmark-frontend
           targets: wasm32-unknown-unknown
           trunk: 'true'
       - name: Measure unchanged optimized WASM pipeline
+        if: inputs.frontend_run_id == ''
         shell: bash
         run: |
           mkdir -p benchmark-results
@@ -34,6 +51,12 @@ jobs:
           cd frontend
           /usr/bin/time -v trunk build --release --verbose > ../benchmark-results/frontend-build.log 2>&1
           du -sb dist >> ../benchmark-results/frontend-environment.txt
+      - name: Record reused frontend provenance
+        if: inputs.frontend_run_id != ''
+        run: |
+          mkdir -p benchmark-results
+          printf 'frontend_artifact_run=%s\n' '${{ inputs.frontend_run_id }}' > benchmark-results/frontend-environment.txt
+          du -sb frontend/dist >> benchmark-results/frontend-environment.txt
       - uses: actions/upload-artifact@v7
         with:
           name: benchmark-frontend
@@ -105,52 +128,21 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: dtolnay/rust-toolchain@1.96.0
       - name: Install native dependencies
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler libpq-dev
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler libpq-dev zstd
       - uses: actions/download-artifact@v8
         with:
           name: benchmark-frontend
           overwrite: true
           path: frontend/dist
-      - name: Compute compatible cache namespace
-        id: key
-        shell: bash
-        run: |
-          toolchain="$(rustc -Vv | sha256sum | cut -d' ' -f1)"
-          # Profile, flags (fixed above), architecture, dependencies, and the
-          # benchmark implementation are compatibility boundaries. Source SHA
-          # and run attempt are save-only suffixes, so immutable entries do not
-          # trap later compatible builds behind a stale exact hit.
-          echo "prefix=native-experiment-v1-ubuntu24-${RUNNER_ARCH}-${toolchain}-${{ matrix.name }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml', '.cargo/**', 'scripts/benchmarks/native-build.py') }}" >> "$GITHUB_OUTPUT"
-      - name: Restore retained native artifacts
-        id: cache
-        uses: actions/cache/restore@v4
-        with:
-          path: benchmark-target
-          key: ${{ steps.key.outputs.prefix }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: ${{ steps.key.outputs.prefix }}-
-      - name: Benchmark native profile
-        run: python3 scripts/benchmarks/native-build.py --disposable-checkout --output benchmark-results --cache-hit '${{ steps.cache.outputs.cache-matched-key }}'
-      - name: Match dependency-only retention for non-incremental variants
-        if: matrix.incremental != 'true'
-        shell: bash
-        run: |
-          # cargo clean -p removes workspace outputs, leaving third-party
-          # dependencies. Incremental variants retain the whole target tree.
-          python3 - <<'PY'
-          import json, subprocess
-          m=json.loads(subprocess.check_output(['cargo','metadata','--no-deps','--format-version=1']))
-          names=[p['name'] for p in m['packages'] if p['id'] in m['workspace_members']]
-          subprocess.run(['cargo','clean','--release']+[v for n in names for v in ['-p',n]],check=True)
-          PY
-      - name: Record retained cache size
-        run: du -sb benchmark-target > benchmark-results/cache-size.txt
-      - name: Save source-aware native artifacts
-        uses: actions/cache/save@v4
-        with:
-          path: benchmark-target
-          key: ${{ steps.key.outputs.prefix }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+      # Shared cache storage is already at its 10GB limit. These runners
+      # measure local zstd retention/restoration without evicting production
+      # caches or silently increasing billed storage. Network transfer cost
+      # remains unmeasured until there is explicit cache headroom.
+      - name: Benchmark native profile and local retained artifacts
+        run: python3 scripts/benchmarks/native-build.py --disposable-checkout --local-cache-roundtrip --retention '${{ matrix.incremental == 'true' && 'workspace' || 'dependencies' }}' --output benchmark-results
       - uses: actions/upload-artifact@v7
         if: always()
         with:

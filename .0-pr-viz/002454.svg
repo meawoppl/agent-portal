@@ -23,14 +23,14 @@
 <text x="1080" y="355" font-family="sans-serif" font-size="24" fill="#c0caf5">Fat/z versus Thin/z, Thin/2 and Thin/3</text>
 <text x="1080" y="390" font-family="sans-serif" font-size="24" fill="#c0caf5">Thin/3 incremental isolates retention effects</text>
 <rect x="1055" y="535" width="880" height="205" rx="14" fill="#1e202e" stroke="#9ece6a"/>
-<text x="1080" y="577" font-family="sans-serif" font-size="28" fill="#9ece6a">Source-aware cache experiments</text>
-<text x="1080" y="620" font-family="sans-serif" font-size="24" fill="#c0caf5">Toolchain, target, profile and dependencies keyed</text>
-<text x="1080" y="655" font-family="sans-serif" font-size="24" fill="#c0caf5">Compatible restore prefix; unique source saves</text>
-<text x="1080" y="690" font-family="sans-serif" font-size="24" fill="#c0caf5">Measure restore/save duration and retained bytes</text>
+<text x="1080" y="577" font-family="sans-serif" font-size="28" fill="#9ece6a">Quota-safe local archive experiment</text>
+<text x="1080" y="620" font-family="sans-serif" font-size="24" fill="#c0caf5">Record target, profile and dependency identity</text>
+<text x="1080" y="655" font-family="sans-serif" font-size="24" fill="#c0caf5">Archive/restore; rebuild after a new git commit</text>
+<text x="1080" y="690" font-family="sans-serif" font-size="24" fill="#c0caf5">Measure compression, restore time and bytes</text>
 <rect x="1055" y="800" width="880" height="205" rx="14" fill="#1e202e" stroke="#9ece6a"/>
 <text x="1080" y="842" font-family="sans-serif" font-size="28" fill="#9ece6a">Rebuild and correctness evidence</text>
 <text x="1080" y="885" font-family="sans-serif" font-size="24" fill="#c0caf5">Cold/restored, unchanged, backend and dist edits</text>
 <text x="1080" y="920" font-family="sans-serif" font-size="24" fill="#c0caf5">Cargo timings, binary size and HTTP identity</text>
 <text x="1080" y="955" font-family="sans-serif" font-size="24" fill="#c0caf5">Production profiles stay unchanged until reviewed</text>
-<text x="55" y="1172" font-family="sans-serif" font-size="22" fill="#a9b1d6">Scope: the HTTP sample is a smoke comparison, not production load. Cache pruning approximates dependency-only retention.</text>
+<text x="55" y="1172" font-family="sans-serif" font-size="22" fill="#a9b1d6">Scope: HTTP is a smoke comparison. Network transfer costs remain unmeasured because shared cache storage is full.</text>
 </svg>

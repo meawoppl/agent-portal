@@ -88,7 +88,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--disposable-checkout", action="store_true", required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--cache-hit", default="false")
+    parser.add_argument("--local-cache-roundtrip", action="store_true")
+    parser.add_argument(
+        "--retention", choices=["workspace", "dependencies"], default="dependencies"
+    )
     args = parser.parse_args()
     os.chdir(ROOT)
     output = args.output.resolve()
@@ -109,7 +112,8 @@ def main():
         "rustc": command("rustc", "-Vv"),
         "cargo": command("cargo", "-V"),
         "runner_image": os.environ.get("ImageVersion"),
-        "cache_hit": args.cache_hit,
+        "cache_hit": False,
+        "retention": args.retention,
         "settings": {
             k: v
             for k, v in env.items()
@@ -199,6 +203,83 @@ def main():
         build("frontend-edit")
         frontend.unlink()
         build("restore-frontend")
+        if args.local_cache_roundtrip:
+            # Deletion is confined to this harness's disposable target tree;
+            # refuse a caller's shared/custom target directory.
+            assert (
+                target == ROOT / "benchmark-target"
+            ), "roundtrip requires isolated benchmark-target"
+            if args.retention == "dependencies":
+                packages = json.loads(
+                    command("cargo", "metadata", "--no-deps", "--format-version=1")
+                )
+                names = [
+                    p["name"]
+                    for p in packages["packages"]
+                    if p["id"] in packages["workspace_members"]
+                ]
+                subprocess.run(
+                    ["cargo", "clean", "--release"]
+                    + [arg for name in names for arg in ("-p", name)],
+                    cwd=ROOT,
+                    env=env,
+                    check=True,
+                )
+            retained = bytes_under(target)
+            archive = ROOT / "native-benchmark-cache.tar.zst"
+            assert not archive.exists(), "refusing to overwrite an existing archive"
+            started = time.monotonic()
+            subprocess.run(
+                [
+                    "tar",
+                    "--zstd",
+                    "-cf",
+                    str(archive),
+                    "-C",
+                    str(ROOT),
+                    "benchmark-target",
+                ],
+                check=True,
+            )
+            compression = time.monotonic() - started
+            compressed = archive.stat().st_size
+            shutil.rmtree(target)
+            started = time.monotonic()
+            subprocess.run(
+                ["tar", "--zstd", "-xf", str(archive), "-C", str(ROOT)], check=True
+            )
+            restoration = time.monotonic() - started
+            archive.unlink()
+            # A real HEAD change forces fresh artifact identity, unlike an
+            # in-place source edit. No source files or user index are staged.
+            assert not command(
+                "git", "diff", "--cached", "--name-only"
+            ), "checkout index must be clean"
+            subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "user.name=Native Benchmark",
+                    "-c",
+                    "user.email=benchmark@example.invalid",
+                    "commit",
+                    "--allow-empty",
+                    "-m",
+                    "Benchmark source-identical identity change",
+                ],
+                cwd=ROOT,
+                check=True,
+            )
+            metadata["local_cache"] = {
+                "retained_bytes": retained,
+                "compressed_bytes": compressed,
+                "compression_seconds": compression,
+                "restoration_seconds": restoration,
+                "restored_commit": command("git", "rev-parse", "HEAD"),
+                "network_transfer_measured": False,
+            }
+            (output / "results.json").write_text(json.dumps(metadata, indent=2))
+            build("restored-new-commit")
     finally:
         backend.write_bytes(original)
         frontend.unlink(missing_ok=True)
