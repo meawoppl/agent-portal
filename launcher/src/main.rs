@@ -1,8 +1,8 @@
-pub(crate) const BUILD_INFO: shared::build_info::BuildInfo = shared::build_info!();
-
 // Ratchet for the workspace unwrap/expect deny (#1165 item 8): this crate
 // still has production unwrap/expect; remove this allow as it is cleaned.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+pub(crate) const BUILD_INFO: shared::build_info::BuildInfo = shared::build_info!();
 
 mod config;
 mod connection;
