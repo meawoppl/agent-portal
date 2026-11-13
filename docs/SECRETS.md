@@ -66,7 +66,7 @@ rotate the provider credential.
 
 ## Versions and deletion
 
-In Settings → Secrets, click **Check Portal access** before the inventory loads. Secrets are sorted by name across Personal and Organization scopes. Select a name to expand its details and actions directly below that row; select it again to collapse. **Show deleted secrets** adds deleted entries to the same list.
+In Settings → Secrets, click **Check Portal access** before the inventory loads. Secrets initially sort by name across Personal and Organization scopes. Click any column heading to sort in either direction; Reference and Shared with are inventory columns. Dates appear in the expanded version history. Select a name to expand its details and actions directly below that row; select it again to collapse. **Show deleted secrets** adds deleted entries to the same list.
 
 Every replacement appends an encrypted immutable version and advances the current pointer. Older encrypted versions remain retained; metadata is available in the web UI and agent requests can explicitly pin a version. The web page shows version metadata only. Select an active secret and use **Copy secret** after verifying the Portal session to copy its displayed current version. The server requires read permission, the browser-bound verification cookie and same-origin CSRF headers, and rechecks authorization after asynchronous decryption and reader registration. Copy never renders the value in the page or stores it in component state; success appears only after the clipboard write completes. Browser clipboard permission is also required. Clipboard contents may persist or be synchronized by the operating system; revocation cannot recall a copied value. The retired CLI read endpoint grants no access to any caller.
 
