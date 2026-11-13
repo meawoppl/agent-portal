@@ -92,6 +92,40 @@ fn parked_instruction(reason: ParkedReason) -> &'static str {
     }
 }
 
+/// The registration sent on every control-socket connection. Keep the real
+/// wire declaration testable: child-spawn requests are gated on this frame,
+/// independently of whether the local CLI exposes `session start`.
+fn registration(
+    launcher_id: Uuid,
+    launcher_name: &str,
+    auth_token: Option<String>,
+) -> LauncherToServer {
+    LauncherToServer::LauncherRegister {
+        protocol_version: Some(shared::protocol::PROTOCOL_VERSION),
+        launcher_id,
+        launcher_name: launcher_name.to_string(),
+        auth_token,
+        hostname: claude_session_lib::hostname_or_unknown(),
+        version: Some(crate::BUILD_INFO.version.to_string()),
+        working_directory: std::env::current_dir()
+            .ok()
+            .map(|p| p.to_string_lossy().to_string()),
+        capabilities: vec![
+            shared::LAUNCHER_CAPABILITY_SESSION_PLUGINS.to_string(),
+            shared::LAUNCHER_CAPABILITY_PLUGINS.to_string(),
+            shared::LAUNCHER_CAPABILITY_CREATE_WORKTREE.to_string(),
+            shared::LAUNCHER_CAPABILITY_SCRATCH_WORKTREE.to_string(),
+            shared::LAUNCHER_CAPABILITY_CLI_SPAWN.to_string(),
+            shared::LAUNCHER_CAPABILITY_FORK_SESSION.to_string(),
+            shared::LAUNCHER_CAPABILITY_IMPORT_CODEX.to_string(),
+            shared::LAUNCHER_CAPABILITY_RESTORE_SESSION.to_string(),
+            shared::LAUNCHER_CAPABILITY_HISTORY_RESTORE.to_string(),
+            shared::LAUNCHER_CAPABILITY_RESTART.to_string(),
+            shared::LAUNCHER_CAPABILITY_HEARTBEAT_ACK.to_string(),
+        ],
+    }
+}
+
 pub async fn run_launcher_loop(
     backend_url: &str,
     launcher_id: Uuid,
@@ -137,29 +171,7 @@ pub async fn run_launcher_loop(
                 let (mut ws_sender, mut ws_receiver) = conn.split();
 
                 // Send registration
-                let register = LauncherToServer::LauncherRegister {
-                    protocol_version: Some(shared::protocol::PROTOCOL_VERSION),
-                    launcher_id,
-                    launcher_name: launcher_name.to_string(),
-                    auth_token: auth_token.clone(),
-                    hostname: claude_session_lib::hostname_or_unknown(),
-                    version: Some(crate::BUILD_INFO.version.to_string()),
-                    working_directory: std::env::current_dir()
-                        .ok()
-                        .map(|p| p.to_string_lossy().to_string()),
-                    capabilities: vec![
-                        shared::LAUNCHER_CAPABILITY_SESSION_PLUGINS.to_string(),
-                        shared::LAUNCHER_CAPABILITY_PLUGINS.to_string(),
-                        shared::LAUNCHER_CAPABILITY_CREATE_WORKTREE.to_string(),
-                        shared::LAUNCHER_CAPABILITY_SCRATCH_WORKTREE.to_string(),
-                        shared::LAUNCHER_CAPABILITY_FORK_SESSION.to_string(),
-                        shared::LAUNCHER_CAPABILITY_IMPORT_CODEX.to_string(),
-                        shared::LAUNCHER_CAPABILITY_RESTORE_SESSION.to_string(),
-                        shared::LAUNCHER_CAPABILITY_HISTORY_RESTORE.to_string(),
-                        shared::LAUNCHER_CAPABILITY_RESTART.to_string(),
-                        shared::LAUNCHER_CAPABILITY_HEARTBEAT_ACK.to_string(),
-                    ],
-                };
+                let register = registration(launcher_id, launcher_name, auth_token.clone());
                 if ws_sender.send(register).await.is_err() {
                     warn!("Failed to send registration");
                     tokio::time::sleep(backoff).await;
@@ -431,6 +443,22 @@ pub async fn run_launcher_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn registration_wire_advertises_policy_gated_child_spawn() {
+        // Exercise the actual registration producer rather than a hand-built
+        // backend fixture: the CLI existed while the daemon omitted this flag.
+        let wire = serde_json::to_value(registration(Uuid::nil(), "test", None)).unwrap();
+        assert_eq!(wire["type"], "LauncherRegister");
+        assert!(
+            wire["capabilities"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|flag| flag.as_str() == Some("launcher.cli_spawn")),
+            "backend child spawning rejects a launcher without launcher.cli_spawn"
+        );
+    }
 
     #[test]
     fn classify_fatal_prefers_machine_readable_reason() {
