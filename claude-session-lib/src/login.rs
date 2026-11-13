@@ -23,7 +23,7 @@ use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use claude_codes::auth::{LoginFlow, LoginMode};
+use claude_codes::auth::{AuthStatus, LoginFlow, LoginMode, LoginOutcome};
 use shared::{AgentLoginOutcome, LoginInteraction, LoginPresentable};
 
 /// Wait for the CLI to emit its OAuth URL after start.
@@ -35,9 +35,8 @@ const LOGIN_WAIT: Duration = Duration::from_secs(300);
 const APPROVAL_POLL_WAIT: Duration = Duration::from_secs(4);
 /// Wait for the CLI to settle after a code submission.
 const SUBMIT_TIMEOUT: Duration = Duration::from_secs(60);
-/// Longest failure detail we relay — enough of the CLI transcript to diagnose,
-/// bounded so a runaway TUI dump doesn't flood the UI.
-const MESSAGE_TAIL: usize = 400;
+/// Bound the final status check so a stuck CLI cannot strand the login worker.
+const STATUS_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// A parked claude login flow, driven on a worker thread.
 pub struct ClaudeLoginSession {
@@ -140,14 +139,14 @@ fn run_flow(
     let mut flow = match LoginFlow::start(LoginMode::ClaudeAi) {
         Ok(flow) => flow,
         Err(e) => {
-            let _ = url_tx.send(Err(e.to_string()));
+            let _ = url_tx.send(Err(login_error_message(&e).to_owned()));
             return;
         }
     };
     let url = match flow.auth_url(AUTH_URL_TIMEOUT) {
         Ok(url) => url,
         Err(e) => {
-            let _ = url_tx.send(Err(e.to_string()));
+            let _ = url_tx.send(Err(login_error_message(&e).to_owned()));
             return;
         }
     };
@@ -177,26 +176,92 @@ fn run_flow(
             Err(error) => break Err(error),
         }
     };
-    let outcome = match result {
-        Ok(out) if out.credentials_updated => AgentLoginOutcome {
-            done: true,
-            success: true,
-            message: None,
-        },
-        Ok(out) => failed(&transcript_tail(&out.transcript)),
-        Err(e) => {
-            let mut message = e.to_string();
-            if matches!(e, claude_codes::Error::CodeRejected { .. }) {
-                // Every rejection looks the same to us, and a code that is
-                // expired, reused, or from an earlier window is only one of
-                // several causes; naming one sent users down the wrong path
-                // when the real fault was elsewhere. Say what to do, not why.
-                message.push_str(" — start a new sign-in and paste the new code.");
+    let _ = outcome_tx.send(login_outcome(result, verified_status));
+}
+
+/// Clean exit is not proof of login, and success-looking transcript text is
+/// never authentication evidence. File-only SDK detection can miss credentials
+/// stored elsewhere; confirm the CLI's typed subscription status instead.
+/// Upstream tracking: rust-code-agent-sdks#559.
+fn login_outcome(
+    result: claude_codes::Result<LoginOutcome>,
+    verify: impl FnOnce() -> Option<AuthStatus>,
+) -> AgentLoginOutcome {
+    match result {
+        Ok(out) if out.credentials_updated => succeeded(),
+        Ok(_) | Err(claude_codes::Error::LoginChildExited { code: Some(0), .. }) => {
+            match verify() {
+                Some(status) if status.logged_in && status.auth_method.as_deref() == Some("claude.ai") => succeeded(),
+                Some(status) if !status.logged_in => failed(
+                    "Claude finished, but still reports that it is signed out. Start a new sign-in.",
+                ),
+                _ => failed(
+                    "Claude finished, but its subscription sign-in could not be verified. Check Claude's sign-in status on this computer, then try again.",
+                ),
             }
-            failed(&message)
         }
-    };
-    let _ = outcome_tx.send(outcome);
+        Err(error) => failed(login_error_message(&error)),
+    }
+}
+
+fn succeeded() -> AgentLoginOutcome {
+    AgentLoginOutcome {
+        done: true,
+        success: true,
+        message: None,
+    }
+}
+
+/// Use the SDK's typed response, with a process deadline and kill-on-drop.
+/// SDK auth_status is synchronous and has no timeout. Never relay stdout,
+/// stderr or parser errors: login output can contain OAuth URLs and tokens.
+fn verified_status() -> Option<AuthStatus> {
+    verified_status_with_binary(std::ffi::OsStr::new("claude"), STATUS_TIMEOUT)
+}
+
+fn verified_status_with_binary(binary: &std::ffi::OsStr, timeout: Duration) -> Option<AuthStatus> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .ok()?;
+    runtime.block_on(async {
+        let output = tokio::time::timeout(
+            timeout,
+            tokio::process::Command::new(binary)
+                .args(["auth", "status", "--json"])
+                .kill_on_drop(true)
+                .output(),
+        )
+        .await
+        .ok()?
+        .ok()?;
+        // Logged-out status is valid JSON even when the command exits nonzero.
+        let status: AuthStatus = serde_json::from_slice(&output.stdout).ok()?;
+        if status.logged_in && !output.status.success() {
+            return None;
+        }
+        Some(status)
+    })
+}
+
+/// SDK errors retain diagnostic transcripts. Only these fixed, actionable
+/// messages may cross the launcher boundary into the UI or server logs.
+fn login_error_message(error: &claude_codes::Error) -> &'static str {
+    match error {
+        claude_codes::Error::CodeRejected { .. } => {
+            "Claude rejected the sign-in code. Start a new sign-in and use the new code."
+        }
+        claude_codes::Error::LoginTimeout { .. } | claude_codes::Error::Timeout => {
+            "Timed out waiting for Claude sign-in. Start a new sign-in and try again."
+        }
+        claude_codes::Error::LoginChildExited { .. } => {
+            "Claude exited before sign-in could be confirmed. Start a new sign-in and try again."
+        }
+        claude_codes::Error::BinaryNotFound { .. } => {
+            "Claude is not available on this computer. Install it before signing in."
+        }
+        _ => "Could not complete Claude sign-in. Try again on this computer.",
+    }
 }
 
 fn failed(message: &str) -> AgentLoginOutcome {
@@ -205,12 +270,6 @@ fn failed(message: &str) -> AgentLoginOutcome {
         success: false,
         message: Some(message.to_string()),
     }
-}
-
-/// Keep the tail of a CLI transcript for a failure message — the end carries
-/// the error, and it's char-safe against multi-byte output.
-fn transcript_tail(transcript: &str) -> String {
-    shared::strings::tail_with_ellipsis(transcript.trim(), MESSAGE_TAIL)
 }
 
 #[cfg(test)]
@@ -285,13 +344,119 @@ mod tests {
         ));
     }
 
+    fn status(logged_in: bool, method: &str) -> AuthStatus {
+        AuthStatus {
+            logged_in,
+            auth_method: Some(method.into()),
+            api_provider: None,
+            email: None,
+            org_id: None,
+            org_name: None,
+            subscription_type: None,
+            extra: Default::default(),
+        }
+    }
+
+    fn exited(code: u32) -> claude_codes::Result<LoginOutcome> {
+        Err(claude_codes::Error::LoginChildExited {
+            code: Some(code),
+            transcript: "https://example.invalid/oauth?code=SENSITIVE Login successful.".into(),
+        })
+    }
+
     #[test]
-    fn transcript_tail_keeps_the_end_and_is_char_safe() {
-        assert_eq!(transcript_tail("  short  "), "short");
-        let long = "é".repeat(MESSAGE_TAIL + 50);
-        let tail = transcript_tail(&long);
-        assert!(tail.starts_with('…'));
-        assert_eq!(tail.chars().count(), MESSAGE_TAIL + 1);
+    fn clean_exit_requires_verified_subscription_status() {
+        assert!(login_outcome(exited(0), || Some(status(true, "claude.ai"))).success);
+        for verified in [
+            None,
+            Some(status(false, "claude.ai")),
+            Some(status(true, "console")),
+            Some(status(true, "api_key")),
+        ] {
+            let outcome = login_outcome(exited(0), || verified);
+            assert!(outcome.done && !outcome.success);
+            let message = outcome.message.unwrap();
+            assert!(!message.contains("SENSITIVE"));
+            assert!(!message.contains("Login successful"));
+        }
+    }
+
+    #[test]
+    fn failed_exit_does_not_accept_preexisting_login_or_success_text() {
+        let outcome = login_outcome(exited(1), || {
+            panic!("must not query existing credentials after failure")
+        });
+        assert!(outcome.done && !outcome.success);
+        assert!(!outcome.message.unwrap().contains("SENSITIVE"));
+    }
+
+    #[test]
+    fn sdk_failures_never_relay_authentication_transcripts() {
+        for error in [
+            claude_codes::Error::LoginTimeout {
+                transcript: "secret-url".into(),
+            },
+            claude_codes::Error::CodeRejected {
+                message: "secret-code".into(),
+            },
+            claude_codes::Error::Unknown("secret-token".into()),
+            claude_codes::Error::BinaryNotFound {
+                name: "secret-path".into(),
+            },
+        ] {
+            let message = login_error_message(&error);
+            assert!(!message.contains("secret-"));
+            assert!(!message.is_empty());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn status_check_uses_typed_json_and_bounds_the_child_lifetime() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let binary = dir.path().join("claude-fixture");
+        for (body, expected) in [
+            (
+                r#"printf '%s' '{"loggedIn":true,"authMethod":"claude.ai"}'"#,
+                Some(true),
+            ),
+            (r#"printf '%s' '{"loggedIn":false}'; exit 1"#, Some(false)),
+            (
+                r#"printf '%s' '{"loggedIn":true,"authMethod":"claude.ai"}'; exit 1"#,
+                None,
+            ),
+            ("printf 'Login successful. secret-url'", None),
+            ("exec sleep 30", None),
+        ] {
+            std::fs::write(&binary, format!("#!/bin/sh\n{body}\n")).unwrap();
+            std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let start = Instant::now();
+            let timeout = if body == "exec sleep 30" {
+                Duration::from_millis(100)
+            } else {
+                Duration::from_secs(2)
+            };
+            let status = verified_status_with_binary(binary.as_os_str(), timeout);
+            assert_eq!(status.map(|s| s.logged_in), expected);
+            assert!(start.elapsed() < Duration::from_secs(3));
+        }
+    }
+
+    #[test]
+    fn observed_credential_update_keeps_the_existing_success_path() {
+        let outcome = LoginOutcome {
+            token: None,
+            token_source: None,
+            credentials_updated: true,
+            osc52: claude_codes::auth::Osc52Status::Absent,
+            copy_nudge_sent: false,
+            transcript: "secret-url".into(),
+        };
+        assert_eq!(
+            login_outcome(Ok(outcome), || panic!("already confirmed")),
+            succeeded()
+        );
     }
 
     #[test]

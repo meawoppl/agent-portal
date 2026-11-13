@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2467 · Confirm clean Claude sign-in completion</text>
+<text x="55" y="110" font-family="sans-serif" font-size="34" fill="#e6e9f5">A clean login exit now gets a typed status check before it is called a failure.</text>
+<text x="55" y="153" font-family="sans-serif" font-size="30" fill="#e6e9f5">OAuth transcripts stay out of the error message; verified sign-in settles normally.</text>
+<path d="M55 180 H1945 M1000 200 V1125" stroke="#565f89" stroke-width="2"/>
+<text x="70" y="235" font-family="sans-serif" font-size="24" fill="#f7768e">BEFORE</text>
+<text x="1070" y="235" font-family="sans-serif" font-size="24" fill="#9ece6a">AFTER</text>
+<rect x="70" y="285" width="830" height="200" rx="14" fill="#1e202e" stroke="#7aa2f7" stroke-width="2"/>
+<text x="95" y="330" font-family="sans-serif" font-size="28" fill="#7aa2f7">LoginFlow: clean exit, no file update</text>
+<text x="95" y="375" font-family="sans-serif" font-size="24" fill="#c0caf5">CLI prints Login successful and exits 0.</text>
+<text x="95" y="410" font-family="sans-serif" font-size="24" fill="#c0caf5">File-only detection returns LoginChildExited.</text>
+<rect x="1070" y="285" width="830" height="200" rx="14" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1095" y="330" font-family="sans-serif" font-size="28" fill="#9ece6a">login_outcome: inspect typed result</text>
+<text x="1095" y="375" font-family="sans-serif" font-size="24" fill="#c0caf5">Credentials updated: preserve success path.</text>
+<text x="1095" y="410" font-family="sans-serif" font-size="24" fill="#c0caf5">Clean exit: verify; failed exit: safe error.</text>
+<rect x="70" y="565" width="830" height="200" rx="14" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="95" y="610" font-family="sans-serif" font-size="28" fill="#f7768e">Adapter forwards SDK error text</text>
+<text x="95" y="655" font-family="sans-serif" font-size="24" fill="#c0caf5">No independent auth-status verification.</text>
+<text x="95" y="690" font-family="sans-serif" font-size="24" fill="#c0caf5">Raw transcript includes the authorization URL.</text>
+<rect x="1070" y="565" width="830" height="200" rx="14" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1095" y="610" font-family="sans-serif" font-size="28" fill="#9ece6a">claude auth status --json</text>
+<text x="1095" y="655" font-family="sans-serif" font-size="24" fill="#c0caf5">AuthStatus: logged_in and claude.ai required.</text>
+<text x="1095" y="690" font-family="sans-serif" font-size="24" fill="#c0caf5">Five-second deadline; kill child on timeout.</text>
+<rect x="70" y="845" width="830" height="200" rx="14" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="95" y="890" font-family="sans-serif" font-size="28" fill="#f7768e">Contradictory error dialog</text>
+<text x="95" y="935" font-family="sans-serif" font-size="24" fill="#c0caf5">Sign-in failed ... Login successful.</text>
+<text x="95" y="970" font-family="sans-serif" font-size="24" fill="#c0caf5">Rust exit-code formatting and CLI output.</text>
+<rect x="1070" y="845" width="830" height="200" rx="14" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1095" y="890" font-family="sans-serif" font-size="28" fill="#9ece6a">Verified outcome or concise guidance</text>
+<text x="1095" y="935" font-family="sans-serif" font-size="24" fill="#c0caf5">Verified subscription: normal success and refresh.</text>
+<text x="1095" y="970" font-family="sans-serif" font-size="24" fill="#c0caf5">Unconfirmed: actionable text, no raw transcript.</text>
+<path d="M485 495 v45 m-8 -10 l8 10 l8 -10" fill="none" stroke="#565f89" stroke-width="3"/>
+<path d="M485 775 v45 m-8 -10 l8 10 l8 -10" fill="none" stroke="#565f89" stroke-width="3"/>
+<path d="M1485 495 v45 m-8 -10 l8 10 l8 -10" fill="none" stroke="#565f89" stroke-width="3"/>
+<path d="M1485 775 v45 m-8 -10 l8 10 l8 -10" fill="none" stroke="#565f89" stroke-width="3"/>
+<text x="55" y="1170" font-family="sans-serif" font-size="22" fill="#a9b1d6">Exit 0 or success-looking text alone never proves login. Nonzero failures stay failures. Requires an updated launcher.</text>
+</svg>
