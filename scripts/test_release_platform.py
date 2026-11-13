@@ -27,10 +27,17 @@ class PublicationTests(unittest.TestCase):
         uploads, channels, contents = [], [], {}
 
         def api(path, payload=None):
+            self.assertEqual(
+                path,
+                "repos/owner/repo/releases/1",
+                "drafts must be fetched by ID, not tag",
+            )
             return copy.deepcopy(release)
 
         def run(*args, input=None):
-            if args[:3] == ("gh", "release", "upload"):
+            if args[:3] == ("gh", "release", "view"):
+                return json.dumps({"databaseId": 1})
+            elif args[:3] == ("gh", "release", "upload"):
                 path = Path(args[4])
                 data = path.read_bytes()
                 name = path.name

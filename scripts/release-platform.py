@@ -111,13 +111,22 @@ def channel_advance(repo, channel, sha):
 def prepare(repo, sha):
     tag = f"cli-{sha}"
     found = subprocess.run(
-        ["gh", "api", f"repos/{repo}/releases/tags/{tag}"],
+        [
+            "gh",
+            "release",
+            "view",
+            tag,
+            "--repo",
+            repo,
+            "--json",
+            "databaseId,targetCommitish",
+        ],
         capture_output=True,
         text=True,
     )
     if found.returncode == 0:
         release = json.loads(found.stdout)
-        assert release["target_commitish"] == sha
+        assert release["targetCommitish"] == sha
         return
     api(
         f"repos/{repo}/releases",
@@ -136,7 +145,12 @@ def publish(repo, sha, platform, directory):
     started = time.monotonic()
     tag = f"cli-{sha}"
     manifest_name = f"ready-{platform}.json"
-    release = api(f"repos/{repo}/releases/tags/{tag}")
+    # REST lookup by tag excludes drafts. gh resolves drafts through GraphQL;
+    # subsequent reads by numeric ID work both before and after publication.
+    release_id = json.loads(
+        run("gh", "release", "view", tag, "--repo", repo, "--json", "databaseId")
+    )["databaseId"]
+    release = api(f"repos/{repo}/releases/{release_id}")
     assert release["target_commitish"] == sha
     with tempfile.TemporaryDirectory() as temp:
         manifest_path = Path(temp) / manifest_name
@@ -184,7 +198,7 @@ def publish(repo, sha, platform, directory):
                     )
             manifest_path.write_text(json.dumps(manifest, sort_keys=True) + "\n")
             run("gh", "release", "upload", tag, str(manifest_path), "--repo", repo)
-        release = api(f"repos/{repo}/releases/tags/{tag}")
+        release = api(f"repos/{repo}/releases/{release_id}")
         validate_manifest(manifest, platform, sha, release["assets"])
         if release["draft"]:
             run(
