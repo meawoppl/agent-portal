@@ -83,8 +83,61 @@ pub fn claude_cli_args(
         args.push(transcript_id.to_string());
     }
 
-    args.extend(extra_args.iter().cloned());
+    // A resume or fork means the launcher has already chosen the conversation.
+    // Saved extra args are re-applied on every relaunch, and claude honours the
+    // last `--resume`, so a user's one-time `--resume X --fork-session` would
+    // otherwise rewind every relaunch to X and silently drop all later history.
+    if resume || fork_from.is_some() {
+        let (kept, dropped) = strip_session_selection_args(extra_args);
+        if !dropped.is_empty() {
+            tracing::warn!(
+                session = %session_id,
+                dropped = ?dropped,
+                "Ignoring session-selection args from the saved launch args: the launcher resumes this session's own conversation"
+            );
+        }
+        args.extend(kept);
+    } else {
+        args.extend(extra_args.iter().cloned());
+    }
     args
+}
+
+/// Split `extra_args` into (kept, dropped), dropping the claude flags that pick
+/// which conversation to run: `--resume`/`-r` (optional value), `--continue`/
+/// `-c`, `--fork-session` and `--session-id <id>`, including `--flag=value`.
+fn strip_session_selection_args(extra_args: &[String]) -> (Vec<String>, Vec<String>) {
+    let mut kept = Vec::new();
+    let mut dropped = Vec::new();
+    let mut args = extra_args.iter().peekable();
+    while let Some(arg) = args.next() {
+        let flag = arg.split_once('=').map_or(arg.as_str(), |(flag, _)| flag);
+        let inline_value = arg.contains('=');
+        let takes_value = match flag {
+            "--resume" | "-r" => Some(false),
+            "--session-id" => Some(true),
+            "--continue" | "-c" | "--fork-session" => None,
+            _ => {
+                kept.push(arg.clone());
+                continue;
+            }
+        };
+        dropped.push(arg.clone());
+        if inline_value {
+            continue;
+        }
+        let value_follows = match takes_value {
+            Some(true) => true,
+            Some(false) => args.peek().is_some_and(|next| !next.starts_with('-')),
+            None => false,
+        };
+        if value_follows {
+            if let Some(value) = args.next() {
+                dropped.push(value.clone());
+            }
+        }
+    }
+    (kept, dropped)
 }
 
 /// Spawn the Claude process and return its async client.
@@ -332,6 +385,71 @@ mod tests {
             !args.contains(&portal_id.to_string()),
             "the pre-clear transcript id must not appear at all"
         );
+    }
+
+    /// Saved launch args are re-applied on every relaunch. A one-time
+    /// `--resume X --fork-session` from the first launch must not override the
+    /// conversation the launcher resumes, or each relaunch rewinds to X.
+    #[test]
+    fn resume_drops_saved_session_selection_args() {
+        let portal_id = uuid::Uuid::from_u128(2);
+        let live = uuid::Uuid::from_u128(99);
+        let stale = uuid::Uuid::from_u128(7).to_string();
+        let extra: Vec<String> = [
+            "--resume",
+            &stale,
+            "--fork-session",
+            "--permission-mode",
+            "auto",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let args = claude_cli_args(portal_id, true, Some(live), None, false, &extra);
+
+        assert_eq!(args.iter().filter(|a| *a == "--resume").count(), 1);
+        assert!(!args.contains(&stale));
+        assert!(!args.iter().any(|a| a == "--fork-session"));
+        assert_eq!(
+            &args[args.len() - 4..],
+            ["--resume", &live.to_string(), "--permission-mode", "auto"]
+        );
+    }
+
+    #[test]
+    fn strips_every_session_selection_spelling() {
+        let extra: Vec<String> = [
+            "--model",
+            "opus",
+            "-r",
+            "--continue",
+            "-c",
+            "--session-id",
+            "abc",
+            "--resume=def",
+            "--session-id=ghi",
+            "--verbose",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let (kept, dropped) = strip_session_selection_args(&extra);
+        assert_eq!(kept, ["--model", "opus", "--verbose"]);
+        assert_eq!(dropped.len(), 7);
+    }
+
+    /// A first launch keeps the user's args verbatim: the one-time fork recipe
+    /// still works there, because no conversation exists for the launcher yet.
+    #[test]
+    fn fresh_launch_keeps_user_session_args() {
+        let portal_id = uuid::Uuid::from_u128(2);
+        let extra = vec![
+            "--resume".to_string(),
+            "x".to_string(),
+            "--fork-session".to_string(),
+        ];
+        let args = claude_cli_args(portal_id, false, None, None, false, &extra);
+        assert!(args.ends_with(&extra));
     }
 
     /// The overwhelmingly common case: never cleared, so the portal id still

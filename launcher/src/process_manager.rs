@@ -643,6 +643,7 @@ impl ProcessManager {
             // to, so the next resume opens the live transcript (not the
             // pre-clear one).
             claude_conversation_id_sink: Some(make_claude_conversation_id_sink(session_id)),
+            resume_expectation: Default::default(),
             media_display_sink: Some(make_media_display_sink(session_id)),
             fork_from_session_id: params.fork_from_session_id,
             fork_point_turn_id: params.fork_point_turn_id,
@@ -787,6 +788,29 @@ async fn run_session_task(
         }
     }
     loop {
+        // The mirror image of the pre-flight below. The backend asks for a fresh
+        // start whenever the session has never received input, but a fresh
+        // start reuses the id of the conversation we would resume, so if that
+        // transcript already exists claude rejects `--session-id <id>` and the
+        // session crash-loops. An existing conversation means there is history
+        // to keep: resume it.
+        if !config.resume
+            && config.fork_from_session_id.is_none()
+            && config.agent_type == shared::AgentType::Claude
+            && claude_transcript_status(
+                std::path::Path::new(&config.working_directory),
+                resolved_transcript_id(config.session_id),
+            ) == TranscriptStatus::Present
+        {
+            info!(
+                session = %config.session_id,
+                conversation = %resolved_transcript_id(config.session_id),
+                "Fresh start requested but the conversation already exists; resuming it"
+            );
+            config.resume = true;
+            config.prime_portal_reminder_on_first_input = false;
+        }
+
         // Pre-flight: if we're about to `claude --resume <id>` but the local
         // transcript is gone, claude exits near-instantly and reconcile would
         // relaunch forever. Detect it up front and rotate to a fresh session in
@@ -935,6 +959,14 @@ async fn run_session_task(
         };
         if session_group.is_none() && (limits.high_bytes.is_some() || limits.max_bytes.is_some()) {
             warn!(session_id = %config.session_id, "Memory delegation unsupported for this run; configured session limits are not enforced");
+        }
+        // Whatever this spawn resumes is what claude must report back; the
+        // output forwarder warns in the transcript if it doesn't.
+        let resumed_conversation = (config.resume
+            && config.agent_type == shared::AgentType::Claude)
+            .then(|| resolved_transcript_id(config.session_id));
+        if let Ok(mut expected) = config.resume_expectation.lock() {
+            *expected = resumed_conversation;
         }
         let session_config = SessionConfig {
             runtime_command: session_group.as_ref().map(|group| group.command()),
@@ -1297,6 +1329,7 @@ mod tests {
             scheduled_task_id: None,
             codex_thread_id_sink: None,
             claude_conversation_id_sink: None,
+            resume_expectation: Default::default(),
             media_display_sink: None,
             fork_from_session_id: None,
             fork_point_turn_id: None,

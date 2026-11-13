@@ -425,6 +425,7 @@ async fn main() -> Result<()> {
         context_updates: Default::default(),
         history_restore: None,
         claude_conversation_id_sink: None,
+        resume_expectation: Default::default(),
         // Auto-display needs the launcher's upload credentials; a standalone
         // proxy simply doesn't display images the agent reads.
         media_display_sink: None,
