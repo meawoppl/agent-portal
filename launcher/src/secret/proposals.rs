@@ -9,8 +9,8 @@ use uuid::Uuid;
 use zeroize::Zeroizing;
 
 #[derive(Debug, Args)]
-pub struct ProposeArgs {
-    /// Single new secret, e.g. personal/AWS_ACCESS_KEY_ID.
+pub struct SetArgs {
+    /// Secret to create or update, e.g. personal/AWS_ACCESS_KEY_ID.
     #[arg(conflicts_with_all=["batch_stdin","batch_file"], required_unless_present_any=["batch_stdin","batch_file","status"])]
     reference: Option<Reference>,
     /// Read a single value from stdin without trimming bytes.
@@ -59,7 +59,7 @@ fn parse_batch(bytes: &[u8]) -> anyhow::Result<Vec<SecretDepositInput>> {
     serde_json::from_slice(bytes)
         .map_err(|_| anyhow::anyhow!("Invalid proposal JSON; expected an array of secret objects"))
 }
-fn payload(args: &ProposeArgs) -> anyhow::Result<SecretDepositCreate> {
+fn payload(args: &SetArgs) -> anyhow::Result<SecretDepositCreate> {
     let items = if args.batch_stdin || args.batch_file.is_some() {
         let bytes = if let Some(path) = &args.batch_file {
             from_file(path)?
@@ -71,12 +71,12 @@ fn payload(args: &ProposeArgs) -> anyhow::Result<SecretDepositCreate> {
         let reference = args
             .reference
             .as_ref()
-            .context("Provide a new secret reference")?;
+            .context("Provide a named secret reference")?;
         let (namespace, name) = match reference {
             Reference::Personal(name) => (SecretNamespace::Personal, name.clone()),
             Reference::Organization(name) => (SecretNamespace::Organization, name.clone()),
             Reference::Id(_) => {
-                bail!("Proposals create new named secrets; existing IDs cannot be overwritten")
+                bail!("Use a personal/NAME or org/NAME reference with set")
             }
         };
         let bytes = if args.stdin {
@@ -105,7 +105,7 @@ fn payload(args: &ProposeArgs) -> anyhow::Result<SecretDepositCreate> {
         items,
     })
 }
-pub(super) async fn run(args: &ProposeArgs, dev: bool) -> anyhow::Result<()> {
+pub(super) async fn run(args: &SetArgs, dev: bool) -> anyhow::Result<()> {
     let agent = BoundAgent::from_env(dev)?;
     let (id, mut info) = if let Some(id) = args.status {
         let info: SecretDepositInfo = agent
@@ -117,9 +117,7 @@ pub(super) async fn run(args: &ProposeArgs, dev: bool) -> anyhow::Result<()> {
         let request = payload(args)?;
         let id = request.request_id;
         // Print the recovery ID before sending; never include the input payload.
-        eprintln!(
-            "Secret proposal {id}; retry status with: agent-portal secret propose --status {id}"
-        );
+        eprintln!("Secret proposal {id}; retry status with: agent-portal secret set --status {id}");
         let response = agent
             .client
             .request(Method::POST, "/deposits", Some(&request))
@@ -169,12 +167,12 @@ mod tests {
 mod cli_tests {
     use clap::Parser;
     #[test]
-    fn propose_cli_accepts_file_batches_and_metadata_status() {
+    fn set_cli_accepts_file_batches_and_metadata_status() {
         for args in [
             vec![
                 "agent-portal",
                 "secret",
-                "propose",
+                "set",
                 "--batch-file",
                 "input.json",
                 "--wait",
@@ -182,7 +180,7 @@ mod cli_tests {
             vec![
                 "agent-portal",
                 "secret",
-                "propose",
+                "set",
                 "personal/NAME",
                 "--value-file",
                 "value",
@@ -192,7 +190,7 @@ mod cli_tests {
             vec![
                 "agent-portal",
                 "secret",
-                "propose",
+                "set",
                 "--status",
                 "00000000-0000-4000-8000-000000000001",
             ],
@@ -202,7 +200,7 @@ mod cli_tests {
         assert!(crate::Args::try_parse_from([
             "agent-portal",
             "secret",
-            "propose",
+            "set",
             "personal/NAME",
             "raw-secret-value"
         ])

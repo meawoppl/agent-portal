@@ -13,8 +13,9 @@ use std::ffi::OsString;
 
 #[derive(Debug, Subcommand)]
 pub enum Action {
-    /// Propose new secrets for one owner-approved, write-only batch.
-    Propose(proposals::ProposeArgs),
+    /// Create or update secrets through one owner-approved, write-only batch.
+    #[command(alias = "propose")]
+    Set(proposals::SetArgs),
     /// Ask the session owner in the web UI to approve pinned secret access.
     Request(requests::RequestArgs),
     /// Render a template using an approved credential group; never prints values.
@@ -41,7 +42,7 @@ pub async fn run(action: Action, backend: Option<String>, dev: bool) -> anyhow::
     // These paths require the injected session identity. Never load launcher
     // login/config credentials or a human vault token as a fallback.
     match action {
-        Action::Propose(args) => proposals::run(&args, dev).await,
+        Action::Set(args) => proposals::run(&args, dev).await,
         Action::Request(args) => requests::run(&args, dev).await,
         Action::Run { binding, command } => bindings::execute(&binding, &command, dev).await,
         Action::Inject(args) => inject::bound(&args, dev).await,
@@ -111,7 +112,6 @@ mod tests {
         for command in [
             "authorize",
             "login",
-            "set",
             "rotate",
             "list",
             "members",

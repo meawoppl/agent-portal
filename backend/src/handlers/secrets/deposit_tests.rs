@@ -269,6 +269,13 @@ async fn conflicts_roll_back_entire_batch_and_denial_or_expiry_erases_staging() 
     let Some((_db, state, router, _owner, _other, _session, human, bound)) = setup() else {
         return;
     };
+    let id = Uuid::new_v4();
+    assert!(
+        send(&router, &bound, "/api/secrets/deposits", batch(id, false))
+            .await
+            .0
+            .is_success()
+    );
     let (status, _) = send(
         &router,
         &human,
@@ -277,13 +284,6 @@ async fn conflicts_roll_back_entire_batch_and_denial_or_expiry_erases_staging() 
     )
     .await;
     assert!(status.is_success());
-    let id = Uuid::new_v4();
-    assert!(
-        send(&router, &bound, "/api/secrets/deposits", batch(id, false))
-            .await
-            .0
-            .is_success()
-    );
     let path = format!("/api/secrets/deposits/{id}/decision");
     assert_eq!(
         send(&router, &human, &path, json!({"approve":true}))
@@ -500,4 +500,188 @@ async fn invalid_batch_and_failed_notice_leave_no_staged_values() {
             .unwrap(),
         0
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn set_updates_and_creates_atomically_without_losing_history_or_sharing() {
+    let Some((_db, state, router, _owner, other, _session, human, bound)) = setup() else {
+        return;
+    };
+    let (status,original)=send(&router,&human,"/api/secrets",json!({"namespace":"personal","name":"FIRST","description":"Keep description","value":"original-value"})).await;
+    assert!(status.is_success());
+    let secret: Uuid = serde_json::from_value(original["id"].clone()).unwrap();
+    let original_row = store::load(&mut state.conn().unwrap(), secret).unwrap();
+    let (status, _) = send(
+        &router,
+        &human,
+        &format!("/api/secrets/{secret}/grants"),
+        json!({"expected_generation":1,"user_id":other,"rights":["read","use","write","manage"]}),
+    )
+    .await;
+    assert!(status.is_success());
+    let id = Uuid::new_v4();
+    let (status, proposal) = send(&router, &bound, "/api/secrets/deposits", batch(id, false)).await;
+    assert!(status.is_success());
+    assert_eq!(proposal["items"][0]["secret_id"], secret.to_string());
+    assert_eq!(proposal["items"][0]["update"]["version"], 1);
+    assert_eq!(proposal["items"][0]["description"], "Keep description");
+    assert!(proposal["items"][1]["update"].is_null());
+    let path = format!("/api/secrets/deposits/{id}/decision");
+    // Old create-only browsers cannot silently approve an update.
+    assert_eq!(
+        send(&router, &human, &path, json!({"approve":true}))
+            .await
+            .0,
+        400
+    );
+    assert_eq!(
+        secret_versions::table
+            .count()
+            .get_result::<i64>(&mut state.conn().unwrap())
+            .unwrap(),
+        1
+    );
+    let decision = json!({"approve":true,"confirm_updates":[secret]});
+    let (status, result) = send(&router, &human, &path, decision.clone()).await;
+    assert!(status.is_success(), "{result}");
+    assert_eq!(
+        secrets::table
+            .count()
+            .get_result::<i64>(&mut state.conn().unwrap())
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        secret_versions::table
+            .count()
+            .get_result::<i64>(&mut state.conn().unwrap())
+            .unwrap(),
+        3
+    );
+    let updated = store::load(&mut state.conn().unwrap(), secret).unwrap();
+    assert_ne!(updated.current_version_id, original_row.current_version_id);
+    assert!(updated.acl_generation > original_row.acl_generation);
+    let old = secret_versions::table
+        .find(original_row.current_version_id.unwrap())
+        .first::<VersionRow>(&mut state.conn().unwrap())
+        .unwrap();
+    let old_value = state
+        .secrets
+        .crypto()
+        .unwrap()
+        .open(
+            Identity {
+                organization: original_row.organization_id,
+                secret,
+                version: old.id,
+            },
+            &old.envelope(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(old_value.bytes(), b"original-value");
+    let new = secret_versions::table
+        .find(updated.current_version_id.unwrap())
+        .first::<VersionRow>(&mut state.conn().unwrap())
+        .unwrap();
+    let value = state
+        .secrets
+        .crypto()
+        .unwrap()
+        .open(
+            Identity {
+                organization: updated.organization_id,
+                secret,
+                version: new.id,
+            },
+            &new.envelope(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(value.bytes(), b"canary-first-DO-NOT-LOG");
+    assert_eq!(new.ordinal, 2);
+    let rights = store::rights(&mut state.conn().unwrap(), &updated, other).unwrap();
+    assert!(rights.read && rights.use_value && rights.write && rights.manage);
+    assert!(send(&router, &human, &path, decision).await.0.is_success());
+    assert_eq!(
+        secret_versions::table
+            .count()
+            .get_result::<i64>(&mut state.conn().unwrap())
+            .unwrap(),
+        3
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn changed_version_acl_or_deletion_rolls_back_mixed_set_batch() {
+    for change in ["version", "acl", "delete"] {
+        let Some((_db, state, router, _owner, other, _session, human, bound)) = setup() else {
+            return;
+        };
+        let (_, original) = send(
+            &router,
+            &human,
+            "/api/secrets",
+            json!({"namespace":"personal","name":"SECOND","value":"original"}),
+        )
+        .await;
+        let secret: Uuid = serde_json::from_value(original["id"].clone()).unwrap();
+        let id = Uuid::new_v4();
+        assert!(
+            send(&router, &bound, "/api/secrets/deposits", batch(id, false))
+                .await
+                .0
+                .is_success()
+        );
+        let (endpoint, body) = match change {
+            "version" => (
+                format!("/api/secrets/{secret}/versions"),
+                json!({"expected_generation":1,"value":"newer-value"}),
+            ),
+            "acl" => (
+                format!("/api/secrets/{secret}/grants"),
+                json!({"expected_generation":1,"user_id":other,"rights":["read","use"]}),
+            ),
+            _ => (
+                format!("/api/secrets/{secret}/delete"),
+                json!({"expected_generation":1}),
+            ),
+        };
+        assert!(send(&router, &human, &endpoint, body).await.0.is_success());
+        let decision = json!({"approve":true,"confirm_updates":[secret]});
+        assert!(!send(
+            &router,
+            &human,
+            &format!("/api/secrets/deposits/{id}/decision"),
+            decision
+        )
+        .await
+        .0
+        .is_success());
+        assert_eq!(
+            secrets::table
+                .count()
+                .get_result::<i64>(&mut state.conn().unwrap())
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            secret_versions::table
+                .count()
+                .get_result::<i64>(&mut state.conn().unwrap())
+                .unwrap(),
+            if change == "version" { 2 } else { 1 }
+        );
+        if change == "delete" {
+            assert!(!send(
+                &router,
+                &bound,
+                "/api/secrets/deposits",
+                batch(Uuid::new_v4(), false)
+            )
+            .await
+            .0
+            .is_success());
+        }
+    }
 }
