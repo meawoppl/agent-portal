@@ -190,6 +190,8 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
         .with_state(app_state.clone());
 
     Ok(Router::new()
+        // Legacy exhibit links stay valid without embedding its marketing media.
+        .merge(handlers::aperture::router())
         // Health check endpoint
         .route(
             "/api/health",

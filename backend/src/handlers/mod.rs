@@ -53,3 +53,5 @@ pub(crate) mod session_activity;
 pub mod secrets;
 
 pub(crate) mod session_stop;
+
+pub mod aperture;
