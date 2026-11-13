@@ -24,6 +24,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 mod access_requests;
 mod bindings;
+pub(crate) mod deposits;
 mod idempotency;
 mod members;
 const MAX_RULE_SOURCE_BYTES: i64 = 1024 * 1024;
@@ -962,6 +963,7 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
             )
             .route("/api/secrets/authorize/{*rest}", any(retired_cli_access))
             .merge(access_requests::router())
+            .merge(deposits::router())
             .layer(DefaultBodyLimit::max(400_000)),
         state,
     )

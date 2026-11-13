@@ -1223,6 +1223,11 @@ pub enum PortalContent {
     SecretAccessRequest {
         request_id: Uuid,
     },
+    /// Opaque pointer to an owner-reviewed, write-only secret batch.
+    #[serde(rename = "secret_deposit_proposal")]
+    SecretDepositProposal {
+        request_id: Uuid,
+    },
     /// One server-authorized approval card for a bounded credential set.
     #[serde(rename = "secret_access_group")]
     SecretAccessGroup {
@@ -1325,6 +1330,10 @@ impl std::fmt::Debug for PortalContent {
                 .field("from_agent_type", from_agent_type)
                 .field("from_session_id", from_session_id)
                 .field("text", text)
+                .finish(),
+            Self::SecretDepositProposal { request_id } => f
+                .debug_struct("SecretDepositProposal")
+                .field("request_id", request_id)
                 .finish(),
             Self::SecretAccessGroup { request_id } => f
                 .debug_struct("SecretAccessGroup")

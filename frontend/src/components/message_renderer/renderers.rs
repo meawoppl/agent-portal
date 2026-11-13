@@ -9,6 +9,7 @@ mod media;
 mod portal;
 mod result;
 mod secret_access;
+mod secret_deposit;
 mod system;
 mod tools;
 mod user;

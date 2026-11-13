@@ -25,6 +25,10 @@
 /// key-provider health and verify refresh. Content is rejected/held, not leaked.
 pub const SECRET_REDACTION_FAILED: &str = "SECRET_REDACTION_FAILED";
 
+/// Proposal expiry worker could not remove staged ciphertext. Recurring failures
+/// mean database trouble; restore DB access and verify overdue proposals clear.
+pub const SECRET_PROPOSAL_EXPIRY_FAILED: &str = "SECRET_PROPOSAL_EXPIRY_FAILED";
+
 /// Cleanup worker failed before saving its receipt. Bursts indicate database,
 /// archive or worker failure; inspect job status and storage/key reachability.
 pub const SECRET_EXPUNGE_FAILED: &str = "SECRET_EXPUNGE_FAILED";

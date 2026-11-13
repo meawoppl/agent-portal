@@ -196,3 +196,58 @@ rejected. Failed resolution leaves an existing output unchanged. Files use mode
 0600 on Unix; Windows uses the destination directory's ACL. The rendered file
 contains plaintext and persists after binding expiry or revocation: keep it out
 of version control and remove it when no longer needed.
+
+## Agent-proposed secret deposits
+
+An agent holding a user-provided credential can propose **new** secrets without
+getting general vault access. The owner reviews one combined card, edits names
+or descriptions, optionally removes recipients, and clicks **Approve** once.
+The card verifies Portal access server-side, shows progress, then creates the
+whole batch atomically. A name conflict, disabled recipient, or expired request
+creates nothing. Existing secrets are never overwritten and no read binding is
+created for the agent. Organization proposals require a curator and retain the
+normal organization-wide read/use audience.
+
+Single value, read from a local file (or use `--stdin`):
+
+```sh
+agent-portal secret propose personal/AWS_ACCESS_KEY_ID \
+  --value-file /secure/path/access-key-id \
+  --description 'AWS automation access key ID' \
+  --share google:jazz@cosmicfrontier.org --wait
+```
+
+For several values, provide a JSON array through `--batch-file` or
+`--batch-stdin`. Each object has `namespace` (`personal` or `organization`),
+`name`, `value`, optional `description`, and optional `share` selectors. For
+example, a locally prepared file can contain both an AWS access key ID and its
+secret access key. Do not paste the file contents into a prompt or tool output.
+
+```sh
+agent-portal secret propose --batch-file /secure/path/credentials.json --wait
+agent-portal secret propose --status REQUEST_UUID
+```
+
+Selected-user sharing grants only **read/use**, never write/manage. Selectors
+accept `google:EMAIL`, a verified email, or an existing Portal user UUID, using
+the same verified organization-directory boundary as the web UI. GitHub handles
+must first be resolved to a stable Portal UUID in the web UI. Sharing metadata
+is pinned to the resolved user and displayed before approval. An owner may
+remove recipients during review; adding recipients requires a new proposal.
+
+Batches contain 1–16 values, each 1–65536 UTF-8 bytes, at most 256 KiB total and
+400000 bytes of JSON input. Values are preserved exactly, including newlines.
+There are at most four pending batches per owner, 128 globally, and 30 new
+batches per owner per hour. Proposals expire after ten minutes. Denial clears
+the staged ciphertext immediately; a 30-second sweeper clears expired staging.
+Database backups can retain earlier encrypted records under their retention
+policy. Approval moves the encrypted values into immutable vault versions and
+clears staging in the same transaction.
+
+The agent receives only proposal metadata. The transcript stores an opaque
+proposal ID; secret values are excluded from approval cards, receipts, and
+error messages. Only the submitting session/process can query its receipt, and
+only the owning browser can decide. A replaced/disconnected agent process
+cannot get its pending proposal approved. Reusing `--request-id` returns the
+original immutable proposal, never updates its contents. Use `--status` after
+an uncertain network result rather than creating a new proposal blindly.

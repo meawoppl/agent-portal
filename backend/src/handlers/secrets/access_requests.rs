@@ -26,7 +26,7 @@ struct AccessRequest {
     created_at: chrono::DateTime<Utc>,
     expires_at: chrono::DateTime<Utc>,
 }
-struct BoundProcess;
+pub(super) struct BoundProcess;
 impl FromRequestParts<Arc<AppState>> for BoundProcess {
     type Rejection = Response;
     async fn from_request_parts(
@@ -236,7 +236,10 @@ fn resolve(conn: &mut PgConnection, user: Uuid, reference: &str) -> Result<Secre
     }
     Ok(row)
 }
-fn publish(state: &AppState, message: Option<crate::models::Message>) -> Result<(), AppError> {
+pub(super) fn publish(
+    state: &AppState,
+    message: Option<crate::models::Message>,
+) -> Result<(), AppError> {
     if let Some(message) = message {
         let agent_type = shared::AgentType::parse_or_default(&message.agent_type);
         let content = serde_json::from_str(&message.content)
