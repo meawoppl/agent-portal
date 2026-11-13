@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2453 · Connection health survives an update notice</text>
+<text x="55" y="105" font-family="sans-serif" font-size="34" fill="#e6e9f5">A new-version notice hid outages; connection health now stays visible alongside it.</text>
+<text x="55" y="148" font-family="sans-serif" font-size="34" fill="#e6e9f5">Reconnecting stays visible until the socket handshake succeeds, not just until a retry starts.</text>
+<path d="M55 175 H1945 M1000 190 V1140" stroke="#565f89" stroke-dasharray="6 6"/>
+<text x="55" y="225" font-family="sans-serif" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1055" y="225" font-family="sans-serif" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="55" y="270" width="880" height="205" rx="14" fill="#1e202e" stroke="#7aa2f7"/>
+<text x="80" y="312" font-family="sans-serif" font-size="28" fill="#7aa2f7">New version available</text>
+<text x="80" y="355" font-family="sans-serif" font-size="24" fill="#c0caf5">The persistent update notice wins</text>
+<text x="80" y="390" font-family="sans-serif" font-size="24" fill="#c0caf5">Connection warnings are hidden</text>
+<rect x="55" y="535" width="880" height="205" rx="14" fill="#1e202e" stroke="#f7768e"/>
+<text x="80" y="577" font-family="sans-serif" font-size="28" fill="#f7768e">Reconnect attempt starts</text>
+<text x="80" y="620" font-family="sans-serif" font-size="24" fill="#c0caf5">Clears the warning before negotiation</text>
+<text x="80" y="655" font-family="sans-serif" font-size="24" fill="#c0caf5">Browser can look ready while disconnected</text>
+<rect x="55" y="800" width="880" height="205" rx="14" fill="#1e202e" stroke="#f7768e"/>
+<text x="80" y="842" font-family="sans-serif" font-size="28" fill="#f7768e">Session selection report</text>
+<text x="80" y="885" font-family="sans-serif" font-size="24" fill="#c0caf5">Reported frozen pills after deployment</text>
+<text x="80" y="920" font-family="sans-serif" font-size="24" fill="#c0caf5">Offline status gave no reliable explanation</text>
+<rect x="1055" y="270" width="880" height="205" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="312" font-family="sans-serif" font-size="28" fill="#9ece6a">New version plus connection health</text>
+<text x="1080" y="355" font-family="sans-serif" font-size="24" fill="#c0caf5">Independent non-modal status notices</text>
+<text x="1080" y="390" font-family="sans-serif" font-size="24" fill="#c0caf5">Reload remains an explicit user action</text>
+<rect x="1055" y="535" width="880" height="205" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="577" font-family="sans-serif" font-size="28" fill="#9ece6a">Reconnect attempt starts</text>
+<text x="1080" y="620" font-family="sans-serif" font-size="24" fill="#c0caf5">Warning remains through config and handshake</text>
+<text x="1080" y="655" font-family="sans-serif" font-size="24" fill="#c0caf5">Socket loss displays a warning immediately</text>
+<text x="1080" y="690" font-family="sans-serif" font-size="24" fill="#c0caf5">Successful handshake clears the warning</text>
+<rect x="1055" y="800" width="880" height="205" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="842" font-family="sans-serif" font-size="28" fill="#9ece6a">Browser regression coverage</text>
+<text x="1080" y="885" font-family="sans-serif" font-size="24" fill="#c0caf5">Select sessions while offline and waiting</text>
+<text x="1080" y="920" font-family="sans-serif" font-size="24" fill="#c0caf5">Exercise all four rail positions and themes</text>
+<text x="1080" y="955" font-family="sans-serif" font-size="24" fill="#c0caf5">Recover without clearing the update notice</text>
+<text x="55" y="1172" font-family="sans-serif" font-size="22" fill="#a9b1d6">Scope: the reported pill freeze was not reproduced; this fixes confirmed connection-status masking and early clearing.</text>
+</svg>
