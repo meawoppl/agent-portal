@@ -55,6 +55,11 @@ full-history commit counts/hashes, a detached worktree, shallow-checkout fallbac
 to the manifest patch, and source-tarball unknown revision. The timestamp keeps
 the existing Pacific-time/date fallback semantics. `shared` unit coverage checks
 explicit, idempotent registration and rejection of conflicting process identity.
+A fixture compiles the registry library once, then builds two executables with
+different identities against that same library and verifies each reports its own
+version/revision. The real launcher build at `c2d995e1` printed
+`agent-portal 2.15.1912 (c2d995e1; built 2026-11-12 18:52 PST)`, matching
+that commit's count and hash.
 
 Build-script rerun tracking covers helper edits, HEAD/reflog, the current branch
 ref, packed refs and shallow state when present. No version is frozen, and
