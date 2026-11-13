@@ -1,0 +1,156 @@
+name: Native Build Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      frontend_run_id:
+        description: Optional successful benchmark run whose frontend artifact should be reused
+        required: false
+        default: ''
+  pull_request:
+    types: [labeled, synchronize]
+
+# Deliberately opt-in; these are experiments, never required PR gates.
+concurrency:
+  group: native-benchmark-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  frontend:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'ci-benchmark')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Reuse an existing optimized frontend fixture
+        if: inputs.frontend_run_id != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: benchmark-frontend
+          path: frontend/dist
+          run-id: ${{ inputs.frontend_run_id }}
+          github-token: ${{ github.token }}
+      - uses: ./.github/actions/setup-rust
+        if: inputs.frontend_run_id == ''
+        with:
+          cache-key: native-benchmark-frontend
+          targets: wasm32-unknown-unknown
+          trunk: 'true'
+      - name: Measure unchanged optimized WASM pipeline
+        if: inputs.frontend_run_id == ''
+        shell: bash
+        run: |
+          mkdir -p benchmark-results
+          rustc -Vv > benchmark-results/frontend-environment.txt
+          printf '\nrunner=%s image=%s commit=%s\n' "$RUNNER_OS/$RUNNER_ARCH" "$ImageVersion" "$(git rev-parse HEAD)" >> benchmark-results/frontend-environment.txt
+          cd frontend
+          /usr/bin/time -v trunk build --release --verbose > ../benchmark-results/frontend-build.log 2>&1
+          du -sb dist >> ../benchmark-results/frontend-environment.txt
+      - name: Record reused frontend provenance
+        if: inputs.frontend_run_id != ''
+        env:
+          FRONTEND_RUN_ID: ${{ inputs.frontend_run_id }}
+        run: |
+          mkdir -p benchmark-results
+          printf 'frontend_artifact_run=%s\n' "$FRONTEND_RUN_ID" > benchmark-results/frontend-environment.txt
+          du -sb frontend/dist >> benchmark-results/frontend-environment.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: benchmark-frontend
+          overwrite: true
+          path: frontend/dist
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: benchmark-wasm-timings
+          overwrite: true
+          path: benchmark-results
+
+  native:
+    needs: frontend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: baseline-fat-z
+            lto: fat
+            opt: z
+            units: 1
+            incremental: 'false'
+          - name: thin-z
+            lto: thin
+            opt: z
+            units: 16
+            incremental: 'false'
+          - name: thin-3
+            lto: thin
+            opt: '3'
+            units: 16
+            incremental: 'false'
+          - name: thin-2
+            lto: thin
+            opt: '2'
+            units: 16
+            incremental: 'false'
+          - name: thin-3-incremental
+            lto: thin
+            opt: '3'
+            units: 16
+            incremental: 'true'
+    env:
+      CARGO_TARGET_DIR: benchmark-target
+      CARGO_BUILD_JOBS: 2
+      CARGO_PROFILE_RELEASE_LTO: ${{ matrix.lto }}
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: ${{ matrix.opt }}
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ matrix.units }}
+      CARGO_PROFILE_RELEASE_INCREMENTAL: ${{ matrix.incremental }}
+      CARGO_INCREMENTAL: ${{ matrix.incremental == 'true' && '1' || '0' }}
+      RUSTFLAGS: ''
+      DATABASE_URL: postgresql://benchmark:benchmark@127.0.0.1:5432/benchmark
+      SESSION_SECRET: native-build-benchmark-only-not-a-real-secret-000000000000000000000
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: benchmark
+          POSTGRES_PASSWORD: benchmark
+          POSTGRES_DB: benchmark
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U benchmark" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: dtolnay/rust-toolchain@1.96.0
+      - name: Install native dependencies
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler libpq-dev zstd
+      - uses: actions/download-artifact@v8
+        with:
+          name: benchmark-frontend
+          path: frontend/dist
+      # Shared cache storage is already at its 10GB limit. These runners
+      # measure local zstd retention/restoration without evicting production
+      # caches or silently increasing billed storage. Network transfer cost
+      # remains unmeasured until there is explicit cache headroom.
+      - name: Benchmark native profile and local retained artifacts
+        run: python3 scripts/benchmarks/native-build.py --disposable-checkout --local-cache-roundtrip --retention '${{ matrix.incremental == 'true' && 'workspace' || 'dependencies' }}' --output benchmark-results
+      - name: Show measurements in the job summary
+        if: always()
+        shell: bash
+        run: python3 scripts/benchmarks/summarize-native.py benchmark-results >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: native-benchmark-${{ matrix.name }}
+          overwrite: true
+          path: benchmark-results
