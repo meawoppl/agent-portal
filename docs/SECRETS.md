@@ -219,7 +219,7 @@ agent-portal secret set personal/AWS_ACCESS_KEY_ID \
 
 For several values, provide a JSON array through `--batch-file` or
 `--batch-stdin`. Each object has `namespace` (`personal` or `organization`),
-`name`, `value`, optional `description`, and optional `share` selectors. For
+`name`, `value`, optional `description`, and optional `share` selectors (an array of strings, such as `["google:user@example.test"]`, never a single string). For
 example, a locally prepared file can contain both an AWS access key ID and its
 secret access key. Do not paste the file contents into a prompt or tool output.
 
@@ -255,3 +255,9 @@ only the owning browser can decide. A replaced/disconnected agent process
 cannot get its pending proposal approved. Reusing `--request-id` returns the
 original immutable proposal, never updates its contents. Use `--status` after
 an uncertain network result rather than creating a new proposal blindly.
+
+### Secret set submission diagnostics
+
+Recipient lookup never trusts a profile email alone. Legacy identity rows may lack a recorded verified email assertion. A normal provider sign-in refreshes that assertion; **Check Portal access** does not. An authorized sharing caller can instead select the intended active member by their stable Portal user UUID. The same generic lookup failure covers missing, disabled, and unmatched/unverified recipients without identifying which case applies.
+
+A submission rejected during target/recipient validation creates no approval card or saved proposal status. The printed request ID is useful for recovering from an uncertain network result; it does not itself prove submission succeeded. Do not automatically retry with values or change recipients after a rejection.

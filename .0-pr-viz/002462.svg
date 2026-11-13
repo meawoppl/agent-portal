@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200"><rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="Arial, sans-serif"><text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2462 · Secret set diagnostics</text><text x="55" y="105" font-size="34" fill="#e6e9f5">Field errors looked like invalid arrays; lookup failures lacked recovery guidance.</text><text x="55" y="149" font-size="34" fill="#e6e9f5">Diagnostics now identify safe field names without exposing values or identities.</text><path d="M55 177 H1945 M1000 205 V1120" stroke="#3d4666"/>
+<text x="75" y="235" font-size="22" font-weight="bold" letter-spacing="4" fill="#f7768e">BEFORE</text>
+<rect x="75" y="290" width="870" height="265" rx="16" fill="#1e202e" stroke="#f7768e"/>
+<text x="100" y="340" font-size="28" fill="#7aa2f7">Batch parsing</text>
+<text x="100" y="405" font-size="25" fill="#c0caf5">Invalid proposal JSON: expected an array</text>
+<text x="100" y="475" font-size="23" fill="#a9b1d6">Wrong share type is blamed on the whole batch.</text>
+<rect x="75" y="650" width="870" height="265" rx="16" fill="#1e202e" stroke="#f7768e"/>
+<text x="100" y="700" font-size="28" fill="#7aa2f7">Recipient lookup</text>
+<text x="100" y="765" font-size="25" fill="#c0caf5">Secret, version, or verified member not found</text>
+<text x="100" y="835" font-size="23" fill="#a9b1d6">Printed request ID suggests a status always exists.</text>
+<text x="1055" y="235" font-size="22" font-weight="bold" letter-spacing="4" fill="#9ece6a">AFTER</text>
+<rect x="1055" y="290" width="870" height="265" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="340" font-size="28" fill="#7aa2f7">Safe field diagnostics</text>
+<text x="1080" y="405" font-size="25" fill="#c0caf5">Batch item 1: share must be an array of strings</text>
+<text x="1080" y="475" font-size="23" fill="#a9b1d6">Only known fields and item positions enter errors.</text>
+<rect x="1055" y="650" width="870" height="265" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="700" font-size="28" fill="#7aa2f7">Actionable lookup guidance</text>
+<text x="1080" y="765" font-size="25" fill="#c0caf5">Provider sign-in or stable Portal user UUID</text>
+<text x="1080" y="835" font-size="23" fill="#a9b1d6">Explain rejection before approval vs uncertain failure.</text>
+<text x="55" y="1172" font-size="22" fill="#a9b1d6">Diagnostics only; verified identity and domain rules stay enforced, response bodies stay hidden.</text></g></svg>
