@@ -24,6 +24,21 @@ parent's launcher. It must be connected, belong to the same owner, and advertise
 `launcher.cli_spawn`. Claude, Codex and Muse are supported; Antigravity is
 rejected until its tool harness can carry the session credential.
 
+`--dir` must exist on the target host and resolve to a directory under that
+launcher's home directory. Symlinks are checked after canonicalization. To do
+temporary work elsewhere, start in an existing project under home and let the
+child switch to the temporary workspace after launch.
+
+An `unsupported_launcher` error naming `launcher.cli_spawn` refers to the
+capabilities advertised by the **running launcher**, not the CLI invoking
+`session start`. A CLI can expose the command while its daemon omits the flag.
+Install a launcher that advertises this capability and coordinate its restart
+with the owner: a launcher restart interrupts the sessions it manages. A
+backend-only update or reconnect of an unchanged launcher does not add the flag.
+Verify that the target launcher's `/api/launchers` entry advertises
+`launcher.cli_spawn` before submitting from the original parent session. The
+normal owner approval policy still applies.
+
 `--json` writes one result/error object to stdout and exits nonzero on errors,
 including `approval_required`, `child_limit`, `depth_limit`, and `rate_limit`.
 An approval-required response includes a `request_id`. Repeating the identical
