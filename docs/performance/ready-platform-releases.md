@@ -42,7 +42,10 @@ This is observed pipeline delay, not compilation time or a predicted speedup.
 7. The updater resolves exactly one platform ref. No release-list pagination or
    publication-order assumptions are involved. It validates the manifest, both
    asset digests and the actual downloaded bytes before replacing anything.
-   A locally newer semantic version stays installed.
+   On this manifest path, a locally newer semantic version stays installed.
+   Legacy fallback has no trusted numeric version metadata and can replace a
+   manually installed newer binary with the older complete release; this
+   pre-existing limitation also applies to the first-rollout fallback.
 
 A delayed/failed Windows build leaves the Windows ref pointing at its prior
 ready commit. It does not delay a ready Linux update or advertise an old Windows
