@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2465 · Installed agent versions</text>
+<text x="55" y="110" font-family="sans-serif" font-size="34" fill="#e6e9f5">Computers exposes each installed binary version already carried by the probe.</text>
+<text x="55" y="153" font-family="sans-serif" font-size="30" fill="#e6e9f5">Missing versions remain explicit, including older Antigravity launchers.</text>
+<path d="M55 180 H1945 M1000 200 V1125" stroke="#565f89" stroke-width="2"/>
+<text x="70" y="235" font-family="sans-serif" font-size="24" fill="#f7768e">BEFORE</text>
+<text x="1070" y="235" font-family="sans-serif" font-size="24" fill="#9ece6a">AFTER</text>
+<rect x="70" y="285" width="830" height="200" rx="14" fill="#1e202e" stroke="#7aa2f7" stroke-width="2"/>
+<text x="95" y="330" font-family="sans-serif" font-size="28" fill="#7aa2f7">Existing probe data</text>
+<text x="95" y="375" font-family="sans-serif" font-size="24" fill="#c0caf5">AgentInstall.version reaches the frontend.</text>
+<text x="95" y="410" font-family="sans-serif" font-size="24" fill="#c0caf5">Claude, Codex, Muse and Antigravity.</text>
+<rect x="1070" y="285" width="830" height="200" rx="14" fill="#1e202e" stroke="#7aa2f7" stroke-width="2"/>
+<text x="1095" y="330" font-family="sans-serif" font-size="28" fill="#7aa2f7">Existing probe data</text>
+<text x="1095" y="375" font-family="sans-serif" font-size="24" fill="#c0caf5">Same payload; no protocol or database changes.</text>
+<text x="1095" y="410" font-family="sans-serif" font-size="24" fill="#c0caf5">Launcher reports no invented version.</text>
+<rect x="70" y="565" width="830" height="200" rx="14" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="95" y="610" font-family="sans-serif" font-size="28" fill="#f7768e">Computers cell</text>
+<text x="95" y="655" font-family="sans-serif" font-size="24" fill="#c0caf5">Installed / sign-in badges shown.</text>
+<text x="95" y="690" font-family="sans-serif" font-size="24" fill="#c0caf5">Reported binary version is not rendered.</text>
+<rect x="1070" y="565" width="830" height="200" rx="14" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1095" y="610" font-family="sans-serif" font-size="28" fill="#9ece6a">Computers cell</text>
+<text x="1095" y="655" font-family="sans-serif" font-size="24" fill="#c0caf5">Version shown beneath the status badges.</text>
+<text x="1095" y="690" font-family="sans-serif" font-size="24" fill="#c0caf5">Examples: 2.1.323, codex-cli 0.169.0.</text>
+<rect x="70" y="845" width="830" height="200" rx="14" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+<text x="95" y="890" font-family="sans-serif" font-size="28" fill="#f7768e">Unavailable Antigravity version</text>
+<text x="95" y="935" font-family="sans-serif" font-size="24" fill="#c0caf5">Probe substitutes a binary-name placeholder.</text>
+<text x="95" y="970" font-family="sans-serif" font-size="24" fill="#c0caf5">That text is not a version number.</text>
+<rect x="1070" y="845" width="830" height="200" rx="14" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+<text x="1095" y="890" font-family="sans-serif" font-size="28" fill="#9ece6a">Explicit unavailable state</text>
+<text x="1095" y="935" font-family="sans-serif" font-size="24" fill="#c0caf5">Missing or legacy placeholder: Version unavailable.</text>
+<text x="1095" y="970" font-family="sans-serif" font-size="24" fill="#c0caf5">Not installed and offline remain distinct.</text>
+<path d="M485 495 v45 m-8 -10 l8 10 l8 -10" fill="none" stroke="#565f89" stroke-width="3"/>
+<path d="M485 775 v45 m-8 -10 l8 10 l8 -10" fill="none" stroke="#565f89" stroke-width="3"/>
+<path d="M1485 495 v45 m-8 -10 l8 10 l8 -10" fill="none" stroke="#565f89" stroke-width="3"/>
+<path d="M1485 775 v45 m-8 -10 l8 10 l8 -10" fill="none" stroke="#565f89" stroke-width="3"/>
+<text x="55" y="1170" font-family="sans-serif" font-size="22" fill="#a9b1d6">Versions describe installed binaries, not model versions. No claim is made when the agent cannot report its version.</text>
+</svg>
