@@ -15,8 +15,8 @@ mod ui_theme;
 pub mod utils;
 
 /// Application version — derived at build time from the git commit count
-/// (see `shared::VERSION` / `shared/build.rs`, issue #1096).
-pub const VERSION: &str = shared::VERSION;
+/// (see `build-support/identity.rs`, issue #1096).
+pub const VERSION: &str = BUILD_INFO.version;
 
 use health_timer::HealthTimerReminder;
 use pages::{
@@ -145,3 +145,6 @@ pub fn run_app() {
     wasm_logger::init(wasm_logger::Config::default());
     yew::Renderer::<App>::new().render();
 }
+
+/// Identity of this compiled artifact, independent of reusable libraries.
+pub const BUILD_INFO: shared::build_info::BuildInfo = shared::build_info!();

@@ -2,6 +2,8 @@
 // still has production unwrap/expect; remove this allow as it is cleaned.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+pub(crate) const BUILD_INFO: shared::build_info::BuildInfo = shared::build_info!();
+
 mod config;
 mod connection;
 mod forward;
@@ -449,9 +451,9 @@ fn print_version() {
     println!(
         "{} {} ({}; built {})",
         BINARY_PREFIX,
-        shared::VERSION,
-        shared::GIT_HASH,
-        shared::BUILD_TIME
+        crate::BUILD_INFO.version,
+        crate::BUILD_INFO.git_hash,
+        crate::BUILD_INFO.build_time
     );
 }
 
@@ -611,6 +613,8 @@ mod path_tests {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    shared::build_info::register(BUILD_INFO)
+        .map_err(|_| anyhow::anyhow!("Conflicting process build identity"))?;
     // `install_default` fails only when another provider is already set;
     // report it through main's `anyhow::Result` instead of panicking.
     rustls::crypto::ring::default_provider()

@@ -255,7 +255,7 @@ pub async fn register_session(
         resuming: config.resume,
         git_branch: config.git_branch.clone(),
         replay_after: None, // Proxy doesn't need history replay
-        client_version: Some(shared::VERSION.to_string()),
+        client_version: Some(shared::build_info::running().version.to_string()),
         replaces_session_id: config.replaces_session_id,
         hostname: Some(hostname),
         launcher_id: config.launcher_id,

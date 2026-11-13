@@ -196,7 +196,7 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
             get(|| async {
                 Json(HealthResponse {
                     status: "OK".to_string(),
-                    version: shared::VERSION.to_string(),
+                    version: crate::BUILD_INFO.version.to_string(),
                 })
             }),
         )

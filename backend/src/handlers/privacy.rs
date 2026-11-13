@@ -143,7 +143,7 @@ and no sale or sharing of data beyond the services above.</p>
 </body>
 </html>
 "#,
-        version = shared::VERSION,
+        version = crate::BUILD_INFO.version,
     )
 }
 
@@ -158,7 +158,7 @@ mod tests {
         assert!(html.contains("older than <strong>30 days</strong>"));
         assert!(html.contains("deleted <strong>14 days</strong> after"));
         assert!(html.contains("archives completed sessions"));
-        assert!(html.contains(shared::VERSION));
+        assert!(html.contains(crate::BUILD_INFO.version));
     }
 
     #[test]

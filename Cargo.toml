@@ -23,9 +23,9 @@ resolver = "2"
 [workspace.package]
 # Only `major.minor` here is meaningful — bump it by hand for a feature/breaking
 # release. The patch is a placeholder: the reported version is
-# `major.minor.{git commit count}`, derived at build time by `shared/build.rs`
+# `major.minor.{git commit count}`, derived at executable boundaries by `build-support/identity.rs`
 # so no PR ever edits a version line (issue #1096). Runtime version =
-# `shared::VERSION`.
+# each artifact's `BUILD_INFO.version`.
 version = "2.15.17"
 edition = "2021"
 authors = ["Matthew Goodman <d3a6d0cec0c16f3e@inboxnegative.com>"]

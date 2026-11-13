@@ -575,7 +575,7 @@ fn archive_one_session_inner(
         claude_args: session.claude_args.0.clone(),
         // Per-write provenance: whichever backend runs this sweep stamps
         // its own version, so a re-archive reflects the newer writer.
-        archived_by_version: Some(shared::VERSION.to_string()),
+        archived_by_version: Some(crate::BUILD_INFO.version.to_string()),
         members,
     };
     let mut manifest = manifest;

@@ -839,8 +839,8 @@ If code is unused, delete it. It can be recovered from git history if needed lat
 ### Versioning
 
 The reported version is `major.minor.{git commit count}` — the **patch is
-derived at build time** from `git rev-list --count HEAD` by `shared/build.rs`,
-and read everywhere as `shared::VERSION` (issue #1096). This means:
+derived at build time** from `git rev-list --count HEAD` by `build-support/identity.rs` at binary/frontend boundaries,
+and read as `crate::BUILD_INFO.version` (frontend also exposes `crate::VERSION`) (issue #1096). This means:
 
 - **PRs do NOT touch the version.** There is no version line to bump and no
   version collisions between parallel PRs. The patch advances by exactly one
@@ -849,7 +849,11 @@ and read everywhere as `shared::VERSION` (issue #1096). This means:
   `[workspace.package] version` (the patch there is a placeholder). Bump it by
   hand only for a **feature** (`2.13 → 2.14`) or **breaking** (`2 → 3`) release.
 - **Do not reintroduce `env!("CARGO_PKG_VERSION")` for display** — it's the
-  static placeholder, not the real version. Use `shared::VERSION`.
+  static placeholder, not the real version. Use the artifact's `BUILD_INFO.version`.
+- Shared/session libraries must not bake git identity into compilation. Native
+  entry points register `BUILD_INFO` through `shared::build_info::register` before
+  library work; library code reads `shared::build_info::running()`. Unregistered
+  library-only consumers report explicit `unknown`, never a stale dependency version.
 
 The CHANGELOG is no longer kept in lockstep per-PR (you can't know the commit
 count in advance); it's maintained by a periodic sweep. Add notable

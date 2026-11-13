@@ -225,7 +225,7 @@ pub struct SessionArchiveManifest {
     /// omitted) for sessions launched with no extra args.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub claude_args: Vec<String>,
-    /// `shared::VERSION` of the backend that performed this archive write.
+    /// Build version of the backend that performed this archive write.
     /// **Per-write**: a re-archive by a newer backend stamps the newer
     /// version, so this records who last wrote the object, not who first
     /// created the session.

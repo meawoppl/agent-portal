@@ -21,7 +21,7 @@ async fn client() -> Result<AsyncClient> {
             client_info: ClientInfo {
                 name: "agent-portal-import".into(),
                 title: Some("Portal session import".into()),
-                version: shared::VERSION.into(),
+                version: shared::build_info::running().version.into(),
             },
             capabilities: Some(InitializeCapabilities {
                 experimental_api: Some(true),

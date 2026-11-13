@@ -12,9 +12,9 @@ pub async fn get_config(State(app_state): State<Arc<AppState>>) -> Json<AppConfi
     Json(AppConfig {
         protocol_version: Some(shared::protocol::PROTOCOL_VERSION),
         app_title: app_state.app_title.clone(),
-        server_version: shared::VERSION.to_string(),
-        git_hash: shared::GIT_HASH.to_string(),
-        build_time: shared::BUILD_TIME.to_string(),
+        server_version: crate::BUILD_INFO.version.to_string(),
+        git_hash: crate::BUILD_INFO.git_hash.to_string(),
+        build_time: crate::BUILD_INFO.build_time.to_string(),
         splash_text: app_state.splash_text.clone(),
         archive_enabled: app_state.archive.is_some(),
         stt_enabled: app_state.stt.is_some(),

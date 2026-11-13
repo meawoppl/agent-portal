@@ -156,6 +156,9 @@ jobs:
           cache-key: "test"
           protoc: "true"
 
+      - name: Test build identity across cached libraries and Git layouts
+        run: python3 scripts/test-build-identity.py
+
       - name: Run tests
         run: cargo test --workspace
 
