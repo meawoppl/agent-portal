@@ -172,6 +172,7 @@ async def main():
             ).to_be_visible()
             assert operations.count("restart_launcher") == 1
             versions[1] = "codex-cli 0.170.0"
+            host["version"] = "99.0.1"
             await sockets[0].close(code=1001, reason="fixture disconnect")
             await asyncio.wait_for(reconnected.wait(), timeout=15)
             await expect(page.get_by_text("rpc-host", exact=True)).to_be_visible()

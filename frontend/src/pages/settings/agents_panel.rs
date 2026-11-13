@@ -115,8 +115,8 @@ fn render_install_cell(
                 <span class="agents-badge installed">{ "Installed" }</span>
                 <span class={classes!("agents-badge", login_class)}>{ login_label }</span>
             </div>
-            <div class="agents-version" title={version.unwrap_or("This agent did not report a version")} >
-                { version.unwrap_or("Version unavailable") }
+            <div class="agents-version" title={version.unwrap_or("This agent did not report a version").to_owned()}>
+                { version.unwrap_or("Version unavailable").to_owned() }
             </div>
             if let AgentLoginStatus::LoggedIn { label, plan, via } = &install.login {
                 <div class="agents-details" title={login_text}>
