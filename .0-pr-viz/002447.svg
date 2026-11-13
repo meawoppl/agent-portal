@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2447 · Owner-approved secret set updates</text>
+<text x="55" y="105" font-family="sans-serif" font-size="34" fill="#e6e9f5">Agents could deposit new secrets only; set now creates or updates in one approved batch.</text>
+<text x="55" y="148" font-family="sans-serif" font-size="34" fill="#e6e9f5">Pinned versions and permissions prevent stale replacement; existing history and sharing survive.</text>
+<path d="M55 175 H1945 M1000 190 V1140" stroke="#565f89" stroke-dasharray="6 6"/>
+<text x="55" y="225" font-family="sans-serif" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1055" y="225" font-family="sans-serif" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="55" y="270" width="880" height="205" rx="14" fill="#1e202e" stroke="#7aa2f7"/>
+<text x="80" y="312" font-family="sans-serif" font-size="28" fill="#7aa2f7">secret propose</text>
+<text x="80" y="355" font-family="sans-serif" font-size="24" fill="#c0caf5">Single value or batch file</text>
+<text x="80" y="390" font-family="sans-serif" font-size="24" fill="#c0caf5">Write-only submission; owner approves</text>
+<rect x="55" y="535" width="880" height="205" rx="14" fill="#1e202e" stroke="#f7768e"/>
+<text x="80" y="577" font-family="sans-serif" font-size="28" fill="#f7768e">New names only</text>
+<text x="80" y="620" font-family="sans-serif" font-size="24" fill="#c0caf5">Existing names fail at insert</text>
+<text x="80" y="655" font-family="sans-serif" font-size="24" fill="#c0caf5">Replacement requires the Settings UI</text>
+<rect x="55" y="800" width="880" height="205" rx="14" fill="#1e202e" stroke="#f7768e"/>
+<text x="80" y="842" font-family="sans-serif" font-size="28" fill="#f7768e">Create-only approval card</text>
+<text x="80" y="885" font-family="sans-serif" font-size="24" fill="#c0caf5">No update version shown</text>
+<text x="80" y="920" font-family="sans-serif" font-size="24" fill="#c0caf5">Cannot review a mixed create/update batch</text>
+<rect x="1055" y="270" width="880" height="205" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="312" font-family="sans-serif" font-size="28" fill="#9ece6a">secret set</text>
+<text x="1080" y="355" font-family="sans-serif" font-size="24" fill="#c0caf5">Same file/stdin and batch interface</text>
+<text x="1080" y="390" font-family="sans-serif" font-size="24" fill="#c0caf5">propose remains a compatibility alias</text>
+<rect x="1055" y="535" width="880" height="205" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="577" font-family="sans-serif" font-size="28" fill="#9ece6a">Review creates and pinned updates</text>
+<text x="1080" y="620" font-family="sans-serif" font-size="24" fill="#c0caf5">Shows current and next version</text>
+<text x="1080" y="655" font-family="sans-serif" font-size="24" fill="#c0caf5">Approval explicitly confirms each update target</text>
+<text x="1080" y="690" font-family="sans-serif" font-size="24" fill="#c0caf5">Changed version or permissions reject the batch</text>
+<rect x="1055" y="800" width="880" height="205" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="842" font-family="sans-serif" font-size="28" fill="#9ece6a">One atomic save</text>
+<text x="1080" y="885" font-family="sans-serif" font-size="24" fill="#c0caf5">Append immutable versions; preserve sharing</text>
+<text x="1080" y="920" font-family="sans-serif" font-size="24" fill="#c0caf5">No read binding returned to the agent</text>
+<text x="1080" y="955" font-family="sans-serif" font-size="24" fill="#c0caf5">Any conflict rolls back creates and updates</text>
+<text x="55" y="1172" font-family="sans-serif" font-size="22" fill="#a9b1d6">Scope: named personal/org secrets only; updates cannot rename targets or restore deleted secrets. Owner approval remains required.</text>
+</svg>
