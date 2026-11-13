@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2460 - Data-only CLI readiness pointers</text>
+<text x="55" y="105" font-family="sans-serif" font-size="34" fill="#e6e9f5">Publish ready platforms with the normal Actions token, without copying workflow files.</text>
+<text x="55" y="148" font-family="sans-serif" font-size="34" fill="#e6e9f5">A versioned pointer selects source-pinned releases; source ancestry prevents stale updates.</text>
+<path d="M55 175 H1945 M1000 190 V1140" stroke="#565f89" stroke-dasharray="6 6"/>
+<text x="55" y="225" font-family="sans-serif" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1055" y="225" font-family="sans-serif" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="55" y="270" width="880" height="205" rx="14" fill="#1e202e" stroke="#7aa2f7"/>
+<text x="80" y="312" font-family="sans-serif" font-size="28" fill="#7aa2f7">Source-tree readiness branch</text>
+<text x="80" y="355" font-family="sans-serif" font-size="24" fill="#c0caf5">Binaries and checksums upload successfully</text>
+<text x="80" y="393" font-family="sans-serif" font-size="24" fill="#c0caf5">Branch points directly at main source commit</text>
+<rect x="55" y="535" width="880" height="205" rx="14" fill="#1e202e" stroke="#f7768e"/>
+<text x="80" y="577" font-family="sans-serif" font-size="28" fill="#f7768e">GitHub rejects workflow files</text>
+<text x="80" y="620" font-family="sans-serif" font-size="24" fill="#c0caf5">Normal Actions token lacks workflows permission</text>
+<text x="80" y="658" font-family="sans-serif" font-size="24" fill="#c0caf5">No ready ref; legacy release stays unchanged</text>
+<rect x="55" y="800" width="880" height="205" rx="14" fill="#1e202e" stroke="#e0af68"/>
+<text x="80" y="842" font-family="sans-serif" font-size="28" fill="#e0af68">Compatibility must survive the correction</text>
+<text x="80" y="885" font-family="sans-serif" font-size="24" fill="#c0caf5">Manually downloaded old readers may exist</text>
+<text x="80" y="923" font-family="sans-serif" font-size="24" fill="#c0caf5">Legacy orphan tags can survive partial deletion</text>
+<rect x="1055" y="270" width="880" height="205" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="312" font-family="sans-serif" font-size="28" fill="#9ece6a">Data-only v2 branch</text>
+<text x="1080" y="355" font-family="sans-serif" font-size="24" fill="#c0caf5">One readiness.json file: schema, channel, source</text>
+<text x="1080" y="393" font-family="sans-serif" font-size="24" fill="#c0caf5">Marker parent is prior marker, never source tree</text>
+<rect x="1055" y="535" width="880" height="205" rx="14" fill="#1e202e" stroke="#7dcfff"/>
+<text x="1080" y="577" font-family="sans-serif" font-size="28" fill="#7dcfff">Pinned discovery and race-safe publication</text>
+<text x="1080" y="620" font-family="sans-serif" font-size="24" fill="#c0caf5">Read pointer by immutable marker SHA</text>
+<text x="1080" y="658" font-family="sans-serif" font-size="24" fill="#c0caf5">Compare source ancestry; retry non-force CAS</text>
+<rect x="1055" y="800" width="880" height="205" rx="14" fill="#1e202e" stroke="#bb9af7"/>
+<text x="1080" y="842" font-family="sans-serif" font-size="28" fill="#bb9af7">Old readers safely retain their protocol</text>
+<text x="1080" y="885" font-family="sans-serif" font-size="24" fill="#c0caf5">Old prefix absent: complete-release fallback</text>
+<text x="1080" y="923" font-family="sans-serif" font-size="24" fill="#c0caf5">Check orphan tag ancestry before delete/create</text>
+<text x="55" y="1170" font-family="sans-serif" font-size="26" fill="#a9b1d6">Validation: Git permission/race fixture, orphan retries, pointer schema, pinned reads, checksum tests.</text>
+</svg>
