@@ -829,7 +829,12 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Apply pending updates, then auto-update on startup (unless --no-update)
-    match portal_update::startup_auto_update(BINARY_PREFIX, shared::VERSION, !args.no_update).await
+    match portal_update::startup_auto_update(
+        BINARY_PREFIX,
+        crate::BUILD_INFO.version,
+        !args.no_update,
+    )
+    .await
     {
         Ok(true) => {
             info!("Launcher updated, please restart");
@@ -924,7 +929,7 @@ async fn cmd_login(args: &Args) -> anyhow::Result<()> {
 
 /// `agent-portal update` — update binary and restart service if running
 async fn cmd_update() -> anyhow::Result<()> {
-    match portal_update::startup_auto_update(BINARY_PREFIX, shared::VERSION, true).await {
+    match portal_update::startup_auto_update(BINARY_PREFIX, crate::BUILD_INFO.version, true).await {
         Ok(true) => {
             println!("agent-portal updated successfully.");
             // Restart the service if it's installed and running
