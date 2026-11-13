@@ -53,7 +53,9 @@ async def main():
             await route.fulfill(status=500, body="Launcher REST must not be used")
             return
         data = {}
-        if path == "/api/auth/me":
+        if path == "/api/config":
+            data = dict(app_title="Portal", server_version="99.0.0", protocol_version=1)
+        elif path == "/api/auth/me":
             data = dict(
                 id=USER, email="test@example.invalid", name="Test", is_admin=False
             )
@@ -79,6 +81,11 @@ async def main():
 
         def message(raw):
             msg = json.loads(raw)
+            if msg["type"] == "Hello":
+                route.send(
+                    json.dumps(dict(type="HelloAck", protocol_version=1, success=True))
+                )
+                return
             assert msg["type"] == "Dashboard", msg
             op = msg["request"]["operation"]
             operations.append(op)
@@ -88,7 +95,7 @@ async def main():
                     data=[host, dict(host, launcher_id=LEGACY, hostname="legacy-host")],
                 )
             elif op == "probe_agents":
-                if msg["request"]["launcher_id"] == LEGACY:
+                if msg["request"]["args"]["launcher_id"] == LEGACY:
                     installs = [
                         dict(agent_type=a, installed=i != 0, version=v)
                         for i, (a, v) in enumerate(
