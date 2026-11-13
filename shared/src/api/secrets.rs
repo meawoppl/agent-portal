@@ -325,3 +325,56 @@ pub struct SecretVerificationStart {
 pub struct SecretVerificationRedirect {
     pub url: String,
 }
+
+/// A write-only submission: values never appear in proposal/status responses.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SecretDepositCreate {
+    pub request_id: Uuid,
+    pub items: Vec<SecretDepositInput>,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SecretDepositInput {
+    pub namespace: SecretNamespace,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    pub value: SecretValue,
+    /// Registered google:EMAIL, verified email, or Portal user UUID; read/use only.
+    #[serde(default)]
+    pub share: Vec<String>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SecretDepositRecipient {
+    pub user_id: Uuid,
+    pub display_name: String,
+    pub email: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SecretDepositItem {
+    pub secret_id: Uuid,
+    pub version_id: Uuid,
+    pub namespace: SecretNamespace,
+    pub name: String,
+    pub description: String,
+    pub recipients: Vec<SecretDepositRecipient>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SecretDepositInfo {
+    pub id: Uuid,
+    pub session_id: Uuid,
+    pub state: String,
+    pub expires_at: String,
+    pub items: Vec<SecretDepositItem>,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SecretDepositDecision {
+    pub approve: bool,
+    /// Optional owner edits, in original item order. Recipient IDs may only be removed.
+    pub items: Option<Vec<SecretDepositEdit>>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SecretDepositEdit {
+    pub name: String,
+    pub description: String,
+    pub recipients: Vec<Uuid>,
+}

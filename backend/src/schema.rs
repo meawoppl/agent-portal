@@ -343,6 +343,22 @@ diesel::table! {
 }
 
 diesel::table! {
+    secret_deposit_proposals (id) {
+        id -> Uuid,
+        owner_user_id -> Uuid,
+        session_id -> Uuid,
+        launcher_id -> Uuid,
+        proxy_token_id -> Uuid,
+        organization_id -> Uuid,
+        state -> Text,
+        metadata -> Jsonb,
+        envelopes -> Nullable<Jsonb>,
+        created_at -> Timestamptz,
+        expires_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
     secret_enrollments (id) {
         id -> Uuid,
         user_id -> Uuid,
@@ -779,6 +795,8 @@ diesel::joinable!(secret_bindings -> secrets (secret_id));
 diesel::joinable!(secret_bindings -> sessions (session_id));
 diesel::joinable!(secret_bindings -> users (created_by));
 diesel::joinable!(secret_credentials -> users (user_id));
+diesel::joinable!(secret_deposit_proposals -> sessions (session_id));
+diesel::joinable!(secret_deposit_proposals -> users (owner_user_id));
 diesel::joinable!(secret_enrollments -> users (user_id));
 diesel::joinable!(secret_expunge_jobs -> secrets (secret_id));
 diesel::joinable!(secret_expunge_jobs -> users (requested_by));
@@ -837,6 +855,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     secret_bindings,
     secret_coverage,
     secret_credentials,
+    secret_deposit_proposals,
     secret_enrollments,
     secret_expunge_jobs,
     secret_grants,

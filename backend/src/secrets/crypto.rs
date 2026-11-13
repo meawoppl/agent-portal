@@ -48,7 +48,7 @@ impl Identity {
 pub struct EnvelopeCrypto {
     pub(crate) key: Arc<Zeroizing<Vec<u8>>>,
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Envelope {
     pub ciphertext: Vec<u8>,
     pub nonce: Vec<u8>,

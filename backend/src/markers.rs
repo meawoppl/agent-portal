@@ -25,6 +25,10 @@
 /// key-provider health and verify refresh. Content is rejected/held, not leaked.
 pub const SECRET_REDACTION_FAILED: &str = "SECRET_REDACTION_FAILED";
 
+/// Proposal expiry worker could not remove staged ciphertext. Recurring failures
+/// mean database trouble; restore DB access and verify overdue proposals clear.
+pub const SECRET_PROPOSAL_EXPIRY_FAILED: &str = "SECRET_PROPOSAL_EXPIRY_FAILED";
+
 /// Cleanup worker failed before saving its receipt. Bursts indicate database,
 /// archive or worker failure; inspect job status and storage/key reachability.
 pub const SECRET_EXPUNGE_FAILED: &str = "SECRET_EXPUNGE_FAILED";
@@ -225,6 +229,7 @@ mod tests {
     const ALL_MARKERS: &[&str] = &[
         SECRET_REDACTION_FAILED,
         SECRET_EXPUNGE_FAILED,
+        SECRET_PROPOSAL_EXPIRY_FAILED,
         SECRETS_REDACTION_REFRESH_FAILED,
         COST_ACCOUNTING_PERSIST_FAILED,
         TURN_METRICS_PERSIST_FAILED,
@@ -308,6 +313,7 @@ mod tests {
             include_str!("handlers/media_archive.rs"),
             include_str!("handlers/websocket/launcher_socket.rs"),
             include_str!("handlers/plugins.rs"),
+            include_str!("handlers/secrets/deposits.rs"),
             include_str!("handlers/websocket/member_status.rs"),
         ];
         for m in ALL_MARKERS {

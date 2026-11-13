@@ -273,6 +273,13 @@ pub async fn run() -> anyhow::Result<()> {
     // Build our application with routes
     let app = routes::build_router(app_state.clone())?;
 
+    background::spawn_periodic(
+        "secret proposal expiry",
+        Duration::from_secs(30),
+        app_state.clone(),
+        handlers::secrets::deposits::sweep,
+    );
+
     // Spawn background maintenance tasks
     background::spawn_periodic(
         "media store sweep task (every 5 minutes)",

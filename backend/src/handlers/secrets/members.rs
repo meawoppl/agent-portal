@@ -288,6 +288,38 @@ pub(super) async fn resolve(
     )?))
 }
 
+/// Proposal sharing uses the same verified organization-directory boundary.
+/// Keep this local: mutable GitHub handles require the interactive resolver.
+pub(super) fn deposit_recipient(
+    state: &AppState,
+    conn: &mut crate::db::DbConnection,
+    user: Uuid,
+    selector: &str,
+) -> Result<SecretDepositRecipient, AppError> {
+    require_directory(
+        state,
+        conn,
+        Principal {
+            user,
+            browser: false,
+            metadata: true,
+            mutation: false,
+        },
+    )?;
+    let selector = parse_selector(selector)?;
+    if matches!(selector, Selector::Github(_)) {
+        return Err(AppError::BadRequest(
+            "Use a verified email, google:EMAIL or Portal user UUID for proposed sharing",
+        ));
+    }
+    let member = select_member(&members(conn)?, &selector, None)?;
+    Ok(SecretDepositRecipient {
+        user_id: member.user_id,
+        display_name: member.display_name,
+        email: member.email,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
