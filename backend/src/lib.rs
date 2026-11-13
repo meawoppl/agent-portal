@@ -128,6 +128,8 @@ impl AppState {
 /// Run the backend server: parse args, build state, serve with graceful
 /// shutdown. The binary entry point is a thin wrapper around this.
 pub async fn run() -> anyhow::Result<()> {
+    shared::build_info::register(BUILD_INFO)
+        .map_err(|_| anyhow::anyhow!("Conflicting process build identity"))?;
     // Parse CLI arguments
     let args = Args::parse();
 
