@@ -1,25 +1,39 @@
 # Docker Deployment Guide
 
-This guide covers running Claude Code Portal in Docker.
+This guide covers running Agent Portal in Docker. For a complete production
+stack with HTTPS and backups, use [Self-Hosting](SELF_HOSTING.md).
 
 ## Quick Start
 
 ```bash
-# Build and start
-docker-compose up -d
+# Configure OAuth and SESSION_SECRET in .env first.
+# Pull and start the released backend plus the local development database.
+docker compose pull
+docker compose up -d
 
 # View logs
-docker-compose logs -f backend
+docker compose logs -f backend
 
 # Stop
-docker-compose down
+docker compose down
 ```
 
 ## Building the Image
 
+The root `Dockerfile` packages a prebuilt Linux backend; it does not compile the
+workspace. CI builds the frontend first and embeds it into that binary. To
+package a compatible CI backend artifact locally:
+
 ```bash
-docker build -f backend/Dockerfile -t agent-portal-backend .
+mkdir -p build-output
+cp /path/to/compatible-linux-backend build-output/backend
+docker build -f Dockerfile -t agent-portal-backend .
 ```
+
+The artifact must match the image architecture and Ubuntu 24.04's runtime ABI.
+The Docker context intentionally includes only this binary and the Dockerfile.
+For ordinary use, pull `ghcr.io/meawoppl/agent-portal:<version>` instead of
+building an image; pin a release version for production.
 
 ## Running with Environment Variables
 
@@ -92,9 +106,7 @@ Create a `docker-compose.prod.yml`:
 ```yaml
 services:
   backend:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
+    image: ghcr.io/meawoppl/agent-portal:${PORTAL_VERSION:?set a release version}
     container_name: agent-portal-backend
     ports:
       - "3000:3000"
@@ -112,7 +124,7 @@ services:
 Run with:
 
 ```bash
-docker-compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml up -d
 ```
 
 ## Production Setup with Traefik
@@ -139,9 +151,7 @@ services:
       - ./letsencrypt:/letsencrypt
 
   backend:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
+    image: ghcr.io/meawoppl/agent-portal:${PORTAL_VERSION:?set a release version}
     env_file:
       - .env
     labels:
@@ -154,18 +164,11 @@ services:
 
 ## Multi-Architecture Builds
 
-Build for both AMD64 and ARM64:
-
-```bash
-docker buildx create --use
-
-docker buildx build \
-  --platform linux/amd64,linux/arm64 \
-  -f backend/Dockerfile \
-  -t your-registry/agent-portal-backend:latest \
-  --push \
-  .
-```
+Use the published multi-platform image for normal deployments. CI builds a
+separate backend for each platform before packaging the corresponding image.
+A custom multi-platform build likewise needs a matching prebuilt backend for
+each target; passing two platforms to Docker while copying one native binary
+does not produce two working architectures.
 
 ## Environment Variables Reference
 
@@ -261,7 +264,7 @@ docker exec agent-portal-backend curl -f http://localhost:3000/
 
 ## Production Checklist
 
-- [ ] Use a production PostgreSQL database (not the dev docker-compose db)
+- [ ] Use a production PostgreSQL database (not the dev docker compose db)
 - [ ] Set up database backups
 - [ ] Configure TLS/SSL (via Traefik, nginx, or cloud load balancer)
 - [ ] Set a strong, stable `SESSION_SECRET` (or `SESSION_SECRET_FILE`)
