@@ -33,7 +33,7 @@ pub fn backend_row(app_state: &AppState) -> ServiceStats {
         name: "backend".into(),
         hostname: guard.hostname().to_string(),
         sessions: app_state.session_manager.connected_proxy_count() as u32,
-        version: Some(env!("CARGO_PKG_VERSION").to_string()),
+        version: Some(crate::BUILD_INFO.version.to_string()),
         sample: Some(guard.sample()),
     }
 }

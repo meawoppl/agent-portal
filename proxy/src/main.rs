@@ -1,3 +1,5 @@
+pub(crate) const BUILD_INFO: shared::build_info::BuildInfo = shared::build_info!();
+
 mod auth;
 mod commands;
 mod config;
@@ -251,6 +253,8 @@ async fn handle_update(check_only: bool) -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    shared::build_info::register(BUILD_INFO)
+        .map_err(|_| anyhow::anyhow!("Conflicting process build identity"))?;
     dotenvy::dotenv().ok();
 
     let args = Args::parse();

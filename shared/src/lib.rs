@@ -8,22 +8,7 @@ use uuid::Uuid;
 pub mod claude_cost;
 pub mod claude_effort;
 
-/// The portal version, `major.minor.{git commit count}` — derived at build
-/// time by `build.rs` (issue #1096) so no PR ever edits a version line. Every
-/// crate reports this single value (`server_version`, launcher `version`, the
-/// frontend footer, the `agent-portal` client version). The Cargo.toml
-/// `[workspace.package] version` supplies only `major.minor`; its patch is a
-/// placeholder.
-pub const VERSION: &str = env!("PORTAL_VERSION");
-
-/// Short git commit hash of this build, or `"unknown"` without git (#1386).
-/// Surfaced next to [`VERSION`] for deploy tracing.
-pub const GIT_HASH: &str = env!("PORTAL_GIT_HASH");
-
-/// Build timestamp in Pacific time with a `PST`/`PDT` label (or `"unknown"`),
-/// e.g. `2026-07-16 14:32 PDT` (#1386). Refreshes per deploy via `build.rs`'s
-/// HEAD-based rerun triggers, so it reads as "last built/deployed".
-pub const BUILD_TIME: &str = env!("PORTAL_BUILD_TIME");
+pub mod build_info;
 
 /// Launcher capability advertised by versions that honor
 /// `ServerToLauncher::LaunchSession.create_worktree`.
@@ -112,16 +97,6 @@ pub const PROXY_CAPABILITY_TUNNEL_BINARY_V1: &str = "session.tunnel_binary_v1";
 /// agreed profile in `RegisterAck.tunnel_sizing`. A v2 proxy still advertises
 /// [`PROXY_CAPABILITY_TUNNEL_BINARY_V1`] too, so a v1 backend keeps working.
 pub const PROXY_CAPABILITY_TUNNEL_BINARY_V2: &str = "session.tunnel_binary_v2";
-
-/// Split [`VERSION`] into `(major, minor, patch)` numeric components.
-/// `None` on the (impossible-by-construction) malformed string.
-pub fn version_parts() -> Option<(u64, u64, u64)> {
-    let mut it = VERSION.split('.');
-    let major = it.next()?.parse().ok()?;
-    let minor = it.next()?.parse().ok()?;
-    let patch = it.next()?.parse().ok()?;
-    Some((major, minor, patch))
-}
 
 // Proxy token types in separate module
 pub mod codex_errors;
@@ -1612,18 +1587,6 @@ mod tests {
         let json = r#"{"id":"11111111-1111-1111-1111-111111111111","session_id":"22222222-2222-2222-2222-222222222222","reset_at":"2026-07-16T00:00:00Z","prompt":"go"}"#;
         let cfg: ContinuationConfig = serde_json::from_str(json).expect("deserialize");
         assert_eq!(cfg.reason, CONTINUATION_REASON_LIMIT);
-    }
-
-    #[test]
-    fn version_is_well_formed() {
-        // Derived by build.rs; must always be `major.minor.patch`, all numeric
-        // (issue #1096). A parse failure means the derivation broke.
-        let (major, minor, _patch) = version_parts().expect("VERSION is major.minor.patch");
-        // major.minor track the workspace Cargo.toml; patch is the commit
-        // count (fallback to the Cargo patch when git is absent).
-        assert!(major >= 2, "unexpected major in {VERSION}");
-        let _ = minor;
-        assert_eq!(VERSION.split('.').count(), 3, "VERSION = {VERSION}");
     }
 
     #[test]

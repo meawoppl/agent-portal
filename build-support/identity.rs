@@ -21,7 +21,7 @@ fn git(args: &[&str]) -> Option<String> {
     (!s.is_empty()).then_some(s)
 }
 
-fn main() {
+pub fn emit() {
     let major = std::env::var("CARGO_PKG_VERSION_MAJOR").unwrap_or_else(|_| "0".into());
     let minor = std::env::var("CARGO_PKG_VERSION_MINOR").unwrap_or_else(|_| "0".into());
     let fallback_patch = std::env::var("CARGO_PKG_VERSION_PATCH").unwrap_or_else(|_| "0".into());
@@ -60,6 +60,9 @@ fn main() {
         .unwrap_or_else(|| "unknown".into());
     println!("cargo:rustc-env=PORTAL_BUILD_TIME={build_time}");
 
+    // The helper is shared source, not a compiled dependency of runtime crates.
+    println!("cargo:rerun-if-changed=../build-support/identity.rs");
+
     // Recompute only when the commit count / hash could have changed: HEAD
     // moving (branch switch / detached commit) or the reflog appending (any
     // commit/reset/checkout). This also refreshes the build time per deploy.
@@ -67,5 +70,17 @@ fn main() {
     if let Some(git_dir) = git(&["rev-parse", "--absolute-git-dir"]) {
         println!("cargo:rerun-if-changed={git_dir}/HEAD");
         println!("cargo:rerun-if-changed={git_dir}/logs/HEAD");
+        // Also cover ref updates without a reflog and shallow-history changes.
+        let mut paths = vec!["packed-refs".to_string(), "shallow".to_string()];
+        if let Some(reference) = git(&["symbolic-ref", "-q", "HEAD"]) {
+            paths.push(reference);
+        }
+        for path in paths {
+            if let Some(path) = git(&["rev-parse", "--git-path", &path]) {
+                if std::path::Path::new(&path).exists() {
+                    println!("cargo:rerun-if-changed={path}");
+                }
+            }
+        }
     }
 }

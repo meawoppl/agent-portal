@@ -22,11 +22,6 @@ use tracing::{info, warn};
 /// Bundled fallback body (relative to this file).
 const DEFAULT_BODY: &str = include_str!("../../portal_reminder.md");
 
-/// Running portal version, captured at compile time from the workspace
-/// `Cargo.toml`. Surfaced in the system-reminder envelope so the agent
-/// knows which portal features and fixes are in scope.
-const PORTAL_VERSION: &str = shared::VERSION;
-
 /// Resolve the reminder body. Honors `PORTAL_REMINDER_FILE` at call time so
 /// operators can hot-edit the file and have the next injection pick it up
 /// without restarting the proxy.
@@ -57,7 +52,7 @@ pub fn load_reminder_body() -> String {
 fn reminder_contents(body: &str) -> String {
     format!(
         "Agent Portal version {}.\n\n{}",
-        PORTAL_VERSION,
+        shared::build_info::running().version,
         body.trim()
     )
 }

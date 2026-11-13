@@ -417,3 +417,6 @@ async fn shutdown_signal(app_state: Arc<AppState>) {
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     tracing::info!("Shutdown complete");
 }
+
+/// Identity of this compiled artifact, independent of reusable libraries.
+pub const BUILD_INFO: shared::build_info::BuildInfo = shared::build_info!();
