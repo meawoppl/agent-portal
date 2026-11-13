@@ -232,6 +232,10 @@ def legacy(repo, sha, directory):
         capture_output=True,
         text=True,
     )
+    if current.returncode != 0 and "HTTP 404" not in current.stderr:
+        raise RuntimeError(
+            "Could not inspect legacy release; refusing to mutate release state"
+        )
     if current.returncode == 0:
         body = json.loads(current.stdout).get("body") or ""
         import re
@@ -251,6 +255,13 @@ def legacy(repo, sha, directory):
             ):
                 print("Keeping newer complete legacy release")
                 return
+            if (
+                subprocess.run(
+                    ["git", "merge-base", "--is-ancestor", old[1], sha]
+                ).returncode
+                != 0
+            ):
+                raise RuntimeError("Refusing divergent legacy release source history")
     if not channel_advance(repo, "complete", sha):
         return
     expected = [name for platform in PLATFORMS for name in artifact_names(platform)]

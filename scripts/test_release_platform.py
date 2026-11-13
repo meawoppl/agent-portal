@@ -111,6 +111,17 @@ class PublicationTests(unittest.TestCase):
             with self.assertRaises(AssertionError):
                 m.validate_manifest(manifest, "linux-x86_64", "a" * 40, assets)
 
+    def test_legacy_api_failure_does_not_mutate_tags_or_release(self):
+        failure = subprocess.CompletedProcess(
+            [], 1, "", "gh: API rate limit exceeded (HTTP 403)"
+        )
+        with patch.object(m.subprocess, "run", return_value=failure), patch.object(
+            m, "channel_advance"
+        ) as advance:
+            with self.assertRaisesRegex(RuntimeError, "refusing to mutate"):
+                m.legacy("owner/repo", "a" * 40, Path("unused"))
+            advance.assert_not_called()
+
     def test_older_completion_cannot_regress_platform_channel(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
