@@ -108,11 +108,15 @@ fn render_install_cell(
         AgentLoginStatus::LoggedOut => "Signed out",
         AgentLoginStatus::Unknown => "Sign-in unknown",
     };
+    let version = reported_version(install.version.as_deref());
     html! {
         <td class="agents-cell installed">
             <div class="agents-statuses">
                 <span class="agents-badge installed">{ "Installed" }</span>
                 <span class={classes!("agents-badge", login_class)}>{ login_label }</span>
+            </div>
+            <div class="agents-version" title={version.unwrap_or("This agent did not report a version")} >
+                { version.unwrap_or("Version unavailable") }
             </div>
             if let AgentLoginStatus::LoggedIn { label, plan, via } = &install.login {
                 <div class="agents-details" title={login_text}>
@@ -129,6 +133,14 @@ fn render_install_cell(
             { for sign_in_button(&install.login, agent, agent_name, launcher.launcher_id, on_sign_in) }
         </td>
     }
+}
+
+/// Older launchers used a presence label when localharness could not report a
+/// version. Keep that placeholder distinct from an actual binary version.
+fn reported_version(version: Option<&str>) -> Option<&str> {
+    version
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && *value != "google-antigravity localharness")
 }
 
 /// A Sign-in button, shown only when the agent is installed but not signed in

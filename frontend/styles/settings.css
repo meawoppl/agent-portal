@@ -1063,6 +1063,14 @@
     margin-top: 0.25rem;
 }
 
+.agents-version {
+    font-family: var(--font-mono, monospace);
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    overflow-wrap: anywhere;
+    white-space: pre-line;
+}
+
 .agents-badge {
     display: inline-block;
     width: fit-content;
