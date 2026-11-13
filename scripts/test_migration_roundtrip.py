@@ -17,7 +17,7 @@ spec.loader.exec_module(roundtrip)
 
 
 class DisposableDatabaseTests(unittest.TestCase):
-    def execute(self, fail=None, error=RuntimeError):
+    def execute(self, fail=None, error=RuntimeError, container=""):
         calls = []
         def run(label, argv, env, capture=False):
             calls.append((label, argv, env.copy()))
@@ -28,7 +28,7 @@ class DisposableDatabaseTests(unittest.TestCase):
             root = Path(directory)
             (root / "backend/src").mkdir(parents=True)
             (root / "backend/src/schema.rs").write_text("schema\n")
-            with patch.object(roundtrip, "ROOT", root), patch.object(roundtrip, "run", run), patch.dict(os.environ, {"DATABASE_URL": "postgresql://user:secret@localhost:5432/existing?sslmode=disable"}), contextlib.redirect_stdout(io.StringIO()):
+            with patch.object(roundtrip, "ROOT", root), patch.object(roundtrip, "run", run), patch.dict(os.environ, {"DATABASE_URL": "postgresql://user:secret@localhost:5432/existing?sslmode=disable", "POSTGRES_TOOLS_CONTAINER": container}), contextlib.redirect_stdout(io.StringIO()):
                 if fail:
                     with self.assertRaisesRegex(error, "injected failure"):
                         roundtrip.main()
@@ -49,6 +49,38 @@ class DisposableDatabaseTests(unittest.TestCase):
             else:
                 self.assertNotIn("/existing", " ".join(argv))
         self.assertEqual(calls[-1][1][0], "dropdb")
+
+    def test_container_tools_keep_owned_database_and_literal_arguments(self):
+        calls = self.execute(container="postgres-service")
+        name = calls[0][1][-1]
+        for label, argv, env in calls:
+            if argv[0] == "docker":
+                self.assertEqual(argv[:3], ["docker", "exec", "postgres-service"])
+                self.assertIn(argv[3], ["createdb", "dropdb", "pg_dump"])
+                if argv[3] in ["createdb", "dropdb"]:
+                    self.assertEqual(argv[-1], name)
+                    self.assertIn("/existing?sslmode=disable", argv[-2])
+                else:
+                    self.assertEqual(argv[-1], env["DATABASE_URL"])
+            else:
+                self.assertEqual(argv[0], "diesel")
+        self.assertEqual(calls[-1][1][3], "dropdb")
+        url = "postgresql://user:p%24%28word%29@localhost/db?sslmode=disable"
+        self.assertEqual(
+            roundtrip.postgres_tool("pg_dump", ["--dbname", url], {"POSTGRES_TOOLS_CONTAINER": "abc123"}),
+            ["docker", "exec", "abc123", "pg_dump", "--dbname", url],
+        )
+
+    def test_container_mode_failure_still_drops_only_owned_database(self):
+        for label in ["Snapshot database objects", "Revert all migrations"]:
+            calls = self.execute(label, container="postgres-service")
+            self.assertEqual(calls[-1][1][:4], ["docker", "exec", "postgres-service", "dropdb"])
+            self.assertEqual(calls[-1][1][-1], calls[0][1][-1])
+
+    def test_container_option_injection_is_rejected(self):
+        for container in ["--privileged", "name; command", "name with spaces"]:
+            with self.subTest(container=container), self.assertRaises(ValueError):
+                roundtrip.postgres_tool("pg_dump", [], {"POSTGRES_TOOLS_CONTAINER": container})
 
     def test_failed_creation_never_drops_any_database(self):
         calls = self.execute("Create isolated migration database")

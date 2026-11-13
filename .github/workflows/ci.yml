@@ -173,7 +173,7 @@ jobs:
       DATABASE_URL: postgresql://migration_check:migration_check@localhost:5432/postgres
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:16.16-alpine@sha256:0adbf25a9e96d38823bb813f3ac0ed41fadb665c88f1df7fe6dbfb060cbdc106
         env:
           POSTGRES_USER: migration_check
           POSTGRES_PASSWORD: migration_check
@@ -191,14 +191,22 @@ jobs:
         with:
           cache-key: "migration-cli"
           components: "rustfmt"
-      - name: Install PostgreSQL tools
-        run: sudo apt-get update && sudo apt-get install -y libpq-dev postgresql-client
+      - name: Install Diesel PostgreSQL library
+        run: sudo apt-get update && sudo apt-get install -y libpq-dev
       - name: Install pinned Diesel CLI
         run: cargo install diesel_cli --version 2.3.11 --locked --no-default-features --features postgres
       - name: Test disposable database ownership and cleanup
         run: python3 scripts/test_migration_roundtrip.py
       - name: Apply, revert, reapply and check schema drift
-        run: python3 scripts/check-migration-roundtrip.py
+        env:
+          # Run dump/create/drop clients from the exact server image, not the
+          # runner image's independently updated PostgreSQL client package.
+          POSTGRES_TOOLS_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          docker inspect --format 'PostgreSQL service image: {{.Config.Image}}' "$POSTGRES_TOOLS_CONTAINER"
+          docker exec "$POSTGRES_TOOLS_CONTAINER" pg_dump --version
+          docker exec "$POSTGRES_TOOLS_CONTAINER" psql -U migration_check -d postgres -Atc 'SHOW server_version'
+          python3 scripts/check-migration-roundtrip.py
 
   e2e-tests:
     name: E2E Tests

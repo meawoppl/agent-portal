@@ -3,6 +3,9 @@
 
 DATABASE_URL is only the maintenance connection used to CREATE/DROP a randomly
 named database. Requires CREATEDB, PostgreSQL client tools and diesel_cli 2.3.11.
+Set POSTGRES_TOOLS_CONTAINER to use that Docker service's matching client tools.
+DATABASE_URL must address the same server from the host (Diesel) and container
+(client tools); CI uses localhost:5432 in both namespaces. No URL is rewritten.
 Data-only irreversible migrations are not expected to restore deleted rows.
 """
 import difflib
@@ -34,8 +37,19 @@ def compare(expected, actual, label):
         raise RuntimeError(f"{label}: schema drift")
 
 
+def postgres_tool(tool, args, env):
+    container = env.get("POSTGRES_TOOLS_CONTAINER")
+    if not container:
+        return [tool, *args]
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", container):
+        raise ValueError("POSTGRES_TOOLS_CONTAINER must be a Docker container ID or name")
+    # Literal argv, no shell or URL transformation. Every tool reaches the same
+    # maintenance/owned database as before, using the server image's binaries.
+    return ["docker", "exec", container, tool, *args]
+
+
 def dump_schema(env):
-    dump = run("Snapshot database objects", ["pg_dump", "--schema-only", "--no-owner", "--no-privileges", "--dbname", env["DATABASE_URL"]], env, capture=True)
+    dump = run("Snapshot database objects", postgres_tool("pg_dump", ["--schema-only", "--no-owner", "--no-privileges", "--dbname", env["DATABASE_URL"]], env), env, capture=True)
     return normalize_dump(dump)
 
 
@@ -66,7 +80,7 @@ def main():
     env = dict(os.environ, DATABASE_URL=database_url)
     # createdb/dropdb receive only the maintenance connection; Diesel receives
     # only our new database. No migration or registry operation hits the former.
-    run("Create isolated migration database", ["createdb", "--maintenance-db", maintenance, name], env)
+    run("Create isolated migration database", postgres_tool("createdb", ["--maintenance-db", maintenance, name], env), env)
     try:
         with tempfile.TemporaryDirectory(prefix="portal-migration-") as temp:
             config = Path(temp) / "diesel.toml"
@@ -83,7 +97,7 @@ def main():
             compare(objects_before, dump_schema(env), "database objects after reapply")
             print("Migration structural roundtrip and generated schema match.")
     finally:
-        run("Drop isolated migration database", ["dropdb", "--maintenance-db", maintenance, name], env)
+        run("Drop isolated migration database", postgres_tool("dropdb", ["--maintenance-db", maintenance, name], env), env)
 
 
 def terminate(signum, _frame):
