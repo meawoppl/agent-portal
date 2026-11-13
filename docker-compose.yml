@@ -17,11 +17,9 @@ services:
       timeout: 5s
       retries: 5
 
-  # Backend (production build)
+  # Released backend image. For production HTTPS/backups use deploy/compose.yaml.
   backend:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
+    image: ghcr.io/meawoppl/agent-portal:${PORTAL_VERSION:-latest}
     container_name: claude-portal-backend
     ports:
       - "3000:3000"
