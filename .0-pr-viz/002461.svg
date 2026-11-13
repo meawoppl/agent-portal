@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2461 · Admin audit history</text>
+<text x="55" y="105" font-family="sans-serif" font-size="34" fill="#e6e9f5">Secrets had a narrow audit table; login and computer actions had no common admin history.</text>
+<text x="55" y="148" font-family="sans-serif" font-size="34" fill="#e6e9f5">Three categories now feed a durable, paginated audit tab without recording credential values.</text>
+<path d="M55 175 H1945 M1000 190 V1140" stroke="#565f89" stroke-dasharray="6 6"/>
+<text x="55" y="225" font-family="sans-serif" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1055" y="225" font-family="sans-serif" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="55" y="270" width="880" height="200" rx="14" fill="#1e202e" stroke="#7aa2f7"/>
+<text x="80" y="315" font-family="sans-serif" font-size="26" fill="#7aa2f7">secret_audit_events</text>
+<text x="80" y="360" font-family="sans-serif" font-size="23" fill="#c0caf5">Actor, secret, action, outcome, timestamp</text>
+<text x="80" y="405" font-family="sans-serif" font-size="23" fill="#c0caf5">Secrets-only history; no admin browsing tab</text>
+<rect x="55" y="535" width="880" height="200" rx="14" fill="#1e202e" stroke="#f7768e"/>
+<text x="80" y="580" font-family="sans-serif" font-size="26" fill="#f7768e">Separate operational observations</text>
+<text x="80" y="625" font-family="sans-serif" font-size="23" fill="#c0caf5">Login and launcher actions require log inspection</text>
+<text x="80" y="670" font-family="sans-serif" font-size="23" fill="#c0caf5">No shared category filter or bounded audit API</text>
+<rect x="55" y="800" width="880" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="80" y="845" font-family="sans-serif" font-size="26" fill="#7aa2f7">Admin dashboard</text>
+<text x="80" y="890" font-family="sans-serif" font-size="23" fill="#c0caf5">Overview, Users, Sessions, Subdomains, Federation</text>
+<text x="80" y="935" font-family="sans-serif" font-size="23" fill="#c0caf5">No audit retention setting</text>
+<rect x="1055" y="270" width="890" height="200" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="315" font-family="sans-serif" font-size="26" fill="#9ece6a">audit_events</text>
+<text x="1080" y="360" font-family="sans-serif" font-size="23" fill="#c0caf5">Identity + computers + secrets; old history migrated</text>
+<text x="1080" y="405" font-family="sans-serif" font-size="23" fill="#c0caf5">Transactions and lifecycle triggers retain evidence</text>
+<path d="M1500 475 V525" stroke="#9ece6a" stroke-width="3"/>
+<rect x="1055" y="535" width="890" height="200" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="580" font-family="sans-serif" font-size="26" fill="#9ece6a">GET /api/admin/audit</text>
+<text x="1080" y="625" font-family="sans-serif" font-size="23" fill="#c0caf5">require_admin + category/actor filters + keyset cursor</text>
+<text x="1080" y="670" font-family="sans-serif" font-size="23" fill="#c0caf5">At most 100 rows; IDs in expandable details</text>
+<path d="M1500 740 V790" stroke="#9ece6a" stroke-width="3"/>
+<rect x="1055" y="800" width="890" height="200" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="845" font-family="sans-serif" font-size="26" fill="#9ece6a">AdminAuditTab + bounded retention worker</text>
+<text x="1080" y="890" font-family="sans-serif" font-size="23" fill="#c0caf5">365 days by default; explicit unlimited option</text>
+<text x="1080" y="935" font-family="sans-serif" font-size="23" fill="#c0caf5">No tokens, values, request bodies or CLI output</text>
+<text x="55" y="1172" font-family="sans-serif" font-size="22" fill="#a9b1d6">Requests do not prove external completion. AUDIT_PERSIST_FAILED exposes observation gaps; database administrators can alter this history.</text>
+</svg>
