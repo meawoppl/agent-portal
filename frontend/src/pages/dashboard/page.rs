@@ -767,7 +767,8 @@ pub fn dashboard_page() -> Html {
             }
 
             // Update-available banner (post-reconnect, server version advanced)
-            // takes precedence over the transient shutdown banner.
+            // is independent of connection health: a newer version is not proof
+            // that this browser is still connected.
             {
                 if let Some(version) = update_available.as_ref() {
                     let on_reload = Callback::from(|_: MouseEvent| {
@@ -789,7 +790,12 @@ pub fn dashboard_page() -> Html {
                             </button>
                         </div>
                     }
-                } else if let Some(reason) = server_shutdown_reason.as_ref() {
+                } else {
+                    html! {}
+                }
+            }
+            {
+                if let Some(reason) = server_shutdown_reason.as_ref() {
                     html! {
                         <div class="server-shutdown-banner" role="status">
                             <span class="shutdown-banner-dot" aria-hidden="true"></span>
