@@ -58,6 +58,13 @@ def smoke(binary, output, scenario, expected_title):
             assert config["git_hash"] == expected_hash, config
             assert config["server_version"].endswith("." + version), config
             assert config["app_title"].endswith(expected_title), config
+            if scenario == "frontend-edit":
+                with urllib.request.urlopen(
+                    "http://127.0.0.1:3107/native-benchmark-marker.txt", timeout=10
+                ) as response:
+                    assert (
+                        response.read() == b"native frontend-only change\n"
+                    ), "changed frontend asset was not embedded"
             # Same request shape and concurrency for every variant. This is a
             # smoke comparison, NOT a substitute for representative load tests.
             start = time.monotonic()
