@@ -26,6 +26,9 @@ jobs:
       - name: Test isolated PR preview lifecycle
         run: python3 scripts/test_preview.py
 
+      - name: Test ready-platform release publication
+        run: python3 scripts/test_release_platform.py
+
       - name: Check migration naming convention
         run: ./scripts/check-migration-names.sh
 

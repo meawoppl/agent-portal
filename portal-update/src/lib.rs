@@ -4,6 +4,8 @@
 //! and self-updates if necessary. Parameterized by binary name so both
 //! `claude-portal` and `agent-portal` can use it.
 
+mod releases;
+
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -85,6 +87,8 @@ struct GitHubAsset {
     browser_download_url: String,
     /// SHA256 digest in format "sha256:abc123..."
     digest: Option<String>,
+    #[serde(default)]
+    size: u64,
 }
 
 /// GitHub release from the API
@@ -93,6 +97,10 @@ struct GitHubRelease {
     tag_name: String,
     name: String,
     assets: Vec<GitHubAsset>,
+    #[serde(default)]
+    draft: bool,
+    #[serde(default)]
+    prerelease: bool,
 }
 
 /// Compute SHA256 hash of bytes
@@ -113,7 +121,11 @@ fn sha256_hex(bytes: &[u8]) -> String {
 /// Returns `Err` when the current executable can't be located or read, the
 /// platform is unsupported, or any step of the GitHub fetch / download /
 /// install fails (network, non-2xx status, unparseable JSON, filesystem).
-pub async fn check_for_update(binary_prefix: &str, check_only: bool) -> Result<UpdateResult> {
+pub async fn check_for_update(
+    binary_prefix: &str,
+    current_version: &str,
+    check_only: bool,
+) -> Result<UpdateResult> {
     let self_path = std::env::current_exe().context("Failed to get current executable path")?;
     let self_bytes = fs::read(&self_path).context("Failed to read current binary")?;
     let self_hash = sha256_hex(&self_bytes);
@@ -137,46 +149,26 @@ pub async fn check_for_update(binary_prefix: &str, check_only: bool) -> Result<U
         .build()
         .context("Failed to create HTTP client")?;
 
-    // Get the latest release from GitHub API
-    let api_url = format!("https://api.github.com/repos/{GITHUB_REPO}/releases/tags/latest");
-
-    let resp = client
-        .get(&api_url)
-        .send()
-        .await
-        .context("Failed to fetch GitHub release info")?;
-
-    if !resp.status().is_success() {
-        bail!("GitHub API returned {}", resp.status());
+    let available = releases::available(&client, &platform).await?;
+    if let (Some(current), Some(remote)) = (
+        releases::numeric_version(current_version),
+        available.numeric_version,
+    ) {
+        if current > remote {
+            info!("Current version is newer than this platform's ready release; keeping it");
+            return Ok(UpdateResult::UpToDate);
+        }
     }
-
-    let release: GitHubRelease = resp
-        .json()
-        .await
-        .context("Failed to parse GitHub release JSON")?;
-    info!("Latest release: {} ({})", release.name, release.tag_name);
-
-    // Find the asset for our platform
-    let asset = release
-        .assets
-        .iter()
-        .find(|a| a.name == platform.binary_name)
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "No binary found for platform {} {} in release assets. Available: {:?}",
-                platform.os,
-                platform.arch,
-                release.assets.iter().map(|a| &a.name).collect::<Vec<_>>()
-            )
-        })?;
-
-    info!("Found asset: {}", asset.name);
+    info!("Ready release: {}", available.version);
 
     // Check if we can compare hashes without downloading (GitHub provides digest in API)
-    if let Some(ref digest) = asset.digest {
+    if let Some(ref digest) = available.digest {
         // GitHub digest format: "sha256:abc123..."
         if let Some(remote_hash) = digest.strip_prefix("sha256:") {
-            info!("Remote binary hash: {}", &remote_hash[..16]);
+            info!(
+                "Remote binary hash: {}",
+                &remote_hash[..remote_hash.len().min(16)]
+            );
             if self_hash == remote_hash {
                 info!("Binary is up to date (verified via API)");
                 return Ok(UpdateResult::UpToDate);
@@ -187,15 +179,15 @@ pub async fn check_for_update(binary_prefix: &str, check_only: bool) -> Result<U
 
     if check_only {
         return Ok(UpdateResult::UpdateAvailable {
-            version: release.name,
-            download_url: asset.browser_download_url.clone(),
+            version: available.version,
+            download_url: available.download_url.clone(),
         });
     }
 
     // Download the new binary
     info!("Downloading update from GitHub...");
     let resp = client
-        .get(&asset.browser_download_url)
+        .get(&available.download_url)
         .send()
         .await
         .context("Failed to download from GitHub")?;
@@ -213,12 +205,12 @@ pub async fn check_for_update(binary_prefix: &str, check_only: bool) -> Result<U
     info!("Downloaded binary hash: {}", &new_hash[..16]);
 
     // Verify downloaded hash matches what we expected (if we had a digest)
-    if let Some(ref digest) = asset.digest {
+    if let Some(ref digest) = available.digest {
         if let Some(remote_hash) = digest.strip_prefix("sha256:") {
             if new_hash != remote_hash {
                 bail!(
                     "Downloaded binary hash mismatch! Expected {}, got {}",
-                    &remote_hash[..16],
+                    &remote_hash[..remote_hash.len().min(16)],
                     &new_hash[..16]
                 );
             }
@@ -427,7 +419,11 @@ fn apply_pending_update() -> Result<bool> {
 ///
 /// Propagates the [`check_for_update`] failure when `check` is true. A pending
 /// Windows swap that can't be applied is swallowed (logged, retried next run).
-pub async fn startup_auto_update(binary_prefix: &str, check: bool) -> Result<bool> {
+pub async fn startup_auto_update(
+    binary_prefix: &str,
+    current_version: &str,
+    check: bool,
+) -> Result<bool> {
     // Failure to apply a pending update is non-fatal; the swap is logged
     // and retried on the next startup.
     let _ = apply_pending_update();
@@ -436,7 +432,7 @@ pub async fn startup_auto_update(binary_prefix: &str, check: bool) -> Result<boo
         return Ok(false);
     }
 
-    match check_for_update(binary_prefix, false).await? {
+    match check_for_update(binary_prefix, current_version, false).await? {
         UpdateResult::Updated => Ok(true),
         UpdateResult::UpToDate | UpdateResult::UpdateAvailable { .. } => Ok(false),
     }

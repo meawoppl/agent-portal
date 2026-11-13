@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2457 · Ready-platform CLI publication</text>
+<text x="55" y="105" font-family="sans-serif" font-size="34" fill="#e6e9f5">A ready Linux build waited for Windows; each platform now publishes its own ready pair.</text>
+<text x="55" y="148" font-family="sans-serif" font-size="34" fill="#e6e9f5">A fast-forward source ref selects immutable artifacts only after both checksums are available.</text>
+<path d="M55 175 H1945 M1000 190 V1140" stroke="#565f89" stroke-dasharray="6 6"/>
+<text x="55" y="225" font-family="sans-serif" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1055" y="225" font-family="sans-serif" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="55" y="270" width="880" height="205" rx="14" fill="#1e202e" stroke="#7aa2f7"/>
+<text x="80" y="312" font-family="sans-serif" font-size="28" fill="#7aa2f7">Five parallel build lanes</text>
+<text x="80" y="355" font-family="sans-serif" font-size="24" fill="#c0caf5">Linux pair finishes first</text>
+<text x="80" y="390" font-family="sans-serif" font-size="24" fill="#c0caf5">All platform support and signing retained</text>
+<rect x="55" y="535" width="880" height="205" rx="14" fill="#1e202e" stroke="#f7768e"/>
+<text x="80" y="577" font-family="sans-serif" font-size="28" fill="#f7768e">Complete matrix barrier</text>
+<text x="80" y="620" font-family="sans-serif" font-size="24" fill="#c0caf5">Linux waited 276 seconds in run 43348496928</text>
+<text x="80" y="655" font-family="sans-serif" font-size="24" fill="#c0caf5">No ready-platform download during that wait</text>
+<rect x="55" y="800" width="880" height="205" rx="14" fill="#1e202e" stroke="#f7768e"/>
+<text x="80" y="842" font-family="sans-serif" font-size="28" fill="#f7768e">Mutable latest release</text>
+<text x="80" y="885" font-family="sans-serif" font-size="24" fill="#c0caf5">All platforms published together</text>
+<text x="80" y="920" font-family="sans-serif" font-size="24" fill="#c0caf5">Older runs could replace newer release state</text>
+<rect x="1055" y="270" width="880" height="205" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="312" font-family="sans-serif" font-size="28" fill="#9ece6a">Independent platform publication</text>
+<text x="1080" y="355" font-family="sans-serif" font-size="24" fill="#c0caf5">Upload launcher and proxy to cli-SHA</text>
+<text x="1080" y="390" font-family="sans-serif" font-size="24" fill="#c0caf5">Publish ready-platform manifest last</text>
+<rect x="1055" y="535" width="880" height="205" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="577" font-family="sans-serif" font-size="28" fill="#9ece6a">Fast-forward readiness ref</text>
+<text x="1080" y="620" font-family="sans-serif" font-size="24" fill="#c0caf5">Advance release-ready/platform to source SHA</text>
+<text x="1080" y="655" font-family="sans-serif" font-size="24" fill="#c0caf5">Old source cannot overwrite a newer ref</text>
+<text x="1080" y="690" font-family="sans-serif" font-size="24" fill="#c0caf5">Updater validates pair and downloaded SHA-256</text>
+<rect x="1055" y="800" width="880" height="205" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="842" font-family="sans-serif" font-size="28" fill="#9ece6a">Safe migration and measurement</text>
+<text x="1080" y="885" font-family="sans-serif" font-size="24" fill="#c0caf5">Failed platforms retain prior ready builds</text>
+<text x="1080" y="920" font-family="sans-serif" font-size="24" fill="#c0caf5">Legacy installer uses complete latest release</text>
+<text x="1080" y="955" font-family="sans-serif" font-size="24" fill="#c0caf5">Each publisher logs READY_PLATFORM_SECONDS</text>
+<text x="55" y="1172" font-family="sans-serif" font-size="22" fill="#a9b1d6">Scope: live speedup awaits the first production run; legacy bootstrap remains complete-only and all platform checks remain required.</text>
+</svg>
