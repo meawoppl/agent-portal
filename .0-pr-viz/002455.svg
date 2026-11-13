@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="sans-serif" font-size="24" fill="#a9b1d6">PR #2455 · Publish the exhibit before removing embedded media</text>
+<text x="55" y="105" font-family="sans-serif" font-size="34" fill="#e6e9f5">Aperture media ships inside the application; first establish a working standalone destination.</text>
+<text x="55" y="148" font-family="sans-serif" font-size="34" fill="#e6e9f5">One source exhibit, a minimal Yew build, and verified static assets prepare the safe cutover.</text>
+<path d="M55 175 H1945 M1000 190 V1140" stroke="#565f89" stroke-dasharray="6 6"/>
+<text x="55" y="225" font-family="sans-serif" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1055" y="225" font-family="sans-serif" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="55" y="270" width="880" height="205" rx="14" fill="#1e202e" stroke="#7aa2f7"/>
+<text x="80" y="312" font-family="sans-serif" font-size="28" fill="#7aa2f7">Portal frontend build</text>
+<text x="80" y="355" font-family="sans-serif" font-size="24" fill="#c0caf5">Exhibit shares the full application bundle</text>
+<text x="80" y="390" font-family="sans-serif" font-size="24" fill="#c0caf5">Media copied into frontend/dist</text>
+<rect x="55" y="535" width="880" height="205" rx="14" fill="#1e202e" stroke="#f7768e"/>
+<text x="80" y="577" font-family="sans-serif" font-size="28" fill="#f7768e">Backend build</text>
+<text x="80" y="620" font-family="sans-serif" font-size="24" fill="#c0caf5">memory_serve embeds all of frontend/dist</text>
+<text x="80" y="655" font-family="sans-serif" font-size="24" fill="#c0caf5">Marketing media adds about 27 MiB of input</text>
+<rect x="55" y="800" width="880" height="205" rx="14" fill="#1e202e" stroke="#f7768e"/>
+<text x="80" y="842" font-family="sans-serif" font-size="28" fill="#f7768e">Public exhibit entry point</text>
+<text x="80" y="885" font-family="sans-serif" font-size="24" fill="#c0caf5">/aperture relies on embedded resources</text>
+<text x="80" y="920" font-family="sans-serif" font-size="24" fill="#c0caf5">No external deployment to redirect visitors to</text>
+<rect x="1055" y="270" width="880" height="205" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="312" font-family="sans-serif" font-size="28" fill="#9ece6a">Standalone aperture-frontend</text>
+<text x="1080" y="355" font-family="sans-serif" font-size="24" fill="#c0caf5">Reuses authored exhibit modules and assets</text>
+<text x="1080" y="390" font-family="sans-serif" font-size="24" fill="#c0caf5">No Portal API or authentication dependency</text>
+<rect x="1055" y="535" width="880" height="205" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="577" font-family="sans-serif" font-size="28" fill="#9ece6a">Dedicated GitHub Pages workflow</text>
+<text x="1080" y="620" font-family="sans-serif" font-size="24" fill="#c0caf5">Optimized WASM and project-relative assets</text>
+<text x="1080" y="655" font-family="sans-serif" font-size="24" fill="#c0caf5">Film, narration, downloads and sandbox tested</text>
+<text x="1080" y="690" font-family="sans-serif" font-size="24" fill="#c0caf5">Deploy before removing embedded assets</text>
+<rect x="1055" y="800" width="880" height="205" rx="14" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="842" font-family="sans-serif" font-size="28" fill="#9ece6a">Verified external destination first</text>
+<text x="1080" y="885" font-family="sans-serif" font-size="24" fill="#c0caf5">Normal Portal keeps working during migration</text>
+<text x="1080" y="920" font-family="sans-serif" font-size="24" fill="#c0caf5">Follow-up removes media and redirects old URLs</text>
+<text x="1080" y="955" font-family="sans-serif" font-size="24" fill="#c0caf5">Source evidence and attribution remain in repo</text>
+<text x="55" y="1172" font-family="sans-serif" font-size="22" fill="#a9b1d6">Scope: preparatory deployment only; embedded media is retained until the live external exhibit passes verification.</text>
+</svg>
