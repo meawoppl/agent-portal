@@ -1004,12 +1004,14 @@ async fn audit_failures(
         }
         _ => None,
     };
-    let actor = request
-        .extensions()
-        .get::<tower_cookies::Cookies>()
-        .and_then(|cookies| {
-            crate::auth::extract_user_id(&state, Some(request.headers()), cookies).ok()
-        });
+    let actor = event.and_then(|_| {
+        request
+            .extensions()
+            .get::<tower_cookies::Cookies>()
+            .and_then(|cookies| {
+                crate::auth::extract_user_id(&state, Some(request.headers()), cookies).ok()
+            })
+    });
     // Only parse UUIDs from resource routes, never store raw URLs or bodies.
     let target = request
         .uri()
