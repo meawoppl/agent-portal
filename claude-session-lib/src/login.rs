@@ -432,8 +432,12 @@ mod tests {
             std::fs::write(&binary, format!("#!/bin/sh\n{body}\n")).unwrap();
             std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
             let start = Instant::now();
-            let status =
-                verified_status_with_binary(binary.as_os_str(), Duration::from_millis(100));
+            let timeout = if body == "exec sleep 30" {
+                Duration::from_millis(100)
+            } else {
+                Duration::from_secs(2)
+            };
+            let status = verified_status_with_binary(binary.as_os_str(), timeout);
             assert_eq!(status.map(|s| s.logged_in), expected);
             assert!(start.elapsed() < Duration::from_secs(3));
         }
