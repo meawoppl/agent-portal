@@ -1,46 +1,7 @@
-# Target directories
-target/
-**/target/
-
-# Frontend build artifacts (commented out to include pre-built dist)
-# frontend/dist/
-
-# Git
-.git/
-.gitignore
-
-# Environment files (we copy .env.example explicitly)
-.env
-!.env.example
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Documentation
-*.md
-!README.md
-
-# Test files
-**/tests/
-
-# Examples
-examples/
-
-# CI/CD
-.github/
-
-# Logs
-*.log
-
-# Database files
-*.db
-*.db-shm
-*.db-wal
+# The runtime image copies only the prebuilt backend (see Dockerfile).
+# Keep source, exhibit media, worktrees and local credentials out of the context.
+**
+!Dockerfile
+!build-output/
+build-output/**
+!build-output/backend

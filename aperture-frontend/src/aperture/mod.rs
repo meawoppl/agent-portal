@@ -24,13 +24,11 @@ struct NarrationLine {
 
 fn transcript(id: &str) -> String {
     // Captions and voice are authored from one manifest so they cannot drift.
-    serde_json::from_str::<NarrationManifest>(include_str!(
-        "../../../frontend/assets/aperture/lines.json"
-    ))
-    .ok()
-    .and_then(|manifest| manifest.lines.into_iter().find(|line| line.id == id))
-    .map(|line| line.text)
-    .unwrap_or_default()
+    serde_json::from_str::<NarrationManifest>(include_str!("../../assets/aperture/lines.json"))
+        .ok()
+        .and_then(|manifest| manifest.lines.into_iter().find(|line| line.id == id))
+        .map(|line| line.text)
+        .unwrap_or_default()
 }
 
 fn observer_role() -> Option<&'static str> {
