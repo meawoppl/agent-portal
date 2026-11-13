@@ -1,0 +1,65 @@
+name: Aperture Pages
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - aperture-frontend/**
+      - frontend/src/pages/aperture/**
+      - frontend/assets/aperture/**
+      - frontend/assets/aperture-demo/**
+      - frontend/styles/aperture.css
+      - scripts/build-aperture.sh
+      - .github/workflows/aperture-pages.yml
+      - Cargo.lock
+      - rust-toolchain.toml
+  pull_request:
+    branches: [main]
+    paths:
+      - aperture-frontend/**
+      - frontend/src/pages/aperture/**
+      - frontend/assets/aperture/**
+      - frontend/assets/aperture-demo/**
+      - frontend/styles/aperture.css
+      - scripts/build-aperture.sh
+      - .github/workflows/aperture-pages.yml
+      - Cargo.lock
+      - rust-toolchain.toml
+permissions:
+  contents: read
+concurrency:
+  group: aperture-pages-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'production' }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: aperture-wasm
+          targets: wasm32-unknown-unknown
+          trunk: 'true'
+      - run: scripts/build-aperture.sh
+      - name: Test standalone exhibit
+        run: |
+          python3 -m pip install playwright==1.58.0
+          python3 -m playwright install --with-deps chromium
+          python3 scripts/test-aperture-static.py
+      - uses: actions/upload-pages-artifact@v3
+        if: github.event_name != 'pull_request' 
+        with:
+          path: aperture-frontend/dist
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment

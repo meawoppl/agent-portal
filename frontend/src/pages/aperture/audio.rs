@@ -10,7 +10,7 @@ export function apertureStop() {
 }
 export function apertureSpeak(id) {
     apertureStop();
-    narration = new Audio('/aperture-assets/voice/' + id + '.mp3');
+    narration = new Audio('./aperture-assets/voice/' + id + '.mp3');
     narration.volume = 0.8;
     narration.play().catch(() => {});
 }

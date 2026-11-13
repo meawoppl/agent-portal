@@ -4,6 +4,7 @@ members = [
     "archive-format",
     "backend",
     "frontend",
+    "aperture-frontend",
     "proxy",
     "session-lib",
     "claude-session-lib",

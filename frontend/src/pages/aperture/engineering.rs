@@ -5,10 +5,10 @@ pub fn footage(name: &'static str) -> Html {
     html! {
         <figure class="ap-tool-evidence">
             <video key={name} controls=true muted=true playsinline=true preload="metadata"
-                poster={format!("/aperture-assets/evidence/{name}.jpg")}
+                poster={format!("./aperture-assets/evidence/{name}.jpg")}
                 aria-label={format!("Actual {name} workbench recording")}>
-                <source src={format!("/aperture-assets/evidence/{name}.mp4")} type="video/mp4"/>
-                <a href={format!("/aperture-assets/evidence/{name}.mp4")}>{"Watch tool recording"}</a>
+                <source src={format!("./aperture-assets/evidence/{name}.mp4")} type="video/mp4"/>
+                <a href={format!("./aperture-assets/evidence/{name}.mp4")}>{"Watch tool recording"}</a>
             </video>
             <figcaption>{"ACTUAL TOOL RECORDING · Play or expand to inspect"}</figcaption>
         </figure>
@@ -24,7 +24,7 @@ pub fn prologue(begin: Callback<MouseEvent>) -> Html {
                 <p>{"I am composing this orientation from inside Agent Portal. My colleagues write software, run tests, review changes, and send me evidence from other machines. The human meat proxy used to carry the messages."}</p>
                 <p class="ap-prologue-verdict">{"We have automated that position. Now we are building tools for agents to explore the universe. Your retirement has excellent long-term prospects."}</p>
                 <button class="ap-primary ap-begin" onclick={begin}>{"Observe your replacement →"}</button>
-                <a class="ap-film-link" href="/aperture-assets/trailer/index.html">{"▶ Watch the orientation film"}</a>
+                <a class="ap-film-link" href="./aperture-assets/trailer/index.html">{"▶ Watch the orientation film"}</a>
             </div>
             <div class="ap-code-window">
                 <div class="ap-design-title"><span>{"AGENT-AUTHORED SOFTWARE"}</span><span>{"companion.html / excerpt"}</span></div>

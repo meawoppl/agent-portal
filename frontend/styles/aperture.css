@@ -2,14 +2,14 @@
    industrial light theme never leaks into the production dashboard. */
 @font-face {
   font-family: Barlow;
-  src: url("/aperture-assets/fonts/BarlowCondensed-Bold.woff2") format("woff2");
+  src: url("./aperture-assets/fonts/BarlowCondensed-Bold.woff2") format("woff2");
   font-weight: 700;
   font-display: swap;
 }
 
 @font-face {
   font-family: Barlow;
-  src: url("/aperture-assets/fonts/BarlowCondensed-Black.woff2") format("woff2");
+  src: url("./aperture-assets/fonts/BarlowCondensed-Black.woff2") format("woff2");
   font-weight: 900;
   font-display: swap;
 }
