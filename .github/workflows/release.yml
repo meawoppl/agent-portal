@@ -9,8 +9,28 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  prepare:
+    name: Prepare immutable CLI release
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: python3 scripts/release-platform.py prepare
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   build:
     name: Build (${{ matrix.name }})
+    needs: prepare
+    permissions:
+      contents: write
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -48,6 +68,9 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0  # full history so build.rs commit-count version is real (#1096)
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
 
       - name: Setup Rust
         uses: ./.github/actions/setup-rust
@@ -75,6 +98,12 @@ jobs:
           mv ${{ matrix.target-dir }}/claude-portal${{ matrix.ext }} ${{ matrix.target-dir }}/claude-portal-${{ matrix.suffix }}${{ matrix.ext }}
           mv ${{ matrix.target-dir }}/agent-portal${{ matrix.ext }} ${{ matrix.target-dir }}/agent-portal-${{ matrix.suffix }}${{ matrix.ext }}
 
+      - name: Publish ready platform
+        shell: bash
+        run: python scripts/release-platform.py publish --platform "${{ matrix.suffix }}" --directory "${{ matrix.target-dir }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Upload proxy artifact
         uses: actions/upload-artifact@v7
         with:
@@ -87,8 +116,12 @@ jobs:
           name: agent-portal-${{ matrix.suffix }}
           path: ${{ matrix.target-dir }}/agent-portal-${{ matrix.suffix }}${{ matrix.ext }}
 
+
   release:
-    name: Create Release
+    name: Publish legacy complete release
+    concurrency:
+      group: release-legacy-complete
+      cancel-in-progress: false
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -97,6 +130,9 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0  # full history so build.rs commit-count version is real (#1096)
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
 
       - name: Download all artifacts
         uses: actions/download-artifact@v8
@@ -120,54 +156,7 @@ jobs:
           chmod +x release/agent-portal-linux-* release/agent-portal-darwin-*
           ls -la release/
 
-      - name: Delete existing latest release
-        run: gh release delete latest --yes || true
+      - name: Publish complete legacy release without regressing source
+        run: python3 scripts/release-platform.py legacy --directory release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create latest release
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: latest
-          name: "Latest Build #${{ github.run_number }}"
-          body: |
-            Automatic build from main branch.
-
-            **Build:** #${{ github.run_number }}
-            **Commit:** ${{ github.sha }}
-            **Date:** ${{ github.event.head_commit.timestamp }}
-
-            ## Downloads
-
-            ### Proxy (`claude-portal`)
-            | Platform | Binary |
-            |----------|--------|
-            | Linux (x86_64) | `claude-portal-linux-x86_64` |
-            | Linux (aarch64) | `claude-portal-linux-aarch64` |
-            | macOS (Apple Silicon M1+) | `claude-portal-darwin-aarch64` |
-            | macOS (Intel) | `claude-portal-darwin-x86_64` |
-            | Windows (x86_64) | `claude-portal-windows-x86_64.exe` |
-
-            ### Launcher (`agent-portal`)
-            | Platform | Binary |
-            |----------|--------|
-            | Linux (x86_64) | `agent-portal-linux-x86_64` |
-            | Linux (aarch64) | `agent-portal-linux-aarch64` |
-            | macOS (Apple Silicon M1+) | `agent-portal-darwin-aarch64` |
-            | macOS (Intel) | `agent-portal-darwin-x86_64` |
-            | Windows (x86_64) | `agent-portal-windows-x86_64.exe` |
-          files: |
-            release/claude-portal-linux-x86_64
-            release/claude-portal-linux-aarch64
-            release/claude-portal-darwin-aarch64
-            release/claude-portal-darwin-x86_64
-            release/claude-portal-windows-x86_64.exe
-            release/agent-portal-linux-x86_64
-            release/agent-portal-linux-aarch64
-            release/agent-portal-darwin-aarch64
-            release/agent-portal-darwin-x86_64
-            release/agent-portal-windows-x86_64.exe
-          prerelease: false
-          make_latest: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

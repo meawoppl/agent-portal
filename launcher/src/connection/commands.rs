@@ -566,7 +566,9 @@ pub(super) async fn handle_message(
         ServerToLauncher::UpdateAndRestart => {
             info!("Received UpdateAndRestart request from dashboard");
             tokio::spawn(async move {
-                match portal_update::check_for_update(crate::BINARY_PREFIX, false).await {
+                match portal_update::check_for_update(crate::BINARY_PREFIX, shared::VERSION, false)
+                    .await
+                {
                     Ok(portal_update::UpdateResult::UpToDate) => {
                         info!("Already up to date; restarting service anyway");
                     }
