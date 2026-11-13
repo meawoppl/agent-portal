@@ -1,5 +1,5 @@
 //! Values enter through stdin/files, never argv or status output.
-use super::{bindings::BoundAgent, input::Reference};
+use super::{bindings::BoundAgent, client::ServiceError, input::Reference};
 use anyhow::{bail, Context};
 use clap::Args;
 use reqwest::Method;
@@ -56,8 +56,40 @@ fn from_file(path: &PathBuf) -> anyhow::Result<Zeroizing<Vec<u8>>> {
     )
 }
 fn parse_batch(bytes: &[u8]) -> anyhow::Result<Vec<SecretDepositInput>> {
-    serde_json::from_slice(bytes)
-        .map_err(|_| anyhow::anyhow!("Invalid proposal JSON; expected an array of secret objects"))
+    let mut deserializer = serde_json::Deserializer::from_slice(bytes);
+    let items = serde_path_to_error::deserialize(&mut deserializer).map_err(|error| {
+        // Never format the serde error or raw path: both may contain secret
+        // values or attacker-controlled keys. Emit only known field names.
+        let mut item = None;
+        let mut field = None;
+        for segment in error.path() {
+            match segment {
+                serde_path_to_error::Segment::Seq { index } if item.is_none() => item = Some(index + 1),
+                serde_path_to_error::Segment::Map { key } => field = match key.as_str() {
+                    "share" => Some("share must be an array of recipient strings, for example [\"google:user@example.test\"]"),
+                    "namespace" => Some("namespace must be \"personal\" or \"organization\""),
+                    "name" => Some("name must be a string"),
+                    "description" => Some("description must be a string"),
+                    "value" => Some("value must be a string"),
+                    _ => None,
+                },
+                _ => {},
+            }
+        }
+        if error.inner().is_syntax() || error.inner().is_eof() {
+            anyhow::anyhow!("Invalid batch JSON syntax; input values are omitted")
+        } else if let (Some(item), Some(field)) = (item, field) {
+            anyhow::anyhow!("Invalid batch item {item}: {field}")
+        } else if let Some(item) = item {
+            anyhow::anyhow!("Invalid batch item {item}; expected a secret object with namespace, name and value")
+        } else {
+            anyhow::anyhow!("Invalid batch JSON; expected an array of secret objects")
+        }
+    })?;
+    deserializer
+        .end()
+        .map_err(|_| anyhow::anyhow!("Invalid batch JSON syntax; input values are omitted"))?;
+    Ok(items)
 }
 fn payload(args: &SetArgs) -> anyhow::Result<SecretDepositCreate> {
     let items = if args.batch_stdin || args.batch_file.is_some() {
@@ -105,19 +137,34 @@ fn payload(args: &SetArgs) -> anyhow::Result<SecretDepositCreate> {
         items,
     })
 }
+pub(super) fn proposal_error(error: anyhow::Error, submitting: bool) -> anyhow::Error {
+    if error
+        .downcast_ref::<ServiceError>()
+        .is_some_and(|e| e.status == 404)
+    {
+        if submitting {
+            anyhow::anyhow!("Secret set submission rejected before approval: target secret or recipient unavailable. For email sharing, ask the recipient to sign in through their provider, or use their registered Portal user UUID. No new approval proposal was created.")
+        } else {
+            anyhow::anyhow!("Proposal not found for this session. A submission rejected before approval has no saved status; check the original submission error and request ID.")
+        }
+    } else {
+        error
+    }
+}
 pub(super) async fn run(args: &SetArgs, dev: bool) -> anyhow::Result<()> {
     let agent = BoundAgent::from_env(dev)?;
     let (id, mut info) = if let Some(id) = args.status {
         let info: SecretDepositInfo = agent
             .client
             .request::<_, ()>(Method::GET, &format!("/deposits/{id}"), None)
-            .await?;
+            .await
+            .map_err(|e| proposal_error(e, false))?;
         (id, info)
     } else {
         let request = payload(args)?;
         let id = request.request_id;
         // Print the recovery ID before sending; never include the input payload.
-        eprintln!("Secret proposal {id}; retry status with: agent-portal secret set --status {id}");
+        eprintln!("Secret proposal {id}; if the submission result is uncertain, check: agent-portal secret set --status {id}");
         let response = agent
             .client
             .request(Method::POST, "/deposits", Some(&request))
@@ -125,7 +172,7 @@ pub(super) async fn run(args: &SetArgs, dev: bool) -> anyhow::Result<()> {
         for mut item in request.items {
             zeroize::Zeroize::zeroize(&mut item.value.0);
         }
-        (id, response?)
+        (id, response.map_err(|e| proposal_error(e, true))?)
     };
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(610);
     loop {
@@ -154,6 +201,37 @@ mod tests {
     fn malformed_input_does_not_echo_values() {
         let error = parse_batch(br#"[{"value":"PRIVATE", broken}]"#).unwrap_err();
         assert!(!error.to_string().contains("PRIVATE"));
+    }
+    #[test]
+    fn batch_errors_name_only_safe_fields_and_item_positions() {
+        for share in [r#""PRIVATE_RECIPIENT""#, r#"[42]"#, r#"null"#] {
+            let input = format!(
+                r#"[{{"namespace":"personal","name":"PRIVATE_NAME","value":"PRIVATE_VALUE","share":{share}}}]"#
+            );
+            let error = parse_batch(input.as_bytes()).unwrap_err();
+            let shown = format!("{error:#?}");
+            assert!(shown.contains("item 1: share must be an array"), "{shown}");
+            assert!(!shown.contains("PRIVATE"));
+        }
+        for (input, expected) in [
+            (r#"{}"#, "expected an array"),
+            (r#"["PRIVATE"]"#, "item 1; expected a secret object"),
+            (
+                r#"[{"namespace":"PRIVATE","name":"A","value":"PRIVATE"}]"#,
+                "namespace must be",
+            ),
+            (
+                r#"[{"namespace":"personal","name":"A","value":42}]"#,
+                "value must be a string",
+            ),
+            (r#"[] PRIVATE"#, "Invalid batch JSON syntax"),
+        ] {
+            let shown = format!("{:#?}", parse_batch(input.as_bytes()).unwrap_err());
+            assert!(shown.contains(expected), "{shown}");
+            assert!(!shown.contains("PRIVATE"));
+        }
+        let valid = br#"[{"namespace":"personal","name":"A","value":"PRIVATE","share":["google:user@example.test","00000000-0000-4000-8000-000000000001"]}]"#;
+        assert_eq!(parse_batch(valid).unwrap()[0].share.len(), 2);
     }
     #[test]
     fn multi_value_json_is_redacted_in_debug() {

@@ -195,7 +195,7 @@ fn select_member(
         .collect();
     match matches.as_slice() {
         [member] => Ok((*member).clone()),
-        [] => Err(AppError::NotFound("No active registered member matches this verified identity; never matched by display name")),
+        [] => Err(AppError::NotFound("No active registered member matches this identity. For email sharing, ask the recipient to sign in through their provider, or use their registered Portal user UUID")),
         _ => Err(AppError::Conflict("Identity selector is ambiguous; specify its provider or the portal user UUID")),
     }
 }
@@ -397,6 +397,19 @@ mod tests {
             .user_id,
             github.user_id
         );
+    }
+    #[test]
+    fn missing_and_unverified_email_recipients_get_identical_guidance() {
+        let user = member("google", "42", None, "legacy@example.test", false);
+        let selector = Selector::GoogleEmail(user.email.clone());
+        let missing = select_member(&[], &selector, None).unwrap_err().to_string();
+        let unverified = select_member(std::slice::from_ref(&user), &selector, None)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(missing, unverified);
+        assert!(missing.contains("sign in through their provider"));
+        assert!(missing.contains("Portal user UUID"));
+        assert!(!missing.contains("legacy@example.test"));
     }
     #[test]
     fn unverified_assertions_and_legacy_profile_emails_are_not_selectors() {

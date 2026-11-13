@@ -195,6 +195,48 @@ mod tests {
         assert!(request.contains("idempotency-key:"));
     }
     #[tokio::test]
+    async fn proposal_lookup_errors_are_actionable_without_echoing_server_data() {
+        for submitting in [true, false] {
+            let (base, server) = mock_response("404 Not Found", "PRIVATE_SERVER_ECHO").await;
+            let client = Client::new(&base, true, None).unwrap();
+            let error = client
+                .request::<serde_json::Value, ()>(
+                    if submitting {
+                        Method::POST
+                    } else {
+                        Method::GET
+                    },
+                    "/deposits",
+                    None,
+                )
+                .await
+                .unwrap_err();
+            let shown = super::super::proposals::proposal_error(error, submitting).to_string();
+            assert!(!shown.contains("PRIVATE"));
+            if submitting {
+                assert!(shown.contains("sign in through their provider"));
+                assert!(shown.contains("Portal user UUID"));
+                assert!(shown.contains("No new approval proposal"));
+            } else {
+                assert!(shown.contains("no saved status"));
+            }
+            server.join().unwrap();
+        }
+        let (base, server) = mock_response("503 Service Unavailable", "PRIVATE_SERVER_ECHO").await;
+        let client = Client::new(&base, true, None).unwrap();
+        let error = client
+            .request::<serde_json::Value, ()>(Method::POST, "/deposits", None)
+            .await
+            .unwrap_err();
+        let shown = super::super::proposals::proposal_error(error, true).to_string();
+        assert!(!shown.contains("PRIVATE"));
+        assert!(
+            !shown.contains("No new approval proposal"),
+            "uncertain failures must not claim no commit"
+        );
+        server.join().unwrap();
+    }
+    #[tokio::test]
     async fn malformed_value_response_is_not_in_parse_error() {
         let (base, server) = mock_response("200 OK", "SECRET-VALUE-BAD-JSON").await;
         let client = Client::new(&base, true, None).unwrap();
