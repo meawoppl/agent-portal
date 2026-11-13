@@ -29,10 +29,10 @@ permissions:
   contents: read
 concurrency:
   group: aperture-pages-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'production' }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
@@ -47,13 +47,13 @@ jobs:
           python3 -m playwright install --with-deps chromium
           python3 scripts/test-aperture-static.py
       - uses: actions/upload-pages-artifact@v3
-        if: github.event_name != 'pull_request' 
+        if: github.event_name != 'pull_request'
         with:
           path: aperture-frontend/dist
   deploy:
     needs: build
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       pages: write
       id-token: write
