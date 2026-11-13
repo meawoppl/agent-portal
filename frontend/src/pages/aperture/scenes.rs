@@ -57,7 +57,7 @@ fn website(state: &Experiment, action: Callback<MouseEvent>) -> Html {
         <div class={classes!("ap-website-room", state.website_open.then_some("open"))}>
             <div class="ap-browser-chrome"><span>{"● ● ●"}</span><span>{if state.website_open { "companion-lab / forwarded preview" } else { "lab-b.internal:8080 / unreachable from your browser" }}</span><span>{"↗"}</span></div>
             if state.website_open {
-                <iframe class="ap-sample-site" title="Interactive Companion Calibration demo website" src="/aperture-demo/companion.html" sandbox="allow-scripts"/>
+                <iframe class="ap-sample-site" title="Interactive Companion Calibration demo website" src="./aperture-demo/companion.html" sandbox="allow-scripts"/>
             } else {
                 <div class="ap-website-waiting">
                     <div class="ap-orbit" aria-hidden="true"><span>{"8080"}</span></div>
@@ -173,7 +173,7 @@ pub fn guide(chamber: usize) -> Html {
         <details class="ap-real-guide">
             <summary>{"How agents do this for real"}</summary>
             <ol>{for steps.into_iter().map(|step| html! { <li>{step}</li> })}</ol>
-            <a href="/dashboard">{"Open your dashboard ↗"}</a>
+            <a href={super::portal_url()}>{"Open your dashboard ↗"}</a>
         </details>
     }
 }

@@ -164,10 +164,16 @@ pub fn aperture_page() -> Html {
         })
     };
     let share_url = web_sys::window()
-        .and_then(|window| window.location().origin().ok())
+        .and_then(|window| {
+            window
+                .location()
+                .href()
+                .ok()
+                .map(|url| url.split('#').next().unwrap_or(&url).to_owned())
+        })
         .map(|url| {
             format!(
-                "{}/aperture#observer-{}",
+                "{}#observer-{}",
                 url,
                 if state.editor { "editor" } else { "viewer" }
             )
@@ -209,8 +215,8 @@ pub fn aperture_page() -> Html {
         <main class="aperture">
             <a class="ap-skip" href="#ap-experiment">{"Skip to experiment"}</a>
             <header class="ap-header">
-                <a class="ap-brand" href="/aperture" aria-label="Aperture Science Agent Portal home">
-                    <img class="ap-shutter" src="/aperture-assets/art/logo-mark-light.svg" alt="" />
+                <a class="ap-brand" href={exhibit_url()} aria-label="Aperture Science Agent Portal home">
+                    <img class="ap-shutter" src="./aperture-assets/art/logo-mark-light.svg" alt="" />
                     <span><strong>{"APERTURE"}<span>{"SCIENCE"}</span></strong><small>{"AGENT PORTAL ENRICHMENT CENTER"}</small></span>
                 </a>
                 <div class="ap-header-right">
@@ -219,7 +225,7 @@ pub fn aperture_page() -> Html {
                         <span aria-hidden="true">{if *sound { "◖))" } else { "◖×" }}</span>
                         {if *sound { "Audio on" } else { "Enable audio" }}
                     </button>
-                    <a class="ap-exit" href="/dashboard">{"Exit to Agent Portal"}<span aria-hidden="true">{" ↗"}</span></a>
+                    <a class="ap-exit" href={portal_url()}>{"Exit to Agent Portal"}<span aria-hidden="true">{" ↗"}</span></a>
                 </div>
             </header>
             <nav class="ap-chambers" aria-label="Test sectors">
@@ -249,8 +255,8 @@ pub fn aperture_page() -> Html {
                         <div class="ap-grade">{format!("{CHAMBER_COUNT:02}")}<span>{format!("/{CHAMBER_COUNT:02}")}</span></div>
                         <h1>{"Your agents have"}<br/>{"taken it from here."}</h1>
                         <p>{"Agents write code, inspect distant test benches, design hardware, and review the results. This film was composed through the same portal: agents exchanged messages, built previews, recorded the tools, and revised the cut. The human meat proxy gave notes. We have filed the notes."}</p>
-                        <div class="ap-final-actions"><a class="ap-primary" href="/dashboard">{"Open Agent Portal"}</a><button class="ap-secondary" onclick={on_reset.clone()}>{"Repeat the experiment"}</button></div>
-                        <a class="ap-secondary ap-cake-download" href="/aperture-assets/evidence/cake.stl" download="aperture-cake.stl">{"Print your cake · STL"}</a><p>{"Available in your preferred thermoplastic."}</p><span class="ap-fine-print">{"THE CAKE IS A CAD FILE. PLEASE DO NOT EAT THE WORKSTATION."}</span>
+                        <div class="ap-final-actions"><a class="ap-primary" href={portal_url()}>{"Open Agent Portal"}</a><button class="ap-secondary" onclick={on_reset.clone()}>{"Repeat the experiment"}</button></div>
+                        <a class="ap-secondary ap-cake-download" href="./aperture-assets/evidence/cake.stl" download="aperture-cake.stl">{"Print your cake · STL"}</a><p>{"Available in your preferred thermoplastic."}</p><span class="ap-fine-print">{"THE CAKE IS A CAD FILE. PLEASE DO NOT EAT THE WORKSTATION."}</span>
                     </div>
                 } else if state.making_of {
                     {engineering::making_of(on_next.clone())}
@@ -266,10 +272,10 @@ pub fn aperture_page() -> Html {
                         <div class="ap-specimen-label"><span aria-hidden="true">{"⌁"}</span><span>{"HUMAN PRESENCE OPTIONAL"}<small>{"The agent has the keyboard."}</small></span></div>
                         <div class="ap-safety-icons" aria-label="Available experiments">
                             {for ["code", "bench", "websites", "mechanical", "electronics", "logic", "control", "briefing"].iter().enumerate().map(|(index, name)| html! {
-                                <img class={if index == chamber { "active" } else { "" }} src={format!("/aperture-assets/art/icon-{name}.svg")} alt={LABELS[index]} />
+                                <img class={if index == chamber { "active" } else { "" }} src={format!("./aperture-assets/art/icon-{name}.svg")} alt={LABELS[index]} />
                             })}
                         </div>
-                        <a class="ap-film-link" href="/aperture-assets/trailer/index.html">{"▶ Watch the orientation film"}</a>
+                        <a class="ap-film-link" href="./aperture-assets/trailer/index.html">{"▶ Watch the orientation film"}</a>
                         if !*started {
                             <button class="ap-begin" onclick={on_begin}>{"Begin orientation"}<span>{"↓"}</span></button>
                         }
@@ -318,4 +324,14 @@ pub fn aperture_page() -> Html {
             <p class="ap-attribution">{"An unofficial Portal-inspired Agent Portal fan demo. Not affiliated with Valve. Original narration and exhibit artwork. Machine connections and permissions are simulated; engineering videos are actual tool recordings of example projects."}</p>
         </main>
     }
+}
+
+fn exhibit_url() -> String {
+    web_sys::window()
+        .and_then(|window| window.location().pathname().ok())
+        .unwrap_or_else(|| "./".into())
+}
+
+fn portal_url() -> &'static str {
+    option_env!("APERTURE_PORTAL_URL").unwrap_or("/dashboard")
 }

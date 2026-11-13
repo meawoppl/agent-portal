@@ -1,0 +1,21 @@
+[package]
+name = "aperture-frontend"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+yew.workspace = true
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+web-sys = { workspace = true, features = ["Window", "Document", "Location", "Navigator", "Clipboard"] }
+gloo.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+js-sys = "0.3.83"
+
+[lints]
+workspace = true

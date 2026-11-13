@@ -25,9 +25,9 @@ pub fn render(state: &Experiment) -> Html {
             <div class="ap-design-caption"><h3>{department.plugin}</h3><p>{department.quip}</p></div>
             <ol class="ap-build-loop"><li>{"BUILD"}<small>{"Author the source"}</small></li><li>{"INSPECT"}<small>{"Look at the evidence"}</small></li><li>{"REVISE"}<small>{"Change the design"}</small></li><li>{"REPEAT"}<small>{"Retire another excuse"}</small></li></ol>
             if state.chamber == 3 {
-                <a class="ap-secondary ap-cake-download" href="/aperture-assets/evidence/cake.stl" download="aperture-cake.stl">{"Print your cake · STL"}</a>
+                <a class="ap-secondary ap-cake-download" href="./aperture-assets/evidence/cake.stl" download="aperture-cake.stl">{"Print your cake · STL"}</a>
             }
-            <div class="ap-plugin-evidence"><span>{format!("SECTOR {:02} / {}", state.chamber + 1, department.plugin)}</span><p>{department.boundary}</p><a href="/aperture-assets/evidence/index.html" target="_blank" rel="noopener noreferrer">{"Inspect sources and recorded checks ↗"}</a><a href={format!("https://github.com/meawoppl/agent-portal-plugins/tree/main/{}", department.plugin)} target="_blank" rel="noopener noreferrer">{"Inspect the plugin ↗"}</a></div>
+            <div class="ap-plugin-evidence"><span>{format!("SECTOR {:02} / {}", state.chamber + 1, department.plugin)}</span><p>{department.boundary}</p><a href="./aperture-assets/evidence/index.html" target="_blank" rel="noopener noreferrer">{"Inspect sources and recorded checks ↗"}</a><a href={format!("https://github.com/meawoppl/agent-portal-plugins/tree/main/{}", department.plugin)} target="_blank" rel="noopener noreferrer">{"Inspect the plugin ↗"}</a></div>
         </div>
     }
 }
