@@ -26,13 +26,100 @@ fn deleted(secret: &SecretMetadata) -> bool {
 fn visible(secret: &SecretMetadata, show_deleted: bool) -> bool {
     show_deleted || !deleted(secret)
 }
-fn sorted_secrets(response: &SecretListResponse, show_deleted: bool) -> Vec<&SecretMetadata> {
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum SortColumn {
+    Name,
+    Scope,
+    Version,
+    Owner,
+    Reference,
+    SharedWith,
+}
+impl SortColumn {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Name => "Name",
+            Self::Scope => "Scope",
+            Self::Version => "Version",
+            Self::Owner => "Owner",
+            Self::Reference => "Reference",
+            Self::SharedWith => "Shared with",
+        }
+    }
+}
+fn owner_label(secret: &SecretMetadata, members: &[SecretMember]) -> String {
+    members
+        .iter()
+        .find(|m| m.user_id == secret.owner_user_id)
+        .map(compact_member_label)
+        .unwrap_or_else(|| "Unknown member".into())
+}
+fn shared_with(secret: &SecretMetadata, members: &[SecretMember]) -> String {
+    if secret.namespace == SecretNamespace::Organization {
+        return "Organization".into();
+    }
+    let mut labels: Vec<_> = secret
+        .grants
+        .iter()
+        .filter(|g| g.user_id != secret.owner_user_id)
+        .map(|g| {
+            members
+                .iter()
+                .find(|m| m.user_id == g.user_id)
+                .map(compact_member_label)
+                .unwrap_or_else(|| g.user_id.to_string())
+        })
+        .collect();
+    labels.sort_by_key(|s| s.to_lowercase());
+    labels.dedup();
+    if labels.is_empty() {
+        "Owner only".into()
+    } else {
+        labels.join(", ")
+    }
+}
+fn sorted_secrets<'a>(
+    response: &'a SecretListResponse,
+    show_deleted: bool,
+    column: SortColumn,
+    descending: bool,
+    members: &[SecretMember],
+) -> Vec<&'a SecretMetadata> {
     let mut rows: Vec<_> = response
         .secrets
         .iter()
         .filter(|s| visible(s, show_deleted))
         .collect();
-    rows.sort_by_cached_key(|s| (s.name.to_ascii_lowercase(), s.name.clone(), s.id));
+    // A stable identity tie-break keeps equal labels from jumping after refresh.
+    rows.sort_by_cached_key(|s| {
+        let text = match column {
+            SortColumn::Name => s.name.clone(),
+            SortColumn::Scope => {
+                if s.namespace == SecretNamespace::Personal {
+                    "Personal".into()
+                } else {
+                    "Organization".into()
+                }
+            }
+            SortColumn::Version => String::new(),
+            SortColumn::Owner => owner_label(s, members),
+            SortColumn::Reference => format!("id/{}", s.id),
+            SortColumn::SharedWith => shared_with(s, members),
+        };
+        (
+            if column == SortColumn::Version {
+                s.current_version
+            } else {
+                0
+            },
+            text.to_lowercase(),
+            s.name.to_lowercase(),
+            s.id,
+        )
+    });
+    if descending {
+        rows.reverse();
+    }
     rows
 }
 async fn load_secrets(show_deleted: bool) -> Result<SecretListResponse, String> {
@@ -83,6 +170,7 @@ pub enum Msg {
     CheckAccess,
     AccessChecked(Result<(), &'static str>),
     ShowDeleted(bool),
+    Sort(SortColumn),
     Loaded(u64, Result<SecretListResponse, String>),
     Select(Uuid),
     Versions(Uuid, Result<SecretVersionsResponse, String>),
@@ -104,6 +192,8 @@ pub enum Msg {
 pub struct SecretsPage {
     verified: bool,
     show_deleted: bool,
+    sort_column: SortColumn,
+    sort_descending: bool,
     checking_access: bool,
     list_loading: bool,
     load_generation: u64,
@@ -153,6 +243,8 @@ impl Component for SecretsPage {
         Self {
             verified: false,
             show_deleted: false,
+            sort_column: SortColumn::Name,
+            sort_descending: false,
             checking_access: false,
             list_loading: false,
             load_generation: 0,
@@ -233,6 +325,16 @@ impl Component for SecretsPage {
                 ctx.link().send_future(async move {
                     Msg::Loaded(generation, load_secrets(show_deleted).await)
                 });
+                true
+            }
+            Msg::Sort(column) => {
+                if self.sort_column == column {
+                    self.sort_descending = !self.sort_descending;
+                } else {
+                    self.sort_column = column;
+                    self.sort_descending = false;
+                }
+                self.confirm_delete = false;
                 true
             }
             Msg::ShowDeleted(show) => {
@@ -549,21 +651,29 @@ impl Component for SecretsPage {
 
 impl SecretsPage {
     fn inventory(&self, ctx: &Context<Self>) -> Html {
-        let rows = self
-            .response
-            .as_ref()
-            .map(|r| sorted_secrets(r, self.show_deleted));
+        let rows = self.response.as_ref().map(|r| {
+            sorted_secrets(
+                r,
+                self.show_deleted,
+                self.sort_column,
+                self.sort_descending,
+                &self.members,
+            )
+        });
         html! {<div class="secrets-table-scroll"><table class="secrets-table" aria-label="Secrets">
-            <thead><tr><th scope="col">{"Name"}</th><th scope="col">{"Scope"}</th><th scope="col">{"Version"}</th><th scope="col" class="secrets-owner">{"Owner"}</th><th scope="col" class="secrets-updated">{"Updated"}</th></tr></thead>
+            <thead><tr>{for [SortColumn::Name,SortColumn::Scope,SortColumn::Version,SortColumn::Owner,SortColumn::Reference,SortColumn::SharedWith].into_iter().map(|column| {
+                let active = self.sort_column == column;
+                html!{<th scope="col" aria-sort={if active {if self.sort_descending {"descending"}else{"ascending"}}else{"none"}}><button type="button" class="secret-sort" onclick={ctx.link().callback(move |_|Msg::Sort(column))}>{column.label()}<span aria-hidden="true">{if active {if self.sort_descending {" ↓"}else{" ↑"}}else{" ↕"}}</span></button></th>}
+            })}</tr></thead>
             <tbody>{match rows {
-                None => html!{<tr><td colspan="5">{if self.error.is_some(){"Secrets could not be loaded."}else{"Loading secrets…"}}</td></tr>},
-                Some(rows) if rows.is_empty() => html!{<tr><td colspan="5" class="secrets-empty">{"No secrets to show."}</td></tr>},
+                None => html!{<tr><td colspan="6">{if self.error.is_some(){"Secrets could not be loaded."}else{"Loading secrets…"}}</td></tr>},
+                Some(rows) if rows.is_empty() => html!{<tr><td colspan="6" class="secrets-empty">{"No secrets to show."}</td></tr>},
                 Some(rows) => html!{<>{for rows.into_iter().map(|secret| {
                     let id = secret.id;
-                    let owner = self.members.iter().find(|member|member.user_id==secret.owner_user_id).map(compact_member_label).unwrap_or_else(||"Unknown member".into());
+                    let owner = owner_label(secret, &self.members);
                     html!{<key={id.to_string()}>
-                        {metadata_row(secret,&owner,self.selected==Some(id),&utils::format_timestamp(&secret.updated_at),ctx.link().callback(move |_|Msg::Select(id)))}
-                        if self.selected == Some(id) {<tr class="secret-expanded-row"><td colspan="5">{self.detail(ctx)}</td></tr>}
+                        {metadata_row(secret,&owner,self.selected==Some(id),&shared_with(secret, &self.members),ctx.link().callback(move |_|Msg::Select(id)))}
+                        if self.selected == Some(id) {<tr class="secret-expanded-row"><td colspan="6">{self.detail(ctx)}</td></tr>}
                     </>}
                 })}</>},
             }}</tbody>
@@ -578,10 +688,10 @@ impl SecretsPage {
                 <div class="secret-detail-actions">
                     if secret.can_read {<copy::SecretCopy key={format!("{}-{}",secret.id,secret.current_version)} id={secret.id} version={secret.current_version} verified={self.verified} disabled={self.busy} />}
                     if secret.can_write {<button disabled={self.busy} onclick={ctx.link().callback(|_|Msg::Replace)}>{"Replace value"}</button>}
+                    if secret.can_manage {<button type="button" class={classes!("secret-delete",self.confirm_delete.then_some("confirming"))} disabled={self.busy} onclick={ctx.link().callback(|_|Msg::Delete)}>{if self.confirm_delete {"Click again to confirm"} else {"Delete secret"}}</button>}
                 </div>
                 if self.editing == Some(true) {<ValueForm key={secret.id.to_string()} replacing={true} can_publish={false} on_submit={ctx.link().callback(Msg::Save)} on_cancel={ctx.link().callback(|_|Msg::Cancel)} />}
             }
-            <dl><dt>{"Audience"}</dt><dd>{audience(secret)}</dd><dt>{"Reference"}</dt><dd><code>{format!("id/{}",secret.id)}</code></dd></dl>
             if deleted(secret) {
                 <p>{format!("Deleted {} by {}",secret.deleted_at.as_deref().map(utils::format_timestamp).unwrap_or_else(||"at an unknown time".into()),secret.deleted_by.map(|id|id.to_string()).unwrap_or_else(||"an unavailable user".into()))}</p>
                 if !secret.grants.is_empty() { <ul aria-label="Retained individual access">{for secret.grants.iter().map(|grant|html!{<li key={grant.user_id.to_string()}>{self.member_label(grant.user_id)}{format!(" — {}",grant.rights.iter().map(right_label).collect::<Vec<_>>().join(", "))}</li>})}</ul> }
@@ -601,13 +711,13 @@ impl SecretsPage {
                     <label>{"Existing active member"}<select value={self.share_user.map(|id|id.to_string()).unwrap_or_default()} disabled={self.busy} onchange={ctx.link().callback(|event:Event|Msg::ShareUser(event.target_unchecked_into::<web_sys::HtmlSelectElement>().value()))}><option value="">{"Choose a member"}</option>{for self.members.iter().filter(|member|member.user_id!=secret.owner_user_id).map(|member|html!{<option value={member.user_id.to_string()}>{self.member_label(member.user_id)}</option>})}</select></label>
                     <button disabled={self.busy||self.share_user.is_none()} onclick={ctx.link().callback(|_|Msg::Share)}>{"Grant read and use"}</button>}
                     }
-                    <h3>{"Delete"}</h3><p>{"Delete adds the deleted tag, disables reads and use, and keeps all encrypted versions. It does not clean up leaked copies. The name stays reserved."}</p>
-                    <button type="button" class={classes!("secret-delete",self.confirm_delete.then_some("confirming"))} disabled={self.busy} onclick={ctx.link().callback(|_|Msg::Delete)}>{if self.confirm_delete {"Click again to confirm"} else {"Delete secret"}}</button>
-                    if self.confirm_delete {<p role="status">{"Deletion is reversible. Encrypted versions stay in the vault."}</p>}
+
+
+
                 }
             }
-            <h3>{"Retained versions"}</h3><p>{"All versions remain encrypted. This page shows metadata only, including for deleted secrets."}</p>
-            {match &self.versions{None=>html!{<p>{"Loading version history…"}</p>},Some(history)=>html!{<ol class="secrets-versions">{for history.versions.iter().map(|version|html!{<li key={version.version}><strong>{format!("Version {}{}",version.version,if version.current{" · current"}else{""})}</strong><small>{format!("{} · {}",utils::format_timestamp(&version.created_at),version.created_by)}</small></li>})}</ol>}}}
+            <h3>{"Versions"}</h3>
+            {match &self.versions{None=>html!{<p>{"Loading version history…"}</p>},Some(history)=>html!{<ul class="secrets-versions">{for history.versions.iter().map(|version|html!{<li key={version.version}><strong>{format!("Version {}{}",version.version,if version.current{" · current"}else{""})}</strong><time datetime={version.created_at.clone()}>{utils::format_timestamp(&version.created_at)}</time><span>{self.member_label(version.created_by)}</span></li>})}</ul>}}}
         </section>}
     }
     fn member_label(&self, id: Uuid) -> String {
@@ -688,7 +798,7 @@ fn metadata_row(
     secret: &SecretMetadata,
     owner: &str,
     selected: bool,
-    updated: &str,
+    shared: &str,
     onclick: Callback<MouseEvent>,
 ) -> Html {
     html! {<>
@@ -698,11 +808,10 @@ fn metadata_row(
         </th>
         <td>{if secret.namespace==SecretNamespace::Personal {"Personal"} else {"Organization"}}</td>
         <td>{secret.current_version}</td><td class="secrets-owner">{owner}</td>
-        <td class="secrets-updated"><time datetime={secret.updated_at.clone()}>{updated}</time></td>
+        <td class="secrets-reference"><code>{format!("id/{}",secret.id)}</code></td><td>{shared}</td>
     </tr>
-    <tr class={classes!("secret-description-row",secret.description.is_empty().then_some("is-empty"),selected.then_some("is-selected"))}><td colspan="5">
+    <tr class={classes!("secret-description-row",secret.description.is_empty().then_some("is-empty"),selected.then_some("is-selected"))}><td colspan="6">
         if !secret.description.is_empty(){<p class="secrets-description">{&secret.description}</p>}
-        <div class="secret-mobile-metadata"><span>{format!("Owner: {owner}")}</span><span>{"Updated: "}<time datetime={secret.updated_at.clone()}>{updated}</time></span></div>
     </td></tr>
     </>}
 }
@@ -779,19 +888,55 @@ mod tests {
             can_manage_organization: false,
         };
         assert_eq!(
-            sorted_secrets(&response, false)
+            sorted_secrets(&response, false, SortColumn::Name, false, &[])
                 .iter()
                 .map(|s| s.name.as_str())
                 .collect::<Vec<_>>(),
             vec!["alpha", "Zulu"]
         );
         assert_eq!(
-            sorted_secrets(&response, true)
+            sorted_secrets(&response, true, SortColumn::Name, false, &[])
                 .iter()
                 .map(|s| s.name.as_str())
                 .collect::<Vec<_>>(),
             vec!["alpha", "Bravo", "Zulu"]
         );
+    }
+    #[test]
+    fn version_sort_is_numeric_and_sharing_uses_recipient_labels() {
+        let mut a = fixture();
+        a.current_version = 2;
+        let mut b = a.clone();
+        b.id = Uuid::new_v4();
+        b.current_version = 10;
+        b.namespace = SecretNamespace::Organization;
+        let response = SecretListResponse {
+            secrets: vec![b, a.clone()],
+            can_manage_organization: false,
+        };
+        for (descending, expected) in [(false, vec![2, 10]), (true, vec![10, 2])] {
+            assert_eq!(
+                sorted_secrets(&response, false, SortColumn::Version, descending, &[])
+                    .iter()
+                    .map(|s| s.current_version)
+                    .collect::<Vec<_>>(),
+                expected
+            );
+        }
+        assert_eq!(shared_with(&a, &[]), "Owner only");
+        let recipient = Uuid::new_v4();
+        a.grants.push(shared::api::SecretGrant {
+            user_id: recipient,
+            rights: vec![SecretRight::Read],
+        });
+        let members = vec![SecretMember {
+            user_id: recipient,
+            display_name: "Alice".into(),
+            email: "alice@example.test".into(),
+            identities: vec![],
+        }];
+        assert_eq!(shared_with(&a, &members), "Alice");
+        assert_eq!(shared_with(&response.secrets[0], &[]), "Organization");
     }
     #[test]
     fn sharing_labels_preserve_provider_identity_and_stable_portal_user_id() {

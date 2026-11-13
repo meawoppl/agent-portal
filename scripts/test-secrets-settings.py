@@ -67,7 +67,7 @@ async def exercise(browser, base, output, width):
                 return
             alpha_deleted = True
             data = {}
-        elif path.endswith('/versions'): data = dict(versions=[])
+        elif path.endswith('/versions'): data = dict(versions=[dict(version=1,created_at='2026-11-12T14:05:00Z',created_by=USER,current=True)])
         else: data = {}
         await route.fulfill(content_type='application/json',body=json.dumps(data))
     await context.route('**/api/**',api)
@@ -96,20 +96,29 @@ async def exercise(browser, base, output, width):
     description = page.get_by_text(ALPHA_DESCRIPTION,exact=True)
     await expect(description).to_have_count(1)
     await expect(description).to_be_visible()
-    assert await description.evaluate("e => e.closest('td').colSpan === 5")
-    await expect(expanded.locator('dt')).to_have_text(['Audience','Reference'])
+    assert await description.evaluate("e => e.closest('td').colSpan === 6")
+    await expect(expanded.locator('dt')).to_have_count(0)
+    await expect(page.get_by_role('columnheader',name='Updated',exact=True)).to_have_count(0)
+    await expect(page.locator('.secrets-reference').first).to_contain_text('id/')
     await expect(expanded.get_by_text(ALPHA_DESCRIPTION,exact=True)).to_have_count(0)
     summary = page.locator('.secret-summary-row').filter(has=alpha)
     assert (await description.bounding_box())['width'] > (await summary.locator('th').bounding_box())['width']
-    mobile_meta = page.locator('.secret-description-row').filter(has=description).locator('.secret-mobile-metadata')
-    if width <= 700:
-        await expect(summary.locator('.secrets-owner')).to_be_hidden()
-        await expect(mobile_meta).to_be_visible()
-        await expect(mobile_meta).to_contain_text('Owner: Fixture')
-        await expect(mobile_meta).to_contain_text('Updated:')
-    else:
-        await expect(summary.locator('.secrets-owner')).to_be_visible()
-        await expect(mobile_meta).to_be_hidden()
+    await expect(summary.locator('.secrets-owner')).to_be_visible()
+    actions = expanded.locator('.secret-detail-actions')
+    await expect(actions.get_by_role('button')).to_have_text(['Copy secret','Replace value','Delete secret'])
+    assert 'Delete adds' not in await expanded.inner_text()
+    history = expanded.locator('.secrets-versions')
+    await expect(history.locator('li')).to_have_count(1)
+    assert await history.evaluate("e => getComputedStyle(e).paddingLeft === '0px' && getComputedStyle(e).listStyleType === 'none'")
+    for label in ['Name','Scope','Version','Owner','Reference','Shared with']:
+        heading = page.get_by_role('columnheader').filter(has=page.get_by_role('button',name=label,exact=False))
+        button = heading.get_by_role('button')
+        await button.click()
+        await expect(heading).to_have_attribute('aria-sort','descending' if label == 'Name' else 'ascending')
+        await button.click()
+        await expect(heading).to_have_attribute('aria-sort','ascending' if label == 'Name' else 'descending')
+    await page.get_by_role('button',name='Name',exact=False).first.click()
+    await expect(names).to_have_text(['▾Alpha','▸bravo','▸Zulu'])
 
     await expect(page.get_by_role('button',name='Start cleanup for all versions',exact=True)).to_have_count(0)
     await expect(page.get_by_text('Clean up leaked copies',exact=True)).to_have_count(0)
