@@ -103,7 +103,7 @@ fn probe_antigravity() -> ProbeResult {
             let trimmed = raw.trim();
             is_non_blank(trimmed).then(|| trimmed.to_string())
         }
-        Ok(_) | Err(_) => Some("google-antigravity localharness".to_string()),
+        Ok(_) | Err(_) => None,
     };
 
     ProbeResult {
