@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200"><rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="Arial, sans-serif"><text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2471 · Health reminders respect sign-in</text><text x="55" y="105" font-size="34" fill="#e6e9f5">Logged-out time used to trigger health reminders; it now counts as inactivity.</text><text x="55" y="149" font-size="34" fill="#e6e9f5">Resume a full interval after login and verify the account before delivery.</text><path d="M55 177 H1945 M1000 205 V1120" stroke="#3d4666"/>
+<text x="75" y="235" font-size="22" font-weight="bold" letter-spacing="4" fill="#f7768e">BEFORE</text>
+<rect x="75" y="290" width="870" height="265" rx="16" fill="#1e202e" stroke="#f7768e"/>
+<text x="100" y="340" font-size="28" fill="#7aa2f7">Global reminder</text>
+<text x="100" y="405" font-size="25" fill="#c0caf5">Enabled timer runs on the login page.</text>
+<text x="100" y="475" font-size="23" fill="#a9b1d6">Logged-out wall time can leave it overdue.</text>
+<rect x="75" y="650" width="870" height="265" rx="16" fill="#1e202e" stroke="#f7768e"/>
+<text x="100" y="700" font-size="28" fill="#7aa2f7">Due timer</text>
+<text x="100" y="765" font-size="25" fill="#c0caf5">Timeout directly opens the dialog.</text>
+<text x="100" y="835" font-size="23" fill="#a9b1d6">An expired cookie is not checked.</text>
+<text x="1055" y="235" font-size="22" font-weight="bold" letter-spacing="4" fill="#9ece6a">AFTER</text>
+<rect x="1055" y="290" width="870" height="265" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="340" font-size="28" fill="#7aa2f7">Account-gated timer</text>
+<text x="1080" y="405" font-size="25" fill="#c0caf5">Logged-out time resets the interval.</text>
+<text x="1080" y="475" font-size="23" fill="#a9b1d6">Next login starts fresh; signed-in refresh preserves it.</text>
+<rect x="1055" y="650" width="870" height="265" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="700" font-size="28" fill="#7aa2f7">Validated delivery</text>
+<text x="1080" y="765" font-size="25" fill="#c0caf5">Check the account before opening the dialog.</text>
+<text x="1080" y="835" font-size="23" fill="#a9b1d6">Expired sessions stop; transient outages retry.</text>
+<text x="55" y="1172" font-size="22" fill="#a9b1d6">Browser-local timer; no authentication or reminder-policy changes on the backend.</text></g></svg>
