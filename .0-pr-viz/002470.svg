@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200" role="img" aria-labelledby="title desc">
+  <title id="title">Send signed-in app launches straight to sessions</title>
+  <desc id="desc">The installed app starts at slash. Before, a successful account check still led to sign-in buttons. HomeRoute now uses that verified account to replace the startup route with the dashboard. Signed-out browsers keep the login page; identity failures keep the retry screen.</desc>
+  <rect width="2000" height="1200" fill="#1a1b26"/>
+  <g font-family="Arial, sans-serif">
+    <text x="55" y="54" font-size="24" fill="#a9b1d6" letter-spacing="1">PR #2470 · Send signed-in app launches straight to sessions</text>
+    <text x="55" y="110" font-size="34" fill="#e6e9f5">Opening the app showed sign-in buttons even after confirming a valid login.</text>
+    <text x="55" y="155" font-size="34" fill="#e6e9f5">Use the verified account to open the dashboard without another sign-in.</text>
+    <path d="M55 180 H1945" stroke="#3d4666"/>
+    <path d="M1000 205 V1100" stroke="#3d4666" stroke-dasharray="8 10"/>
+    <text x="75" y="235" font-size="22" fill="#f7768e" font-weight="bold" letter-spacing="4">BEFORE</text>
+    <text x="1055" y="235" font-size="22" fill="#9ece6a" font-weight="bold" letter-spacing="4">AFTER</text>
+    <g>
+      <rect x="75" y="275" width="850" height="160" rx="16" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+      <text x="105" y="320" font-size="26" fill="#7aa2f7">Installed app opens /</text>
+      <text x="105" y="365" font-size="25" fill="#c0caf5">FederationProvider checks /api/auth/me.</text>
+      <text x="105" y="405" font-size="25" fill="#c0caf5">The server confirms an existing login.</text>
+    </g>
+    <g>
+      <rect x="1055" y="275" width="870" height="160" rx="16" fill="#1e202e" stroke="#3d4666" stroke-width="2"/>
+      <text x="1085" y="320" font-size="26" fill="#7aa2f7">Installed app opens /</text>
+      <text x="1085" y="365" font-size="25" fill="#c0caf5">FederationProvider checks /api/auth/me.</text>
+      <text x="1085" y="405" font-size="25" fill="#c0caf5">The server confirms an existing login.</text>
+    </g>
+    <path d="M500 435 V505 M490 491 L500 505 L510 491" fill="none" stroke="#565f89" stroke-width="3"/>
+    <path d="M1490 435 V505 M1480 491 L1490 505 L1500 491" fill="none" stroke="#565f89" stroke-width="3"/>
+    <g>
+      <rect x="75" y="505" width="850" height="155" rx="16" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+      <text x="105" y="550" font-size="26" fill="#7aa2f7">Route::Home renders SplashPage</text>
+      <text x="105" y="595" font-size="25" fill="#f7768e">Ignores the confirmed account.</text>
+      <text x="105" y="635" font-size="25" fill="#c0caf5">Always presents provider sign-in buttons.</text>
+    </g>
+    <g>
+      <rect x="1055" y="505" width="870" height="155" rx="16" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+      <text x="1085" y="550" font-size="26" fill="#7aa2f7">Route::Home renders HomeRoute</text>
+      <text x="1085" y="595" font-size="25" fill="#9ece6a">Uses the verified account_id().</text>
+      <text x="1085" y="635" font-size="25" fill="#c0caf5">navigator.replace(&amp;Route::Dashboard)</text>
+    </g>
+    <path d="M500 660 V730 M490 716 L500 730 L510 716" fill="none" stroke="#f7768e" stroke-width="3"/>
+    <path d="M1490 660 V730 M1480 716 L1490 730 L1500 716" fill="none" stroke="#9ece6a" stroke-width="3"/>
+    <g>
+      <rect x="75" y="730" width="850" height="155" rx="16" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+      <text x="105" y="777" font-size="26" fill="#f7768e">A valid login looks like a logout</text>
+      <text x="105" y="825" font-size="25" fill="#c0caf5">Reopening sends the user through sign-in again.</text>
+    </g>
+    <g>
+      <rect x="1055" y="730" width="870" height="155" rx="16" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+      <text x="1085" y="777" font-size="26" fill="#9ece6a">Open directly to sessions</text>
+      <text x="1085" y="825" font-size="25" fill="#c0caf5">Back skips the replaced startup entry.</text>
+    </g>
+    <text x="105" y="975" font-size="26" fill="#e0af68">The login already lasts 30 days.</text>
+    <text x="105" y="1020" font-size="25" fill="#c0caf5">This failure is choosing the wrong startup page.</text>
+    <text x="1085" y="975" font-size="26" fill="#e0af68">The account check still decides access.</text>
+    <text x="1085" y="1020" font-size="25" fill="#c0caf5">Signed out: login. Identity unavailable: retry.</text>
+    <path d="M55 1130 H1945" stroke="#3d4666"/>
+    <text x="55" y="1172" font-size="22" fill="#a9b1d6">Requires an existing valid login. The fix takes effect after frontend deployment and an app reload.</text>
+  </g>
+</svg>

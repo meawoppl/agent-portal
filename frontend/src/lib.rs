@@ -58,6 +58,27 @@ pub enum Route {
     AccessDenied,
 }
 
+/// Installed apps open `/`. FederationProvider resolves the browser's account
+/// before mounting routes, so an existing login can go straight to sessions.
+#[function_component(HomeRoute)]
+fn home_route() -> Html {
+    let signed_in = portal_client::use_portal().account_id().is_some();
+    let navigator = use_navigator();
+    use_effect_with((navigator, signed_in), |(navigator, signed_in)| {
+        if *signed_in {
+            if let Some(navigator) = navigator {
+                // Back must not return to the startup page and redirect again.
+                navigator.replace(&Route::Dashboard);
+            }
+        }
+    });
+    if signed_in {
+        Html::default()
+    } else {
+        html! { <SplashPage /> }
+    }
+}
+
 /// Wrapper for /admin route — provides back-navigation on_close callback
 #[function_component(AdminRoute)]
 fn admin_route() -> Html {
@@ -109,7 +130,7 @@ fn legacy_secrets_route(props: &LegacySecretsProps) -> Html {
 
 fn switch(routes: Route) -> Html {
     match routes {
-        Route::Home => html! { <SplashPage /> },
+        Route::Home => html! { <HomeRoute /> },
         Route::Dashboard => html! { <DashboardPage /> },
         Route::Demo => html! { <DemoPage /> },
         Route::Aperture => html! { <pages::aperture::AperturePage /> },
