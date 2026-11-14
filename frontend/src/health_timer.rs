@@ -9,10 +9,7 @@ use gloo::timers::callback::Timeout;
 use serde::{Deserialize, Serialize};
 use yew::prelude::*;
 
-use crate::{
-    hooks::use_focus_trap,
-    utils::{self, On401},
-};
+use crate::{hooks::use_focus_trap, utils};
 use shared::api::MeResponse;
 use std::{cell::Cell, rc::Rc};
 use wasm_bindgen_futures::spawn_local;
@@ -279,8 +276,24 @@ pub fn health_timer_reminder() -> Html {
                         spawn_local(async move {
                             // The cookie may have expired since app bootstrap.
                             // Never deliver based only on a cached account id.
-                            let request =
-                                utils::fetch_json::<MeResponse>("/api/auth/me", On401::Ignore);
+                            let request = async {
+                                let response =
+                                    gloo_net::http::Request::get(&utils::api_url("/api/auth/me"))
+                                        .cache(web_sys::RequestCache::NoStore)
+                                        .send()
+                                        .await
+                                        .map_err(|_| {
+                                            utils::FetchError::Network(
+                                                "Identity check unavailable".into(),
+                                            )
+                                        })?;
+                                if !response.ok() {
+                                    return Err(utils::FetchError::Status(response.status()));
+                                }
+                                response.json::<MeResponse>().await.map_err(|_| {
+                                    utils::FetchError::Decode("Invalid identity response".into())
+                                })
+                            };
                             let deadline = gloo::timers::future::TimeoutFuture::new(5_000);
                             futures_util::pin_mut!(request, deadline);
                             let result = match futures_util::future::select(request, deadline).await
