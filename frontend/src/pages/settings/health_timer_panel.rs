@@ -60,7 +60,7 @@ pub fn health_timer_panel() -> Html {
             <div class="section-header">
                 <h2>{ "Health timer" }</h2>
                 <p class="section-description">
-                    { "Periodic local reminders. Saved in this browser." }
+                    { "Periodic local reminders while signed in. Signing out resets the interval. Saved in this browser." }
                 </p>
             </div>
 
