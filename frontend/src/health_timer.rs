@@ -9,9 +9,18 @@ use gloo::timers::callback::Timeout;
 use serde::{Deserialize, Serialize};
 use yew::prelude::*;
 
-use crate::hooks::use_focus_trap;
+use crate::{
+    hooks::use_focus_trap,
+    utils::{self, On401},
+};
+use shared::api::MeResponse;
+use std::{cell::Cell, rc::Rc};
+use wasm_bindgen_futures::spawn_local;
 
 pub const STORAGE_KEY: &str = "agent_portal.health_timer.v1";
+
+// Logged-out wall time must not become an overdue reminder after login.
+const RESET_AFTER_LOGIN_KEY: &str = "agent_portal.health_timer.reset_after_login";
 
 const SETTINGS_CHANGED_EVENT: &str = "agent-portal-health-timer-settings-changed";
 const DEFAULT_CADENCE_MINUTES: u32 = 30;
@@ -177,17 +186,45 @@ fn health_timer_dialog(props: &HealthTimerDialogProps) -> Html {
 pub fn health_timer_reminder() -> Html {
     let settings = use_state(load_health_timer_settings);
     let showing = use_state(|| false);
+    let account = crate::portal_client::use_portal().account_id();
+    let active_account = use_state(|| None::<uuid::Uuid>);
+    let retry = use_state(|| 0u64);
 
     {
         let settings = settings.clone();
         let showing = showing.clone();
+        let active_account = active_account.clone();
+        use_effect_with(account, move |account| {
+            showing.set(false);
+            if account.is_none() {
+                utils::storage_set(RESET_AFTER_LOGIN_KEY, "1");
+                save_health_timer_settings_reset(&load_health_timer_settings());
+            } else if utils::storage_get(RESET_AFTER_LOGIN_KEY).is_some() {
+                utils::storage_remove(RESET_AFTER_LOGIN_KEY);
+                save_health_timer_settings_reset(&load_health_timer_settings());
+            }
+            settings.set(load_health_timer_settings());
+            active_account.set(*account);
+            || ()
+        });
+    }
+
+    {
+        let settings = settings.clone();
+        let showing = showing.clone();
+        let active_account = active_account.clone();
         use_effect_with((), move |_| {
             let listeners = web_sys::window().map(|window| {
                 let same_window = {
                     let settings = settings.clone();
                     let showing = showing.clone();
+                    let active_account = active_account.clone();
                     EventListener::new(&window, SETTINGS_CHANGED_EVENT, move |_| {
                         let loaded = load_health_timer_settings();
+                        if utils::storage_get(RESET_AFTER_LOGIN_KEY).is_some() {
+                            active_account.set(None);
+                            showing.set(false);
+                        }
                         if !loaded.enabled {
                             showing.set(false);
                         }
@@ -197,8 +234,13 @@ pub fn health_timer_reminder() -> Html {
                 let cross_window = {
                     let settings = settings.clone();
                     let showing = showing.clone();
+                    let active_account = active_account.clone();
                     EventListener::new(&window, "storage", move |_| {
                         let loaded = load_health_timer_settings();
+                        if utils::storage_get(RESET_AFTER_LOGIN_KEY).is_some() {
+                            active_account.set(None);
+                            showing.set(false);
+                        }
                         if !loaded.enabled {
                             showing.set(false);
                         }
@@ -217,21 +259,69 @@ pub fn health_timer_reminder() -> Html {
         let settings_value = (*settings).clone();
         let is_showing = *showing;
         let showing = showing.clone();
+        let active = *active_account;
+        let active_account = active_account.clone();
+        let retry_value = *retry;
+        let retry = retry.clone();
         use_effect_with(
-            (settings_value, is_showing),
-            move |(settings, is_showing)| {
-                let timeout = if settings.enabled && !*is_showing {
+            (settings_value, is_showing, account, active, retry_value),
+            move |(settings, is_showing, account, active, _)| {
+                let cancelled = Rc::new(Cell::new(false));
+                let guard = cancelled.clone();
+                let account = *account;
+                let timeout = if settings.enabled
+                    && !*is_showing
+                    && account.is_some()
+                    && account == *active
+                {
                     let delay = delay_until_due_ms(settings, now_ms());
-                    Some(Timeout::new(delay, move || showing.set(true)))
+                    Some(Timeout::new(delay, move || {
+                        spawn_local(async move {
+                            // The cookie may have expired since app bootstrap.
+                            // Never deliver based only on a cached account id.
+                            let request =
+                                utils::fetch_json::<MeResponse>("/api/auth/me", On401::Ignore);
+                            let deadline = gloo::timers::future::TimeoutFuture::new(5_000);
+                            futures_util::pin_mut!(request, deadline);
+                            let result = match futures_util::future::select(request, deadline).await
+                            {
+                                futures_util::future::Either::Left((result, _)) => Some(result),
+                                futures_util::future::Either::Right(_) => None,
+                            };
+                            if guard.get() {
+                                return;
+                            }
+                            match result {
+                                Some(Ok(me)) if Some(me.id) == account => showing.set(true),
+                                Some(Ok(_)) | Some(Err(utils::FetchError::Status(401 | 403))) => {
+                                    active_account.set(None);
+                                    showing.set(false);
+                                    utils::storage_set(RESET_AFTER_LOGIN_KEY, "1");
+                                    save_health_timer_settings_reset(&load_health_timer_settings());
+                                }
+                                _ => {
+                                    // A transient outage is not a logout. Keep
+                                    // the due time but retry without a hot loop.
+                                    gloo::timers::future::TimeoutFuture::new(30_000).await;
+                                    if !guard.get() {
+                                        retry.set(retry_value.wrapping_add(1));
+                                    }
+                                }
+                            }
+                        });
+                    }))
                 } else {
                     None
                 };
-                move || drop(timeout)
+                move || {
+                    cancelled.set(true);
+                    drop(timeout);
+                }
             },
         );
     }
 
-    if !settings.enabled || !*showing {
+    if account.is_none() || account != *active_account || !settings.enabled || !*showing {
         return html! {};
     }
 
