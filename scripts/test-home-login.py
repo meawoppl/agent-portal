@@ -4,6 +4,7 @@
 Run after `cd frontend && trunk build` with Python Playwright, Chromium and
 WebKit installed. All API/socket traffic is intercepted; no real login is used.
 """
+import argparse
 import asyncio
 import functools
 import http.server
@@ -75,10 +76,8 @@ async def exercise(browser, device, base, name):
 
     await context.route("**/api/**", api)
     await context.route_web_socket("**/ws/**", ws)
-    # Avoid third-party assets while exercising the local app.
-    await context.route("https://cdn.jsdelivr.net/**", lambda route: route.abort())
     page = await context.new_page()
-    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.on("pageerror", lambda error: errors.append(f"{page.url}: {error}\n{error.stack}"))
 
     async def expect_dashboard(target):
         await expect(target).to_have_url(base + "/dashboard", timeout=30000)
@@ -103,10 +102,12 @@ async def exercise(browser, device, base, name):
 
     # Replace the startup entry, so Back cannot bounce through it forever.
     await page.goto(base + "/demo")
+    await expect(page.get_by_role("link", name="Live Portal", exact=True)).to_be_visible()
     await page.goto(base + "/")
     await expect_dashboard(page)
     await page.go_back()
     await expect(page).to_have_url(base + "/demo")
+    await expect(page.get_by_role("link", name="Live Portal", exact=True)).to_be_visible()
 
     # An actually signed-out browser still gets the normal provider buttons.
     identity_status = 401
@@ -129,7 +130,7 @@ async def exercise(browser, device, base, name):
     print(f"PASS {name}: existing login, reopen, Back, signed-out login, outage/retry")
 
 
-async def main():
+async def main(selected_browser):
     server = http.server.ThreadingHTTPServer(
         ("127.0.0.1", 0),
         functools.partial(Handler, directory=str(ROOT / "frontend/dist")),
@@ -137,10 +138,12 @@ async def main():
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
         async with async_playwright() as p:
-            for engine, device, name in (
-                (p.chromium, p.devices["Pixel 7"], "Android Chromium"),
-                (p.webkit, p.devices["iPhone 13"], "iPhone WebKit"),
+            for key, engine, device, name in (
+                ("chromium", p.chromium, p.devices["Pixel 7"], "Android Chromium"),
+                ("webkit", p.webkit, p.devices["iPhone 13"], "iPhone WebKit"),
             ):
+                if selected_browser not in ("all", key):
+                    continue
                 browser = await engine.launch()
                 try:
                     await exercise(browser, device, f"http://127.0.0.1:{server.server_port}", name)
@@ -151,4 +154,6 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--browser", choices=("all", "chromium", "webkit"), default="all")
+    asyncio.run(main(parser.parse_args().browser))
