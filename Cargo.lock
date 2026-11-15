@@ -1567,9 +1567,9 @@ dependencies = [
 
 [[package]]
 name = "codex-codes"
-version = "0.167.8"
+version = "0.169.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4e132142235d19774c985f9466294adc22e71aaa64a1766e9bd6e0ebe635397"
+checksum = "3853062798384a2e8f4d6f426c4238785320b872f13a9d1cbc0b1795fa74b9b6"
 dependencies = [
  "log",
  "serde",
@@ -6079,7 +6079,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7863,7 +7863,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.2",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
