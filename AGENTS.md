@@ -291,6 +291,7 @@ and a row here.**
 | `SESSION_LAUNCH_CRASHLOOP_PAUSED` | Launcher reconcile (`launcher_socket.rs::record_exit_for_backoff`) auto-pausing a session after `LAUNCH_CRASHLOOP_GIVEUP` consecutive failed launches (it sets `paused = true` and stops relaunching) | Bad/expired agent credentials or config on a launcher host (`401 Invalid authentication credentials` from the `claude` binary) making every launch fail in seconds; many distinct sessions on one host parking points at a host-wide problem | Fix the credentials/config on that host, then resume the paused session(s); the auto-pause itself is the desired outcome — it is what stops the relaunch/log flood |
 | `PLUGIN_COMMAND_RECORD_FAILED` | Plugin command run (`handlers/plugins.rs`) when an approved command ran but its transcript card couldn't be written; the result still returns to the user, flagged unrecorded | DB/pool trouble or schema drift on `messages`; plugin command runs are missing from transcripts | Check DB health and the `messages` schema; the log line names the session and the line that ran |
 | `MEMBER_STATUS_FANOUT_FAILED` | Member fan-out (`websocket/member_status.rs`) when a session stopped running (failed launch, or its proxy disconnected) but its members couldn't be loaded; fails closed, telling no one beyond the owner's own launch result | DB/pool trouble or schema drift on `session_members`; members' lists show stale running status until refresh | Check DB health and the `session_members` schema |
+| `HEAP_PROFILE_CAPTURED` | Heap-profile watchdog (`heap_profile.rs`) when the backend's live heap reaches `PORTAL_HEAP_PROFILE_THRESHOLD_MB`, then each further 256 MiB; the line says whether the profile was written to `PORTAL_HEAP_PROFILE_DIR` | A memory spike in progress (bursts at rising sizes); the container's memory cap may kill the backend shortly after | Collect the `heap-*.pb.gz` files and read them with `go tool pprof -top <file>` to find the allocating code path |
 
 A recurring `PENDING_INPUT_PERSIST_FAILED` right after a deploy almost always
 means schema drift (a migration recorded-but-not-applied) — see above. A one-off
@@ -1062,6 +1063,8 @@ When making changes, verify:
 | `PORTAL_STT_BUCKET` | S3 bucket used to stage audio | Required for `aws` |
 | `PORTAL_STT_SERVICE_ACCOUNT_PATH` | Google service-account JSON | Required for `google` |
 | `PORTAL_STT_VOCABULARY_NAME` | Pre-created custom-vocabulary resource | Optional (`aws`) |
+| `PORTAL_HEAP_PROFILE_DIR` | Directory where the backend writes heap profiles when its live heap spikes (Linux; jemalloc sampled profiling is always on). Unset = no watchdog, nothing written. Mount it as a volume so profiles survive a container restart | Optional |
+| `PORTAL_HEAP_PROFILE_THRESHOLD_MB` | Live-heap size that triggers the first profile; another is written at each further 256 MiB, and the newest 24 are kept | Optional (default: 700) |
 | `PORTAL_MAX_AUDIO_MB` | Per-recording cap for `POST /api/stt/transcribe` | Optional (default: 25) |
 | `PORTAL_MAX_IMAGE_MB` | Max image size for proxies (also the per-file cap for image `agent-portal show`) | Optional (default: 10) |
 | `PORTAL_MAX_VIDEO_MB` | Per-file cap for videos shown via `agent-portal show` | Optional (default: 100) |

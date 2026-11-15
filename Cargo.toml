@@ -126,6 +126,13 @@ codegen-units = 1
 opt-level = "z"
 strip = true
 
+# The server keeps its symbols and line tables: heap profiles
+# (`backend/src/heap_profile.rs`) are symbolized in-process, so a stripped
+# binary would record only addresses. Distributed binaries stay stripped.
+[profile.release.package.backend]
+debug = "line-tables-only"
+strip = "none"
+
 # Panic/error policy (#1165 item 8). `unwrap`/`expect` in production code hide
 # error context and, in background tasks, die silently. We deny them
 # workspace-wide and ratchet existing usage down per crate/module: crates or
