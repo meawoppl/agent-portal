@@ -63,6 +63,29 @@ pub(crate) fn current_exe_path() -> Result<String> {
         .to_string())
 }
 
+/// Restart the launcher process into whatever binary is now on disk. Under a
+/// service manager (systemd/launchd), sync the unit and ask the manager to
+/// restart us; when unmanaged, exit(0) so an external supervisor respawns.
+/// Shared by the startup update, the dashboard's `UpdateAndRestart` and its
+/// `Restart`, so the restart mechanism lives in exactly one place.
+///
+/// Returns only when a managed restart could not be requested: the caller then
+/// keeps running. Exiting instead would leave a systemd unit down, because its
+/// `Restart=on-failure` does not respawn a clean exit.
+pub fn restart_launcher() {
+    if !is_installed() {
+        tracing::info!("Service not installed; exiting so a supervisor can respawn");
+        std::process::exit(0);
+    }
+    if let Err(e) = sync() {
+        tracing::error!("Service unit sync failed; leaving launcher running: {}", e);
+        return;
+    }
+    if let Err(e) = restart() {
+        tracing::error!("Service restart failed: {}", e);
+    }
+}
+
 // --- Linux (systemd) ---
 
 #[cfg(target_os = "linux")]
@@ -94,7 +117,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 Environment=PATH={path}
-ExecStart={binary_path} --no-update
+ExecStart={binary_path}
 Restart=on-failure
 RestartSec=5
 OOMPolicy=continue
@@ -383,7 +406,6 @@ fn render_plist(binary_path: &str, path: &str, log_dir: &str) -> String {
     <key>ProgramArguments</key>
     <array>
         <string>{binary_path}</string>
-        <string>--no-update</string>
     </array>
     <key>EnvironmentVariables</key>
     <dict>
@@ -738,6 +760,8 @@ mod tests {
         assert!(!plist.contains("SuccessfulExit"));
         assert!(plist.contains("O&apos;Brien &amp; Co"));
         assert!(plist.contains("/bin:&lt;tools&gt;"));
+        // Services must run the startup update check; the opt-out is config.
+        assert!(!plist.contains("--no-update"));
     }
 
     /// Execute the real recovery worker with a controlled launchctl substitute.
@@ -893,6 +917,20 @@ esac
         assert!(service.contains(&"OOMPolicy=continue"), "{unit}");
         assert!(service.contains(&"ManagedOOMPreference=avoid"), "{unit}");
         assert!(service.contains(&"Delegate=memory"), "{unit}");
+    }
+
+    /// The unit runs the bare binary so every service start checks for an
+    /// update; `"auto_update": false` in config is the opt-out.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn unit_runs_startup_update_check() {
+        let exe = "/home/u/.config/claude-portal/agent-portal";
+        let unit = super::generate_unit(exe);
+        assert!(
+            unit.lines().any(|l| l == format!("ExecStart={exe}")),
+            "{unit}"
+        );
+        assert!(!unit.contains("--no-update"), "{unit}");
     }
 
     /// Startup sync only rewrites a unit that runs this exact executable.

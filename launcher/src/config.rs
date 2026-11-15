@@ -11,6 +11,11 @@ pub struct LauncherConfig {
     /// Linux hosts with delegated memory control; new session launches read the current values.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_memory: Option<SessionMemoryLimits>,
+    /// `false` skips the startup update check, e.g. to keep a locally built
+    /// binary. This lives in config rather than on the service command line
+    /// because the unit is regenerated from a fixed template on every start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_update: Option<bool>,
     pub backend_url: Option<String>,
     pub auth_token: Option<String>,
     pub name: Option<String>,
@@ -916,6 +921,7 @@ mod tests {
     fn roundtrip_config_serialization() {
         let config = LauncherConfig {
             session_memory: None,
+            auto_update: Some(false),
             backend_url: Some("wss://test.com".to_string()),
             auth_token: Some("tok_test".to_string()),
             name: Some("test-launcher".to_string()),
@@ -930,6 +936,7 @@ mod tests {
         };
         let serialized = serde_json::to_string_pretty(&config).unwrap();
         let deserialized: LauncherConfig = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized.auto_update, Some(false));
         assert_eq!(deserialized.backend_url, config.backend_url);
         assert_eq!(deserialized.auth_token, config.auth_token);
         assert_eq!(deserialized.name, config.name);
@@ -1111,6 +1118,7 @@ description: Route KiCad PCB layouts.
         let sid = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
         let config = LauncherConfig {
             session_memory: None,
+            auto_update: None,
             backend_url: None,
             auth_token: None,
             name: None,
