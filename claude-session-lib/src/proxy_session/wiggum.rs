@@ -616,6 +616,15 @@ mod tests {
             turn_start_phases_ms: None,
             turn_start_control_requests_ms: None,
             api_error: None,
+            // Optional 2.1.325 diagnostics are absent from synthetic loop results.
+            api_error_type: None,
+            policy_answer: None,
+            policy_answer_reason: None,
+            restored_rewind: None,
+            invalid_config_file: None,
+            tool_pool_build_lapsed_count: None,
+            tool_pool_moved_at_lapse_count: None,
+            tool_pool_limit_ms: None,
             // 2.1.300 API provenance and hosted-worker diagnostics are absent locally.
             api_error_origin: None,
             interrupted_by_shutdown: None,
