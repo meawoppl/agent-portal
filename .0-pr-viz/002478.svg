@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200"><rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="Arial, sans-serif"><text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2478 · Stop history replays from starving the database pool</text><text x="55" y="105" font-size="34" fill="#e6e9f5">Each replay pinned one of 10 pooled connections until its browser drained.</text><text x="55" y="149" font-size="34" fill="#e6e9f5">Now batches hold a connection only to load, so bursts cannot close browsers.</text><path d="M55 177 H1945 M1000 205 V1120" stroke="#3d4666"/>
+<text x="75" y="235" font-size="22" font-weight="bold" letter-spacing="4" fill="#f7768e">BEFORE</text>
+<rect x="75" y="275" width="870" height="230" rx="16" fill="#1e202e" stroke="#f7768e"/>
+<text x="100" y="325" font-size="28" fill="#7aa2f7">stream_history: load_iter cursor</text>
+<text x="100" y="385" font-size="25" fill="#c0caf5">Connection held across every send().</text>
+<text x="100" y="445" font-size="23" fill="#a9b1d6">10 slow replays = the whole r2d2 pool pinned.</text>
+<rect x="75" y="545" width="870" height="230" rx="16" fill="#1e202e" stroke="#f7768e"/>
+<text x="100" y="595" font-size="28" fill="#7aa2f7">sanitize_outbound: pool.try_get()</text>
+<text x="100" y="655" font-size="25" fill="#c0caf5">No free connection -> close the browser.</text>
+<text x="100" y="715" font-size="23" fill="#a9b1d6">Browser reconnects, replays again: 1,250 closes in 4 days.</text>
+<rect x="75" y="815" width="870" height="230" rx="16" fill="#1e202e" stroke="#3d4666"/>
+<text x="100" y="865" font-size="28" fill="#7aa2f7">Replay frames redacted twice</text>
+<text x="100" y="925" font-size="25" fill="#c0caf5">Owner rules in producer, then again per frame.</text>
+<text x="100" y="985" font-size="23" fill="#a9b1d6">Second pass needed a second checkout per frame.</text>
+<text x="1055" y="235" font-size="22" font-weight="bold" letter-spacing="4" fill="#9ece6a">AFTER</text>
+<rect x="1055" y="275" width="870" height="230" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="325" font-size="28" fill="#7aa2f7">plan_batches + per-batch load</text>
+<text x="1080" y="385" font-size="25" fill="#c0caf5">One plan query: id, created_at, octet_length.</text>
+<text x="1080" y="445" font-size="23" fill="#a9b1d6">Each batch checks out, loads, releases, then sends.</text>
+<rect x="1055" y="545" width="870" height="230" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="595" font-size="28" fill="#7aa2f7">sanitize_live (live frames)</text>
+<text x="1080" y="655" font-size="25" fill="#c0caf5">Retry rules every 100 ms for up to 3 s.</text>
+<text x="1080" y="715" font-size="23" fill="#a9b1d6">Fail-closed: held, never sent unredacted.</text>
+<rect x="1055" y="815" width="870" height="230" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="865" font-size="28" fill="#7aa2f7">redact_replay_frame(viewer, owner)</text>
+<text x="1080" y="925" font-size="25" fill="#c0caf5">Once, with a fresh snapshot per batch.</text>
+<text x="1080" y="985" font-size="23" fill="#a9b1d6">Test: zero connections checked out at every send.</text>
+<text x="55" y="1172" font-size="22" fill="#a9b1d6">Removes a reconnect feedback loop; does not fix the backend memory spike itself. DB tests run only in CI's Postgres job.</text></g></svg>
