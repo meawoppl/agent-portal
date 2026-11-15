@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200"><rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="Arial, sans-serif"><text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2476 · Update the launcher service on startup</text><text x="55" y="105" font-size="34" fill="#e6e9f5">The installed service ran with --no-update, so it never updated itself.</text><text x="55" y="149" font-size="34" fill="#e6e9f5">Now every service start installs a newer release and restarts into it.</text><path d="M55 177 H1945 M1000 205 V1120" stroke="#3d4666"/>
+<text x="75" y="235" font-size="22" font-weight="bold" letter-spacing="4" fill="#f7768e">BEFORE</text>
+<rect x="75" y="275" width="870" height="250" rx="16" fill="#1e202e" stroke="#f7768e"/>
+<text x="100" y="325" font-size="28" fill="#7aa2f7">generate_unit / render_plist</text>
+<text x="100" y="385" font-size="25" fill="#c0caf5">ExecStart={binary_path} --no-update</text>
+<text x="100" y="445" font-size="23" fill="#a9b1d6">startup_auto_update(..., !args.no_update) skips the check.</text>
+<text x="100" y="490" font-size="23" fill="#a9b1d6">A service stays on its install version until a manual update.</text>
+<rect x="75" y="565" width="870" height="250" rx="16" fill="#1e202e" stroke="#f7768e"/>
+<text x="100" y="615" font-size="28" fill="#7aa2f7">Startup update path</text>
+<text x="100" y="675" font-size="25" fill="#c0caf5">Updated -> "please restart" -> exit(0)</text>
+<text x="100" y="735" font-size="23" fill="#a9b1d6">Under Restart=on-failure a clean exit leaves the unit down.</text>
+<text x="100" y="780" font-size="23" fill="#a9b1d6">reqwest client has no timeouts: a stalled GitHub hangs.</text>
+<rect x="75" y="855" width="870" height="200" rx="16" fill="#1e202e" stroke="#3d4666"/>
+<text x="100" y="905" font-size="28" fill="#7aa2f7">connection/commands.rs</text>
+<text x="100" y="965" font-size="23" fill="#a9b1d6">Private restart_service() for UpdateAndRestart and Restart.</text>
+<text x="1055" y="235" font-size="22" font-weight="bold" letter-spacing="4" fill="#9ece6a">AFTER</text>
+<rect x="1055" y="275" width="870" height="250" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="325" font-size="28" fill="#7aa2f7">generate_unit / render_plist</text>
+<text x="1080" y="385" font-size="25" fill="#c0caf5">ExecStart={binary_path}</text>
+<text x="1080" y="445" font-size="23" fill="#a9b1d6">Opt-out moves to launcher.json: "auto_update": false.</text>
+<text x="1080" y="490" font-size="23" fill="#a9b1d6">Survives sync_on_startup regenerating the unit.</text>
+<rect x="1055" y="565" width="870" height="250" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="615" font-size="28" fill="#7aa2f7">Startup update path</text>
+<text x="1080" y="675" font-size="25" fill="#c0caf5">Updated -> service::restart_launcher()</text>
+<text x="1080" y="735" font-size="23" fill="#a9b1d6">Manager restart into the new binary; on failure keep running.</text>
+<text x="1080" y="780" font-size="23" fill="#a9b1d6">connect_timeout 15 s, read_timeout 30 s on the update client.</text>
+<rect x="1055" y="855" width="870" height="200" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="905" font-size="28" fill="#7aa2f7">service::restart_launcher()</text>
+<text x="1080" y="965" font-size="23" fill="#a9b1d6">One restart path for startup, UpdateAndRestart and Restart.</text>
+<text x="55" y="1172" font-size="22" fill="#a9b1d6">Updates only on restart: a daemon that never restarts still needs agent-portal update. macOS plists resync on the next update or restart.</text></g></svg>
