@@ -55,6 +55,17 @@ pub const HEADER_COLLAPSED_STORAGE_KEY: &str = "claude-portal-header-collapsed";
 /// the live view, though nothing is lost server-side.
 pub const MAX_MESSAGES_PER_SESSION: usize = 100;
 
+/// Live-buffer ceiling while the user is scrolled back reading history.
+///
+/// Evicting from the top of the transcript removes content above the
+/// viewport, which shifts whatever the reader is looking at wherever the
+/// browser has no CSS scroll anchoring (mobile Safari). So while not tailing,
+/// the buffer grows past [`MAX_MESSAGES_PER_SESSION`] instead and is trimmed
+/// back once the view is pinned to the bottom again, where top eviction is
+/// invisible. This bound only keeps a reader parked through a very long turn
+/// from growing the DOM without limit.
+pub const MAX_MESSAGES_WHILE_SCROLLED_BACK: usize = 4 * MAX_MESSAGES_PER_SESSION;
+
 /// A session as the dashboard holds it: the row from its portal's
 /// `/api/sessions`, the portal it lives on, and the key every piece of client
 /// state about it is filed under.
