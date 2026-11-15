@@ -16,6 +16,10 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 const LINKED_RECHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+/// How long a live frame may wait for its redaction rules before the socket
+/// closes. Covers a busy pool and one rules refresh (every 2 s).
+const OUTBOUND_RULES_PATIENCE: std::time::Duration = std::time::Duration::from_secs(3);
+const OUTBOUND_RULES_RETRY: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// Only outbound reads may reuse successful authorization. Incoming commands
 /// always validate freshly, and the idle timer forces validation even under load.
@@ -46,18 +50,25 @@ impl OutboundAuthorization {
     }
 }
 
+/// Viewer rules plus, when different, the session owner's.
+type OutboundRules = (
+    crate::secrets::redaction::Redactor,
+    Option<crate::secrets::redaction::Redactor>,
+);
+
 /// The socket's verified binding and closed typed metadata frames are the
 /// only session authority here. Nested agent JSON IDs must never choose a
-/// different owner's rules. Resolve fresh matchers using a nonwaiting checkout:
-/// the replay producer can hold the last connection while waiting on this sink.
-fn sanitize_outbound(
+/// different owner's rules. Resolve fresh matchers using a nonwaiting
+/// checkout: this runs on the socket's async task, which must never block a
+/// runtime thread on the pool; [`sanitize_live`] does the waiting.
+fn outbound_rules(
     pool: &crate::db::DbPool,
     viewer: Uuid,
     verified_session: Option<Uuid>,
-    frame: ServerToClient,
-) -> Result<ServerToClient, crate::errors::AppError> {
+    frame: &ServerToClient,
+) -> Result<OutboundRules, crate::errors::AppError> {
     use crate::{errors::AppError, schema::sessions, secrets::redaction};
-    let session = match &frame {
+    let session = match frame {
         ServerToClient::SessionUpdate { session_id, .. } => Some(*session_id),
         _ => verified_session,
     };
@@ -77,7 +88,14 @@ fn sanitize_outbound(
     let owner_rules = owner
         .filter(|owner| *owner != viewer)
         .map(|owner| catalog.scoped_for(owner));
-    drop(conn);
+    Ok((viewer_rules, owner_rules))
+}
+
+fn apply_outbound_rules(
+    (viewer_rules, owner_rules): OutboundRules,
+    frame: ServerToClient,
+) -> Result<ServerToClient, crate::errors::AppError> {
+    use crate::errors::AppError;
     if viewer_rules.is_empty() && owner_rules.as_ref().is_none_or(|rules| rules.is_empty()) {
         return Ok(frame);
     }
@@ -89,6 +107,28 @@ fn sanitize_outbound(
     }
     serde_json::from_value(value)
         .map_err(|_| AppError::ServiceUnavailable("Content redaction unavailable"))
+}
+
+/// Redact a live frame, holding it for up to [`OUTBOUND_RULES_PATIENCE`]
+/// while its rules are briefly unavailable (pool busy, rules refreshing).
+/// Still fail-closed: the frame is never sent unredacted, and the socket
+/// closes only once the wait is exhausted. Closing on the first miss made
+/// the browser reconnect and replay history, adding load to the very pool
+/// that was busy.
+async fn sanitize_live(
+    pool: &crate::db::DbPool,
+    viewer: Uuid,
+    verified_session: Option<Uuid>,
+    frame: ServerToClient,
+) -> Result<ServerToClient, crate::errors::AppError> {
+    let deadline = tokio::time::Instant::now() + OUTBOUND_RULES_PATIENCE;
+    loop {
+        match outbound_rules(pool, viewer, verified_session, &frame) {
+            Ok(rules) => return apply_outbound_rules(rules, frame),
+            Err(error) if tokio::time::Instant::now() >= deadline => return Err(error),
+            Err(_) => tokio::time::sleep(OUTBOUND_RULES_RETRY).await,
+        }
+    }
 }
 
 #[tracing::instrument(skip_all, fields(user, user_id = %user_id, session_name, session_id, computer, owner, owner_id))]
@@ -173,10 +213,8 @@ pub async fn handle_web_client_socket(
                 match replayed {
                     Some(Ok(msg)) => {
                         if linked.as_ref().is_some_and(|auth| outbound_auth.check(std::time::Instant::now(), false, || auth.authorize(&app_state, shared::api::TokenScope::Read)).is_err()) { break; }
-                        let msg = match sanitize_outbound(&db_pool, user_id, verified_session_id, msg) {
-                            Ok(msg) => msg,
-                            Err(_) => { warn!("{}: closing client until rules refresh", crate::markers::SECRET_REDACTION_FAILED); break; }
-                        };
+                        // The replay producer already redacted this batch for
+                        // this viewer and the owner (`replay::stream_history`).
                         if ws_sender.send(msg).await.is_err() { break; }
                     }
                     Some(Err(error)) => { warn!("History replay failed: {error}"); break; }
@@ -186,7 +224,7 @@ pub async fn handle_web_client_socket(
             msg = rx.recv(), if pending_replay.is_none() => {
                 let Some(msg) = msg else { break; };
                 if linked.as_ref().is_some_and(|auth| outbound_auth.check(std::time::Instant::now(), false, || auth.authorize(&app_state, shared::api::TokenScope::Read)).is_err()) { break; }
-                let msg = match sanitize_outbound(&db_pool, user_id, verified_session_id, msg) {
+                let msg = match sanitize_live(&db_pool, user_id, verified_session_id, msg).await {
                             Ok(msg) => msg,
                             Err(_) => { warn!("{}: closing client until rules refresh", crate::markers::SECRET_REDACTION_FAILED); break; }
                         };
@@ -598,6 +636,7 @@ fn handle_web_register(
             *pending_replay = Some(replay_history(
                 db_pool,
                 session_id,
+                user_id,
                 replay_after,
                 initial_replay_limit,
             ));
@@ -1163,6 +1202,17 @@ mod owner_redaction_tests {
     use crate::handlers::secrets::tests::Database;
     use crate::secrets::redaction::{RedactionRuntime, MASK};
     use shared::api::SecretValue;
+
+    /// The synchronous, single-attempt form of [`sanitize_live`].
+    fn sanitize_outbound(
+        pool: &crate::db::DbPool,
+        viewer: Uuid,
+        verified_session: Option<Uuid>,
+        frame: ServerToClient,
+    ) -> Result<ServerToClient, crate::errors::AppError> {
+        let rules = outbound_rules(pool, viewer, verified_session, &frame)?;
+        apply_outbound_rules(rules, frame)
+    }
 
     #[test]
     fn outbound_uses_verified_owner_and_viewer_but_never_nested_agent_session_ids() {
