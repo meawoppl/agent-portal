@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200"><rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="Arial, sans-serif"><text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2479 · Keep socket database waits off the async worker threads</text><text x="55" y="105" font-size="34" fill="#e6e9f5">A frame waiting on the DB pool used to freeze a whole tokio worker (of 2).</text><text x="55" y="149" font-size="34" fill="#e6e9f5">Now run_blocking hands that worker's other tasks off, so sockets keep moving.</text><path d="M55 177 H1945 M1000 205 V1120" stroke="#3d4666"/>
+<text x="75" y="235" font-size="22" font-weight="bold" letter-spacing="4" fill="#f7768e">BEFORE</text>
+<rect x="75" y="275" width="870" height="230" rx="16" fill="#1e202e" stroke="#f7768e"/>
+<text x="100" y="325" font-size="28" fill="#7aa2f7">handle_agent_output, inline</text>
+<text x="100" y="385" font-size="25" fill="#c0caf5">db_pool.get() waits up to 30 s on a full pool.</text>
+<text x="100" y="445" font-size="23" fill="#a9b1d6">The tokio worker running it can do nothing else.</text>
+<rect x="75" y="545" width="870" height="230" rx="16" fill="#1e202e" stroke="#f7768e"/>
+<text x="100" y="595" font-size="28" fill="#7aa2f7">2 vCPUs = 2 workers</text>
+<text x="100" y="655" font-size="25" fill="#c0caf5">Two waiting frames stall every socket.</text>
+<text x="100" y="715" font-size="23" fill="#a9b1d6">Heartbeats stop; liveness evicts agents after 60 s.</text>
+<rect x="75" y="815" width="870" height="230" rx="16" fill="#1e202e" stroke="#3d4666"/>
+<text x="100" y="865" font-size="28" fill="#7aa2f7">Launcher registration</text>
+<text x="100" y="925" font-size="25" fill="#c0caf5">Held a connection across .await sends.</text>
+<text x="100" y="985" font-size="23" fill="#a9b1d6">Could not be wrapped as one blocking unit.</text>
+<text x="1055" y="235" font-size="22" font-weight="bold" letter-spacing="4" fill="#9ece6a">AFTER</text>
+<rect x="1055" y="275" width="870" height="230" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="325" font-size="28" fill="#7aa2f7">websocket::run_blocking(work)</text>
+<text x="1080" y="385" font-size="25" fill="#c0caf5">block_in_place on the multi-thread runtime.</text>
+<text x="1080" y="445" font-size="23" fill="#a9b1d6">Frame order and borrowed state are kept.</text>
+<rect x="1055" y="545" width="870" height="230" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="595" font-size="28" fill="#7aa2f7">Proxy, browser and launcher dispatch</text>
+<text x="1080" y="655" font-size="25" fill="#c0caf5">Each frame's DB work runs inside run_blocking.</text>
+<text x="1080" y="715" font-size="23" fill="#a9b1d6">Test: other task &lt; 300 ms while one blocks 600 ms.</text>
+<rect x="1055" y="815" width="870" height="230" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="865" font-size="28" fill="#7aa2f7">LauncherAuth (blocking check)</text>
+<text x="1080" y="925" font-size="25" fill="#c0caf5">Then the same five acks, sent async.</text>
+<text x="1080" y="985" font-size="23" fill="#a9b1d6">Same text, fatal flags and reject reasons.</text>
+<text x="55" y="1172" font-size="22" fill="#a9b1d6">Sockets only: HTTP handlers still call app_state.conn() inline (follow-up). Does not resize the pool or fix the memory spike.</text></g></svg>
