@@ -104,6 +104,46 @@ pub struct ForkSessionRequest {
     pub fork_point_turn_id: Option<String>,
 }
 
+/// Request body for `POST /api/sessions/:id/handoff`.
+///
+/// A handoff continues a session's work with a **different** agent. Agent
+/// conversation state is not portable between agents, so unlike a fork this
+/// starts a fresh session whose first input points it at the source's Portal
+/// transcript. Same-agent requests are rejected; use a fork for those.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HandoffSessionRequest {
+    pub target_agent: crate::AgentType,
+    pub name: String,
+    pub directory_mode: ForkDirectoryMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_directory: Option<String>,
+    /// CLI args for the target agent (model, permission preset). The
+    /// source's args are agent-specific and never carried over.
+    #[serde(default)]
+    pub claude_args: Vec<String>,
+    /// Extra direction appended to the handoff note.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<String>,
+    /// Stop and pause the source so two agents don't work at once, and so a
+    /// usage-limited agent doesn't resume on its own when its window resets.
+    #[serde(default = "default_true")]
+    pub stop_source: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HandoffSessionResponse {
+    pub request_id: uuid::Uuid,
+    pub session_id: uuid::Uuid,
+    /// False when `stop_source` was requested but stopping failed; the new
+    /// session still launched, so the caller should tell the user to stop the
+    /// source by hand.
+    pub source_stopped: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ForkSessionResponse {
     pub request_id: uuid::Uuid,

@@ -103,6 +103,7 @@ pub const PROXY_CAPABILITY_TUNNEL_BINARY_V2: &str = "session.tunnel_binary_v2";
 pub mod codex_errors;
 pub mod codex_media;
 pub mod proxy_tokens;
+pub mod usage_limit;
 pub use proxy_tokens::*;
 
 // Typed WebSocket endpoint definitions
