@@ -89,6 +89,7 @@ pub async fn handoff_session(
         .select((messages::role, messages::agent_type, messages::content))
         .load(&mut conn)?;
     let orientation = Orientation::from_newest_first(&rows);
+    let summary = super::handoff_summary::latest_summary(&mut conn, source_id)?;
     drop(conn);
 
     let launched = super::launchers::launch_owned_session(
@@ -118,6 +119,7 @@ pub async fn handoff_session(
         new_checkout: req.directory_mode != ForkDirectoryMode::Same,
         source_stopped: req.stop_source,
         orientation: &orientation,
+        summary: summary.as_deref(),
         instructions: req.instructions.as_deref(),
     });
     app_state.session_manager.set_last_input_sender(
@@ -143,6 +145,7 @@ pub async fn handoff_session(
         && app_state
             .conn()
             .and_then(|mut conn| {
+                super::handoff_summary::cancel_pending_requests(&mut conn, source_id)?;
                 super::session_stop::persist_and_stop(
                     &mut conn,
                     &app_state.session_manager,
@@ -207,6 +210,8 @@ struct HandoffNote<'a> {
     new_checkout: bool,
     source_stopped: bool,
     orientation: &'a Orientation,
+    /// The source agent's own handoff summary, when it wrote one.
+    summary: Option<&'a str>,
     instructions: Option<&'a str>,
 }
 
@@ -241,6 +246,14 @@ fn handoff_note(n: &HandoffNote<'_>) -> String {
             "You are in the same directory the source worked in. Check `git status` and \
              `git diff` first: it may have left work half-done.\n\n",
         );
+    }
+    if let Some(summary) = n.summary {
+        note.push_str(
+            "Before it ran out, the source agent wrote this summary for you. Work may have \
+             continued after it; the transcript has anything newer.\n\n",
+        );
+        note.push_str(summary);
+        note.push_str("\n\n");
     }
     if let Some(request) = &n.orientation.last_request {
         note.push_str(&format!(
@@ -319,6 +332,7 @@ mod tests {
                 last_request: Some("Fix the parser".into()),
                 last_reply: None,
             },
+            summary: new_checkout.then_some("## Handoff summary\nGoal: parser."),
             instructions,
         })
     }
@@ -335,7 +349,10 @@ mod tests {
         assert!(same.ends_with("before you carry on."));
 
         let other = note(true, false, Some("Only review the diff."));
+        assert!(!same.contains("Handoff summary"));
         assert!(other.contains("`/home/u/repo`"));
+        assert!(other.contains("wrote this summary for you"));
+        assert!(other.contains("## Handoff summary\nGoal: parser."));
         assert!(other.contains("left running"));
         assert!(other.ends_with("Only review the diff."));
     }
