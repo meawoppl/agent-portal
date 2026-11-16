@@ -36,9 +36,10 @@ pub fn is_claude_usage_refusal(message: &crate::AssistantMessage) -> bool {
             .is_some_and(|kind| CLAUDE_USAGE_ERRORS.contains(&kind))
 }
 
-/// Frame type the Codex session forwards for an `account/rateLimits/updated`
-/// notification. Only snapshots near a limit are forwarded; the rest would
-/// fill the transcript with a row per turn.
+/// Frame type the Codex session forwards for `account/rateLimits/updated`.
+/// Codex sends that update with every token count during a turn, and it is
+/// sparse (fields it omits are unchanged, not empty), so the session merges
+/// updates per limit and forwards a complete snapshot once per warning window.
 pub const CODEX_RATE_LIMITS_EVENT: &str = "account/rateLimits/updated";
 
 /// A Codex usage window this full counts as a warning.
@@ -48,12 +49,17 @@ pub const CODEX_USAGE_WARNING_PERCENT: i64 = 90;
 /// in the transcript.
 pub const HANDOFF_SUMMARY_HEADING: &str = "## Handoff summary";
 
-/// Whether any of a Codex snapshot's usage windows is nearly used up.
-pub fn codex_near_limit(snapshot: &codex_codes::RateLimitSnapshot) -> bool {
-    codex_warning_window(snapshot).is_some()
-}
+/// Codex's default limit family when a snapshot names none.
+pub const CODEX_DEFAULT_LIMIT_ID: &str = "codex";
 
-fn codex_warning_window(snapshot: &codex_codes::RateLimitSnapshot) -> Option<String> {
+/// Key naming the nearly used-up window of a complete (merged) Codex
+/// snapshot, or `None` when no window is past the warning threshold. Codex
+/// reports several limits side by side (`limit_id`), so the key includes it.
+pub fn codex_warning_window(snapshot: &codex_codes::RateLimitSnapshot) -> Option<String> {
+    let limit = snapshot
+        .limit_id
+        .as_deref()
+        .unwrap_or(CODEX_DEFAULT_LIMIT_ID);
     [
         ("primary", &snapshot.primary),
         ("secondary", &snapshot.secondary),
@@ -61,8 +67,12 @@ fn codex_warning_window(snapshot: &codex_codes::RateLimitSnapshot) -> Option<Str
     .into_iter()
     .find_map(|(name, window)| {
         let window = window.as_ref()?;
-        (window.used_percent >= CODEX_USAGE_WARNING_PERCENT)
-            .then(|| format!("codex:{name}:{}", window.resets_at.unwrap_or_default()))
+        (window.used_percent >= CODEX_USAGE_WARNING_PERCENT).then(|| {
+            format!(
+                "codex:{limit}:{name}:{}",
+                window.resets_at.unwrap_or_default()
+            )
+        })
     })
 }
 
@@ -158,7 +168,13 @@ mod tests {
         .unwrap();
         assert_eq!(
             usage_warning(AgentType::Codex, &codex).as_deref(),
-            Some("codex:secondary:2")
+            Some("codex:codex:secondary:2")
+        );
+        let mut other = codex.clone();
+        other["params"]["rateLimits"]["limitId"] = "codex_other".into();
+        assert_eq!(
+            usage_warning(AgentType::Codex, &other).as_deref(),
+            Some("codex:codex_other:secondary:2")
         );
         let mut low = codex.clone();
         low["params"]["rateLimits"]["secondary"]["usedPercent"] = 50.into();

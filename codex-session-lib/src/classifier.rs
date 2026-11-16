@@ -135,14 +135,6 @@ fn classify_notification(notif: Notification) -> Vec<AgentOutput> {
         Notification::ReasoningTextDelta(p) => passthrough("item/reasoning/textDelta", &p),
         Notification::FileChangePatchUpdated(p) => passthrough("item/fileChange/patchUpdated", &p),
         Notification::ContextCompacted(p) => passthrough("thread/compacted", &p),
-        // Forwarded only near a limit: it is what lets Portal ask for a
-        // handoff summary before the agent runs out. Ordinary updates arrive
-        // every turn and would add a transcript row each time.
-        Notification::AccountRateLimitsUpdated(p)
-            if shared::usage_limit::codex_near_limit(&p.rate_limits) =>
-        {
-            passthrough(shared::usage_limit::CODEX_RATE_LIMITS_EVENT, &p)
-        }
 
         // Everything else (status notifications, deltas, realtime, hooks,
         // unknown) is not user-facing — the handler logs at debug and emits
@@ -338,30 +330,6 @@ mod tests {
 
     fn classify(msg: ServerMessage) -> Vec<AgentOutput> {
         CodexClassifier.classify(msg)
-    }
-
-    #[test]
-    fn rate_limit_updates_are_forwarded_only_near_a_limit() {
-        let update = |used: i64| {
-            classify(ServerMessage::Notification(
-                Notification::AccountRateLimitsUpdated(
-                    serde_json::from_value(json!({
-                        "rateLimits": {"primary": {"usedPercent": used, "resetsAt": 7}}
-                    }))
-                    .unwrap(),
-                ),
-            ))
-        };
-        assert!(matches!(update(50).as_slice(), [AgentOutput::Noop]));
-        let near = update(95);
-        let [AgentOutput::Visible(raw)] = near.as_slice() else {
-            panic!("expected a forwarded frame, got {near:?}");
-        };
-        let value = serde_json::to_value(raw).unwrap();
-        assert_eq!(
-            shared::usage_limit::usage_warning(shared::AgentType::Codex, &value).as_deref(),
-            Some("codex:primary:7")
-        );
     }
 
     #[test]

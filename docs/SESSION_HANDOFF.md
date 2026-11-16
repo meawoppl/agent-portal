@@ -34,8 +34,11 @@ reports that it is close to its usage limit, Portal asks it for a short handoff
 summary while it still can:
 
 - **Claude** sends a rate-limit event with status `allowed_warning`.
-- **Codex** sends rate-limit snapshots; Portal treats a window at 90% or more
-  as a warning, and forwards only those snapshots into the transcript.
+- **Codex** sends `account/rateLimits/updated` with each token count during a
+  turn, built from the usage headers on OpenAI's responses; without those
+  headers there is no warning and no summary request. Updates are sparse,
+  so the Codex session merges them per `limit_id` and forwards one complete
+  snapshot the first time a window reaches 90%.
 
 The request goes into the session's work queue, **once per usage window**, so
 it is sent after the current turn ends rather than interrupting it. You can
