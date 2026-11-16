@@ -27,7 +27,9 @@ async fn receive<E: WsEndpoint>(
     .expect("expected frame within timeout")
 }
 
-#[tokio::test]
+// Multi-threaded like production, so socket handling takes the real
+// `block_in_place` hand-off in `run_blocking` rather than running inline.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn turn_permission_delivery_and_reconnect_replay() {
     if std::env::var("DATABASE_URL").is_err() {
         return;

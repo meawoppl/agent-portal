@@ -98,15 +98,17 @@ pub async fn handle_web_client_socket(
     user_id: Uuid,
     linked: Option<crate::handlers::federation::LinkedAuth>,
 ) {
-    if let Ok(mut conn) = app_state.db_pool.get() {
-        use crate::schema::users;
-        if let Ok(user) = users::table
-            .find(user_id)
-            .first::<crate::models::User>(&mut conn)
-        {
-            crate::log_context::record_user(&user);
+    super::run_blocking(|| {
+        if let Ok(mut conn) = app_state.db_pool.get() {
+            use crate::schema::users;
+            if let Ok(user) = users::table
+                .find(user_id)
+                .first::<crate::models::User>(&mut conn)
+            {
+                crate::log_context::record_user(&user);
+            }
         }
-    }
+    });
     let session_manager = app_state.session_manager.clone();
     let db_pool = app_state.db_pool.clone();
     let initial_replay_limit = app_state.message_retention_count;
@@ -252,7 +254,8 @@ pub async fn handle_web_client_socket(
                             }
                             continue;
                         }
-                        if handle_web_client_message(client_msg, ctx, &mut session_key, &mut verified_session_id, &mut pending_uploads, &mut pending_replay) { break; }
+                        // Message handling checks out pooled connections; see `run_blocking`.
+                        if super::run_blocking(|| handle_web_client_message(client_msg, ctx, &mut session_key, &mut verified_session_id, &mut pending_uploads, &mut pending_replay)) { break; }
                     }
                     Err(e) => { warn!("WebSocket decode error: {}", e); }
                 }

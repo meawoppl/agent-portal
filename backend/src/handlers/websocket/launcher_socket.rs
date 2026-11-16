@@ -129,6 +129,21 @@ fn launcher_recently_minted_same_name_token(
         .map(|row| row.is_some())
 }
 
+/// Outcome of the synchronous half of launcher registration; the async half
+/// sends the matching `LauncherRegisterAck`.
+enum LauncherAuth {
+    Verified(Uuid, Option<PendingTokenRefresh>),
+    /// A session or launch token tried to register a launcher.
+    SessionCredential,
+    /// The DB failed while checking the token; retryable.
+    Unavailable,
+    /// Dev mode accepts any token as the dev user, if one exists.
+    DevFallback(Option<Uuid>),
+    Rejected,
+    /// No pooled connection; retryable.
+    DatabaseError,
+}
+
 fn grace_old_launcher_token(app_state: &AppState, token_id: Uuid) {
     let Ok(mut conn) = app_state.db_pool.get() else {
         warn!(
@@ -207,111 +222,106 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                 // rotate legacy non-expiring or half-lived tokens while the
                 // websocket is healthy (#1237 part 2).
                 let (user_id, pending_token_refresh) = if let Some(ref token) = auth_token {
-                    match app_state.db_pool.get() {
-                        Ok(mut conn) => {
-                            match verify_and_get_user_with_token(&app_state, &mut conn, token) {
-                                Ok(verified) => {
-                                    if verified.token.session_id.is_some()
-                                        || verified.token.name
-                                            == crate::handlers::proxy_tokens::LAUNCH_TOKEN_NAME
-                                    {
-                                        let _ = ws_sender
-                                            .send(ServerToLauncher::LauncherRegisterAck {
-                                                protocol_version: Some(
-                                                    shared::protocol::PROTOCOL_VERSION,
-                                                ),
-                                                capabilities: Vec::new(),
-                                                success: false,
-                                                fatal: true,
-                                                launcher_id,
-                                                error: Some(
-                                                    "Session credentials cannot register launchers"
-                                                        .into(),
-                                                ),
-                                                reject_reason: None,
-                                            })
-                                            .await;
-                                        return;
-                                    }
-                                    info!(
-                                        "Launcher authenticated as {} ({})",
-                                        verified.email, verified.user_id
-                                    );
-                                    let refresh = maybe_issue_launcher_token_refresh(
-                                        &app_state, &mut conn, &verified,
-                                    );
-                                    (verified.user_id, refresh)
-                                }
-                                Err(crate::errors::AppError::ServiceUnavailable(_)) => {
-                                    // Transient DB failure while checking the
-                                    // token — the token was never evaluated.
-                                    // Must not be fatal: a fatal AuthFailed
-                                    // parks the launcher for a deploy blip
-                                    // (#1264). Non-fatal → normal reconnect
-                                    // backoff.
-                                    let _ = ws_sender
-                                        .send(ServerToLauncher::LauncherRegisterAck {
-                                            protocol_version: Some(
-                                                shared::protocol::PROTOCOL_VERSION,
-                                            ),
-                                            capabilities: Vec::new(),
-                                            success: false,
-                                            fatal: false,
-                                            launcher_id,
-                                            error: Some(
-                                                "Server temporarily unavailable - retrying"
-                                                    .to_string(),
-                                            ),
-                                            reject_reason: None,
-                                        })
-                                        .await;
-                                    return;
-                                }
-                                Err(_) => {
-                                    if app_state.dev_mode {
-                                        match get_dev_user_id(&app_state) {
-                                            Some(id) => (id, None),
-                                            None => {
-                                                let _ = ws_sender
-                                                    .send(ServerToLauncher::LauncherRegisterAck {
-                                                        protocol_version: Some(
-                                                            shared::protocol::PROTOCOL_VERSION,
-                                                        ),
-                                                        capabilities: Vec::new(),
-                                                        success: false,
-                                                        fatal: true,
-                                                        launcher_id,
-                                                        error: Some("Dev user missing".to_string()),
-                                                        reject_reason: Some(
-                                                            LauncherRejectReason::AuthFailed,
-                                                        ),
-                                                    })
-                                                    .await;
-                                                return;
-                                            }
-                                        }
-                                    } else {
-                                        let _ = ws_sender
-                                            .send(ServerToLauncher::LauncherRegisterAck {
-                                                protocol_version: Some(
-                                                    shared::protocol::PROTOCOL_VERSION,
-                                                ),
-                                                capabilities: Vec::new(),
-                                                success: false,
-                                                fatal: true,
-                                                launcher_id,
-                                                error: Some("Authentication failed".to_string()),
-                                                reject_reason: Some(
-                                                    LauncherRejectReason::AuthFailed,
-                                                ),
-                                            })
-                                            .await;
-                                        return;
-                                    }
-                                }
+                    // Token checks are synchronous DB work; see `run_blocking`.
+                    let auth = super::run_blocking(|| {
+                        let Ok(mut conn) = app_state.db_pool.get() else {
+                            return LauncherAuth::DatabaseError;
+                        };
+                        match verify_and_get_user_with_token(&app_state, &mut conn, token) {
+                            Ok(verified)
+                                if verified.token.session_id.is_some()
+                                    || verified.token.name
+                                        == crate::handlers::proxy_tokens::LAUNCH_TOKEN_NAME =>
+                            {
+                                LauncherAuth::SessionCredential
                             }
+                            Ok(verified) => {
+                                info!(
+                                    "Launcher authenticated as {} ({})",
+                                    verified.email, verified.user_id
+                                );
+                                let refresh = maybe_issue_launcher_token_refresh(
+                                    &app_state, &mut conn, &verified,
+                                );
+                                LauncherAuth::Verified(verified.user_id, refresh)
+                            }
+                            Err(crate::errors::AppError::ServiceUnavailable(_)) => {
+                                LauncherAuth::Unavailable
+                            }
+                            Err(_) if app_state.dev_mode => {
+                                LauncherAuth::DevFallback(get_dev_user_id(&app_state))
+                            }
+                            Err(_) => LauncherAuth::Rejected,
                         }
-                        Err(_) => {
+                    });
+                    match auth {
+                        LauncherAuth::Verified(user_id, refresh) => (user_id, refresh),
+                        LauncherAuth::DevFallback(Some(id)) => (id, None),
+                        LauncherAuth::SessionCredential => {
+                            let _ = ws_sender
+                                .send(ServerToLauncher::LauncherRegisterAck {
+                                    protocol_version: Some(shared::protocol::PROTOCOL_VERSION),
+                                    capabilities: Vec::new(),
+                                    success: false,
+                                    fatal: true,
+                                    launcher_id,
+                                    error: Some(
+                                        "Session credentials cannot register launchers".into(),
+                                    ),
+                                    reject_reason: None,
+                                })
+                                .await;
+                            return;
+                        }
+                        LauncherAuth::Unavailable => {
+                            // Transient DB failure while checking the token: the
+                            // token was never evaluated. Must not be fatal: a fatal
+                            // AuthFailed parks the launcher for a deploy blip
+                            // (#1264). Non-fatal -> normal reconnect backoff.
+                            let _ = ws_sender
+                                .send(ServerToLauncher::LauncherRegisterAck {
+                                    protocol_version: Some(shared::protocol::PROTOCOL_VERSION),
+                                    capabilities: Vec::new(),
+                                    success: false,
+                                    fatal: false,
+                                    launcher_id,
+                                    error: Some(
+                                        "Server temporarily unavailable - retrying".to_string(),
+                                    ),
+                                    reject_reason: None,
+                                })
+                                .await;
+                            return;
+                        }
+                        LauncherAuth::DevFallback(None) => {
+                            let _ = ws_sender
+                                .send(ServerToLauncher::LauncherRegisterAck {
+                                    protocol_version: Some(shared::protocol::PROTOCOL_VERSION),
+                                    capabilities: Vec::new(),
+                                    success: false,
+                                    fatal: true,
+                                    launcher_id,
+                                    error: Some("Dev user missing".to_string()),
+                                    reject_reason: Some(LauncherRejectReason::AuthFailed),
+                                })
+                                .await;
+                            return;
+                        }
+                        LauncherAuth::Rejected => {
+                            let _ = ws_sender
+                                .send(ServerToLauncher::LauncherRegisterAck {
+                                    protocol_version: Some(shared::protocol::PROTOCOL_VERSION),
+                                    capabilities: Vec::new(),
+                                    success: false,
+                                    fatal: true,
+                                    launcher_id,
+                                    error: Some("Authentication failed".to_string()),
+                                    reject_reason: Some(LauncherRejectReason::AuthFailed),
+                                })
+                                .await;
+                            return;
+                        }
+                        LauncherAuth::DatabaseError => {
                             let _ = ws_sender
                                 .send(ServerToLauncher::LauncherRegisterAck {
                                     protocol_version: Some(shared::protocol::PROTOCOL_VERSION),
@@ -327,7 +337,7 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                         }
                     }
                 } else if app_state.dev_mode {
-                    match get_dev_user_id(&app_state) {
+                    match super::run_blocking(|| get_dev_user_id(&app_state)) {
                         Some(id) => (id, None),
                         None => {
                             let _ = ws_sender
@@ -382,15 +392,17 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
     tracing::Span::current().record("computer", crate::log_context::label(&hostname));
     tracing::Span::current().record("launcher", crate::log_context::label(&launcher_name));
     tracing::Span::current().record("launcher_id", tracing::field::display(launcher_id));
-    if let Ok(mut conn) = app_state.db_pool.get() {
-        use crate::schema::users;
-        if let Ok(user) = users::table
-            .find(user_id)
-            .first::<crate::models::User>(&mut conn)
-        {
-            crate::log_context::record_user(&user);
+    super::run_blocking(|| {
+        if let Ok(mut conn) = app_state.db_pool.get() {
+            use crate::schema::users;
+            if let Ok(user) = users::table
+                .find(user_id)
+                .first::<crate::models::User>(&mut conn)
+            {
+                crate::log_context::record_user(&user);
+            }
         }
-    }
+    });
     // Reject if user already has too many launchers
     const MAX_LAUNCHERS_PER_USER: usize = 10;
     let user_launcher_count = app_state.session_manager.launcher_count_for_user(user_id);
@@ -520,19 +532,17 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
     );
 
     // Send initial ScheduleSync with the user's scheduled tasks
-    crate::handlers::scheduled_tasks::send_initial_schedule_sync(
-        &app_state,
-        user_id,
-        launcher_id,
-        &hostname,
-        &launcher_name,
-    );
-
-    let continuation_configs = super::continuations::load_scheduled_continuations(
-        &app_state.db_pool,
-        launcher_id,
-        user_id,
-    );
+    // Both read the DB synchronously; see `run_blocking`.
+    let continuation_configs = super::run_blocking(|| {
+        crate::handlers::scheduled_tasks::send_initial_schedule_sync(
+            &app_state,
+            user_id,
+            launcher_id,
+            &hostname,
+            &launcher_name,
+        );
+        super::continuations::load_scheduled_continuations(&app_state.db_pool, launcher_id, user_id)
+    });
     let _ = tx_for_sync.send(ServerToLauncher::ContinuationSync {
         continuations: continuation_configs,
     });
@@ -553,13 +563,16 @@ pub async fn handle_launcher_socket(socket: WebSocket, app_state: Arc<AppState>)
                             } else {
                                 token_refresh_old_id
                             };
-                        handle_launcher_message(
-                            msg,
-                            launcher_id,
-                            user_id,
-                            token_refresh_ack_old_id,
-                            &app_state,
-                        );
+                        // Message handling is synchronous DB work; see `run_blocking`.
+                        super::run_blocking(|| {
+                            handle_launcher_message(
+                                msg,
+                                launcher_id,
+                                user_id,
+                                token_refresh_ack_old_id,
+                                &app_state,
+                            )
+                        });
                     }
                     Some(Err(e)) => {
                         warn!("Launcher decode error: {}", e);
