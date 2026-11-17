@@ -601,6 +601,7 @@ mod tests {
             time_to_request_phases_ms: None,
             // Attachment diagnostics and feature-flag timing are absent in this fixture.
             input_attachments_detail: None,
+            memory_check_detail: None,
             // Request-build breakdowns added in 2.1.317 are absent in this fixture.
             tool_schema_build_detail: None,
             message_normalization_detail: None,

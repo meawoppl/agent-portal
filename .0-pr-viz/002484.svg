@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="monospace" font-size="24" fill="#a9b1d6">PR #2484 · Use SDK-verified Claude login outcomes</text>
+<text x="55" y="103" font-family="monospace" font-size="34" fill="#e6e9f5">Claude login needed a portal-side status workaround;</text>
+<text x="55" y="146" font-family="monospace" font-size="34" fill="#e6e9f5">the SDK now verifies keychain logins and bounds its status check.</text>
+<path d="M55 175H1945 M1000 190V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="55" y="230" font-family="monospace" font-size="22" fill="#f7768e">BEFORE</text>
+<text x="1055" y="230" font-family="monospace" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="55" y="300" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="79" y="345" font-family="monospace" font-size="26" fill="#7aa2f7">claude-codes 2.1.325</text>
+<text x="79" y="399" font-family="monospace" font-size="23" fill="#c0caf5">LoginChildExited { code: Some(0) }</text>
+<text x="79" y="441" font-family="monospace" font-size="23" fill="#c0caf5">No credentials-file write observed.</text>
+<path d="M500 500v70" stroke="#565f89" stroke-width="3"/>
+<rect x="55" y="570" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="79" y="615" font-family="monospace" font-size="26" fill="#7aa2f7">Portal workaround</text>
+<text x="79" y="669" font-family="monospace" font-size="23" fill="#c0caf5">verified_status_with_binary spawns CLI</text>
+<text x="79" y="711" font-family="monospace" font-size="23" fill="#c0caf5">Local Tokio timeout and JSON parsing.</text>
+<path d="M500 770v70" stroke="#565f89" stroke-width="3"/>
+<rect x="55" y="840" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="79" y="885" font-family="monospace" font-size="26" fill="#7aa2f7">login_outcome</text>
+<text x="79" y="939" font-family="monospace" font-size="23" fill="#c0caf5">Credential update or local status check</text>
+<text x="79" y="981" font-family="monospace" font-size="23" fill="#c0caf5">Transcript text never proves login.</text>
+<rect x="1055" y="300" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="1079" y="345" font-family="monospace" font-size="26" fill="#7aa2f7">claude-codes 2.1.327</text>
+<text x="1079" y="399" font-family="monospace" font-size="23" fill="#c0caf5">LoginOutcome::verified_status</text>
+<text x="1079" y="441" font-family="monospace" font-size="23" fill="#c0caf5">SDK verifies login mode after clean exit.</text>
+<path d="M1500 500v70" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="570" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="1079" y="615" font-family="monospace" font-size="26" fill="#7aa2f7">SDK owns status verification</text>
+<text x="1079" y="669" font-family="monospace" font-size="23" fill="#c0caf5">Bounded status check inside LoginFlow</text>
+<text x="1079" y="711" font-family="monospace" font-size="23" fill="#c0caf5">Remove duplicate portal status process.</text>
+<path d="M1500 770v70" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="840" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="1079" y="885" font-family="monospace" font-size="26" fill="#7aa2f7">login_outcome</text>
+<text x="1079" y="939" font-family="monospace" font-size="23" fill="#c0caf5">Accept credentials_updated or claude.ai</text>
+<text x="1079" y="981" font-family="monospace" font-size="23" fill="#c0caf5">Reject unverified exits; sanitize errors.</text>
+<text x="55" y="1172" font-family="monospace" font-size="22" fill="#a9b1d6">Scope: subscription login only; no live OAuth flow is exercised by the regression tests.</text>
+</svg>
