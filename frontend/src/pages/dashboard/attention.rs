@@ -88,6 +88,14 @@ pub(super) struct Attention {
     pub mark_read: Callback<(SessionKey, uuid::Uuid)>,
 }
 
+/// How long after the last keypress, click, touch or scroll this device still
+/// counts as in use. While any of the user's devices is in use, pushes are
+/// held (see `push_suppressed`), because that device shows replies itself.
+const ACTIVE_WINDOW_MS: f64 = 3.0 * 60.0 * 1000.0;
+
+/// Interaction events that mark the device as in use.
+const INPUT_EVENTS: [&str; 4] = ["keydown", "pointerdown", "wheel", "touchstart"];
+
 fn visible() -> bool {
     web_sys::window()
         .and_then(|w| w.document())
@@ -122,9 +130,12 @@ pub(super) fn use_attention(
             let cancelled = Rc::new(Cell::new(false));
             let busy = Rc::new(RefCell::new(HashSet::new()));
             let previous_view = Rc::new(RefCell::new(None::<(PortalClient, SessionKey)>));
+            // Loading or returning to the page is itself use.
+            let last_input = Rc::new(Cell::new(js_sys::Date::now()));
             let refresh = Rc::new({
                 let portals = portals.clone();
                 let cancelled = cancelled.clone();
+                let last_input = last_input.clone();
                 move || {
                     if cancelled.get() {
                         return;
@@ -142,13 +153,18 @@ pub(super) fn use_attention(
                             .ok()
                             .flatten()
                     });
-                    let viewing = visible()
+                    // Presence (holds pushes): the device is in use. Seeing a
+                    // reply (clears unread) is stricter: the conversation is
+                    // on screen, unobstructed and scrolled to its end.
+                    let active =
+                        visible() && js_sys::Date::now() - last_input.get() < ACTIVE_WINDOW_MS;
+                    let at_reply = active
                         && !crate::hooks::modal_overlay_open()
                         && element.as_ref().is_some_and(|e| {
                             e.client_height() > 0
                                 && e.scroll_height() - e.scroll_top() - e.client_height() < 50
                         });
-                    let viewed = session.filter(|s| viewing && s.portal.can_write());
+                    let viewed = session.filter(|s| active && s.portal.can_write());
                     let new_key = viewed.as_ref().map(|s| s.key);
                     let old = previous_view.borrow().clone();
                     if let Some((portal, key)) = old.filter(|(_, key)| Some(*key) != new_key) {
@@ -174,6 +190,7 @@ pub(super) fn use_attention(
                     if let Some(session) = viewed {
                         *previous_view.borrow_mut() = Some((session.portal.clone(), session.key));
                         let seen_reply_id = element
+                            .filter(|_| at_reply)
                             .and_then(|e| e.get_attribute("data-rendered-reply"))
                             .and_then(|id| id.parse().ok());
                         let cancelled = cancelled.clone();
@@ -257,18 +274,32 @@ pub(super) fn use_attention(
                     move |_| cancelled.set(true)
                 })
             });
+            let inputs: Vec<EventListener> = web_sys::window()
+                .map(|w| {
+                    INPUT_EVENTS
+                        .iter()
+                        .map(|event| {
+                            let last_input = last_input.clone();
+                            EventListener::new(&w, *event, move |_| {
+                                last_input.set(js_sys::Date::now())
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
             let pageshow = web_sys::window().map(|w| {
                 EventListener::new(&w, "pageshow", {
                     let cancelled = cancelled.clone();
                     move |_| {
                         cancelled.set(false);
+                        last_input.set(js_sys::Date::now());
                         refresh();
                     }
                 })
             });
             move || {
                 cancelled.set(true);
-                drop((timer, visibility, focus, blur, pagehide, pageshow));
+                drop((timer, visibility, focus, blur, pagehide, pageshow, inputs));
             }
         });
     }

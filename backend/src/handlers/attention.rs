@@ -168,8 +168,16 @@ struct DeliveryPolicy {
     #[diesel(sql_type = Bool)]
     muted: bool,
     #[diesel(sql_type = Bool)]
-    viewing: bool,
+    active: bool,
 }
+/// Whether a push for `session` should be held. Muting the session always
+/// holds it. Otherwise it is held while the user is actively using Portal on
+/// any device: a `session_attention_views` row is a per-client lease the
+/// browser renews only while its tab is visible, focused and recently used,
+/// and that device already shows replies in its Ready list and banners. A
+/// merely connected or forgotten tab stops renewing and expires within
+/// seconds, so it never silences the phone. `always` (the user's "notify
+/// even while I'm using Portal" preference) disables the activity hold.
 pub(crate) fn push_suppressed(
     conn: &mut diesel::PgConnection,
     user: Uuid,
@@ -178,9 +186,9 @@ pub(crate) fn push_suppressed(
 ) -> QueryResult<bool> {
     let row = diesel::sql_query("SELECT
         COALESCE((SELECT muted FROM session_attention_receipts WHERE user_id=$1 AND session_id=$2),FALSE) AS muted,
-        EXISTS(SELECT 1 FROM session_attention_views WHERE user_id=$1 AND session_id=$2 AND expires_at > now()) AS viewing")
+        EXISTS(SELECT 1 FROM session_attention_views WHERE user_id=$1 AND expires_at > now()) AS active")
         .bind::<SqlUuid,_>(user).bind::<SqlUuid,_>(session).get_result::<DeliveryPolicy>(conn)?;
-    Ok(row.muted || (!always && row.viewing))
+    Ok(row.muted || (!always && row.active))
 }
 
 #[cfg(test)]
@@ -406,7 +414,7 @@ mod tests {
         ));
     }
     #[test]
-    fn pushes_only_suppress_for_unexpired_same_conversation_or_muting() {
+    fn pushes_hold_while_any_device_is_active_or_the_session_is_muted() {
         let Some(pool) = shared_pool() else {
             return;
         };
@@ -419,8 +427,13 @@ mod tests {
         req.viewing = true;
         update_receipt(&mut conn, user.id, a.id, &req).unwrap();
         assert!(push_suppressed(&mut conn, user.id, a.id, false).unwrap());
-        assert!(!push_suppressed(&mut conn, user.id, b.id, false).unwrap());
+        // Activity is per device, not per conversation: using Portal on
+        // session A also holds pushes for session B.
+        assert!(push_suppressed(&mut conn, user.id, b.id, false).unwrap());
         assert!(!push_suppressed(&mut conn, user.id, a.id, true).unwrap());
+        // Another user's activity never holds this user's pushes.
+        let other = insert_user(&mut conn, "attention-other");
+        assert!(!push_suppressed(&mut conn, other.id, a.id, false).unwrap());
         // A suspended/crashed phone stops heartbeating; its lease expires.
         diesel::sql_query("UPDATE session_attention_views SET expires_at=now()-interval '1 second' WHERE user_id=$1").bind::<SqlUuid,_>(user.id).execute(&mut conn).unwrap();
         assert!(!push_suppressed(&mut conn, user.id, a.id, false).unwrap());

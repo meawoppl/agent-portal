@@ -343,12 +343,14 @@ Backend delta: ~2 focused PRs (bearer path + refresh; token-login exchange).
 
 ### 8.2 Delivery policy
 
-- **Suppress only while viewing the conversation**: a visible, focused browser
-  at the bottom of that transcript renews a 15-second viewing lease every three
-  seconds. Hidden, unfocused and crashed clients do not keep silencing pushes.
-  A connected desktop tab alone never suppresses phone notifications.
-- **User controls**: per-session mute and the notification preference “Notify
-  even while viewing the conversation” apply to Web Push, APNs and FCM.
+- **Hold pushes while any device is in use**: a visible, focused tab that
+  has had a keypress, click, touch or scroll in the last three minutes renews
+  a 15-second presence lease every three seconds. While any of the user's
+  devices holds a lease, pushes are held, because that device shows replies in
+  its Ready list and banners. A tab left open but unused, hidden, unfocused or
+  crashed stops renewing, so it never silences the phone.
+- **User controls**: per-session mute and the notification preference "Notify
+  even while I'm using Portal" apply to Web Push, APNs and FCM.
 - **Ready queue**: `/api/session-attention` supplies lightweight state for every
   accessible session. Completed output and per-user read receipts are durable;
   background transcripts do not need to be open. Acknowledgments name the exact

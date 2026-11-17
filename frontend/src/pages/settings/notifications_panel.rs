@@ -210,7 +210,7 @@ pub fn notifications_panel() -> Html {
             if push_apis_present() && web_sys::Notification::permission() == web_sys::NotificationPermission::Denied {
                 <p role="status">{ "Notifications are blocked. Allow notifications for this site in your browser settings, and check your device's notification permission for the browser or installed Portal app." }</p>
             }
-            <p class="section-description">{ "Leaving Portal open on another device does not silence alerts. Only actively viewing the same conversation suppresses them." }</p>
+            <p class="section-description">{ "While you're using Portal on any device (a visible tab you've typed, clicked or scrolled in within the last 3 minutes), alerts are held: that device shows replies itself. A tab you've left open but aren't using doesn't silence them." }</p>
             { render_device_control(
                 &availability,
                 *device_state,
@@ -418,7 +418,7 @@ const PREF_FIELDS: [(PrefField, &str); 5] = [
     (PrefField::AgentMessage, "Agent messages"),
     (
         PrefField::AlwaysNotify,
-        "Notify even while viewing the conversation",
+        "Notify even while I'm using Portal",
     ),
 ];
 
