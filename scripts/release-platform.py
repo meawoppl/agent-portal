@@ -24,7 +24,10 @@ PLATFORMS = {
 
 
 def run(*args, input=None):
-    return subprocess.check_output(args, input=input, text=True).strip()
+    # Pass stdin as bytes, not text=True: on Windows, text mode turns "\n"
+    # into "\r\n", which made `git mktree` name the entry "readiness.json\r".
+    data = None if input is None else input.encode()
+    return subprocess.check_output(args, input=data).decode().strip()
 
 
 def api(path, payload=None):
