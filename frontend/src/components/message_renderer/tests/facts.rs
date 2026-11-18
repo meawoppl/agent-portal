@@ -3,10 +3,32 @@
 
 use std::rc::Rc;
 
+use super::super::grouping::reuse_unchanged_groups;
 use super::fixtures::{
-    assistant_with_tool_use, codex_command_event, read_tool_result_user_message, rendered,
-    result_message, thinking_tokens_message,
+    assistant_with_tool_use, codex_command_event, group_for_tests, read_tool_result_user_message,
+    rendered, result_message, thinking_tokens_message, user_text_message,
 };
+
+/// A regroup after one new message keeps the untouched groups' pointers, so
+/// their renderers compare in O(1) and skip; only the grown group is new.
+#[test]
+fn regroup_reuses_unchanged_groups() {
+    let mut wire = vec![
+        user_text_message("hi"),
+        assistant_with_tool_use("t1", "Read"),
+    ];
+    let first = reuse_unchanged_groups(&[], group_for_tests(&wire));
+    wire.push(read_tool_result_user_message("t1"));
+    let second = reuse_unchanged_groups(&first, group_for_tests(&wire));
+
+    assert_eq!(first.len(), 2);
+    assert_eq!(second.len(), 2);
+    assert!(Rc::ptr_eq(&first[0], &second[0]), "user group unchanged");
+    assert!(
+        !Rc::ptr_eq(&first[1], &second[1]),
+        "assistant group grew, so it gets a new Rc"
+    );
+}
 
 /// The cached budget flag must agree with the shared rule the backend and
 /// history hydration still use, or live trimming would drift from replay.

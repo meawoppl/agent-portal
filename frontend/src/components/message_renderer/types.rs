@@ -23,8 +23,9 @@ pub struct RenderedMessage {
     /// The wire frame. Private and never edited in place: the secret-request
     /// id and the parse cache below are derived from it, and the cache is
     /// shared with every clone. Build a new message through the constructors
-    /// instead.
-    content: String,
+    /// instead. Shared rather than owned, so the clones that grouping makes of
+    /// every message on each regroup don't copy the body.
+    content: Rc<str>,
     pub meta: Option<shared::PortalMeta>,
     secret_request_id: Option<uuid::Uuid>,
     /// Lazily parsed [`FrameFacts`], shared by every clone (including the
@@ -42,6 +43,8 @@ impl PartialEq for RenderedMessage {
             && self.secret_request_id == other.secret_request_id
     }
 }
+
+impl Eq for RenderedMessage {}
 
 impl RenderedMessage {
     /// Wrap an already-serialized frame. Use this for **foreign** frames only
@@ -64,7 +67,7 @@ impl RenderedMessage {
                 _ => None,
             });
         Self {
-            content,
+            content: content.into(),
             meta,
             secret_request_id,
             facts: Rc::default(),

@@ -228,7 +228,7 @@ fn transcript_body(
         Some(Ok(groups)) => html! {
             <div class="messages-container">
                 { for groups.iter().enumerate().map(|(i, group)| html! {
-                    <MessageGroupRenderer key={group.key(i)} group={group.clone()} {session_id} {agent_type} />
+                    <MessageGroupRenderer key={group.key(i)} group={Rc::new(group.clone())} {session_id} {agent_type} />
                 }) }
             </div>
         },
