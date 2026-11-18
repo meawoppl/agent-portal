@@ -222,7 +222,7 @@ fn use_live_client_websocket() -> UseClientWebSocket {
                                     }
                                 }
                                 if portal.conn() == ConnId::HOME { shutdown_reason.set(Some("Connecting to server".into())); }
-                                match crate::browser_protocol::connect(&portal, |msg| {
+                                match crate::browser_protocol::connect(&portal, &[shared::protocol::CLIENT_CAPABILITY_SESSION_LIST], |msg| {
                                     handle_server_message(portal.conn(), msg, &shutdown_reason, &live);
                                 }).await {
                                         Ok((conn, config)) => {

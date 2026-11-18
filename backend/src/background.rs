@@ -998,8 +998,14 @@ pub async fn watch_session_lists(state: Arc<AppState>) {
                 }
                 previous = current;
             }
-            Ok(Err(error)) => tracing::warn!("Session list revision query failed: {error}"),
-            Err(error) => tracing::error!("Session list watcher failed: {error}"),
+            Ok(Err(error)) => tracing::warn!(
+                "{}: revision query failed: {error}",
+                crate::markers::SESSION_LIST_WATCH_FAILED
+            ),
+            Err(error) => tracing::error!(
+                "{}: worker failed: {error}",
+                crate::markers::SESSION_LIST_WATCH_FAILED
+            ),
         }
     }
 }

@@ -129,8 +129,10 @@ pub fn connect_websocket(
     let portal = portal.clone();
     let send_lifetime = lifetime.clone();
     lifetime.spawn(async move {
-        match crate::browser_protocol::connect(&portal, |msg| handle_proxy_message(msg, &on_event))
-            .await
+        match crate::browser_protocol::connect(&portal, &[], |msg| {
+            handle_proxy_message(msg, &on_event)
+        })
+        .await
         {
             Ok((conn, _config)) => {
                 let (mut sender, mut receiver) = conn.split();
