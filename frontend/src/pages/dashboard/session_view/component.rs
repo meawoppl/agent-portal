@@ -1878,6 +1878,14 @@ impl SessionView {
                 // browser was offline and therefore never visited the normal
                 // live-output cleanup path.
                 self.muse_live_turn = MuseLiveTurn::default();
+                // Same reasoning for the live status strip: replayed messages
+                // skip `handle_received_output`, so a `tool_result` or `result`
+                // that landed while offline would never retire its pill. A tool
+                // still running re-adds itself on its next heartbeat.
+                if self.live_status != LiveStatusSnapshot::default() {
+                    self.live_status = LiveStatusSnapshot::default();
+                    self.publish_live_status();
+                }
                 for message in &messages {
                     if let Ok(output) =
                         serde_json::from_str::<shared::ClaudeOutput>(message.content())
