@@ -1842,6 +1842,15 @@ impl SessionView {
                 if let Some(dispatcher) = &self.permission_dispatcher {
                     dispatcher.emit(PermissionUpdate::Reset);
                 }
+                // Same for the live status strip. A tool_result or result that
+                // landed while offline arrives through replay (or not at all,
+                // when there's nothing new), never through
+                // `handle_received_output`, so its pill would never retire. A
+                // tool still running re-adds itself on its next heartbeat.
+                if self.live_status != LiveStatusSnapshot::default() {
+                    self.live_status = LiveStatusSnapshot::default();
+                    self.publish_live_status();
+                }
                 ctx.link()
                     .send_message(SessionViewMsg::WebSocketConnected(sender));
                 false
