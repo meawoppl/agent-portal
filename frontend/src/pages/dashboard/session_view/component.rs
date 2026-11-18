@@ -26,6 +26,7 @@ use shared::{
     ClientToServer, DeliveryMeta, PortalMeta, ReasoningEffort, SendMode, SessionInfo, TurnMetrics,
 };
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 use uuid::Uuid;
 use wasm_bindgen::{closure::Closure, JsCast};
 use wasm_bindgen_futures::spawn_local;
@@ -372,6 +373,9 @@ fn save_plugin_notice_expanded(session_id: Uuid, expanded: bool, portal: &Portal
 
 /// Messages for the SessionView component
 pub enum SessionViewMsg {
+    /// A permission answer was given; hand focus back to the textarea via
+    /// the `InputBar`'s dispatcher.
+    RefocusInput,
     LoadHistory(Vec<MessageData>, Option<String>),
     ReceivedOutput(RenderedMessage),
     WebSocketConnected(WsSender),
@@ -565,7 +569,14 @@ pub struct SessionView {
     /// because the join walk is sequential — a HashMap with a positional
     /// counter would buy nothing.
     turn_metrics: Vec<TurnMetrics>,
-    continuation_statuses: HashMap<Uuid, String>,
+    /// Shared with every message group by `Rc`, so prop comparison is a
+    /// pointer check and only a real status change re-renders the groups.
+    continuation_statuses: Rc<HashMap<Uuid, String>>,
+    /// Built once: a `Callback` compares by identity, so one rebuilt per
+    /// `view()` made every message group's props unequal on every render.
+    on_schedule_continuation: Callback<Uuid>,
+    on_claude_login: Callback<()>,
+    child_callbacks: ChildCallbacks,
     /// Currently-running tools, fed by the ephemeral `WsEvent::ToolProgress`
     /// heartbeat side-channel and rendered as a trailing "active tool" status
     /// strip. Never persisted; pruned when a tool's result arrives or the turn
@@ -732,7 +743,12 @@ impl Component for SessionView {
             claude_effort: Default::default(),
             pending_sends: Vec::new(),
             turn_metrics: Vec::new(),
-            continuation_statuses: HashMap::new(),
+            continuation_statuses: Rc::default(),
+            on_schedule_continuation: ctx
+                .link()
+                .callback(SessionViewMsg::ScheduleLimitContinuation),
+            on_claude_login: ctx.link().callback(|_| SessionViewMsg::ShowClaudeLogin),
+            child_callbacks: ChildCallbacks::new(ctx.link()),
             active_tools: Vec::new(),
             permission_checks: Vec::new(),
             agent_progress: Vec::new(),
@@ -1423,6 +1439,12 @@ impl Component for SessionView {
                     None => false,
                 }
             }
+            SessionViewMsg::RefocusInput => {
+                if let Some(dispatcher) = &self.input_bar_dispatcher {
+                    dispatcher.emit(InputBarInbound::FocusTextarea);
+                }
+                false
+            }
             SessionViewMsg::JumpToLive => {
                 self.should_autoscroll = true;
                 self.enforce_render_budget();
@@ -1444,7 +1466,7 @@ impl Component for SessionView {
                 true
             }
             SessionViewMsg::ScheduleLimitContinuation(continuation_id) => {
-                self.continuation_statuses
+                Rc::make_mut(&mut self.continuation_statuses)
                     .insert(continuation_id, "scheduling".to_string());
                 if let Some(ref sender) = self.ws_sender {
                     send_message(
@@ -1455,7 +1477,7 @@ impl Component for SessionView {
                 true
             }
             SessionViewMsg::ContinuationStatus(continuation_id, status) => {
-                self.continuation_statuses.insert(continuation_id, status);
+                Rc::make_mut(&mut self.continuation_statuses).insert(continuation_id, status);
                 true
             }
         }
@@ -1472,7 +1494,7 @@ impl Component for SessionView {
             e.stop_propagation();
             SessionViewMsg::JumpToLive
         });
-        let on_schedule_continuation = link.callback(SessionViewMsg::ScheduleLimitContinuation);
+        let on_schedule_continuation = &self.on_schedule_continuation;
 
         // Per-turn metrics join (PR 2 of N): walk grouped messages in order
         // and pair the Nth terminator card with `turn_metrics[N]`. The
@@ -1590,16 +1612,16 @@ impl Component for SessionView {
                             key={ctx.props().session.id.to_string()}
                             session_id={ctx.props().session.id}
                             is_owner={is_forward_owner}
-                            on_loaded={ctx.link().callback(SessionViewMsg::PluginInventoryLoaded)}
-                            on_details={ctx.link().callback(|_| SessionViewMsg::TogglePluginsPanel)}
+                            on_loaded={self.child_callbacks.plugin_inventory_loaded.clone()}
+                            on_details={self.child_callbacks.toggle_plugins_panel.clone()}
                         />
                     }
                     if !ctx.props().portal.is_linked() { <ForwardChips
                         session_id={ctx.props().session.id}
                         is_owner={is_forward_owner}
                         refresh={self.forwards_refresh}
-                        on_open={ctx.link().callback(SessionViewMsg::OpenForwardSurface)}
-                        on_loaded={ctx.link().callback(SessionViewMsg::ForwardsLoaded)}
+                        on_open={self.child_callbacks.open_forward.clone()}
+                        on_loaded={self.child_callbacks.forwards_loaded.clone()}
                     /> }
                     <button
                         type="button"
@@ -1721,7 +1743,7 @@ impl Component for SessionView {
                                     { "Jump to live ↓" }
                                 </button>
                             }
-                            { self.render_tasks_panel(ctx) }
+                            { self.render_tasks_panel() }
                         </div>
 
                         { self.render_permission_handler(ctx) }
@@ -1815,7 +1837,7 @@ impl SessionView {
             && ctx.props().session.agent_type == shared::AgentType::Claude
             && ctx.props().session.my_role == shared::SessionRole::Owner
             && ctx.props().session.launcher_id.is_some())
-        .then(|| ctx.link().callback(|_| SessionViewMsg::ShowClaudeLogin))
+        .then(|| self.on_claude_login.clone())
     }
 
     fn handle_ws_event(&mut self, ctx: &Context<Self>, event: WsEvent) -> bool {
@@ -2992,27 +3014,14 @@ impl SessionView {
         if !ctx.props().portal.can_write() || !ctx.props().session.my_role.can_mutate() {
             return html! {};
         }
-        let link = ctx.link();
-        let on_register = link.callback(SessionViewMsg::PermissionDispatcherRegistered);
-        let on_pending_changed = link.callback(SessionViewMsg::PermissionPendingChanged);
-        let on_response =
-            link.callback(|(rid, kind)| SessionViewMsg::PermissionAnswered(rid, kind));
-        // Re-focus the textarea after an answer by forwarding through the
-        // `InputBar`'s dispatcher (which we got at the bar's `create` time).
-        // Snapshot the `Option` once so the callback doesn't capture `&self`.
-        let input_bar = self.input_bar_dispatcher.clone();
-        let on_refocus_input = Callback::from(move |_| {
-            if let Some(ref dispatcher) = input_bar {
-                dispatcher.emit(InputBarInbound::FocusTextarea);
-            }
-        });
+        let cb = &self.child_callbacks;
         html! {
             <PermissionHandler
                 focused={ctx.props().focused}
-                {on_register}
-                {on_pending_changed}
-                {on_response}
-                {on_refocus_input}
+                on_register={cb.permission_register.clone()}
+                on_pending_changed={cb.permission_pending_changed.clone()}
+                on_response={cb.permission_response.clone()}
+                on_refocus_input={cb.refocus_input.clone()}
             />
         }
     }
@@ -3021,38 +3030,7 @@ impl SessionView {
         if !ctx.props().portal.can_write() || !ctx.props().session.my_role.can_mutate() {
             return html! { <div class="linked-read-only">{"Read-only connection — commands and permission responses are disabled"}</div> };
         }
-        let link = ctx.link();
-        let on_register = link.callback(SessionViewMsg::InputBarDispatcherRegistered);
-        let on_send_text = link.callback(
-            |(text, mode, reasoning_effort): (String, SendMode, Option<ReasoningEffort>)| {
-                SessionViewMsg::SendText(text, mode, reasoning_effort)
-            },
-        );
-        let on_send_frame = link.callback(SessionViewMsg::SendFrame);
-        let on_queued = link.callback(SessionViewMsg::EditStackLoaded);
-        let on_upload_prompt = link.callback(
-            |(content, upload_ids, reasoning_effort): (
-                String,
-                Vec<String>,
-                Option<ReasoningEffort>,
-            )| {
-                SessionViewMsg::UploadPrompt {
-                    content,
-                    upload_ids,
-                    reasoning_effort,
-                }
-            },
-        );
-        let on_secret_drop = link.callback(
-            |(upload_id, file_size, reasoning_effort): (String, u64, Option<ReasoningEffort>)| {
-                SessionViewMsg::SecretDrop {
-                    upload_id,
-                    file_size,
-                    reasoning_effort,
-                }
-            },
-        );
-        let on_upload_error = link.callback(SessionViewMsg::UploadError);
+        let cb = &self.child_callbacks;
         html! {
             <InputBar
                 session_id={ctx.props().session.id}
@@ -3061,29 +3039,88 @@ impl SessionView {
                 focused={ctx.props().focused}
                 ws_connected={self.ws_connected}
                 stt_enabled={ctx.props().stt_enabled}
-                {on_register}
-                {on_send_text}
-                {on_queued}
-                {on_send_frame}
-                {on_upload_prompt}
-                {on_secret_drop}
-                {on_upload_error}
+                on_register={cb.input_bar_register.clone()}
+                on_send_text={cb.send_text.clone()}
+                on_queued={cb.queued.clone()}
+                on_send_frame={cb.send_frame.clone()}
+                on_upload_prompt={cb.upload_prompt.clone()}
+                on_secret_drop={cb.secret_drop.clone()}
+                on_upload_error={cb.upload_error.clone()}
             />
         }
     }
 
-    fn render_tasks_panel(&self, ctx: &Context<Self>) -> Html {
-        let on_register = ctx
-            .link()
-            .callback(SessionViewMsg::TasksDispatcherRegistered);
+    fn render_tasks_panel(&self) -> Html {
         html! {
-            <TasksPanel {on_register} />
+            <TasksPanel on_register={self.child_callbacks.tasks_register.clone()} />
         }
     }
 
     fn dispatch_tasks(&self, msg: TasksInbound) {
         if let Some(ref dispatcher) = self.tasks_dispatcher {
             dispatcher.emit(msg);
+        }
+    }
+}
+
+/// Callbacks handed to `SessionView`'s child components, built once in
+/// `create()`. A `Callback` compares by identity, so building these per
+/// `view()` made every child's props unequal and re-rendered `InputBar`,
+/// `PermissionHandler`, `TasksPanel`, `PluginSelector` and `ForwardChips` on
+/// every session render.
+struct ChildCallbacks {
+    plugin_inventory_loaded: Callback<(Uuid, PluginInventoryResponse)>,
+    toggle_plugins_panel: Callback<MouseEvent>,
+    open_forward: Callback<ForwardInfo>,
+    forwards_loaded: Callback<Vec<ForwardInfo>>,
+    permission_register: Callback<Callback<PermissionUpdate>>,
+    permission_pending_changed: Callback<bool>,
+    permission_response: Callback<(String, PermissionResponseKind)>,
+    refocus_input: Callback<()>,
+    input_bar_register: Callback<Callback<InputBarInbound>>,
+    send_text: Callback<(String, SendMode, Option<ReasoningEffort>)>,
+    send_frame: Callback<ClientToServer>,
+    queued: Callback<Vec<EditStackItem>>,
+    upload_prompt: Callback<(String, Vec<String>, Option<ReasoningEffort>)>,
+    secret_drop: Callback<(String, u64, Option<ReasoningEffort>)>,
+    upload_error: Callback<String>,
+    tasks_register: Callback<Callback<TasksInbound>>,
+}
+
+impl ChildCallbacks {
+    fn new(link: &yew::html::Scope<SessionView>) -> Self {
+        Self {
+            plugin_inventory_loaded: link.callback(SessionViewMsg::PluginInventoryLoaded),
+            toggle_plugins_panel: link.callback(|_| SessionViewMsg::TogglePluginsPanel),
+            open_forward: link.callback(SessionViewMsg::OpenForwardSurface),
+            forwards_loaded: link.callback(SessionViewMsg::ForwardsLoaded),
+            permission_register: link.callback(SessionViewMsg::PermissionDispatcherRegistered),
+            permission_pending_changed: link.callback(SessionViewMsg::PermissionPendingChanged),
+            permission_response: link
+                .callback(|(rid, kind)| SessionViewMsg::PermissionAnswered(rid, kind)),
+            refocus_input: link.callback(|_| SessionViewMsg::RefocusInput),
+            input_bar_register: link.callback(SessionViewMsg::InputBarDispatcherRegistered),
+            send_text: link.callback(|(text, mode, reasoning_effort)| {
+                SessionViewMsg::SendText(text, mode, reasoning_effort)
+            }),
+            send_frame: link.callback(SessionViewMsg::SendFrame),
+            queued: link.callback(SessionViewMsg::EditStackLoaded),
+            upload_prompt: link.callback(|(content, upload_ids, reasoning_effort)| {
+                SessionViewMsg::UploadPrompt {
+                    content,
+                    upload_ids,
+                    reasoning_effort,
+                }
+            }),
+            secret_drop: link.callback(|(upload_id, file_size, reasoning_effort)| {
+                SessionViewMsg::SecretDrop {
+                    upload_id,
+                    file_size,
+                    reasoning_effort,
+                }
+            }),
+            upload_error: link.callback(SessionViewMsg::UploadError),
+            tasks_register: link.callback(SessionViewMsg::TasksDispatcherRegistered),
         }
     }
 }

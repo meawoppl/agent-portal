@@ -24,6 +24,13 @@ use menu::SessionRailMenu;
 use pill::SessionPill;
 pub use sparkline::ActivityRef;
 
+/// Poll period of the rail ticker; the frame rate of in-flight orbs.
+const RAIL_FRAME_MS: u32 = 100;
+/// Minimum spacing of redraws caused by new activity, so a busy turn's
+/// stream of events doesn't put the rail back on the frame rate.
+const RAIL_ACTIVITY_TICK_MS: f64 = 250.0;
+/// Redraw period when nothing is animating and no activity has landed.
+const RAIL_IDLE_TICK_MS: f64 = 1_000.0;
 const PILL_MENU_MIN_WIDTH_PX: i32 = 160;
 const PILL_MENU_ESTIMATED_HEIGHT_PX: i32 = 420;
 const PILL_MENU_VIEWPORT_MARGIN_PX: i32 = 8;
@@ -312,15 +319,34 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
     let fork_session = use_state(|| None::<PortalSession>);
     let rename_session = use_state(|| None::<PortalSession>);
 
-    // Independent 100 ms tick that drives sparkline redraws.
-    // Accumulation happens externally via ActivityRef mutations; this timer
-    // is the only thing that causes SessionRail to re-render for sparklines.
+    // Ticker that drives sparkline drift, the compaction flash and the
+    // agent-message orbs. Accumulation happens externally via
+    // `ActivityRef`/`BroadcastRef` mutations; this timer is the only thing
+    // that re-renders `SessionRail` (and so every pill) for them. It polls at
+    // the orb frame rate but only commits a new `render_time` while an orb is
+    // in flight, shortly after new activity lands, or once per idle period: the
+    // sparkline spans five minutes, so a 100 ms step moved it far less than a
+    // pixel while re-rendering every pill ten times a second.
     let render_time = use_state(js_sys::Date::now);
     {
         let render_time = render_time.clone();
-        use_effect_with((), move |_| {
-            let interval = Interval::new(100, move || {
-                render_time.set(js_sys::Date::now());
+        let activity = props.activity_timestamps.clone();
+        let broadcasts = props.broadcasts.clone();
+        use_effect_with((activity.clone(), broadcasts.clone()), move |_| {
+            let mut last_render = js_sys::Date::now();
+            let mut seen_revision = activity.revision();
+            let interval = Interval::new(RAIL_FRAME_MS, move || {
+                let now = js_sys::Date::now();
+                let revision = activity.revision();
+                let elapsed = now - last_render;
+                if broadcasts.is_animating(now)
+                    || (revision != seen_revision && elapsed >= RAIL_ACTIVITY_TICK_MS)
+                    || elapsed >= RAIL_IDLE_TICK_MS
+                {
+                    last_render = now;
+                    seen_revision = revision;
+                    render_time.set(now);
+                }
             });
             move || drop(interval)
         });
