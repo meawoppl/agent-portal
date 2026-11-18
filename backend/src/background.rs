@@ -699,6 +699,7 @@ struct RetentionArchives {
     held: std::collections::HashSet<uuid::Uuid>,
     count_candidates: Vec<uuid::Uuid>,
     age_candidates: Vec<uuid::Uuid>,
+    next_age_cursor: Option<handlers::retention::AgeCursor>,
 }
 
 fn archive_retention_candidates(
@@ -706,6 +707,7 @@ fn archive_retention_candidates(
     runtime: &crate::archive::ArchiveRuntime,
     config: &handlers::retention::RetentionConfig,
     pending: &[uuid::Uuid],
+    age_cursor: Option<handlers::retention::AgeCursor>,
 ) -> diesel::QueryResult<RetentionArchives> {
     use diesel::prelude::*;
     use schema::{messages, sessions};
@@ -715,15 +717,27 @@ fn archive_retention_candidates(
     };
 
     let age_rows = with_cleanup_timeout(conn, |conn| {
-        old_message_candidates(conn, *config, MAX_DELETES_PER_CYCLE, &Default::default())
+        old_message_candidates(
+            conn,
+            *config,
+            MAX_DELETES_PER_CYCLE,
+            &Default::default(),
+            age_cursor,
+        )
     })
     .unwrap_or_else(|error| {
         tracing::error!("Failed to select age-retention candidates: {error}");
         Vec::new()
     });
+    // If an old session cannot be archived, advance the scan past it so
+    // unrelated age trims can proceed; the end of the scan wraps to the head.
+    let next_age_cursor = age_rows
+        .last()
+        .filter(|_| age_rows.len() == MAX_DELETES_PER_CYCLE)
+        .map(|(id, _, timestamp)| (*timestamp, *id));
     let (affected, count_candidates) = with_cleanup_timeout(conn, |conn| {
         let mut affected: std::collections::HashSet<_> =
-            age_rows.iter().map(|(_, session)| *session).collect();
+            age_rows.iter().map(|(_, session, _)| *session).collect();
         let mut count_candidates = Vec::new();
         for &session in pending {
             let over_limit = messages::table
@@ -746,6 +760,7 @@ fn archive_retention_candidates(
             held: affected,
             count_candidates,
             age_candidates: Vec::new(),
+            next_age_cursor,
         });
     }
 
@@ -773,12 +788,13 @@ fn archive_retention_candidates(
     }
     let age_candidates = age_rows
         .into_iter()
-        .filter_map(|(id, session)| (!failed.contains(&session)).then_some(id))
+        .filter_map(|(id, session, _)| (!failed.contains(&session)).then_some(id))
         .collect();
     Ok(RetentionArchives {
         held: failed,
         count_candidates,
         age_candidates,
+        next_age_cursor,
     })
 }
 
@@ -968,6 +984,8 @@ pub async fn run_retention_cleanup(app_state: Arc<AppState>) {
     use handlers::retention::RetentionConfig;
 
     let manager = app_state.session_manager.clone();
+    let age_cursor = manager.retention_age_cursor();
+    let cleanup_manager = manager.clone();
     let session_ids = manager.drain_pending_truncations();
     let attempted_ids = session_ids.clone();
     let db_pool = app_state.db_pool.clone();
@@ -999,7 +1017,14 @@ pub async fn run_retention_cleanup(app_state: Arc<AppState>) {
         // retention without an archive is the operator's explicit choice.
         let (held_ids, count_candidates, age_candidates) = match &archive {
             Some(runtime) => {
-                let plan = archive_retention_candidates(&mut conn, runtime, &config, &session_ids)?;
+                let plan = archive_retention_candidates(
+                    &mut conn,
+                    runtime,
+                    &config,
+                    &session_ids,
+                    age_cursor,
+                )?;
+                cleanup_manager.set_retention_age_cursor(plan.next_age_cursor);
                 (plan.held, plan.count_candidates, Some(plan.age_candidates))
             }
             None => (std::collections::HashSet::new(), session_ids, None),
@@ -1437,10 +1462,15 @@ mod retention_archive_hold_tests {
             let runtime = ArchiveRuntime::new(cfg).expect("runtime");
 
             let config = RetentionConfig::new(100, 30);
-            let held =
-                crate::background::archive_retention_candidates(&mut *conn, &runtime, &config, &[])
-                    .unwrap()
-                    .held;
+            let held = crate::background::archive_retention_candidates(
+                &mut *conn,
+                &runtime,
+                &config,
+                &[],
+                None,
+            )
+            .unwrap()
+            .held;
             assert!(
                 held.is_empty(),
                 "successful local archive should not hold trim, got {held:?}"
@@ -1488,10 +1518,15 @@ mod retention_archive_hold_tests {
             };
 
             let config = RetentionConfig::new(100, 30);
-            let held =
-                crate::background::archive_retention_candidates(&mut *conn, &runtime, &config, &[])
-                    .unwrap()
-                    .held;
+            let held = crate::background::archive_retention_candidates(
+                &mut *conn,
+                &runtime,
+                &config,
+                &[],
+                None,
+            )
+            .unwrap()
+            .held;
             // File-as-dir fails ENOTDIR for any user including root (not a permission check),
             // unlike chmod which root bypasses — so this holds reliably.
             assert!(held.contains(&sid), "failed archive should hold {sid}");

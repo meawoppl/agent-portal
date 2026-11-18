@@ -86,19 +86,22 @@ pub fn delete_old_messages(
     budget: usize,
     held_ids: &HashSet<Uuid>,
 ) -> Result<usize, diesel::result::Error> {
-    let candidates = old_message_candidates(conn, config, budget, held_ids)?;
-    let ids: Vec<_> = candidates.into_iter().map(|(id, _)| id).collect();
+    let candidates = old_message_candidates(conn, config, budget, held_ids, None)?;
+    let ids: Vec<_> = candidates.into_iter().map(|(id, _, _)| id).collect();
     delete_message_ids(conn, &ids)
 }
 
 /// Plan exact age-trim IDs before archive capture so the deletion cannot
 /// pick up rows that arrived or became eligible during the archive write.
+pub(crate) type AgeCursor = (chrono::NaiveDateTime, Uuid);
+
 pub(crate) fn old_message_candidates(
     conn: &mut diesel::PgConnection,
     config: RetentionConfig,
     budget: usize,
     held_ids: &HashSet<Uuid>,
-) -> QueryResult<Vec<(Uuid, Uuid)>> {
+    after: Option<AgeCursor>,
+) -> QueryResult<Vec<(Uuid, Uuid, chrono::NaiveDateTime)>> {
     if config.retention_days == 0 || budget == 0 {
         return Ok(Vec::new());
     }
@@ -111,10 +114,17 @@ pub(crate) fn old_message_candidates(
         let held: Vec<Uuid> = held_ids.iter().copied().collect();
         query = query.filter(messages::session_id.ne_all(held));
     }
+    if let Some((timestamp, id)) = after {
+        query = query.filter(
+            messages::created_at
+                .gt(timestamp)
+                .or(messages::created_at.eq(timestamp).and(messages::id.gt(id))),
+        );
+    }
     query
         .order((messages::created_at.asc(), messages::id.asc()))
         .limit(budget as i64)
-        .select((messages::id, messages::session_id))
+        .select((messages::id, messages::session_id, messages::created_at))
         .load(conn)
 }
 
