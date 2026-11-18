@@ -1,5 +1,6 @@
 //! Outbound budgets include the frame currently being written, not just the
 //! queue. A receiver releases its previous permits only on the next receive.
+use axum::extract::ws::Utf8Bytes;
 use std::sync::{Arc, OnceLock};
 use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
 use tokio_util::sync::CancellationToken;
@@ -46,8 +47,22 @@ impl OutboundMessage for shared::TunnelFrame {
 }
 
 type Permits = (OwnedSemaphorePermit, OwnedSemaphorePermit);
+pub(crate) enum Delivery<T> {
+    Owned(T),
+    Shared { value: Arc<T>, json: Utf8Bytes },
+}
+
+impl<T: Clone> Delivery<T> {
+    fn into_owned(self) -> T {
+        match self {
+            Self::Owned(value) => value,
+            Self::Shared { value, .. } => Arc::unwrap_or_clone(value),
+        }
+    }
+}
+
 struct Queued<T> {
-    value: T,
+    value: Delivery<T>,
     permits: Permits,
 }
 
@@ -80,10 +95,25 @@ impl<T> ConnSender<T> {
 }
 impl<T: OutboundMessage> ConnSender<T> {
     pub fn send(&self, value: T) -> Result<(), mpsc::error::SendError<T>> {
+        let size = value.outbound_bytes().ok();
+        self.enqueue(Delivery::Owned(value), size)
+            .map_err(|value| match value {
+                Delivery::Owned(value) => mpsc::error::SendError(value),
+                Delivery::Shared { .. } => unreachable!(),
+            })
+    }
+
+    pub(crate) fn send_shared(&self, value: Arc<T>, json: Utf8Bytes) -> Result<(), ()> {
+        let size = json.len();
+        self.enqueue(Delivery::Shared { value, json }, Some(size))
+            .map_err(|_| ())
+    }
+
+    fn enqueue(&self, value: Delivery<T>, size: Option<usize>) -> Result<(), Delivery<T>> {
         if self.cancel.is_cancelled() {
-            return Err(mpsc::error::SendError(value));
+            return Err(value);
         }
-        let permits = value.outbound_bytes().ok().and_then(|bytes| {
+        let permits = size.and_then(|bytes| {
             let bytes = u32::try_from(bytes).ok()?;
             Some((
                 self.bytes.clone().try_acquire_many_owned(bytes).ok()?,
@@ -92,13 +122,16 @@ impl<T: OutboundMessage> ConnSender<T> {
         });
         let Some(permits) = permits else {
             self.cancel.cancel();
-            return Err(mpsc::error::SendError(value));
+            return Err(value);
         };
         self.tx
             .try_send(Queued { value, permits })
-            .map_err(|error| {
-                self.cancel.cancel();
-                mpsc::error::SendError(error.into_inner().value)
+            .map_err(|error| match error {
+                mpsc::error::TrySendError::Full(queued) => {
+                    self.cancel.cancel();
+                    queued.value
+                }
+                mpsc::error::TrySendError::Closed(queued) => queued.value,
             })
     }
 }
@@ -112,17 +145,26 @@ impl<T> ConnReceiver<T> {
     pub fn cancellation_token(&self) -> CancellationToken {
         self.cancel.clone()
     }
-    pub async fn recv(&mut self) -> Option<T> {
+    pub async fn recv(&mut self) -> Option<T>
+    where
+        T: Clone,
+    {
+        self.recv_delivery().await.map(Delivery::into_owned)
+    }
+    pub(crate) async fn recv_delivery(&mut self) -> Option<Delivery<T>> {
         self.in_flight = None;
         let Queued { value, permits } = self.rx.recv().await?;
         self.in_flight = Some(permits);
         Some(value)
     }
-    pub fn try_recv(&mut self) -> Result<T, mpsc::error::TryRecvError> {
+    pub fn try_recv(&mut self) -> Result<T, mpsc::error::TryRecvError>
+    where
+        T: Clone,
+    {
         self.in_flight = None;
         let Queued { value, permits } = self.rx.try_recv()?;
         self.in_flight = Some(permits);
-        Ok(value)
+        Ok(value.into_owned())
     }
 }
 
@@ -161,7 +203,7 @@ fn channel_with_budget<T>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[derive(Debug)]
+    #[derive(Clone, Debug)]
     struct Frame(usize);
     impl OutboundMessage for Frame {
         fn outbound_bytes(&self) -> Result<usize, ()> {
@@ -180,6 +222,16 @@ mod tests {
         drop(rx);
         assert_eq!(process.available_permits(), 10);
     }
+    #[test]
+    fn full_queue_cancels_even_when_the_socket_keeps_a_sender() {
+        let (tx, rx) = conn_channel(1);
+        let retained_sender = tx.clone();
+        tx.send(Frame(1)).unwrap();
+        assert!(tx.send(Frame(1)).is_err());
+        assert!(rx.cancellation_token().is_cancelled());
+        assert!(retained_sender.send(Frame(1)).is_err());
+    }
+
     #[test]
     fn process_budget_is_shared_across_connections() {
         let process = Arc::new(Semaphore::new(10));

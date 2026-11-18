@@ -117,7 +117,7 @@ impl std::ops::Deref for SessionId {
 pub type ProxySender = ConnSender<ServerToProxy>;
 pub type WebClientSender = ConnSender<ServerToClient>;
 
-mod outbound;
+pub(super) mod outbound;
 pub use outbound::{conn_channel, ConnReceiver, ConnSender};
 
 /// Proxy outbound capacity. Sized so a full maximum-size file upload

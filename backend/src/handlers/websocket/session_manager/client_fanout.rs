@@ -1,30 +1,45 @@
 //! Web/user client registries and broadcast fanout, including the
 //! everything-connected shutdown broadcast.
 
+use dashmap::DashMap;
 use shared::{ServerToClient, ServerToLauncher, ServerToProxy};
-use tracing::info;
+use std::hash::Hash;
+use std::sync::Arc;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 use super::{SessionId, SessionManager, WebClientSender};
 
-/// Fan a message out to every sender in `clients`, pruning senders whose
-/// channel has closed. The message is moved (not cloned) into the final
-/// send, so the common single-client case never deep-copies the payload.
-fn fanout_to_clients(clients: &mut Vec<WebClientSender>, msg: ServerToClient) {
-    let mut msg = Some(msg);
-    let mut idx = 0;
-    while idx < clients.len() {
-        let payload = if idx + 1 == clients.len() {
-            msg.take()
-        } else {
-            msg.clone()
-        };
-        let Some(payload) = payload else { return };
-        if clients[idx].send(payload).is_ok() {
-            idx += 1;
-        } else {
-            clients.remove(idx);
+/// Serialize the common frame once. The socket writer can still apply
+/// viewer-specific rules before releasing these bytes.
+fn fanout_to_clients<K: Eq + Hash + std::borrow::Borrow<Q>, Q: Eq + Hash + ?Sized>(
+    registry: &DashMap<K, Vec<WebClientSender>>,
+    key: &Q,
+    msg: ServerToClient,
+) {
+    let Some(clients) = registry.get(key).map(|entry| entry.value().clone()) else {
+        return;
+    };
+    let json: axum::extract::ws::Utf8Bytes = match serde_json::to_string(&msg) {
+        Ok(json) => json.into(),
+        Err(error) => {
+            warn!("WebSocket fanout encoding failed: {error}");
+            for client in clients {
+                client.cancel();
+            }
+            return;
         }
+    };
+    let msg = Arc::new(msg);
+    let failed: Vec<_> = clients
+        .into_iter()
+        .filter(|client| client.send_shared(msg.clone(), json.clone()).is_err())
+        .collect();
+    if !failed.is_empty() {
+        registry.remove_if_mut(key, |_, clients| {
+            clients.retain(|client| !failed.iter().any(|dead| client.same_channel(dead)));
+            clients.is_empty()
+        });
     }
 }
 
@@ -58,9 +73,7 @@ impl SessionManager {
 
     pub fn broadcast_to_web_clients(&self, session_key: &str, msg: ServerToClient) {
         let _ = self.follow_wakes.send(session_key.to_owned());
-        if let Some(mut clients) = self.web_clients.get_mut(session_key) {
-            fanout_to_clients(clients.value_mut(), msg);
-        }
+        fanout_to_clients(&self.web_clients, session_key, msg);
     }
 
     /// Eagerly remove `sender`'s connection from a session's web-client
@@ -72,13 +85,10 @@ impl SessionManager {
     /// clients linger until the next failed send prunes them. The lazy prune in
     /// `fanout_to_clients` stays as a backstop.
     pub fn remove_web_client(&self, session_key: &str, sender: &WebClientSender) {
-        if let Some(mut clients) = self.web_clients.get_mut(session_key) {
+        self.web_clients.remove_if_mut(session_key, |_, clients| {
             clients.retain(|c| !c.same_channel(sender));
-            if clients.is_empty() {
-                drop(clients);
-                self.web_clients.remove(session_key);
-            }
-        }
+            clients.is_empty()
+        });
     }
 
     pub fn add_user_client(&self, user_id: Uuid, sender: WebClientSender) {
@@ -87,9 +97,7 @@ impl SessionManager {
     }
 
     pub fn broadcast_to_user(&self, user_id: &Uuid, msg: ServerToClient) {
-        if let Some(mut clients) = self.user_clients.get_mut(user_id) {
-            fanout_to_clients(clients.value_mut(), msg);
-        }
+        fanout_to_clients(&self.user_clients, user_id, msg);
     }
 
     /// Eagerly remove `sender`'s connection from a user's client registry
@@ -101,13 +109,10 @@ impl SessionManager {
     /// registered until a failed send prunes it. The lazy prune in `fanout_to_clients`
     /// stays as a backstop.
     pub fn remove_user_client(&self, user_id: &Uuid, sender: &WebClientSender) {
-        if let Some(mut clients) = self.user_clients.get_mut(user_id) {
+        self.user_clients.remove_if_mut(user_id, |_, clients| {
             clients.retain(|c| !c.same_channel(sender));
-            if clients.is_empty() {
-                drop(clients);
-                self.user_clients.remove(user_id);
-            }
-        }
+            clients.is_empty()
+        });
     }
 
     pub fn get_all_user_ids(&self) -> Vec<Uuid> {
@@ -140,11 +145,16 @@ impl SessionManager {
             reason: reason.clone(),
             reconnect_delay_ms,
         };
-        for mut entry in self.web_clients.iter_mut() {
-            fanout_to_clients(entry.value_mut(), client_msg.clone());
+        let sessions: Vec<_> = self
+            .web_clients
+            .iter()
+            .map(|entry| entry.key().clone())
+            .collect();
+        for key in sessions {
+            fanout_to_clients(&self.web_clients, &key, client_msg.clone());
         }
-        for mut entry in self.user_clients.iter_mut() {
-            fanout_to_clients(entry.value_mut(), client_msg.clone());
+        for user_id in self.get_all_user_ids() {
+            fanout_to_clients(&self.user_clients, &user_id, client_msg.clone());
         }
 
         let launcher_msg = ServerToLauncher::ServerShutdown {
@@ -162,6 +172,38 @@ impl SessionManager {
 mod tests {
     use super::super::test_support::make_client_msg;
     use super::*;
+
+    #[tokio::test]
+    async fn fanout_reuses_serialized_bytes_and_cancels_only_the_full_connection() {
+        use super::super::outbound::Delivery;
+
+        let mgr = SessionManager::new();
+        let (slow, mut slow_rx) = super::super::conn_channel(1);
+        let (fast, mut fast_rx) = super::super::conn_channel(2);
+        mgr.add_web_client("s1".into(), slow.clone());
+        mgr.add_web_client("s1".into(), fast);
+
+        mgr.broadcast_to_web_clients("s1", make_client_msg());
+        let Some(Delivery::Shared { value, json }) = fast_rx.recv_delivery().await else {
+            panic!("expected pre-encoded fanout");
+        };
+        let Some(Delivery::Shared {
+            value: other,
+            json: other_json,
+        }) = slow_rx.recv_delivery().await
+        else {
+            panic!("expected pre-encoded fanout");
+        };
+        assert!(Arc::ptr_eq(&value, &other));
+        assert_eq!(json.as_str().as_ptr(), other_json.as_str().as_ptr());
+
+        mgr.broadcast_to_web_clients("s1", make_client_msg());
+        mgr.broadcast_to_web_clients("s1", make_client_msg());
+        assert!(slow_rx.cancellation_token().is_cancelled());
+        assert!(!fast_rx.cancellation_token().is_cancelled());
+        assert_eq!(mgr.web_clients.get("s1").unwrap().len(), 1);
+        assert!(slow.send(make_client_msg()).is_err());
+    }
 
     #[test]
     fn broadcast_to_web_clients() {
@@ -208,9 +250,8 @@ mod tests {
 
     #[test]
     fn broadcast_delivers_when_last_client_closed() {
-        // The fanout moves the payload into the final send; make sure a
-        // closed channel in that last slot still prunes correctly and the
-        // open clients before it were already served.
+        // A disconnected last recipient must neither consume nor block
+        // delivery to the other clients.
         let mgr = SessionManager::new();
         let (tx1, mut rx1) = crate::handlers::websocket::conn_channel(64);
         let (tx2, mut rx2) = crate::handlers::websocket::conn_channel(64);
