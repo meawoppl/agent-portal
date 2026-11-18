@@ -1,10 +1,11 @@
+use std::rc::Rc;
 use yew::prelude::*;
 
-#[derive(Debug, Clone)]
-pub enum DiffLine<'a> {
-    Context(&'a str),
-    Removed(&'a str),
-    Added(&'a str),
+#[derive(Debug, Clone, PartialEq)]
+pub enum DiffLine {
+    Context(String),
+    Removed(String),
+    Added(String),
 }
 
 /// Source for a `DiffCard` body: either two snapshots (Claude `Edit` /
@@ -51,20 +52,20 @@ const DIFF_PREVIEW_LINES: usize = 20;
 pub fn diff_card(props: &DiffCardProps) -> Html {
     let expanded = use_state(|| false);
 
-    let old_new;
-    let unified;
-    let lines: &[DiffLine<'_>] = match &props.source {
-        DiffSource::OldNew { old, new } => {
-            let old_lines: Vec<&str> = old.lines().collect();
-            let new_lines: Vec<&str> = new.lines().collect();
-            old_new = compute_line_diff(&old_lines, &new_lines);
-            &old_new
+    // Memoized on the source: the card re-renders on every expand toggle and
+    // whenever its parent does, and an old/new diff is an LCS over the whole
+    // edited region.
+    let lines = use_memo(props.source.clone(), |source| -> Rc<[DiffLine]> {
+        match source {
+            DiffSource::OldNew { old, new } => {
+                let old_lines: Vec<&str> = old.lines().collect();
+                let new_lines: Vec<&str> = new.lines().collect();
+                compute_line_diff(&old_lines, &new_lines).into()
+            }
+            DiffSource::Unified { text } => parse_unified_diff(text).into(),
         }
-        DiffSource::Unified { text } => {
-            unified = parse_unified_diff(text);
-            &unified
-        }
-    };
+    });
+    let lines: &[DiffLine] = &lines;
 
     let hidden = lines.len().saturating_sub(DIFF_PREVIEW_LINES);
     let shown = if *expanded || hidden == 0 {
@@ -115,7 +116,7 @@ pub fn diff_card(props: &DiffCardProps) -> Html {
 }
 
 /// Emit the inner `<div class="diff-view">` block for a sequence of diff lines.
-fn render_diff_html(lines: &[DiffLine<'_>]) -> Html {
+fn render_diff_html(lines: &[DiffLine]) -> Html {
     html! {
         <div class="diff-view">
             {
@@ -124,19 +125,19 @@ fn render_diff_html(lines: &[DiffLine<'_>]) -> Html {
                         DiffLine::Context(line) => html! {
                             <div class="diff-line context">
                                 <span class="diff-marker">{ " " }</span>
-                                <span class="diff-content">{ *line }</span>
+                                <span class="diff-content">{ line }</span>
                             </div>
                         },
                         DiffLine::Removed(line) => html! {
                             <div class="diff-line removed">
                                 <span class="diff-marker">{ "-" }</span>
-                                <span class="diff-content">{ *line }</span>
+                                <span class="diff-content">{ line }</span>
                             </div>
                         },
                         DiffLine::Added(line) => html! {
                             <div class="diff-line added">
                                 <span class="diff-marker">{ "+" }</span>
-                                <span class="diff-content">{ *line }</span>
+                                <span class="diff-content">{ line }</span>
                             </div>
                         },
                     }
@@ -151,59 +152,70 @@ fn render_diff_html(lines: &[DiffLine<'_>]) -> Html {
 /// marker. Body lines are classified by their leading character; lines without
 /// a recognized prefix are treated as context (some tools omit the leading
 /// space on context lines).
-fn parse_unified_diff(diff: &str) -> Vec<DiffLine<'_>> {
+fn parse_unified_diff(diff: &str) -> Vec<DiffLine> {
     diff.lines()
         .filter(|l| !l.starts_with("--- ") && !l.starts_with("+++ ") && !l.starts_with("@@"))
         .filter_map(|l| match l.as_bytes().first() {
-            Some(b'+') => Some(DiffLine::Added(&l[1..])),
-            Some(b'-') => Some(DiffLine::Removed(&l[1..])),
-            Some(b' ') => Some(DiffLine::Context(&l[1..])),
+            Some(b'+') => Some(DiffLine::Added(l[1..].to_string())),
+            Some(b'-') => Some(DiffLine::Removed(l[1..].to_string())),
+            Some(b' ') => Some(DiffLine::Context(l[1..].to_string())),
             Some(b'\\') => None, // "\ No newline at end of file"
-            None => Some(DiffLine::Context("")),
-            _ => Some(DiffLine::Context(l)),
+            None => Some(DiffLine::Context(String::new())),
+            _ => Some(DiffLine::Context(l.to_string())),
         })
         .collect()
 }
 
-/// Compute a line-based diff between old and new content
-fn compute_line_diff<'a>(old_lines: &[&'a str], new_lines: &[&'a str]) -> Vec<DiffLine<'a>> {
-    let lcs = longest_common_subsequence(old_lines, new_lines);
+/// Compute a line-based diff between old and new content.
+///
+/// The LCS table is O(m*n) in time and memory, so the common prefix and
+/// suffix are emitted as context first and only the differing middle goes
+/// through it. Most edits touch a small region of a large file.
+fn compute_line_diff(old_lines: &[&str], new_lines: &[&str]) -> Vec<DiffLine> {
+    let prefix = old_lines
+        .iter()
+        .zip(new_lines)
+        .take_while(|(a, b)| a == b)
+        .count();
+    let suffix = old_lines[prefix..]
+        .iter()
+        .rev()
+        .zip(new_lines[prefix..].iter().rev())
+        .take_while(|(a, b)| a == b)
+        .count();
+    let old_mid = &old_lines[prefix..old_lines.len() - suffix];
+    let new_mid = &new_lines[prefix..new_lines.len() - suffix];
 
-    let mut result = Vec::new();
-    let mut old_idx = 0;
-    let mut new_idx = 0;
-    let mut lcs_idx = 0;
-
-    while old_idx < old_lines.len() || new_idx < new_lines.len() {
-        if lcs_idx < lcs.len() {
-            let (lcs_old, lcs_new) = lcs[lcs_idx];
-
-            while old_idx < lcs_old {
-                result.push(DiffLine::Removed(old_lines[old_idx]));
-                old_idx += 1;
-            }
-
-            while new_idx < lcs_new {
-                result.push(DiffLine::Added(new_lines[new_idx]));
-                new_idx += 1;
-            }
-
-            result.push(DiffLine::Context(old_lines[old_idx]));
-            old_idx += 1;
-            new_idx += 1;
-            lcs_idx += 1;
-        } else {
-            while old_idx < old_lines.len() {
-                result.push(DiffLine::Removed(old_lines[old_idx]));
-                old_idx += 1;
-            }
-            while new_idx < new_lines.len() {
-                result.push(DiffLine::Added(new_lines[new_idx]));
-                new_idx += 1;
-            }
-        }
+    let context = |line: &&str| DiffLine::Context(line.to_string());
+    let mut result: Vec<DiffLine> = old_lines[..prefix].iter().map(context).collect();
+    let lcs = longest_common_subsequence(old_mid, new_mid);
+    let (mut old_idx, mut new_idx) = (0, 0);
+    for (lcs_old, lcs_new) in lcs {
+        result.extend(
+            old_mid[old_idx..lcs_old]
+                .iter()
+                .map(|l| DiffLine::Removed(l.to_string())),
+        );
+        result.extend(
+            new_mid[new_idx..lcs_new]
+                .iter()
+                .map(|l| DiffLine::Added(l.to_string())),
+        );
+        result.push(DiffLine::Context(old_mid[lcs_old].to_string()));
+        old_idx = lcs_old + 1;
+        new_idx = lcs_new + 1;
     }
-
+    result.extend(
+        old_mid[old_idx..]
+            .iter()
+            .map(|l| DiffLine::Removed(l.to_string())),
+    );
+    result.extend(
+        new_mid[new_idx..]
+            .iter()
+            .map(|l| DiffLine::Added(l.to_string())),
+    );
+    result.extend(old_lines[old_lines.len() - suffix..].iter().map(context));
     result
 }
 
@@ -252,15 +264,79 @@ fn longest_common_subsequence(old: &[&str], new: &[&str]) -> Vec<(usize, usize)>
 mod tests {
     use super::*;
 
-    fn classify<'a>(lines: &'a [DiffLine<'a>]) -> Vec<(&'static str, &'a str)> {
+    fn classify(lines: &[DiffLine]) -> Vec<(&'static str, &str)> {
         lines
             .iter()
             .map(|l| match l {
-                DiffLine::Context(s) => ("ctx", *s),
-                DiffLine::Added(s) => ("add", *s),
-                DiffLine::Removed(s) => ("rem", *s),
+                DiffLine::Context(s) => ("ctx", s.as_str()),
+                DiffLine::Added(s) => ("add", s.as_str()),
+                DiffLine::Removed(s) => ("rem", s.as_str()),
             })
             .collect()
+    }
+
+    fn line_diff(old: &str, new: &str) -> Vec<DiffLine> {
+        let old: Vec<&str> = old.lines().collect();
+        let new: Vec<&str> = new.lines().collect();
+        compute_line_diff(&old, &new)
+    }
+
+    #[test]
+    fn line_diff_keeps_shared_prefix_and_suffix_as_context() {
+        assert_eq!(
+            classify(&line_diff("a\nb\nc\nd\n", "a\nB\nc\nd\n")),
+            vec![
+                ("ctx", "a"),
+                ("rem", "b"),
+                ("add", "B"),
+                ("ctx", "c"),
+                ("ctx", "d"),
+            ]
+        );
+    }
+
+    #[test]
+    fn line_diff_handles_pure_insertions_and_deletions() {
+        assert_eq!(
+            classify(&line_diff("a\nc\n", "a\nb\nc\n")),
+            vec![("ctx", "a"), ("add", "b"), ("ctx", "c")]
+        );
+        assert_eq!(
+            classify(&line_diff("a\nb\nc\n", "a\nc\n")),
+            vec![("ctx", "a"), ("rem", "b"), ("ctx", "c")]
+        );
+        assert_eq!(classify(&line_diff("", "x\n")), vec![("add", "x")]);
+        assert_eq!(classify(&line_diff("x\n", "")), vec![("rem", "x")]);
+        assert_eq!(
+            classify(&line_diff("same\n", "same\n")),
+            vec![("ctx", "same")]
+        );
+    }
+
+    /// Repeated lines straddling the edit must not be double-counted by the
+    /// prefix and suffix scans.
+    #[test]
+    fn line_diff_prefix_and_suffix_do_not_overlap() {
+        assert_eq!(
+            classify(&line_diff("x\nx\n", "x\nx\nx\n")),
+            vec![("ctx", "x"), ("ctx", "x"), ("add", "x")]
+        );
+    }
+
+    #[test]
+    fn line_diff_interleaves_changes_around_common_lines() {
+        assert_eq!(
+            classify(&line_diff("p\n1\nk\n2\nq\n", "p\nA\nk\nB\nq\n")),
+            vec![
+                ("ctx", "p"),
+                ("rem", "1"),
+                ("add", "A"),
+                ("ctx", "k"),
+                ("rem", "2"),
+                ("add", "B"),
+                ("ctx", "q"),
+            ]
+        );
     }
 
     #[test]

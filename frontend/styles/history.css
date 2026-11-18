@@ -324,3 +324,17 @@
     flex-wrap: wrap;
     gap: 0.75rem;
 }
+
+/* Archived transcripts can run to thousands of messages. Skip layout and
+   paint for the ones off screen; `auto` remembers each card's real height
+   once it has rendered, so scrolling back up is stable.
+   Deliberately not applied to the live session view: that view starts at
+   the bottom and is read by scrolling up, so a card would swap its
+   placeholder height for its real one at the top edge of the viewport,
+   moving the text being read wherever the browser has no scroll anchoring
+   (mobile Safari). Here reading runs top to bottom, so the swap happens
+   below the viewport. */
+.history-root .messages-container > .claude-message {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 240px;
+}
