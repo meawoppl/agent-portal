@@ -6,6 +6,8 @@
 
 use shared::TurnMetrics;
 
+use super::types::{MAX_MESSAGES_PER_SESSION, MAX_MESSAGES_WHILE_SCROLLED_BACK};
+
 /// Trim a chronological buffer to at most `max_cost` counted items.
 ///
 /// Items for which `counts_toward_limit` is false remain alongside the newest
@@ -13,16 +15,15 @@ use shared::TurnMetrics;
 /// discarded too, preventing detached metadata from growing without bound.
 pub(super) use shared::render_budget::retain_newest_items_by_cost;
 
-/// Append one live message and apply the same retention rule as history
-/// hydration and replay batches.
-pub(super) fn push_message_with_cost_limit<T>(
-    messages: &mut Vec<T>,
-    message: T,
-    max_cost: usize,
-    counts_toward_limit: impl Fn(&T) -> bool,
-) {
-    messages.push(message);
-    retain_newest_items_by_cost(messages, max_cost, counts_toward_limit);
+/// Counted-message budget for the live buffer. While tailing, the normal
+/// render budget applies; while scrolled back, eviction is deferred up to a
+/// larger ceiling so trimming the top never moves the text being read.
+pub(super) fn live_render_budget(tailing: bool) -> usize {
+    if tailing {
+        MAX_MESSAGES_PER_SESSION
+    } else {
+        MAX_MESSAGES_WHILE_SCROLLED_BACK
+    }
 }
 
 /// Re-delivery is a status notification, not a second transcript event. Keep
@@ -203,12 +204,9 @@ mod tests {
     }
 
     #[test]
-    fn push_message_with_limit_appends_then_trims_oldest() {
-        let mut messages = vec!["one".to_string(), "two".to_string()];
-
-        push_message_with_cost_limit(&mut messages, "three".to_string(), 2, |_| true);
-
-        assert_eq!(messages, vec!["two", "three"]);
+    fn scrolled_back_budget_defers_eviction() {
+        assert_eq!(live_render_budget(true), MAX_MESSAGES_PER_SESSION);
+        assert!(live_render_budget(false) > live_render_budget(true));
     }
 
     #[test]

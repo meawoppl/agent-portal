@@ -55,7 +55,7 @@ use super::session_surface::{
 };
 use super::state::{
     advance_replay_watermark, counts_toward_render_limit, deduplicate_secret_notices,
-    insert_turn_metrics_sorted, push_message_with_cost_limit, retain_newest_items_by_cost,
+    insert_turn_metrics_sorted, live_render_budget, retain_newest_items_by_cost,
     sort_turn_metrics_by_start,
 };
 use super::tasks_panel::{derive_task_events, TasksInbound, TasksPanel};
@@ -1417,6 +1417,7 @@ impl Component for SessionView {
                 match autoscroll_transition(self.should_autoscroll, at_bottom) {
                     Some(next) => {
                         self.should_autoscroll = next;
+                        self.enforce_render_budget();
                         true
                     }
                     None => false,
@@ -1424,6 +1425,7 @@ impl Component for SessionView {
             }
             SessionViewMsg::JumpToLive => {
                 self.should_autoscroll = true;
+                self.enforce_render_budget();
                 // rendered() will see the flag and snap to bottom on the
                 // next paint.
                 true
@@ -1866,11 +1868,7 @@ impl SessionView {
                 }
                 self.messages.extend(messages);
                 deduplicate_secret_notices(&mut self.messages);
-                retain_newest_items_by_cost(
-                    &mut self.messages,
-                    MAX_MESSAGES_PER_SESSION,
-                    |message| counts_toward_render_limit(&message.content),
-                );
+                self.enforce_render_budget();
                 // Set the reconnect-replay watermark to the server-assigned
                 // timestamp of the latest message in the batch (closes
                 // #784). Empty batches (or a pre-#784 backend that didn't
@@ -2556,14 +2554,22 @@ impl SessionView {
         self.ephemeral_status = None;
         self.muse_live_turn.clear_if_terminal(&output.content);
 
-        push_message_with_cost_limit(
-            &mut self.messages,
-            output,
-            MAX_MESSAGES_PER_SESSION,
-            |message| counts_toward_render_limit(&message.content),
-        );
+        self.messages.push(output);
+        self.enforce_render_budget();
         self.drain_edit_stack_queue_if_idle(ctx);
         true
+    }
+
+    /// Trim the live buffer to the budget for the current scroll state (see
+    /// [`live_render_budget`]). Called again when tailing resumes, so the
+    /// backlog deferred while scrolled back is dropped while the view is
+    /// pinned to the bottom, where the eviction can't be seen.
+    fn enforce_render_budget(&mut self) {
+        retain_newest_items_by_cost(
+            &mut self.messages,
+            live_render_budget(self.should_autoscroll),
+            |message| counts_toward_render_limit(&message.content),
+        );
     }
 
     /// Trailing "active tool" strip: one live pill per currently-running tool,
