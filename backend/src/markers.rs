@@ -42,11 +42,8 @@ pub const SECRET_EXPUNGE_FAILED: &str = "SECRET_EXPUNGE_FAILED";
 /// refresh. Protected content is held while a current snapshot is unavailable.
 pub const SECRETS_REDACTION_REFRESH_FAILED: &str = "SECRETS_REDACTION_REFRESH_FAILED";
 
-/// A persisted Claude result could not update its durable cost ledger/total.
-/// A burst indicates database or migration failure; inspect the ledger schema
-/// and reconcile affected result UUIDs from retained transcripts before retrying.
-/// A one-off can be transient, but transport acknowledgement does not retry
-/// this accounting transaction automatically.
+/// Claude result accounting failed. The output transaction rolls back and
+/// the proxy retries the result on reconnect after database recovery.
 pub const COST_ACCOUNTING_PERSIST_FAILED: &str = "COST_ACCOUNTING_PERSIST_FAILED";
 
 /// A turn metric and its optional native Codex cost could not commit. Bursts

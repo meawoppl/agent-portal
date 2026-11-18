@@ -513,13 +513,17 @@ fn handle_agent_output_inner(
             // A shared probe against its advisory key lets us skip clock
             // writes only when the archive has yet to start or has finished.
             // Never wait for the archive on the output path.
-            use diesel::sql_types::{Bool, Timestamp};
+            use diesel::sql_types::{Bool, Text, Timestamp};
             let session = sessions::table.find(session_id).filter(
                 diesel::dsl::sql::<Bool>(
                     "(last_activity <= statement_timestamp() - INTERVAL '15 seconds' \
                      OR archived_at >= last_activity \
-                     OR NOT pg_try_advisory_xact_lock_shared(hashtextextended(id::text, 0)) OR ",
+                     OR NOT pg_try_advisory_xact_lock_shared(hashtextextended(",
                 )
+                .bind::<Text, _>(crate::secrets::expunge::archive_session_lock_key(
+                    session_id,
+                ))
+                .sql(", 0)) OR ")
                 .bind::<Bool, _>(releases_edit_stack)
                 .sql(")"),
             );

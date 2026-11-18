@@ -388,7 +388,7 @@ async fn rolled_back_task_notification_does_not_double_count_subagent_usage_on_r
 }
 
 #[tokio::test]
-async fn recent_output_preserves_activity_until_an_archive_covers_it() {
+async fn recent_output_preserves_activity_except_during_or_after_archiving() {
     use crate::schema::sessions;
 
     let Some((_db, state, session)) = fixture().await else {
@@ -424,11 +424,20 @@ async fn recent_output_preserves_activity_until_an_archive_covers_it() {
     assert_eq!(activity(), before);
     assert_eq!(count(&state, session.id), 1);
 
+    let mut archiver = state.conn().unwrap();
+    archiver.test_transaction::<_, crate::errors::AppError, _>(|conn| {
+        crate::secrets::expunge::archive_session_lock(conn, session.id)?;
+        publish_frame(2);
+        assert!(activity() > before);
+        Ok(())
+    });
+    let before = activity();
+
     diesel::update(sessions::table.find(session.id))
         .set(sessions::archived_at.eq(Some(before)))
         .execute(&mut state.conn().unwrap())
         .unwrap();
-    publish_frame(2);
+    publish_frame(3);
     assert!(activity() > before);
-    assert_eq!(count(&state, session.id), 2);
+    assert_eq!(count(&state, session.id), 3);
 }
