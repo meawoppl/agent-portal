@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS idx_turn_metrics_user_session_started;

@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="monospace" font-size="24" fill="#a9b1d6">PR #2512 · Index latest turn metrics by session</text>
+<text x="55" y="103" font-family="monospace" font-size="34" fill="#e6e9f5">The latest-metrics query reads index keys and fetches one eligible row per session.</text>
+<text x="55" y="146" font-family="monospace" font-size="34" fill="#e6e9f5">Historical metric payloads no longer pass through a full sort.</text>
+<path d="M55 175H1945 M1000 190V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="55" y="230" font-family="monospace" font-size="22" fill="#f7768e">BEFORE</text>
+<rect x="55" y="300" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="79" y="345" font-family="monospace" font-size="26" fill="#7aa2f7">User and started_at index</text>
+<text x="79" y="399" font-family="monospace" font-size="23" fill="#c0caf5">Finds metric rows for the account.</text>
+<path d="M500 500v70" stroke="#565f89" stroke-width="3"/>
+<rect x="55" y="570" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="79" y="615" font-family="monospace" font-size="26" fill="#7aa2f7">DISTINCT ON (session_id)</text>
+<text x="79" y="669" font-family="monospace" font-size="23" fill="#c0caf5">Sorts their full rows by session_id and started_at.</text>
+<path d="M500 770v70" stroke="#565f89" stroke-width="3"/>
+<rect x="55" y="840" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="79" y="885" font-family="monospace" font-size="26" fill="#7aa2f7">Latest turn metrics</text>
+<text x="79" y="939" font-family="monospace" font-size="23" fill="#c0caf5">Keeps one eligible row per session after the sort.</text>
+<text x="1055" y="230" font-family="monospace" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="1055" y="300" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="1079" y="345" font-family="monospace" font-size="26" fill="#7aa2f7">idx_turn_metrics_user_session_started</text>
+<text x="1079" y="399" font-family="monospace" font-size="23" fill="#c0caf5">Reads session keys in index order.</text>
+<path d="M1500 500v70" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="570" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="1079" y="615" font-family="monospace" font-size="26" fill="#7aa2f7">CROSS JOIN LATERAL</text>
+<text x="1079" y="669" font-family="monospace" font-size="23" fill="#c0caf5">Looks up the newest eligible row per existing session.</text>
+<path d="M1500 770v70" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="840" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="1079" y="885" font-family="monospace" font-size="26" fill="#7aa2f7">Latest turn metrics</text>
+<text x="1079" y="939" font-family="monospace" font-size="23" fill="#c0caf5">Returns the same per-session result shape.</text>
+<text x="55" y="1172" font-family="monospace" font-size="22" fill="#a9b1d6">The new index still scans the selected account's session keys. One eligible row is fetched per existing session.</text>
+</svg>
