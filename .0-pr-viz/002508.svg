@@ -56,7 +56,7 @@
   <g>
     <rect x="1040" y="240" width="880" height="150" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
     <text x="1064" y="282" font-size="26" fill="#7aa2f7">DashboardPage + use_sessions</text>
-    <text x="1064" y="322" font-size="23" fill="#9ece6a">unchanged poll: Lists::reduce returns self (same Rc)</text>
+    <text x="1064" y="322" font-size="23" fill="#9ece6a">unchanged poll: Lists::reduce no-op + use_reducer_eq</text>
     <text x="1064" y="358" font-size="23" fill="#9ece6a">use_callback for dashboard and websocket-hook callbacks</text>
   </g>
   <line x1="1480" y1="390" x2="1480" y2="436" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>

@@ -24,7 +24,7 @@ pub struct UseSessions {
     pub set_sessions: Callback<Vec<PortalSession>>,
 }
 
-#[derive(Default)]
+#[derive(Default, PartialEq)]
 struct Lists {
     rows: HashMap<ConnId, Vec<PortalSession>>,
     loaded: HashSet<ConnId>,
@@ -39,9 +39,10 @@ enum ListAction {
 impl Reducible for Lists {
     type Action = ListAction;
     fn reduce(self: Rc<Self>, action: Self::Action) -> Rc<Self> {
-        // Returning `self` keeps the `Rc` identity, which tells `use_reducer`
-        // nothing changed. Every five-second poll that comes back identical
-        // would otherwise re-render the dashboard and every mounted session.
+        // An identical poll is a no-op: returning `self` skips rebuilding the
+        // maps, and `use_reducer_eq` then sees equal state and skips the
+        // render. Every five-second poll would otherwise re-render the
+        // dashboard and every mounted session.
         match &action {
             ListAction::Received(conn, rows)
                 if self.loaded.contains(conn)
@@ -99,7 +100,9 @@ pub fn use_sessions() -> UseSessions {
     if let Some(registry) = &federation {
         portals.extend(registry.rows.iter().filter_map(|row| row.client.clone()));
     }
-    let lists = use_reducer(Lists::default);
+    // `_eq`: Yew 0.21's plain `use_reducer` re-renders on every dispatch,
+    // even when `reduce` returns the same state.
+    let lists = use_reducer_eq(Lists::default);
     let refresh_tick = use_reducer(RefreshTick::default);
     {
         let lists = lists.clone();
@@ -221,8 +224,8 @@ mod tests {
         assert!(state.unreachable.contains(&ConnId::HOME));
     }
 
-    /// An identical poll keeps the state's `Rc` identity, so `use_reducer`
-    /// skips the dashboard re-render; a changed one does not.
+    /// An identical poll leaves the state untouched, so `use_reducer_eq` skips
+    /// the dashboard re-render; a changed one does not.
     #[test]
     fn an_unchanged_poll_keeps_the_same_state() {
         let home = ConnId::HOME;
