@@ -403,12 +403,14 @@ pub enum SessionViewMsg {
     PermissionAnswered(String, PermissionResponseKind),
     /// Handle WebSocket event from connection
     WsEvent(WsEvent),
+    /// The status strip registered its snapshot dispatcher.
+    LiveStatusRegistered(Callback<LiveStatusSnapshot>),
+    /// The status strip rendered and may have changed the tail height.
+    LiveStatusRendered,
     /// TasksPanel is mounted and handed us its inbound-event dispatcher.
     /// We store it so live `WsEvent::Output` task events and REST replay
     /// task events can be forwarded without the parent owning any task
     /// state.
-    LiveStatusRegistered(Callback<LiveStatusSnapshot>),
-    LiveStatusRendered,
     TasksDispatcherRegistered(Callback<TasksInbound>),
     /// InputBar is mounted and handed us its inbound-event dispatcher. We
     /// store it so `PermissionHandler`'s "refocus textarea after answer"
@@ -586,7 +588,7 @@ pub struct SessionView {
     on_schedule_continuation: Callback<Uuid>,
     on_claude_login: Callback<()>,
     child_callbacks: ChildCallbacks,
-    /// Keep the latest snapshot so a strip mounted after loading can catch up.
+    /// Keep the latest snapshot across events processed before registration.
     live_status: LiveStatusSnapshot,
     live_status_dispatcher: Option<Callback<LiveStatusSnapshot>>,
     /// Agent-driven progress bars (`agent-portal progress`), replaced wholesale
