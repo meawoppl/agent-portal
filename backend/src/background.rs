@@ -695,43 +695,55 @@ fn parse_media_id(data: &str, kind: &str) -> Option<uuid::Uuid> {
 /// coincides with a retention cycle can never lose the unarchived delta — the
 /// trim is retried next cycle once the archive succeeds. Sessions with a
 /// fresh/successful archive are absent from the set and trim normally.
+struct RetentionArchives {
+    held: std::collections::HashSet<uuid::Uuid>,
+    count_candidates: Vec<uuid::Uuid>,
+}
+
 fn archive_retention_candidates(
     conn: &mut diesel::PgConnection,
     runtime: &crate::archive::ArchiveRuntime,
     config: &handlers::retention::RetentionConfig,
-) -> std::collections::HashSet<uuid::Uuid> {
-    use diesel::dsl::count_star;
+    pending: &[uuid::Uuid],
+) -> diesel::QueryResult<RetentionArchives> {
     use diesel::prelude::*;
     use schema::{messages, sessions};
 
-    let mut affected: std::collections::HashSet<uuid::Uuid> = std::collections::HashSet::new();
-
-    if config.retention_days > 0 {
-        let cutoff = chrono::Utc::now().naive_utc()
-            - chrono::Duration::days(i64::from(config.retention_days));
-        match messages::table
-            .filter(messages::created_at.lt(cutoff))
-            .select(messages::session_id)
-            .distinct()
-            .load::<uuid::Uuid>(conn)
-        {
-            Ok(ids) => affected.extend(ids),
-            Err(e) => tracing::error!("Failed to query age-retention candidates: {e}"),
+    let (affected, count_candidates) = handlers::retention::with_cleanup_timeout(conn, |conn| {
+        let mut affected = std::collections::HashSet::new();
+        if config.retention_days > 0 {
+            let cutoff = chrono::Utc::now().naive_utc()
+                - chrono::Duration::days(i64::from(config.retention_days));
+            affected.extend(
+                messages::table
+                    .filter(messages::created_at.lt(cutoff))
+                    .select(messages::session_id)
+                    .distinct()
+                    .load::<uuid::Uuid>(conn)?,
+            );
         }
-    }
-
-    match messages::table
-        .group_by(messages::session_id)
-        .having(count_star().gt(config.max_messages_per_session))
-        .select(messages::session_id)
-        .load::<uuid::Uuid>(conn)
-    {
-        Ok(ids) => affected.extend(ids),
-        Err(e) => tracing::error!("Failed to query count-retention candidates: {e}"),
-    }
+        let mut count_candidates = Vec::new();
+        for &session in pending {
+            let over_limit = messages::table
+                .filter(messages::session_id.eq(session))
+                .select(messages::id)
+                .offset(config.max_messages_per_session.max(0))
+                .first::<uuid::Uuid>(conn)
+                .optional()?
+                .is_some();
+            if over_limit {
+                affected.insert(session);
+                count_candidates.push(session);
+            }
+        }
+        Ok::<_, diesel::result::Error>((affected, count_candidates))
+    })?;
 
     if affected.is_empty() {
-        return std::collections::HashSet::new();
+        return Ok(RetentionArchives {
+            held: affected,
+            count_candidates,
+        });
     }
 
     let candidates: Vec<models::Session> = match sessions::table
@@ -743,7 +755,10 @@ fn archive_retention_candidates(
             tracing::error!("Failed to load retention-candidate sessions: {e}");
             // Could not confirm any archive this cycle: hold every candidate
             // rather than risk trimming an unarchived session.
-            return affected;
+            return Ok(RetentionArchives {
+                held: affected,
+                count_candidates,
+            });
         }
     };
 
@@ -763,7 +778,10 @@ fn archive_retention_candidates(
             candidates.len()
         );
     }
-    failed
+    Ok(RetentionArchives {
+        held: failed,
+        count_candidates,
+    })
 }
 
 /// Archive `session` if its archive is missing or stale, updating
@@ -951,7 +969,9 @@ pub async fn purge_expired_device_codes(app_state: Arc<AppState>) {
 pub async fn run_retention_cleanup(app_state: Arc<AppState>) {
     use handlers::retention::RetentionConfig;
 
-    let session_ids = app_state.session_manager.drain_pending_truncations();
+    let manager = app_state.session_manager.clone();
+    let session_ids = manager.drain_pending_truncations();
+    let attempted_ids = session_ids.clone();
     let db_pool = app_state.db_pool.clone();
     let archive = app_state.archive.clone();
     let config = RetentionConfig::new(
@@ -979,9 +999,17 @@ pub async fn run_retention_cleanup(app_state: Arc<AppState>) {
         // held semantics of run_session_age_cleanup. When archiving is DISABLED
         // the held set is empty and trims run exactly as before — running
         // retention without an archive is the operator's explicit choice.
-        let held_ids: std::collections::HashSet<uuid::Uuid> = match &archive {
-            Some(runtime) => archive_retention_candidates(&mut conn, runtime, &config),
-            None => std::collections::HashSet::new(),
+        let RetentionArchives {
+            held: held_ids,
+            count_candidates,
+        } = match &archive {
+            Some(runtime) => {
+                archive_retention_candidates(&mut conn, runtime, &config, &session_ids)?
+            }
+            None => RetentionArchives {
+                held: std::collections::HashSet::new(),
+                count_candidates: session_ids,
+            },
         };
         if !held_ids.is_empty() {
             // Stable marker aligned with SESSION_ARCHIVE_FAILED: alert on this
@@ -992,14 +1020,20 @@ pub async fn run_retention_cleanup(app_state: Arc<AppState>) {
             );
         }
 
-        let (age_deleted, count_deleted) =
-            handlers::retention::run_retention_cleanup(&mut conn, session_ids, config, &held_ids);
-        Ok::<(usize, usize), anyhow::Error>((age_deleted, count_deleted))
+        Ok::<_, anyhow::Error>(handlers::retention::run_retention_cleanup(
+            &mut conn,
+            count_candidates,
+            config,
+            &held_ids,
+        ))
     })
     .await;
 
     match result {
-        Ok(Ok((age_deleted, count_deleted))) => {
+        Ok(Ok((age_deleted, count_deleted, retry))) => {
+            for id in retry {
+                manager.queue_truncation(id);
+            }
             if age_deleted > 0 || count_deleted > 0 {
                 tracing::info!(
                     "Retention cleanup complete: {} old, {} over-limit",
@@ -1008,8 +1042,16 @@ pub async fn run_retention_cleanup(app_state: Arc<AppState>) {
                 );
             }
         }
-        Ok(Err(e)) => tracing::error!("Failed to get DB connection for retention cleanup: {e}"),
-        Err(e) => tracing::error!("Retention cleanup task panicked: {e}"),
+        failure => {
+            for id in attempted_ids {
+                manager.queue_truncation(id);
+            }
+            match failure {
+                Ok(Err(e)) => tracing::error!("Retention cleanup failed: {e}"),
+                Err(e) => tracing::error!("Retention cleanup task panicked: {e}"),
+                Ok(Ok(_)) => unreachable!(),
+            }
+        }
     }
 }
 
@@ -1033,16 +1075,13 @@ pub async fn run_session_age_cleanup(app_state: Arc<AppState>) {
 
         let mut conn = db_pool.get()?;
 
-        // Set a 5-second timeout for cleanup queries
-        if let Err(e) = diesel::sql_query("SET LOCAL statement_timeout = '5000'").execute(&mut conn)
-        {
-            tracing::warn!("Failed to set statement_timeout for session age cleanup: {e}");
-        }
-
         let cutoff = chrono::Utc::now().naive_utc() - chrono::Duration::days(i64::from(max_days));
-        let old_sessions: Vec<models::Session> = schema::sessions::table
-            .filter(schema::sessions::last_activity.lt(cutoff))
-            .load(&mut conn)?;
+        let old_sessions: Vec<models::Session> =
+            handlers::retention::with_cleanup_timeout(&mut conn, |conn| {
+                schema::sessions::table
+                    .filter(schema::sessions::last_activity.lt(cutoff))
+                    .load::<models::Session>(conn)
+            })?;
 
         let mut deleted = 0;
         let mut held = 0;
@@ -1057,7 +1096,9 @@ pub async fn run_session_age_cleanup(app_state: Arc<AppState>) {
                     continue;
                 }
             }
-            match delete_session_with_data(&mut conn, session, true, &manager) {
+            match handlers::retention::with_cleanup_timeout(&mut conn, |conn| {
+                delete_session_with_data(conn, session, true, &manager)
+            }) {
                 Ok(_) => deleted += 1,
                 Err(e) => tracing::error!("Failed to delete old session {}: {:?}", session.id, e),
             }
@@ -1088,35 +1129,29 @@ pub async fn run_session_age_cleanup(app_state: Arc<AppState>) {
 
 /// Delete proxy auth tokens whose expiration is more than 7 days in the past.
 pub async fn run_expired_token_cleanup(app_state: Arc<AppState>) {
+    let db_pool = app_state.db_pool.clone();
+    match tokio::task::spawn_blocking(move || {
+        let mut conn = db_pool.get()?;
+        handlers::retention::with_cleanup_timeout(&mut conn, delete_expired_tokens)?;
+        Ok::<_, anyhow::Error>(())
+    })
+    .await
+    {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => tracing::error!("Token cleanup failed: {error}"),
+        Err(error) => tracing::error!("Token cleanup task panicked: {error}"),
+    }
+}
+
+fn delete_expired_tokens(conn: &mut diesel::PgConnection) -> diesel::QueryResult<()> {
     use diesel::prelude::*;
 
-    let Ok(mut conn) = app_state.db_pool.get() else {
-        tracing::error!("Failed to get DB connection for expired token cleanup");
-        return;
-    };
-
-    if let Err(e) = diesel::sql_query("SET LOCAL statement_timeout = '5000'").execute(&mut conn) {
-        tracing::warn!(
-            "Failed to set statement_timeout for expired token cleanup: {}",
-            e
-        );
-    }
-
     let token_cutoff = chrono::Utc::now().naive_utc() - chrono::Duration::days(7);
-    match diesel::delete(
+    let expired = diesel::delete(
         schema::proxy_auth_tokens::table
             .filter(schema::proxy_auth_tokens::expires_at.lt(token_cutoff)),
     )
-    .execute(&mut conn)
-    {
-        Ok(0) => {}
-        Ok(count) => {
-            tracing::info!("Expired token cleanup: deleted {} tokens", count);
-        }
-        Err(e) => {
-            tracing::error!("Failed to delete expired tokens: {}", e);
-        }
-    }
+    .execute(conn)?;
 
     // Delete revoked credentials past the same window. Neither pass around this
     // one collects them: launcher-spawned tokens carry no expiry, and
@@ -1130,21 +1165,12 @@ pub async fn run_expired_token_cleanup(app_state: Arc<AppState>) {
     // days, which is harmless for a credential that can no longer be used — and
     // `created_at` is NOT NULL, so this cannot repeat the NULL-comparison bug it
     // exists to fix.
-    match diesel::delete(
+    let revoked = diesel::delete(
         schema::proxy_auth_tokens::table
             .filter(schema::proxy_auth_tokens::revoked.eq(true))
             .filter(schema::proxy_auth_tokens::created_at.lt(token_cutoff)),
     )
-    .execute(&mut conn)
-    {
-        Ok(0) => {}
-        Ok(count) => {
-            tracing::info!("Revoked token cleanup: deleted {} tokens", count);
-        }
-        Err(e) => {
-            tracing::error!("Failed to delete revoked tokens: {}", e);
-        }
-    }
+    .execute(conn)?;
 
     // Delete leaked launcher-spawned tokens (#1045). These are minted per
     // launch and only ever bound to a session on a *successful* proxy
@@ -1153,7 +1179,7 @@ pub async fn run_expired_token_cleanup(app_state: Arc<AppState>) {
     // launch token is bound within seconds, so any still unbound an hour after
     // creation belongs to a failed launch and is safe to delete.
     let leak_cutoff = chrono::Utc::now().naive_utc() - chrono::Duration::hours(1);
-    match diesel::delete(
+    let leaked = diesel::delete(
         schema::proxy_auth_tokens::table
             .filter(
                 schema::proxy_auth_tokens::name
@@ -1162,16 +1188,11 @@ pub async fn run_expired_token_cleanup(app_state: Arc<AppState>) {
             .filter(schema::proxy_auth_tokens::session_id.is_null())
             .filter(schema::proxy_auth_tokens::created_at.lt(leak_cutoff)),
     )
-    .execute(&mut conn)
-    {
-        Ok(0) => {}
-        Ok(count) => {
-            tracing::info!("Leaked launch-token cleanup: deleted {} tokens", count);
-        }
-        Err(e) => {
-            tracing::error!("Failed to delete leaked launch tokens: {}", e);
-        }
+    .execute(conn)?;
+    if expired + revoked + leaked > 0 {
+        tracing::info!("Token cleanup: {expired} expired, {revoked} revoked, {leaked} leaked");
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1414,7 +1435,9 @@ mod retention_archive_hold_tests {
 
             let config = RetentionConfig::new(100, 30);
             let held =
-                crate::background::archive_retention_candidates(&mut *conn, &runtime, &config);
+                crate::background::archive_retention_candidates(&mut *conn, &runtime, &config, &[])
+                    .unwrap()
+                    .held;
             assert!(
                 held.is_empty(),
                 "successful local archive should not hold trim, got {held:?}"
@@ -1463,7 +1486,9 @@ mod retention_archive_hold_tests {
 
             let config = RetentionConfig::new(100, 30);
             let held =
-                crate::background::archive_retention_candidates(&mut *conn, &runtime, &config);
+                crate::background::archive_retention_candidates(&mut *conn, &runtime, &config, &[])
+                    .unwrap()
+                    .held;
             // File-as-dir fails ENOTDIR for any user including root (not a permission check),
             // unlike chmod which root bypasses — so this holds reliably.
             assert!(held.contains(&sid), "failed archive should hold {sid}");

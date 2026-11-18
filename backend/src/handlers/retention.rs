@@ -4,7 +4,7 @@ use crate::schema::messages;
 use chrono::Utc;
 use diesel::prelude::*;
 use std::collections::HashSet;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 use uuid::Uuid;
 
 /// Maximum number of messages to delete in a single cleanup cycle.
@@ -41,33 +41,28 @@ pub fn truncate_session_messages(
         return Ok(0);
     }
 
-    let total_count: i64 = messages::table
-        .filter(messages::session_id.eq(session_id))
-        .count()
-        .get_result(conn)?;
+    // Seek to the first row outside the retained tail, then remove a
+    // bounded number of older rows in the same statement and snapshot.
+    use diesel::sql_types::{BigInt, Uuid as SqlUuid};
+    let deleted = diesel::sql_query(
+        "DELETE FROM messages WHERE id IN (
+            SELECT id FROM messages
+            WHERE session_id = $1 AND (created_at, id) <= (
+                SELECT created_at, id FROM messages
+                WHERE session_id = $1
+                ORDER BY created_at DESC, id DESC OFFSET $2 LIMIT 1
+            )
+            ORDER BY created_at ASC, id ASC LIMIT $3
+        )",
+    )
+    .bind::<SqlUuid, _>(session_id)
+    .bind::<BigInt, _>(config.max_messages_per_session.max(0))
+    .bind::<BigInt, _>(budget as i64)
+    .execute(conn)?;
 
-    if total_count <= config.max_messages_per_session {
+    if deleted == 0 {
         return Ok(0);
     }
-
-    let to_delete = (total_count - config.max_messages_per_session) as usize;
-    let capped = to_delete.min(budget);
-
-    // Get the IDs of the oldest messages to delete
-    let ids_to_delete: Vec<Uuid> = messages::table
-        .filter(messages::session_id.eq(session_id))
-        .order(messages::created_at.asc())
-        .limit(capped as i64)
-        .select(messages::id)
-        .load(conn)?;
-
-    if ids_to_delete.is_empty() {
-        return Ok(0);
-    }
-
-    let deleted = diesel::delete(messages::table.filter(messages::id.eq_any(&ids_to_delete)))
-        .execute(conn)?;
-
     info!(
         "Truncated session {}: deleted {} old messages, keeping last {}",
         session_id, deleted, config.max_messages_per_session
@@ -130,61 +125,62 @@ pub fn delete_old_messages(
     Ok(deleted)
 }
 
-/// Run the full retention cleanup process:
-/// 1. Delete messages older than retention_days
-/// 2. Truncate per-session message counts
-///
-/// Applies a 5-second statement timeout and caps total deletes at 1000 per cycle.
-///
-/// `held_ids` names sessions whose pre-trim archive failed this cycle (#1258
-/// phase 2). Both delete paths exclude them so no unarchived message is lost
-/// during an archive outage — the trim is held and retried next cycle. The
-/// set is always empty when archiving is disabled, in which case the trim
-/// runs exactly as before.
+/// Apply a timeout scoped to this transaction and its pooled connection.
+pub(crate) fn with_cleanup_timeout<T, E>(
+    conn: &mut diesel::PgConnection,
+    operation: impl FnOnce(&mut diesel::PgConnection) -> Result<T, E>,
+) -> Result<T, E>
+where
+    E: From<diesel::result::Error>,
+{
+    conn.transaction(|conn| {
+        diesel::sql_query("SET LOCAL statement_timeout = '5000'").execute(conn)?;
+        operation(conn)
+    })
+}
+
+/// Delete old messages, then trim the supplied sessions to the count cap.
+/// Returns any session that still needs a count pass due to a failed or
+/// budget-limited attempt.
 pub fn run_retention_cleanup(
-    conn: &mut diesel::pg::PgConnection,
+    conn: &mut diesel::PgConnection,
     pending_session_ids: Vec<Uuid>,
     config: RetentionConfig,
     held_ids: &HashSet<Uuid>,
-) -> (usize, usize) {
-    // Set a 5-second timeout for cleanup queries
-    if let Err(e) = diesel::sql_query("SET LOCAL statement_timeout = '5000'").execute(conn) {
-        warn!(
-            "Failed to set statement_timeout for retention cleanup: {}",
-            e
-        );
-    }
-
+) -> (usize, usize, Vec<Uuid>) {
     let mut budget = MAX_DELETES_PER_CYCLE;
-    let mut age_deleted = 0;
+    let mut retry = Vec::new();
     let mut count_deleted = 0;
+    let age_deleted = with_cleanup_timeout(conn, |conn| {
+        delete_old_messages(conn, config, budget, held_ids)
+    })
+    .unwrap_or_else(|e| {
+        error!("Failed to delete old messages: {e}");
+        0
+    });
+    budget -= age_deleted;
 
-    // First, bulk delete old messages (up to budget), skipping held sessions
-    match delete_old_messages(conn, config, budget, held_ids) {
-        Ok(deleted) => {
-            age_deleted = deleted;
-            budget = budget.saturating_sub(deleted);
-        }
-        Err(e) => error!("Failed to delete old messages: {:?}", e),
-    }
-
-    // Then truncate per-session counts (remaining budget)
     for session_id in pending_session_ids {
-        if budget == 0 {
-            break;
-        }
-        // Hold the trim for any session whose pre-trim archive failed.
-        if held_ids.contains(&session_id) {
+        if budget == 0 || held_ids.contains(&session_id) {
+            retry.push(session_id);
             continue;
         }
-        match truncate_session_messages(conn, session_id, config, budget) {
+        match with_cleanup_timeout(conn, |conn| {
+            truncate_session_messages(conn, session_id, config, budget)
+        }) {
             Ok(deleted) => {
                 count_deleted += deleted;
-                budget = budget.saturating_sub(deleted);
+                budget -= deleted;
+                if budget == 0 {
+                    retry.push(session_id);
+                }
             }
-            Err(e) => error!("Failed to truncate session {}: {:?}", session_id, e),
+            Err(e) => {
+                error!("Failed to truncate session {session_id}: {e}");
+                retry.push(session_id);
+            }
         }
     }
 
-    (age_deleted, count_deleted)
+    (age_deleted, count_deleted, retry)
 }

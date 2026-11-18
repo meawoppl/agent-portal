@@ -146,7 +146,7 @@ impl From<diesel::result::Error> for DeleteSessionError {
 ///
 /// Returns the number of deleted messages.
 pub fn delete_session_with_data(
-    conn: &mut PooledConnection<ConnectionManager<PgConnection>>,
+    conn: &mut PgConnection,
     session: &Session,
     record_costs: bool,
     manager: &crate::handlers::websocket::SessionManager,

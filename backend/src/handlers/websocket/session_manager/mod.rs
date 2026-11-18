@@ -283,10 +283,11 @@ impl SessionManager {
     }
 
     pub fn drain_pending_truncations(&self) -> Vec<Uuid> {
-        let ids: Vec<Uuid> = self.pending_truncations.iter().map(|r| *r).collect();
-        for id in &ids {
-            self.pending_truncations.remove(id);
-        }
+        let mut ids = Vec::new();
+        self.pending_truncations.retain(|id| {
+            ids.push(*id);
+            false
+        });
         ids
     }
 
