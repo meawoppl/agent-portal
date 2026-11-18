@@ -223,6 +223,12 @@ pub const MEMBER_STATUS_FANOUT_FAILED: &str = "MEMBER_STATUS_FANOUT_FAILED";
 ///   the session, plugin command and line that ran.
 pub const PLUGIN_COMMAND_RECORD_FAILED: &str = "PLUGIN_COMMAND_RECORD_FAILED";
 
+/// The backend's live heap reached the heap-profile threshold and the watchdog
+/// (`heap_profile.rs`) tried to write a profile to `PORTAL_HEAP_PROFILE_DIR`; the
+/// line says whether it was written. A burst at rising sizes is a memory spike
+/// in progress. Collect the profiles and read them with `go tool pprof -top`.
+pub const HEAP_PROFILE_CAPTURED: &str = "HEAP_PROFILE_CAPTURED";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -252,6 +258,7 @@ mod tests {
         PERMISSION_CANCEL_PERSIST_FAILED,
         PLUGIN_COMMAND_RECORD_FAILED,
         MEMBER_STATUS_FANOUT_FAILED,
+        HEAP_PROFILE_CAPTURED,
     ];
 
     #[test]
@@ -306,6 +313,7 @@ mod tests {
         let sources: &[&str] = &[
             include_str!("audit.rs"),
             include_str!("background.rs"),
+            include_str!("heap_profile.rs"),
             include_str!("lib.rs"),
             include_str!("secrets/mod.rs"),
             include_str!("secrets/redaction.rs"),

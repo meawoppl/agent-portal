@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200"><rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="Arial, sans-serif"><text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2477 · Capture backend heap profiles when memory spikes</text><text x="55" y="105" font-size="34" fill="#e6e9f5">A multi-GB backend spike used to die with the process, leaving no trace.</text><text x="55" y="149" font-size="34" fill="#e6e9f5">Now a watchdog writes a symbolized heap profile while the spike is growing.</text><path d="M55 177 H1945 M1000 205 V1120" stroke="#3d4666"/>
+<text x="75" y="235" font-size="22" font-weight="bold" letter-spacing="4" fill="#f7768e">BEFORE</text>
+<rect x="75" y="275" width="870" height="230" rx="16" fill="#1e202e" stroke="#3d4666"/>
+<text x="100" y="325" font-size="28" fill="#7aa2f7">System allocator</text>
+<text x="100" y="385" font-size="25" fill="#c0caf5">No allocation stacks are recorded.</text>
+<text x="100" y="445" font-size="23" fill="#a9b1d6">cgroup samples show 150 MB -> 1.1 GB in 30 s, but not who.</text>
+<rect x="75" y="545" width="870" height="230" rx="16" fill="#1e202e" stroke="#f7768e"/>
+<text x="100" y="595" font-size="28" fill="#7aa2f7">Spike reaches the memory cap</text>
+<text x="100" y="655" font-size="25" fill="#c0caf5">Container is OOM-killed and restarts.</text>
+<text x="100" y="715" font-size="23" fill="#a9b1d6">The heap is gone; the code path stays unknown.</text>
+<rect x="75" y="815" width="870" height="230" rx="16" fill="#1e202e" stroke="#3d4666"/>
+<text x="100" y="865" font-size="28" fill="#7aa2f7">[profile.release] strip = true</text>
+<text x="100" y="925" font-size="25" fill="#c0caf5">Backend binary has no symbols.</text>
+<text x="100" y="985" font-size="23" fill="#a9b1d6">Any stack it did record would be bare addresses.</text>
+<text x="1055" y="235" font-size="22" font-weight="bold" letter-spacing="4" fill="#9ece6a">AFTER</text>
+<rect x="1055" y="275" width="870" height="230" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="325" font-size="28" fill="#7aa2f7">tikv_jemallocator::Jemalloc</text>
+<text x="1080" y="385" font-size="25" fill="#c0caf5">malloc_conf: prof:true, lg_prof_sample:19</text>
+<text x="1080" y="445" font-size="23" fill="#a9b1d6">One stack sampled per ~512 KiB allocated.</text>
+<rect x="1055" y="545" width="870" height="230" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="595" font-size="28" fill="#7aa2f7">heap_profile watchdog (1 s poll)</text>
+<text x="1080" y="655" font-size="25" fill="#c0caf5">stats.allocated >= threshold -> dump_pprof()</text>
+<text x="1080" y="715" font-size="23" fill="#a9b1d6">Again every +256 MiB; logs HEAP_PROFILE_CAPTURED.</text>
+<rect x="1055" y="815" width="870" height="230" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="865" font-size="28" fill="#7aa2f7">[profile.release.package.backend]</text>
+<text x="1080" y="925" font-size="25" fill="#c0caf5">strip = "none", debug = "line-tables-only"</text>
+<text x="1080" y="985" font-size="23" fill="#a9b1d6">Profiles name functions; launcher/proxy stay stripped.</text>
+<text x="55" y="1172" font-size="22" fill="#a9b1d6">Diagnosis only: does not fix the spike. Off until PORTAL_HEAP_PROFILE_DIR is set and mounted; a spike faster than 1 s can still be missed.</text></g></svg>
