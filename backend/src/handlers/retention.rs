@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 /// Maximum number of messages to delete in a single cleanup cycle.
 /// If more remain, they will be caught in the next 60-second cycle.
-const MAX_DELETES_PER_CYCLE: usize = 1000;
+pub(crate) const MAX_DELETES_PER_CYCLE: usize = 1000;
 
 /// Configuration for message retention policy
 #[derive(Clone, Copy, Debug)]
@@ -86,15 +86,24 @@ pub fn delete_old_messages(
     budget: usize,
     held_ids: &HashSet<Uuid>,
 ) -> Result<usize, diesel::result::Error> {
+    let candidates = old_message_candidates(conn, config, budget, held_ids)?;
+    let ids: Vec<_> = candidates.into_iter().map(|(id, _)| id).collect();
+    delete_message_ids(conn, &ids)
+}
+
+/// Plan exact age-trim IDs before archive capture so the deletion cannot
+/// pick up rows that arrived or became eligible during the archive write.
+pub(crate) fn old_message_candidates(
+    conn: &mut diesel::PgConnection,
+    config: RetentionConfig,
+    budget: usize,
+    held_ids: &HashSet<Uuid>,
+) -> QueryResult<Vec<(Uuid, Uuid)>> {
     if config.retention_days == 0 || budget == 0 {
-        return Ok(0);
+        return Ok(Vec::new());
     }
 
     let cutoff = Utc::now().naive_utc() - chrono::Duration::days(config.retention_days as i64);
-
-    // Select IDs to delete, capped by remaining budget. Boxed so we can add
-    // the held-session exclusion only when there is one (keeps the empty-set
-    // path identical to the pre-#1258 query plan).
     let mut query = messages::table
         .filter(messages::created_at.lt(cutoff))
         .into_boxed();
@@ -102,27 +111,18 @@ pub fn delete_old_messages(
         let held: Vec<Uuid> = held_ids.iter().copied().collect();
         query = query.filter(messages::session_id.ne_all(held));
     }
-    let ids_to_delete: Vec<Uuid> = query
-        .order(messages::created_at.asc())
+    query
+        .order((messages::created_at.asc(), messages::id.asc()))
         .limit(budget as i64)
-        .select(messages::id)
-        .load(conn)?;
+        .select((messages::id, messages::session_id))
+        .load(conn)
+}
 
-    if ids_to_delete.is_empty() {
+fn delete_message_ids(conn: &mut diesel::PgConnection, ids: &[Uuid]) -> QueryResult<usize> {
+    if ids.is_empty() {
         return Ok(0);
     }
-
-    let deleted = diesel::delete(messages::table.filter(messages::id.eq_any(&ids_to_delete)))
-        .execute(conn)?;
-
-    if deleted > 0 {
-        info!(
-            "Retention cleanup: deleted {} messages older than {} days",
-            deleted, config.retention_days
-        );
-    }
-
-    Ok(deleted)
+    diesel::delete(messages::table.filter(messages::id.eq_any(ids))).execute(conn)
 }
 
 /// Apply a timeout scoped to this transaction and its pooled connection.
@@ -147,12 +147,14 @@ pub fn run_retention_cleanup(
     pending_session_ids: Vec<Uuid>,
     config: RetentionConfig,
     held_ids: &HashSet<Uuid>,
+    archived_age_ids: Option<&[Uuid]>,
 ) -> (usize, usize, Vec<Uuid>) {
     let mut budget = MAX_DELETES_PER_CYCLE;
     let mut retry = Vec::new();
     let mut count_deleted = 0;
-    let age_deleted = with_cleanup_timeout(conn, |conn| {
-        delete_old_messages(conn, config, budget, held_ids)
+    let age_deleted = with_cleanup_timeout(conn, |conn| match archived_age_ids {
+        Some(ids) => delete_message_ids(conn, ids),
+        None => delete_old_messages(conn, config, budget, held_ids),
     })
     .unwrap_or_else(|e| {
         error!("Failed to delete old messages: {e}");

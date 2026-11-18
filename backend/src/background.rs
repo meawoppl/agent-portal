@@ -698,6 +698,7 @@ fn parse_media_id(data: &str, kind: &str) -> Option<uuid::Uuid> {
 struct RetentionArchives {
     held: std::collections::HashSet<uuid::Uuid>,
     count_candidates: Vec<uuid::Uuid>,
+    age_candidates: Vec<uuid::Uuid>,
 }
 
 fn archive_retention_candidates(
@@ -709,19 +710,20 @@ fn archive_retention_candidates(
     use diesel::prelude::*;
     use schema::{messages, sessions};
 
-    let (affected, count_candidates) = handlers::retention::with_cleanup_timeout(conn, |conn| {
-        let mut affected = std::collections::HashSet::new();
-        if config.retention_days > 0 {
-            let cutoff = chrono::Utc::now().naive_utc()
-                - chrono::Duration::days(i64::from(config.retention_days));
-            affected.extend(
-                messages::table
-                    .filter(messages::created_at.lt(cutoff))
-                    .select(messages::session_id)
-                    .distinct()
-                    .load::<uuid::Uuid>(conn)?,
-            );
-        }
+    use handlers::retention::{
+        old_message_candidates, with_cleanup_timeout, MAX_DELETES_PER_CYCLE,
+    };
+
+    let age_rows = with_cleanup_timeout(conn, |conn| {
+        old_message_candidates(conn, *config, MAX_DELETES_PER_CYCLE, &Default::default())
+    })
+    .unwrap_or_else(|error| {
+        tracing::error!("Failed to select age-retention candidates: {error}");
+        Vec::new()
+    });
+    let (affected, count_candidates) = with_cleanup_timeout(conn, |conn| {
+        let mut affected: std::collections::HashSet<_> =
+            age_rows.iter().map(|(_, session)| *session).collect();
         let mut count_candidates = Vec::new();
         for &session in pending {
             let over_limit = messages::table
@@ -743,24 +745,15 @@ fn archive_retention_candidates(
         return Ok(RetentionArchives {
             held: affected,
             count_candidates,
+            age_candidates: Vec::new(),
         });
     }
 
-    let candidates: Vec<models::Session> = match sessions::table
-        .filter(sessions::id.eq_any(affected.iter().copied().collect::<Vec<_>>()))
-        .load(conn)
-    {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::error!("Failed to load retention-candidate sessions: {e}");
-            // Could not confirm any archive this cycle: hold every candidate
-            // rather than risk trimming an unarchived session.
-            return Ok(RetentionArchives {
-                held: affected,
-                count_candidates,
-            });
-        }
-    };
+    let candidates: Vec<models::Session> = with_cleanup_timeout(conn, |conn| {
+        sessions::table
+            .filter(sessions::id.eq_any(affected.iter().copied().collect::<Vec<_>>()))
+            .load::<models::Session>(conn)
+    })?;
 
     let mut archived = 0;
     let mut failed: std::collections::HashSet<uuid::Uuid> = std::collections::HashSet::new();
@@ -778,9 +771,14 @@ fn archive_retention_candidates(
             candidates.len()
         );
     }
+    let age_candidates = age_rows
+        .into_iter()
+        .filter_map(|(id, session)| (!failed.contains(&session)).then_some(id))
+        .collect();
     Ok(RetentionArchives {
         held: failed,
         count_candidates,
+        age_candidates,
     })
 }
 
@@ -999,17 +997,12 @@ pub async fn run_retention_cleanup(app_state: Arc<AppState>) {
         // held semantics of run_session_age_cleanup. When archiving is DISABLED
         // the held set is empty and trims run exactly as before — running
         // retention without an archive is the operator's explicit choice.
-        let RetentionArchives {
-            held: held_ids,
-            count_candidates,
-        } = match &archive {
+        let (held_ids, count_candidates, age_candidates) = match &archive {
             Some(runtime) => {
-                archive_retention_candidates(&mut conn, runtime, &config, &session_ids)?
+                let plan = archive_retention_candidates(&mut conn, runtime, &config, &session_ids)?;
+                (plan.held, plan.count_candidates, Some(plan.age_candidates))
             }
-            None => RetentionArchives {
-                held: std::collections::HashSet::new(),
-                count_candidates: session_ids,
-            },
+            None => (std::collections::HashSet::new(), session_ids, None),
         };
         if !held_ids.is_empty() {
             // Stable marker aligned with SESSION_ARCHIVE_FAILED: alert on this
@@ -1025,6 +1018,7 @@ pub async fn run_retention_cleanup(app_state: Arc<AppState>) {
             count_candidates,
             config,
             &held_ids,
+            age_candidates.as_deref(),
         ))
     })
     .await;
@@ -1071,7 +1065,7 @@ pub async fn run_session_age_cleanup(app_state: Arc<AppState>) {
     // (#1487, the twin of the retention path above).
     let result = tokio::task::spawn_blocking(move || {
         use diesel::prelude::*;
-        use handlers::helpers::delete_session_with_data;
+        use handlers::helpers::delete_session_rows;
 
         let mut conn = db_pool.get()?;
 
@@ -1097,9 +1091,12 @@ pub async fn run_session_age_cleanup(app_state: Arc<AppState>) {
                 }
             }
             match handlers::retention::with_cleanup_timeout(&mut conn, |conn| {
-                delete_session_with_data(conn, session, true, &manager)
+                delete_session_rows(conn, session, true)
             }) {
-                Ok(_) => deleted += 1,
+                Ok(_) => {
+                    manager.forget_deleted_session(session.id, &session.session_key);
+                    deleted += 1;
+                }
                 Err(e) => tracing::error!("Failed to delete old session {}: {:?}", session.id, e),
             }
         }
@@ -1397,7 +1394,13 @@ mod retention_archive_hold_tests {
             let held: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
             // Verify the candidate would be trimmed if not held. The global
             // count includes other tests' rows, so check this session's own.
-            crate::handlers::retention::run_retention_cleanup(&mut *conn, vec![], config, &held);
+            crate::handlers::retention::run_retention_cleanup(
+                &mut *conn,
+                vec![],
+                config,
+                &held,
+                None,
+            );
             let remaining: i64 = messages::table
                 .filter(messages::session_id.eq(sid))
                 .count()
@@ -1495,7 +1498,13 @@ mod retention_archive_hold_tests {
             // The cleanup is global, so its counts include other tests' rows
             // that this transaction can see; judge only this session's own
             // seeded row. The transaction rolls back whatever it deletes.
-            crate::handlers::retention::run_retention_cleanup(&mut *conn, vec![], config, &held);
+            crate::handlers::retention::run_retention_cleanup(
+                &mut *conn,
+                vec![],
+                config,
+                &held,
+                None,
+            );
             let remaining: Vec<(Uuid, String)> = messages::table
                 .filter(messages::session_id.eq(sid))
                 .select((messages::id, messages::content))
