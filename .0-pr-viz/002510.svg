@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="monospace" font-size="24" fill="#a9b1d6">PR #2510 · Share browser fanout frames and close saturated sockets</text>
+<text x="55" y="103" font-family="monospace" font-size="34" fill="#e6e9f5">Fanout shares one encoded frame and releases the registry lock before enqueue.</text>
+<text x="55" y="146" font-family="monospace" font-size="34" fill="#e6e9f5">The browser writer checks current redaction rules before sending.</text>
+<path d="M55 175H1945 M1000 190V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="55" y="230" font-family="monospace" font-size="22" fill="#f7768e">BEFORE</text>
+<rect x="55" y="300" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="79" y="345" font-family="monospace" font-size="26" fill="#7aa2f7">fanout_to_clients</text>
+<text x="79" y="399" font-family="monospace" font-size="23" fill="#c0caf5">Deep-clones the typed frame for each extra viewer.</text>
+<path d="M500 500v70" stroke="#565f89" stroke-width="3"/>
+<rect x="55" y="570" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="79" y="615" font-family="monospace" font-size="26" fill="#7aa2f7">ConnSender::send</text>
+<text x="79" y="669" font-family="monospace" font-size="23" fill="#c0caf5">Counts JSON bytes separately for every recipient.</text>
+<path d="M500 770v70" stroke="#565f89" stroke-width="3"/>
+<rect x="55" y="840" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="79" y="885" font-family="monospace" font-size="26" fill="#7aa2f7">DeadlineSender</text>
+<text x="79" y="939" font-family="monospace" font-size="23" fill="#c0caf5">An overflow cancellation can wait behind a slow write.</text>
+<text x="1055" y="230" font-family="monospace" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="1055" y="300" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="1079" y="345" font-family="monospace" font-size="26" fill="#7aa2f7">fanout_to_clients</text>
+<text x="1079" y="399" font-family="monospace" font-size="23" fill="#c0caf5">Snapshots recipients, then encodes outside the registry lock.</text>
+<path d="M1500 500v70" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="570" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="1079" y="615" font-family="monospace" font-size="26" fill="#7aa2f7">Delivery::Shared</text>
+<text x="1079" y="669" font-family="monospace" font-size="23" fill="#c0caf5">Shares the typed frame and UTF-8 bytes across viewers.</text>
+<path d="M1500 770v70" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="840" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="1079" y="885" font-family="monospace" font-size="26" fill="#7aa2f7">BrowserWriter</text>
+<text x="1079" y="939" font-family="monospace" font-size="23" fill="#c0caf5">Checks cancellation during send and applies fresh rules.</text>
+<text x="55" y="1172" font-family="monospace" font-size="22" fill="#a9b1d6">A recipient with redaction rules still gets its own encoding. Byte budgets remain per connection and process.</text>
+</svg>
