@@ -534,7 +534,7 @@ mod tests {
                     Some(server_ts.as_str()),
                     "watermark must be the server's created_at, never Date.now()"
                 );
-                let parsed: serde_json::Value = serde_json::from_str(&message.content).unwrap();
+                let parsed: serde_json::Value = serde_json::from_str(message.content()).unwrap();
                 assert_eq!(
                     parsed.get("_created_at"),
                     None,
@@ -576,8 +576,8 @@ mod tests {
         assert_eq!(events.len(), 1);
         match &events[0] {
             WsEvent::Output(message) => {
-                assert!(message.content.contains("hello from peer"));
-                assert!(!message.content.contains("_origin"));
+                assert!(message.content().contains("hello from peer"));
+                assert!(!message.content().contains("_origin"));
                 assert_eq!(
                     message.meta.as_ref().and_then(|m| m.source.as_ref()),
                     Some(&shared::MessageSource::Agent {

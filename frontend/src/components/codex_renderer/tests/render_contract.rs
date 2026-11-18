@@ -135,7 +135,7 @@ fn app_server_only_items_render_and_keep_lifecycle_identity() {
                 render_codex_frame_content(&event, Uuid::nil()).is_some(),
                 "{wire}"
             );
-            assert_eq!(codex_event_item_id(&wire).as_deref(), Some("x"), "{wire}");
+            assert_eq!(codex_event_item_id(&event).as_deref(), Some("x"), "{wire}");
         }
     }
 }

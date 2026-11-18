@@ -34,7 +34,7 @@ pub(crate) fn render_frame(ctx: FrameRenderContext<'_>) -> Html {
         );
     }
 
-    let json = ctx.message.content.as_str();
+    let json = ctx.message.content();
     let frame = AgentFrameRegistry::parse(json, ctx.agent_type);
 
     // Dispatch on the message shape, not the agent. `User` (the proxy's
@@ -157,7 +157,7 @@ pub(crate) fn render_identity_group_part(
         ));
     }
 
-    let json = message.content.as_str();
+    let json = message.content();
     let frame = AgentFrameRegistry::parse(json, agent_type);
     match frame {
         AgentFrame::Claude(ClaudeMessage::User(msg)) => {
@@ -186,7 +186,7 @@ pub(crate) fn render_identity_group_part(
 }
 
 fn message_text(message: &RenderedMessage) -> String {
-    if let Ok(value) = serde_json::from_str::<Value>(&message.content) {
+    if let Ok(value) = serde_json::from_str::<Value>(message.content()) {
         match value {
             Value::String(text) => return text,
             Value::Object(_) => {
@@ -197,7 +197,7 @@ fn message_text(message: &RenderedMessage) -> String {
             _ => {}
         }
     }
-    message.content.clone()
+    message.content().to_string()
 }
 
 fn render_raw_json(json: &str) -> Html {

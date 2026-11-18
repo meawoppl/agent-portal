@@ -84,7 +84,7 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
             // none. Each marker reports the cumulative estimate, so the chip
             // ticks upward live as more markers stream in.
             if *category == GroupCategory::Thinking {
-                let tokens = thinking_tokens_estimate(messages);
+                let tokens = thinking_tokens_estimate(messages, props.agent_type);
                 // Seed the odometer with the previous burst's max from this
                 // turn so a run split by a tool call continues counting
                 // instead of re-racing from 0 (clamped inside CountUp, so a
@@ -112,7 +112,8 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
             if *category == GroupCategory::Muse {
                 let mut tree = crate::components::muse_renderer::TaskTree::default();
                 for message in messages {
-                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&message.content) {
+                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(message.content())
+                    {
                         tree.apply(&value);
                     }
                 }

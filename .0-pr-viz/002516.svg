@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="arr-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+  </defs>
+
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2516 · Parse each transcript frame once and regroup only on change</text>
+
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">Every SessionView render regrouped the transcript, re-parsing each frame several times;</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">each frame is now parsed once, and grouping reruns only when the transcript changes.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <!-- ==================== BEFORE ==================== -->
+  <g>
+    <rect x="80" y="240" width="840" height="120" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="282" font-size="26" fill="#7aa2f7">SessionView::view() (any re-render)</text>
+    <text x="104" y="322" font-size="23" fill="#f7768e">group_messages(&amp;self.messages, ..) every time</text>
+  </g>
+  <line x1="500" y1="360" x2="500" y2="406" stroke="#f7768e" stroke-width="1.5" marker-end="url(#arr-red)"/>
+
+  <g>
+    <rect x="80" y="410" width="840" height="300" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+    <text x="104" y="452" font-size="26" fill="#f7768e">AgentFrameRegistry::parse per helper, per frame</text>
+    <text x="104" y="492" font-size="23" fill="#a9b1d6">group_messages loop, classify, group_label</text>
+    <text x="104" y="528" font-size="23" fill="#a9b1d6">is_turn_terminator (twice: metrics, thinking starts)</text>
+    <text x="104" y="564" font-size="23" fill="#a9b1d6">thinking_tokens_estimate, visible_group_indices</text>
+    <text x="104" y="600" font-size="23" fill="#a9b1d6">muse_causation_id (serde_json::Value per record)</text>
+    <text x="104" y="644" font-size="22" fill="#565f89">Codex/Muse frames parse ~3x inside each call:</text>
+    <text x="104" y="676" font-size="22" fill="#565f89">ClaudeOutput, then Value, then their own type</text>
+  </g>
+
+  <g>
+    <rect x="80" y="770" width="840" height="190" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+    <text x="104" y="812" font-size="26" fill="#7aa2f7">enforce_render_budget on every push</text>
+    <text x="104" y="852" font-size="23" fill="#f7768e">counts_toward_render_limit(&amp;message.content)</text>
+    <text x="104" y="888" font-size="23" fill="#f7768e">full ClaudeOutput parse of every buffered message</text>
+    <text x="104" y="926" font-size="22" fill="#565f89">up to 400 while scrolled back</text>
+  </g>
+
+  <!-- ==================== AFTER ==================== -->
+  <g>
+    <rect x="1040" y="240" width="880" height="120" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1064" y="282" font-size="26" fill="#7aa2f7">SessionView::groups(ctx) -> Rc&lt;Vec&lt;MessageGroup&gt;&gt;</text>
+    <text x="1064" y="322" font-size="23" fill="#9ece6a">GroupingCache hit unless Transcript::revision moved</text>
+  </g>
+  <line x1="1480" y1="360" x2="1480" y2="406" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+  <text x="1500" y="392" font-size="22" fill="#565f89">only after Transcript::edit()</text>
+
+  <g>
+    <rect x="1040" y="410" width="880" height="300" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1064" y="452" font-size="26" fill="#9ece6a">RenderedMessage::facts(agent_type): one parse</text>
+    <text x="1064" y="492" font-size="23" fill="#a9b1d6">Rc&lt;OnceCell&gt; shared by every clone and group copy</text>
+    <text x="1064" y="528" font-size="23" fill="#a9b1d6">FrameFacts: kind, IdentityRule, assistant_label,</text>
+    <text x="1064" y="564" font-size="23" fill="#a9b1d6">thinking_tokens, codex_item_id, muse_causation_id,</text>
+    <text x="1064" y="600" font-size="23" fill="#a9b1d6">transcript_noise, lifecycle_wakeup, budget flag</text>
+    <text x="1064" y="644" font-size="22" fill="#565f89">IdentityRule is viewer-independent; classify resolves</text>
+    <text x="1064" y="676" font-size="22" fill="#565f89">"You" vs sender name per call</text>
+  </g>
+
+  <g>
+    <rect x="1040" y="770" width="880" height="190" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1064" y="812" font-size="26" fill="#7aa2f7">enforce_render_budget on every push</text>
+    <text x="1064" y="852" font-size="23" fill="#9ece6a">message.counts_toward_render_limit(agent_type)</text>
+    <text x="1064" y="888" font-size="23" fill="#9ece6a">cached flag; edit() only when something is trimmed</text>
+    <text x="1064" y="926" font-size="22" fill="#565f89">Transcript has no DerefMut: mutation must invalidate</text>
+  </g>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">Not covered: renderers still parse a frame when its group re-renders, and groups still copy message bodies.</text>
+</svg>

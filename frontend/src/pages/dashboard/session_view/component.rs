@@ -8,7 +8,7 @@
 //! `helpers.rs`; task-event derivation lives alongside its consumer in
 //! `tasks_panel.rs`.
 
-use crate::components::message_renderer::{MessageRenderer, RenderedMessage};
+use crate::components::message_renderer::{MessageGroup, MessageRenderer, RenderedMessage};
 use crate::components::{
     group_is_turn_terminator, group_messages, thinking_chip_starts, ForkDialog,
     MessageGroupRenderer,
@@ -25,6 +25,7 @@ use shared::strings::truncate_with_ellipsis;
 use shared::{
     ClientToServer, DeliveryMeta, PortalMeta, ReasoningEffort, SendMode, SessionInfo, TurnMetrics,
 };
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use uuid::Uuid;
@@ -57,7 +58,7 @@ use super::session_surface::{
 use super::state::{
     advance_replay_watermark, counts_toward_render_limit, deduplicate_secret_notices,
     insert_turn_metrics_sorted, live_render_budget, retain_newest_items_by_cost,
-    sort_turn_metrics_by_start,
+    sort_turn_metrics_by_start, Transcript,
 };
 use super::tasks_panel::{derive_task_events, TasksInbound, TasksPanel};
 use super::types::{PendingPermission, WsSender, MAX_MESSAGES_PER_SESSION};
@@ -511,7 +512,10 @@ struct PendingSecretDrop {
 
 pub struct SessionView {
     socket_lifetime: SocketLifetime,
-    messages: Vec<RenderedMessage>,
+    messages: Transcript,
+    /// Message grouping for `messages`, reused until the transcript, agent
+    /// type or viewer changes (see [`Transcript`]).
+    grouped: RefCell<Option<GroupingCache>>,
     ws_connected: bool,
     ws_sender: Option<WsSender>,
     /// Unacked `AgentInput` frames, resent on reconnect so inputs typed while
@@ -722,7 +726,8 @@ impl Component for SessionView {
 
         Self {
             socket_lifetime,
-            messages: vec![],
+            messages: Transcript::default(),
+            grouped: RefCell::default(),
             ws_connected: false,
             ws_sender: None,
             outbox: Outbox::default(),
@@ -1433,7 +1438,7 @@ impl Component for SessionView {
                 match autoscroll_transition(self.should_autoscroll, at_bottom) {
                     Some(next) => {
                         self.should_autoscroll = next;
-                        self.enforce_render_budget();
+                        self.enforce_render_budget(ctx.props().session.agent_type);
                         true
                     }
                     None => false,
@@ -1447,7 +1452,7 @@ impl Component for SessionView {
             }
             SessionViewMsg::JumpToLive => {
                 self.should_autoscroll = true;
-                self.enforce_render_budget();
+                self.enforce_render_budget(ctx.props().session.agent_type);
                 // rendered() will see the flag and snap to bottom on the
                 // next paint.
                 true
@@ -1501,11 +1506,7 @@ impl Component for SessionView {
         // pairs computed here are passed down to `MessageGroupRenderer` so
         // the renderer doesn't have to know its own position in the
         // transcript. See the PR 2 changelog entry for the rationale.
-        let groups = group_messages(
-            &self.messages,
-            ctx.props().session.agent_type,
-            ctx.props().current_user_id.as_deref(),
-        );
+        let groups = self.groups(ctx);
         let mut metrics_iter = self.turn_metrics.iter();
         let group_metrics: Vec<Option<TurnMetrics>> = groups
             .iter()
@@ -1703,7 +1704,7 @@ impl Component for SessionView {
                                     working_directory={ctx.props().session.working_directory.clone()}
                                 />
                                 {
-                                    groups.into_iter().enumerate().map(|(i, group)| {
+                                    groups.iter().cloned().enumerate().map(|(i, group)| {
                                         let key = group.key(i);
                                         let metrics = group_metrics.get(i).cloned().flatten();
                                         let thinking_start = thinking_starts.get(i).copied().unwrap_or(0);
@@ -1876,7 +1877,7 @@ impl SessionView {
             }
             WsEvent::HistoryBatch(messages, last_created_at, truncated) => {
                 if truncated {
-                    self.messages.clear();
+                    self.messages.edit().clear();
                     self.last_message_timestamp = None;
                 }
                 // A reconnect batch is the authoritative state since the last
@@ -1887,14 +1888,15 @@ impl SessionView {
                 self.muse_live_turn = MuseLiveTurn::default();
                 for message in &messages {
                     if let Ok(output) =
-                        serde_json::from_str::<shared::ClaudeOutput>(&message.content)
+                        serde_json::from_str::<shared::ClaudeOutput>(message.content())
                     {
-                        self.observe_claude_effort(&message.content, &output);
+                        self.observe_claude_effort(message.content(), &output);
                     }
                 }
-                self.messages.extend(messages);
-                deduplicate_secret_notices(&mut self.messages);
-                self.enforce_render_budget();
+                let buffer = self.messages.edit();
+                buffer.extend(messages);
+                deduplicate_secret_notices(buffer);
+                self.enforce_render_budget(ctx.props().session.agent_type);
                 // Set the reconnect-replay watermark to the server-assigned
                 // timestamp of the latest message in the batch (closes
                 // #784). Empty batches (or a pre-#784 backend that didn't
@@ -2210,7 +2212,7 @@ impl SessionView {
     /// referencing the file is deliberately NOT sent — the agent must never
     /// be told about a file that isn't fully on disk.
     fn push_upload_error(&mut self, err: &str) {
-        self.messages.push(RenderedMessage::local(
+        self.messages.edit().push(RenderedMessage::local(
             shared::LocalFrame::error(format!(
                 "File upload failed: {err} — your message was not sent"
             )),
@@ -2247,11 +2249,12 @@ impl SessionView {
                 ctx.props().on_activity.emit((session_key, tag, ts_ms));
             }
         }
-        self.messages = messages
+        let buffer = self.messages.edit();
+        *buffer = messages
             .into_iter()
             .map(|m| RenderedMessage::new(m.content, m.meta))
             .collect();
-        deduplicate_secret_notices(&mut self.messages);
+        deduplicate_secret_notices(buffer);
         self.last_message_timestamp = last_timestamp;
     }
 
@@ -2282,7 +2285,7 @@ impl SessionView {
             return;
         }
         match edit_stack_dispatch(
-            self.messages.iter().map(|message| &message.content),
+            self.messages.iter().map(|message| message.content()),
             ctx.props().session.agent_type,
             &self.edit_stack_items,
             self.edit_stack_active.is_some(),
@@ -2533,7 +2536,7 @@ impl SessionView {
         }) {
             return false;
         }
-        let tag = classify_output_msg_type(&output.content);
+        let tag = classify_output_msg_type(output.content());
         if let Some(shared::MessageSource::Agent { session_id, .. }) = output.source() {
             ctx.props().on_agent_message.emit((
                 ctx.props().portal.session_key(*session_id),
@@ -2541,8 +2544,8 @@ impl SessionView {
                 js_sys::Date::now(),
             ));
         }
-        if let Ok(claude_msg) = serde_json::from_str::<shared::ClaudeOutput>(&output.content) {
-            self.observe_claude_effort(&output.content, &claude_msg);
+        if let Ok(claude_msg) = serde_json::from_str::<shared::ClaudeOutput>(output.content()) {
+            self.observe_claude_effort(output.content(), &claude_msg);
             // Live task events use the server-assigned row timestamp when the
             // backend supplied it, falling back to browser time only for
             // pre-metadata/error frames.
@@ -2560,7 +2563,7 @@ impl SessionView {
                 .on_activity
                 .emit((Self::session_key(ctx), tag, activity_ts));
         }
-        reconcile_pending_sends(&mut self.pending_sends, tag, &output.content);
+        reconcile_pending_sends(&mut self.pending_sends, tag, output.content());
         if let Some((item_id, status)) = reconcile_edit_stack_activity(
             &mut self.edit_stack_active,
             &mut self.edit_stack_send_all,
@@ -2572,16 +2575,16 @@ impl SessionView {
         // Retire any active-tool strip entries this message completes: a
         // tool_result for the running tool, or a turn `result` that ends the
         // turn entirely. (The live heartbeat side-channel only adds entries.)
-        clear_completed_tools(&mut self.active_tools, &output.content);
-        super::helpers::clear_permission_checks(&mut self.permission_checks, &output.content);
+        clear_completed_tools(&mut self.active_tools, output.content());
+        super::helpers::clear_permission_checks(&mut self.permission_checks, output.content());
         // Generic status is superseded by any durable message. Muse live
         // records instead stay overlaid on their matching group until the
         // durable terminal record makes the whole turn replayable.
         self.ephemeral_status = None;
-        self.muse_live_turn.clear_if_terminal(&output.content);
+        self.muse_live_turn.clear_if_terminal(output.content());
 
-        self.messages.push(output);
-        self.enforce_render_budget();
+        self.messages.edit().push(output);
+        self.enforce_render_budget(ctx.props().session.agent_type);
         self.drain_edit_stack_queue_if_idle(ctx);
         true
     }
@@ -2590,12 +2593,14 @@ impl SessionView {
     /// [`live_render_budget`]). Called again when tailing resumes, so the
     /// backlog deferred while scrolled back is dropped while the view is
     /// pinned to the bottom, where the eviction can't be seen.
-    fn enforce_render_budget(&mut self) {
-        retain_newest_items_by_cost(
-            &mut self.messages,
-            live_render_budget(self.should_autoscroll),
-            |message| counts_toward_render_limit(&message.content),
-        );
+    fn enforce_render_budget(&mut self, agent_type: shared::AgentType) {
+        let budget = live_render_budget(self.should_autoscroll);
+        let counts = |message: &RenderedMessage| message.counts_toward_render_limit(agent_type);
+        // Only take the mutable path (which invalidates the cached grouping)
+        // when something will actually be trimmed.
+        if self.messages.iter().filter(|m| counts(m)).count() > budget {
+            retain_newest_items_by_cost(self.messages.edit(), budget, counts);
+        }
     }
 
     /// Trailing "active tool" strip: one live pill per currently-running tool,
@@ -2730,7 +2735,7 @@ impl SessionView {
                 link.send_message(SessionViewMsg::AttemptReconnect);
             }));
         } else {
-            self.messages.push(RenderedMessage::local(
+            self.messages.edit().push(RenderedMessage::local(
                 shared::LocalFrame::error(format!("Connection lost: {}", err)),
                 None,
             ));
@@ -2851,7 +2856,7 @@ impl SessionView {
         let show_creator = creator_count > 1;
         let busy = matches!(
             edit_stack_dispatch(
-                self.messages.iter().map(|message| &message.content),
+                self.messages.iter().map(|message| message.content()),
                 ctx.props().session.agent_type,
                 &self.edit_stack_items,
                 self.edit_stack_active.is_some(),
@@ -3064,6 +3069,40 @@ impl SessionView {
         if let Some(ref dispatcher) = self.tasks_dispatcher {
             dispatcher.emit(msg);
         }
+    }
+}
+
+/// What [`SessionView::groups`] was last computed from, and the result.
+struct GroupingCache {
+    revision: u64,
+    agent_type: shared::AgentType,
+    current_user_id: Option<String>,
+    groups: Rc<Vec<MessageGroup>>,
+}
+
+impl SessionView {
+    /// The transcript's message groups, regrouped only when the transcript,
+    /// agent type or viewer changed since the last call.
+    fn groups(&self, ctx: &Context<Self>) -> Rc<Vec<MessageGroup>> {
+        let agent_type = ctx.props().session.agent_type;
+        let current_user_id = ctx.props().current_user_id.as_deref();
+        let revision = self.messages.revision();
+        let mut cache = self.grouped.borrow_mut();
+        if let Some(cached) = cache.as_ref().filter(|cached| {
+            cached.revision == revision
+                && cached.agent_type == agent_type
+                && cached.current_user_id.as_deref() == current_user_id
+        }) {
+            return cached.groups.clone();
+        }
+        let groups = Rc::new(group_messages(&self.messages, agent_type, current_user_id));
+        *cache = Some(GroupingCache {
+            revision,
+            agent_type,
+            current_user_id: current_user_id.map(str::to_string),
+            groups: groups.clone(),
+        });
+        groups
     }
 }
 

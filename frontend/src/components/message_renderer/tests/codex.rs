@@ -261,10 +261,10 @@ fn traceless_reasoning_leaves_no_part_across_groups_or_without_completion() {
     ];
     for messages in [split, unfinished] {
         for message in rendered_vec(&messages) {
-            if classify_codex_category(&message.content).is_none() {
+            if classify_codex_category(message.content()).is_none() {
                 continue;
             }
-            if !message.content.contains("\"reasoning\"") {
+            if !message.content().contains("\"reasoning\"") {
                 continue;
             }
             let part = super::super::dispatch::render_identity_group_part(
@@ -278,7 +278,7 @@ fn traceless_reasoning_leaves_no_part_across_groups_or_without_completion() {
             assert!(
                 part.is_none(),
                 "traceless reasoning rendered a part: {}",
-                message.content
+                message.content()
             );
         }
     }

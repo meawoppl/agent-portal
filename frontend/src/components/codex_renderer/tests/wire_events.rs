@@ -107,7 +107,7 @@ fn event_item_started_context_compaction_no_longer_renders_raw() {
     };
     assert_eq!(id, "9edb35c0-6b6b-407f-84e3-d03a03050a2a");
     assert_eq!(
-        codex_event_item_id(json).as_deref(),
+        codex_event_item_id(&serde_json::from_str::<CodexEvent>(json).unwrap()).as_deref(),
         Some("9edb35c0-6b6b-407f-84e3-d03a03050a2a")
     );
 }
@@ -180,7 +180,7 @@ fn event_item_completed_collab_agent_tool_call() {
     assert!(prompt.as_deref().unwrap().contains("main branch"));
 
     assert_eq!(
-        codex_event_item_id(json).as_deref(),
+        codex_event_item_id(&serde_json::from_str::<CodexEvent>(json).unwrap()).as_deref(),
         Some("call_i1HC5jbTllWgsrMnJjqmRU05")
     );
 }

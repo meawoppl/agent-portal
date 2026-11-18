@@ -5,6 +5,7 @@
 mod assistant;
 mod classifier;
 mod codex;
+mod facts;
 mod fixtures;
 mod model_names;
 mod muse;
