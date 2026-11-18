@@ -26,6 +26,77 @@ pub(crate) use session_manager::{
     CompactionGate, CompactionPhase, EnqueueInput, LauncherRpcError, LauncherRpcKind,
 };
 
+/// Run a socket task's synchronous database work without stalling the runtime.
+///
+/// The socket loops handle each frame inline, and that handling checks out a
+/// pooled connection (`pool.get()` waits up to 30 s when the pool is
+/// exhausted) and can wait on row locks. On a worker thread, such a wait
+/// stalls every task scheduled there; with one worker per vCPU, two waiting
+/// frames freeze heartbeats, dashboards and health checks at once.
+/// `block_in_place` hands the worker's other tasks to another thread for the
+/// duration, while keeping this connection's frames in order and its borrowed
+/// state in place. A current-thread runtime (tests) has no other worker to
+/// hand them to, so the work runs inline there.
+pub(crate) fn run_blocking<R>(work: impl FnOnce() -> R) -> R {
+    match tokio::runtime::Handle::try_current().map(|handle| handle.runtime_flavor()) {
+        Ok(tokio::runtime::RuntimeFlavor::MultiThread) => tokio::task::block_in_place(work),
+        _ => work(),
+    }
+}
+
+#[cfg(test)]
+mod run_blocking_tests {
+    use std::time::{Duration, Instant};
+
+    /// How long the second task takes to finish while the first one blocks
+    /// for 600 ms, on a runtime with a single worker thread.
+    fn other_task_latency(use_run_blocking: bool) -> Duration {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async move {
+            let started = Instant::now();
+            let blocker = tokio::spawn(async move {
+                let wait = || std::thread::sleep(Duration::from_millis(600));
+                if use_run_blocking {
+                    super::run_blocking(wait);
+                } else {
+                    wait();
+                }
+            });
+            // Let the blocker occupy the only worker first.
+            tokio::task::yield_now().await;
+            let other = tokio::spawn(async move { started.elapsed() });
+            let latency = other.await.unwrap();
+            blocker.await.unwrap();
+            latency
+        })
+    }
+
+    #[test]
+    fn other_tasks_keep_running_while_one_blocks() {
+        assert!(other_task_latency(true) < Duration::from_millis(300));
+    }
+
+    /// Guards the test above: the same setup without `run_blocking` stalls,
+    /// so the fast path really is the hand-off and not scheduling luck.
+    #[test]
+    fn inline_blocking_stalls_the_only_worker() {
+        assert!(other_task_latency(false) >= Duration::from_millis(500));
+    }
+
+    #[test]
+    fn current_thread_runtime_runs_inline() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        assert_eq!(runtime.block_on(async { super::run_blocking(|| 7) }), 7);
+        assert_eq!(super::run_blocking(|| 8), 8, "outside any runtime");
+    }
+}
+
 /// Mint a port-forward data-plane ticket (#1506). Re-exported so the proxy
 /// socket's `Register` handler can hand one to a capable proxy without
 /// depending on the ticket module's internals.

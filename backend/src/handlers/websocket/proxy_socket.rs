@@ -125,13 +125,15 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
                     tx: &tx,
                     cancel: &cancel,
                 };
-                let flow = handle_proxy_message(
-                    proxy_msg,
-                    ctx,
-                    &mut session_key,
-                    &mut db_session_id,
-                    &mut connection_gen,
-                );
+                let flow = super::run_blocking(|| {
+                    handle_proxy_message(
+                        proxy_msg,
+                        ctx,
+                        &mut session_key,
+                        &mut db_session_id,
+                        &mut connection_gen,
+                    )
+                });
                 if flow.is_break() {
                     // Registration failed (auth bypass / wrong token / no
                     // token) — RegisterAck { success: false } has already
@@ -173,73 +175,76 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
         session_manager.close_data_plane_for_connection(key, gen);
     }
 
-    if !is_stale {
-        if let Some(session_id) = db_session_id {
-            match db_pool.get() {
-                Ok(mut conn) => {
-                    use crate::schema::sessions;
-                    // Read the prior status + name first so we only push on a
-                    // genuine active → disconnected drop (never a user-requested
-                    // stop, which is already Inactive) — mobile-apps plan §8.1.
-                    let prior: Option<(String, String)> = sessions::table
-                        .find(session_id)
-                        .select((sessions::status, sessions::session_name))
-                        .first::<(String, String)>(&mut conn)
-                        .ok();
-                    let updated = diesel::update(sessions::table.find(session_id))
-                        .set(sessions::status.eq(SessionStatus::Disconnected.as_str()))
-                        .execute(&mut conn);
-                    // The disconnected status is committed now, so every
-                    // member's refetch (the owner's included) reads it. The
-                    // launcher's own exit report can arrive before this.
-                    if matches!(updated, Ok(1)) {
-                        super::member_status::notify_members_not_running(
-                            &session_manager,
-                            &mut conn,
-                            session_id,
-                            None,
-                        );
-                    }
-                    if let Some((status, session_name)) = prior {
-                        if status == SessionStatus::Active.as_str() {
-                            app_state.notifications.emit(
-                                crate::push::NotificationEvent::SessionDisconnected {
-                                    session_id,
-                                    session_name,
-                                },
+    // Disconnect bookkeeping is synchronous DB work; see `run_blocking`.
+    super::run_blocking(|| {
+        if !is_stale {
+            if let Some(session_id) = db_session_id {
+                match db_pool.get() {
+                    Ok(mut conn) => {
+                        use crate::schema::sessions;
+                        // Read the prior status + name first so we only push on a
+                        // genuine active → disconnected drop (never a user-requested
+                        // stop, which is already Inactive) — mobile-apps plan §8.1.
+                        let prior: Option<(String, String)> = sessions::table
+                            .find(session_id)
+                            .select((sessions::status, sessions::session_name))
+                            .first::<(String, String)>(&mut conn)
+                            .ok();
+                        let updated = diesel::update(sessions::table.find(session_id))
+                            .set(sessions::status.eq(SessionStatus::Disconnected.as_str()))
+                            .execute(&mut conn);
+                        // The disconnected status is committed now, so every
+                        // member's refetch (the owner's included) reads it. The
+                        // launcher's own exit report can arrive before this.
+                        if matches!(updated, Ok(1)) {
+                            super::member_status::notify_members_not_running(
+                                &session_manager,
+                                &mut conn,
+                                session_id,
+                                None,
                             );
                         }
+                        if let Some((status, session_name)) = prior {
+                            if status == SessionStatus::Active.as_str() {
+                                app_state.notifications.emit(
+                                    crate::push::NotificationEvent::SessionDisconnected {
+                                        session_id,
+                                        session_name,
+                                    },
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!(
+                            "Failed to get database connection for session disconnect cleanup: {}",
+                            e
+                        );
                     }
                 }
-                Err(e) => {
-                    error!(
-                        "Failed to get database connection for session disconnect cleanup: {}",
-                        e
-                    );
+
+                // With the proxy gone there is no tunnel path, so any cached
+                // port-health verdict is meaningless — drop it and nudge chips
+                // back to neutral. The reconnect's replayed `ForwardOpen` probe
+                // re-seeds a fresh verdict (None → Some broadcasts again).
+                if session_manager.forget_forward_health_for_session(session_id) > 0 {
+                    if let Some(key) = session_key.as_ref() {
+                        session_manager.broadcast_to_web_clients(
+                            key,
+                            ServerToClient::ForwardsChanged {
+                                session_id,
+                                open_preview: false,
+                            },
+                        );
+                    }
                 }
             }
 
-            // With the proxy gone there is no tunnel path, so any cached
-            // port-health verdict is meaningless — drop it and nudge chips
-            // back to neutral. The reconnect's replayed `ForwardOpen` probe
-            // re-seeds a fresh verdict (None → Some broadcasts again).
-            if session_manager.forget_forward_health_for_session(session_id) > 0 {
-                if let Some(key) = session_key.as_ref() {
-                    session_manager.broadcast_to_web_clients(
-                        key,
-                        ServerToClient::ForwardsChanged {
-                            session_id,
-                            open_preview: false,
-                        },
-                    );
-                }
+            if let Some(key) = session_key {
+                session_manager.unregister_session(&key, connection_gen);
             }
         }
-
-        if let Some(key) = session_key {
-            session_manager.unregister_session(&key, connection_gen);
-        }
-    }
+    });
 
     // Drop our owned channel handle first so the send_task naturally
     // drains any queued messages (e.g. the auth-failure RegisterAck) and
