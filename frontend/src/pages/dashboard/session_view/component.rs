@@ -1888,9 +1888,9 @@ impl SessionView {
                 self.muse_live_turn = MuseLiveTurn::default();
                 for message in &messages {
                     if let Ok(output) =
-                        serde_json::from_str::<shared::ClaudeOutput>(&message.content)
+                        serde_json::from_str::<shared::ClaudeOutput>(message.content())
                     {
-                        self.observe_claude_effort(&message.content, &output);
+                        self.observe_claude_effort(message.content(), &output);
                     }
                 }
                 let buffer = self.messages.edit();
@@ -2285,7 +2285,7 @@ impl SessionView {
             return;
         }
         match edit_stack_dispatch(
-            self.messages.iter().map(|message| &message.content),
+            self.messages.iter().map(|message| message.content()),
             ctx.props().session.agent_type,
             &self.edit_stack_items,
             self.edit_stack_active.is_some(),
@@ -2536,7 +2536,7 @@ impl SessionView {
         }) {
             return false;
         }
-        let tag = classify_output_msg_type(&output.content);
+        let tag = classify_output_msg_type(output.content());
         if let Some(shared::MessageSource::Agent { session_id, .. }) = output.source() {
             ctx.props().on_agent_message.emit((
                 ctx.props().portal.session_key(*session_id),
@@ -2544,8 +2544,8 @@ impl SessionView {
                 js_sys::Date::now(),
             ));
         }
-        if let Ok(claude_msg) = serde_json::from_str::<shared::ClaudeOutput>(&output.content) {
-            self.observe_claude_effort(&output.content, &claude_msg);
+        if let Ok(claude_msg) = serde_json::from_str::<shared::ClaudeOutput>(output.content()) {
+            self.observe_claude_effort(output.content(), &claude_msg);
             // Live task events use the server-assigned row timestamp when the
             // backend supplied it, falling back to browser time only for
             // pre-metadata/error frames.
@@ -2563,7 +2563,7 @@ impl SessionView {
                 .on_activity
                 .emit((Self::session_key(ctx), tag, activity_ts));
         }
-        reconcile_pending_sends(&mut self.pending_sends, tag, &output.content);
+        reconcile_pending_sends(&mut self.pending_sends, tag, output.content());
         if let Some((item_id, status)) = reconcile_edit_stack_activity(
             &mut self.edit_stack_active,
             &mut self.edit_stack_send_all,
@@ -2575,13 +2575,13 @@ impl SessionView {
         // Retire any active-tool strip entries this message completes: a
         // tool_result for the running tool, or a turn `result` that ends the
         // turn entirely. (The live heartbeat side-channel only adds entries.)
-        clear_completed_tools(&mut self.active_tools, &output.content);
-        super::helpers::clear_permission_checks(&mut self.permission_checks, &output.content);
+        clear_completed_tools(&mut self.active_tools, output.content());
+        super::helpers::clear_permission_checks(&mut self.permission_checks, output.content());
         // Generic status is superseded by any durable message. Muse live
         // records instead stay overlaid on their matching group until the
         // durable terminal record makes the whole turn replayable.
         self.ephemeral_status = None;
-        self.muse_live_turn.clear_if_terminal(&output.content);
+        self.muse_live_turn.clear_if_terminal(output.content());
 
         self.messages.edit().push(output);
         self.enforce_render_budget(ctx.props().session.agent_type);
@@ -2856,7 +2856,7 @@ impl SessionView {
         let show_creator = creator_count > 1;
         let busy = matches!(
             edit_stack_dispatch(
-                self.messages.iter().map(|message| &message.content),
+                self.messages.iter().map(|message| message.content()),
                 ctx.props().session.agent_type,
                 &self.edit_stack_items,
                 self.edit_stack_active.is_some(),

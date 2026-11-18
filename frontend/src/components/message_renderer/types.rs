@@ -20,9 +20,11 @@ struct NoticeFrameKind {
 
 #[derive(Debug, Clone)]
 pub struct RenderedMessage {
-    /// Replace through the constructors rather than editing in place: logical
-    /// transcript identity is cached from this immutable wire frame.
-    pub content: String,
+    /// The wire frame. Private and never edited in place: the secret-request
+    /// id and the parse cache below are derived from it, and the cache is
+    /// shared with every clone. Build a new message through the constructors
+    /// instead.
+    content: String,
     pub meta: Option<shared::PortalMeta>,
     secret_request_id: Option<uuid::Uuid>,
     /// Lazily parsed [`FrameFacts`], shared by every clone (including the
@@ -100,6 +102,11 @@ impl RenderedMessage {
     /// the cached parse.
     pub fn counts_toward_render_limit(&self, agent_type: shared::AgentType) -> bool {
         self.facts(agent_type).counts_toward_render_limit
+    }
+
+    /// The wire frame this message renders.
+    pub fn content(&self) -> &str {
+        &self.content
     }
 
     pub(crate) fn secret_request_id(&self) -> Option<uuid::Uuid> {

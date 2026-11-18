@@ -112,7 +112,8 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
             if *category == GroupCategory::Muse {
                 let mut tree = crate::components::muse_renderer::TaskTree::default();
                 for message in messages {
-                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&message.content) {
+                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(message.content())
+                    {
                         tree.apply(&value);
                     }
                 }

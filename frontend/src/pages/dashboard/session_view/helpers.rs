@@ -105,7 +105,7 @@ fn codex_file_change_paths_for_item(messages: &[RenderedMessage], item_id: &str)
     let mut paths = Vec::new();
     let mut seen = HashSet::new();
     for message in messages {
-        let Ok(event) = serde_json::from_str::<CodexEvent>(&message.content) else {
+        let Ok(event) = serde_json::from_str::<CodexEvent>(message.content()) else {
             continue;
         };
         match event {
@@ -703,7 +703,7 @@ pub(super) fn reconcile_pending_sends(
                     if pending_has_client_msg_id(pending) {
                         return false;
                     }
-                    ClaudeMessage::parse(&pending.content)
+                    ClaudeMessage::parse(pending.content())
                         .ok()
                         .as_ref()
                         .and_then(extract_user_text)
@@ -1624,7 +1624,7 @@ mod tests {
             r#"{"type":"user","content":"hello"}"#,
         );
         assert_eq!(pending.len(), 1);
-        assert!(pending[0].content.contains("world"));
+        assert!(pending[0].content().contains("world"));
     }
 
     #[test]
