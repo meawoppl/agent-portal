@@ -1090,9 +1090,11 @@ pub fn dashboard_page() -> Html {
             if ui_state.show_history {
                 <div class="full-page-modal">
                     if let Some((user, session)) = ui_state.history_session.clone() {
+                        // Keyed per transcript; see the `HistorySession` route.
                         <HistoryTranscriptPage
-                            {user}
-                            {session}
+                            key={format!("{user}/{session}")}
+                            user={user.clone()}
+                            session={session.clone()}
                             on_back={close_history_session.clone()}
                             {current_user_id}
                             on_restored={on_history_restored.clone()}

@@ -139,8 +139,11 @@ fn switch(routes: Route) -> Html {
         Route::SecretAuthorize => html! { <LegacySecretsRoute /> },
         Route::SecretJob { id } => html! { <LegacySecretsRoute job_id={Some(id)} /> },
         Route::History => html! { <HistoryBrowserPage /> },
+        // Keyed by the transcript it shows: a route change between sessions
+        // remounts the page, so no state or in-flight fetch from the previous
+        // transcript can render under the new one.
         Route::HistorySession { user, session } => html! {
-            <HistoryTranscriptPage {user} {session} />
+            <HistoryTranscriptPage key={format!("{user}/{session}")} user={user.clone()} session={session.clone()} />
         },
         Route::Admin => html! { <AdminRoute /> },
         Route::Banned => html! { <BannedPage /> },
