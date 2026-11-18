@@ -19,13 +19,9 @@ use uuid::Uuid;
 /// backend's own `NaiveDateTime` serializer respectively. Shared by the REST
 /// `list_messages` pagination cursors and the WebSocket replay watermark.
 pub fn parse_iso_cursor(s: &str) -> Option<NaiveDateTime> {
-    // Trim trailing `Z` if present — `js_sys::Date::to_iso_string` emits
-    // `2026-05-17T12:34:56.789Z`, but `NaiveDateTime::parse_from_str` rejects
-    // the timezone marker on a naive timestamp.
-    let trimmed = s.strip_suffix('Z').unwrap_or(s);
-    NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M:%S%.f")
-        .or_else(|_| NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M:%S"))
+    chrono::DateTime::parse_from_rfc3339(&shared::time::normalize_iso_utc(s))
         .ok()
+        .map(|timestamp| timestamp.naive_utc())
 }
 
 /// The label to attribute a user by, preferring their chosen nickname (#1485).

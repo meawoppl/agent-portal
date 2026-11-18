@@ -1874,7 +1874,11 @@ impl SessionView {
                     .send_message(SessionViewMsg::ReceivedOutput(message));
                 false
             }
-            WsEvent::HistoryBatch(messages, last_created_at) => {
+            WsEvent::HistoryBatch(messages, last_created_at, truncated) => {
+                if truncated {
+                    self.messages.clear();
+                    self.last_message_timestamp = None;
+                }
                 // A reconnect batch is the authoritative state since the last
                 // watermark. Discard pre-disconnect Muse ephemera before
                 // replaying it; a terminal record may have landed while this

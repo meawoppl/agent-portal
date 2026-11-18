@@ -200,6 +200,7 @@ async fn turn_permission_delivery_and_reconnect_replay() {
     let ServerToClient::HistoryBatch {
         entries,
         last_created_at,
+        ..
     } = replay
     else {
         unreachable!()

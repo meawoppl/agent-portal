@@ -253,6 +253,9 @@ pub enum ServerToClient {
         entries: Vec<HistoryEntry>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         last_created_at: Option<String>,
+        /// This is the first batch of a replacement window after a large gap.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        truncated: bool,
     },
 
     /// Delivery-progress update for a previously-sent `AgentInput`, keyed by

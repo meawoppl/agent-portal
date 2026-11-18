@@ -41,12 +41,13 @@ pub(super) fn advance_replay_watermark(watermark: &mut Option<String>, candidate
     let Some(candidate) = candidate else {
         return;
     };
-    let Ok(next) = chrono::DateTime::parse_from_rfc3339(candidate) else {
+    let parse = |value: &str| {
+        chrono::DateTime::parse_from_rfc3339(&shared::time::normalize_iso_utc(value)).ok()
+    };
+    let Some(next) = parse(candidate) else {
         return;
     };
-    let previous = watermark
-        .as_deref()
-        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok());
+    let previous = watermark.as_deref().and_then(parse);
     if previous.is_none_or(|previous| next > previous) {
         *watermark = Some(candidate.to_owned());
     }
@@ -183,6 +184,15 @@ mod tests {
         }
         advance_replay_watermark(&mut watermark, Some("2026-11-12T00:08:01.000001Z"));
         assert_eq!(watermark.as_deref(), Some("2026-11-12T00:08:01.000001Z"));
+    }
+
+    #[test]
+    fn server_microsecond_timestamps_seed_and_advance_reconnect_watermark() {
+        let mut watermark = None;
+        advance_replay_watermark(&mut watermark, Some("2026-11-12T00:08:01.000001"));
+        advance_replay_watermark(&mut watermark, Some("2026-11-12T00:08:01.000002"));
+        advance_replay_watermark(&mut watermark, Some("2026-11-12T00:08:01.000001Z"));
+        assert_eq!(watermark.as_deref(), Some("2026-11-12T00:08:01.000002"));
     }
 
     #[test]

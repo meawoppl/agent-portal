@@ -87,10 +87,8 @@ async fn receive_browser_frame(
     None
 }
 
-/// The socket's verified binding and closed typed metadata frames are the
-/// only session authority here. Nested agent JSON IDs must never choose a
-/// different owner's rules. Resolve fresh matchers using a nonwaiting checkout:
-/// the replay producer can hold the last connection while waiting on this sink.
+/// The verified socket binding and typed metadata determine the owner.
+/// Raw agent content never chooses whose rules apply.
 type OutboundRules = (
     crate::secrets::redaction::Redactor,
     Option<crate::secrets::redaction::Redactor>,
@@ -102,11 +100,19 @@ fn outbound_rules(
     verified_session: Option<Uuid>,
     frame: &ServerToClient,
 ) -> Result<Option<OutboundRules>, crate::errors::AppError> {
-    use crate::{errors::AppError, schema::sessions, secrets::redaction};
     let session = match frame {
         ServerToClient::SessionUpdate { session_id, .. } => Some(*session_id),
         _ => verified_session,
     };
+    rules_for_session(pool, viewer, session)
+}
+
+fn rules_for_session(
+    pool: &crate::db::DbPool,
+    viewer: Uuid,
+    session: Option<Uuid>,
+) -> Result<Option<OutboundRules>, crate::errors::AppError> {
+    use crate::{errors::AppError, schema::sessions, secrets::redaction};
     let mut conn = pool.try_get().ok_or(AppError::ServiceUnavailable(
         "Content authorization is busy; reconnect shortly",
     ))?;
@@ -143,6 +149,7 @@ fn redact_outbound(
         .map_err(|_| AppError::ServiceUnavailable("Content redaction unavailable"))
 }
 
+#[cfg(test)]
 fn sanitize_outbound(
     pool: &crate::db::DbPool,
     viewer: Uuid,
@@ -181,6 +188,25 @@ fn sanitize_delivery(
     })
 }
 
+pub(super) fn sanitize_history(
+    pool: &crate::db::DbPool,
+    viewer: Uuid,
+    session: Option<Uuid>,
+    json: String,
+) -> Result<String, crate::errors::AppError> {
+    use crate::errors::AppError;
+    let Some((viewer_rules, owner_rules)) = rules_for_session(pool, viewer, session)? else {
+        return Ok(json);
+    };
+    let error = |_| AppError::ServiceUnavailable("History redaction unavailable");
+    let mut value = serde_json::from_str(&json).map_err(error)?;
+    viewer_rules.redact_transport_json(&mut value);
+    if let Some(rules) = owner_rules {
+        rules.redact_transport_json(&mut value);
+    }
+    serde_json::to_string(&value).map_err(error)
+}
+
 #[tracing::instrument(skip_all, fields(user, user_id = %user_id, session_name, session_id, computer, owner, owner_id))]
 pub async fn handle_web_client_socket(
     socket: WebSocket,
@@ -214,8 +240,7 @@ pub async fn handle_web_client_socket(
     let mut dashboard_jobs = tokio::task::JoinSet::new();
     let mut dashboard_ids = std::collections::HashSet::new();
     let mut compatibility_checked = false;
-    let mut pending_replay: Option<tokio::sync::mpsc::Receiver<std::io::Result<ServerToClient>>> =
-        None;
+    let mut pending_replay: Option<tokio::sync::mpsc::Receiver<std::io::Result<String>>> = None;
     let mut session_key: Option<SessionId> = None;
     let mut verified_session_id: Option<Uuid> = None;
     let mut pending_uploads: HashMap<String, PendingUpload> = HashMap::new();
@@ -267,11 +292,11 @@ pub async fn handle_web_client_socket(
                 match replayed {
                     Some(Ok(msg)) => {
                         if linked.as_ref().is_some_and(|auth| outbound_auth.check(std::time::Instant::now(), false, || auth.authorize(&app_state, shared::api::TokenScope::Read)).is_err()) { break; }
-                        let msg = match sanitize_outbound(&db_pool, user_id, verified_session_id, msg) {
+                        let msg = match sanitize_history(&db_pool, user_id, verified_session_id, msg) {
                             Ok(msg) => msg,
                             Err(_) => { warn!("{}: closing client until rules refresh", crate::markers::SECRET_REDACTION_FAILED); break; }
                         };
-                        if ws_sender.send(msg).await.is_err() { break; }
+                        if ws_sender.send_json(msg.into()).await.is_err() { break; }
                     }
                     Some(Err(error)) => { warn!("History replay failed: {error}"); break; }
                     None => pending_replay = None,
@@ -399,7 +424,7 @@ fn handle_web_client_message(
     session_key: &mut Option<SessionId>,
     verified_session_id: &mut Option<Uuid>,
     pending_uploads: &mut HashMap<String, PendingUpload>,
-    pending_replay: &mut Option<tokio::sync::mpsc::Receiver<std::io::Result<ServerToClient>>>,
+    pending_replay: &mut Option<tokio::sync::mpsc::Receiver<std::io::Result<String>>>,
 ) -> bool {
     let WebClientCtx {
         app_state,
@@ -657,7 +682,7 @@ fn handle_web_register(
     replay_after: Option<String>,
     session_key: &mut Option<SessionId>,
     verified_session_id: &mut Option<Uuid>,
-    pending_replay: &mut Option<tokio::sync::mpsc::Receiver<std::io::Result<ServerToClient>>>,
+    pending_replay: &mut Option<tokio::sync::mpsc::Receiver<std::io::Result<String>>>,
 ) -> bool {
     // A socket owns exactly one replay/presence registration. Re-registering
     // would orphan the previous subscription and its replay producer.
