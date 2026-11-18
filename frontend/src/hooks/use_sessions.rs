@@ -1,4 +1,4 @@
-//! Poll each connection independently, discarding results after its lifecycle ends.
+//! Fetch on user-channel invalidation, with an independent fallback per connection.
 use crate::{
     federation::{Federation, FederationAction},
     pages::dashboard::PortalSession,
@@ -104,18 +104,27 @@ pub fn use_sessions() -> UseSessions {
     // even when `reduce` returns the same state.
     let lists = use_reducer_eq(Lists::default);
     let refresh_tick = use_reducer(RefreshTick::default);
+    let revisions = super::use_client_websocket().session_list_revisions;
+    let request_fetch = use_mut_ref(|| None::<Callback<Option<ConnId>>>);
+    let seen_revisions = use_mut_ref(HashMap::new);
     {
         let lists = lists.clone();
         let federation = federation.clone();
+        let request_fetch = request_fetch.clone();
+        let seen_revisions = seen_revisions.clone();
         use_effect_with((portals.clone(), refresh_tick.0), move |(portals, _)| {
             let cancelled = Rc::new(Cell::new(false));
-            let busy = Rc::new(RefCell::new(HashSet::new()));
+            let busy = Rc::new(RefCell::new(HashMap::new()));
             let fetch = {
                 let portals = portals.clone();
                 let cancelled = cancelled.clone();
-                move || {
-                    for portal in portals.clone() {
-                        if !busy.borrow_mut().insert(portal.conn()) {
+                Callback::from(move |target: Option<ConnId>| {
+                    for portal in portals
+                        .iter()
+                        .filter(|portal| target.is_none_or(|id| id == portal.conn()))
+                    {
+                        if busy.borrow_mut().insert(portal.conn(), false).is_some() {
+                            busy.borrow_mut().insert(portal.conn(), true);
                             continue;
                         }
                         let (cancelled, busy, lists, federation) = (
@@ -124,46 +133,85 @@ pub fn use_sessions() -> UseSessions {
                             lists.clone(),
                             federation.clone(),
                         );
+                        let portal = portal.clone();
                         spawn_local(async move {
-                            let result = portal
-                                .fetch_json::<SessionsResponse>("/api/sessions", On401::Logout)
-                                .await;
-                            if cancelled.get() {
-                                return;
-                            }
-                            let (action, status) = match result {
-                                Ok(data) => (
-                                    ListAction::Received(
-                                        portal.conn(),
-                                        data.sessions
-                                            .into_iter()
-                                            .map(|info| PortalSession::new(portal.clone(), info))
-                                            .collect(),
-                                    ),
-                                    "Connected".to_string(),
-                                ),
-                                Err(error) => (
-                                    ListAction::Unreachable(portal.conn()),
-                                    format!("Unavailable: {error}"),
-                                ),
-                            };
-                            if portal.is_linked() {
-                                if let Some(registry) = &federation {
-                                    registry
-                                        .dispatch(FederationAction::Status(portal.conn(), status));
+                            loop {
+                                let result = portal
+                                    .fetch_json::<SessionsResponse>("/api/sessions", On401::Logout)
+                                    .await;
+                                if cancelled.get() {
+                                    return;
                                 }
+                                let (action, status) = match result {
+                                    Ok(data) => (
+                                        ListAction::Received(
+                                            portal.conn(),
+                                            data.sessions
+                                                .into_iter()
+                                                .map(|info| {
+                                                    PortalSession::new(portal.clone(), info)
+                                                })
+                                                .collect(),
+                                        ),
+                                        "Connected".to_string(),
+                                    ),
+                                    Err(error) => (
+                                        ListAction::Unreachable(portal.conn()),
+                                        format!("Unavailable: {error}"),
+                                    ),
+                                };
+                                if portal.is_linked() {
+                                    if let Some(registry) = &federation {
+                                        registry.dispatch(FederationAction::Status(
+                                            portal.conn(),
+                                            status,
+                                        ));
+                                    }
+                                }
+                                lists.dispatch(action);
+                                if !busy.borrow_mut().remove(&portal.conn()).unwrap_or_default() {
+                                    return;
+                                }
+                                busy.borrow_mut().insert(portal.conn(), false);
                             }
-                            lists.dispatch(action);
-                            busy.borrow_mut().remove(&portal.conn());
                         });
                     }
-                }
+                })
             };
-            fetch();
-            let timer = gloo::timers::callback::Interval::new(5_000, fetch);
+            fetch.emit(None);
+            *request_fetch.borrow_mut() = Some(fetch.clone());
+            let connections: Vec<_> = portals.iter().map(|portal| portal.conn()).collect();
+            let mut ticks = 0;
+            let timer = gloo::timers::callback::Interval::new(5_000, move || {
+                ticks = (ticks + 1) % 12;
+                if ticks == 0 {
+                    fetch.emit(None);
+                } else {
+                    let seen = seen_revisions.borrow();
+                    for &conn in &connections {
+                        if !seen.contains_key(&conn) {
+                            fetch.emit(Some(conn));
+                        }
+                    }
+                }
+            });
             move || {
                 cancelled.set(true);
+                request_fetch.borrow_mut().take();
                 drop(timer);
+            }
+        });
+    }
+    {
+        let request_fetch = request_fetch.clone();
+        use_effect_with(revisions, move |revisions| {
+            let previous = seen_revisions.replace(revisions.clone());
+            if let Some(fetch) = request_fetch.borrow().as_ref() {
+                for (conn, revision) in revisions {
+                    if previous.get(conn) != Some(revision) {
+                        fetch.emit(Some(*conn));
+                    }
+                }
             }
         });
     }

@@ -51,6 +51,7 @@ pub struct UseClientWebSocket {
     /// launcher connected, disconnected, or was evicted. Consumers hang a
     /// `use_effect_with` on it to refetch `/api/launchers` (#710).
     pub launcher_event_counter: u32,
+    pub session_list_revisions: HashMap<ConnId, u32>,
     /// Services monitor table (backend plus the user's launchers), from the
     /// newest `ServerToClient::ServiceStatsUpdate`.
     pub service_stats: Vec<ServiceStats>,
@@ -221,7 +222,7 @@ fn use_live_client_websocket() -> UseClientWebSocket {
                                     }
                                 }
                                 if portal.conn() == ConnId::HOME { shutdown_reason.set(Some("Connecting to server".into())); }
-                                match crate::browser_protocol::connect(&portal, |msg| {
+                                match crate::browser_protocol::connect(&portal, &[shared::protocol::CLIENT_CAPABILITY_SESSION_LIST], |msg| {
                                     handle_server_message(portal.conn(), msg, &shutdown_reason, &live);
                                 }).await {
                                         Ok((conn, config)) => {
@@ -273,6 +274,7 @@ fn use_live_client_websocket() -> UseClientWebSocket {
                                                     Err(_) => break,
                                                 }
                                             }
+                                            live.dispatch(client_websocket_events::ClientWsAction::SessionListDisconnected(portal.conn()));
                                             if portal.conn() == ConnId::HOME {
                                                 shutdown_reason.set(Some("Connection lost".into()));
                                             }
@@ -350,6 +352,12 @@ fn use_live_client_websocket() -> UseClientWebSocket {
             .collect(),
         launch_event_counter: live.launch_event_counter,
         launcher_event_counter: live.launcher_event_counter,
+        session_list_revisions: live
+            .session_list_revisions
+            .iter()
+            .filter(|(conn, _)| current.contains(conn))
+            .map(|(conn, rev)| (*conn, *rev))
+            .collect(),
         service_stats: live.service_stats.clone(),
         service_cpu_history: live
             .service_cpu_history

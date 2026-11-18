@@ -28,6 +28,7 @@ impl ConnectError {
 
 pub(crate) async fn connect(
     portal: &PortalClient,
+    capabilities: &[&str],
     mut on_seed: impl FnMut(ServerToClient),
 ) -> Result<(ws_bridge::yew_client::Connection<ClientEndpoint>, AppConfig), ConnectError> {
     // Use the originating PortalClient, preserving linked-account auth headers.
@@ -47,6 +48,7 @@ pub(crate) async fn connect(
     socket
         .send(ClientToServer::Hello {
             protocol_version: shared::protocol::PROTOCOL_VERSION,
+            capabilities: capabilities.iter().map(|name| (*name).to_owned()).collect(),
         })
         .await
         .map_err(|e| {

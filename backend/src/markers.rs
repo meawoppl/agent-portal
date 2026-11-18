@@ -226,6 +226,10 @@ pub const PLUGIN_COMMAND_RECORD_FAILED: &str = "PLUGIN_COMMAND_RECORD_FAILED";
 /// in progress. Collect the profiles and read them with `go tool pprof -top`.
 pub const HEAP_PROFILE_CAPTURED: &str = "HEAP_PROFILE_CAPTURED";
 
+/// The session list revision query or worker failed. Clients fall back to
+/// timed REST refresh until the next successful invalidation sweep.
+pub const SESSION_LIST_WATCH_FAILED: &str = "SESSION_LIST_WATCH_FAILED";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -255,6 +259,7 @@ mod tests {
         PERMISSION_CANCEL_PERSIST_FAILED,
         PLUGIN_COMMAND_RECORD_FAILED,
         MEMBER_STATUS_FANOUT_FAILED,
+        SESSION_LIST_WATCH_FAILED,
         HEAP_PROFILE_CAPTURED,
     ];
 

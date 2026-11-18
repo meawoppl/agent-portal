@@ -965,6 +965,143 @@ pub async fn broadcast_user_spend_updates(app_state: Arc<AppState>) {
     }
 }
 
+/// Check the durable session list once for all connected accounts. Only the
+/// account whose list changed receives an invalidation, and the existing
+/// authorized REST endpoint is the source of the list itself.
+pub async fn watch_session_lists(state: Arc<AppState>) {
+    use std::collections::HashMap;
+
+    let mut previous = HashMap::new();
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        interval.tick().await;
+        let users = state.session_manager.get_all_user_ids();
+        if users.is_empty() {
+            previous.clear();
+            continue;
+        }
+        let pool = state.db_pool.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            let mut conn = pool.get()?;
+            Ok::<_, anyhow::Error>(session_list_revisions(&mut conn, users)?)
+        })
+        .await;
+        match result {
+            Ok(Ok(current)) => {
+                for (user, revision) in &current {
+                    if previous.get(user) != Some(revision) {
+                        state
+                            .session_manager
+                            .broadcast_to_user(user, shared::ServerToClient::SessionListChanged);
+                    }
+                }
+                previous = current;
+            }
+            Ok(Err(error)) => tracing::warn!(
+                "{}: revision query failed: {error}",
+                crate::markers::SESSION_LIST_WATCH_FAILED
+            ),
+            Err(error) => tracing::error!(
+                "{}: worker failed: {error}",
+                crate::markers::SESSION_LIST_WATCH_FAILED
+            ),
+        }
+    }
+}
+
+fn session_list_revisions(
+    conn: &mut diesel::PgConnection,
+    users: Vec<uuid::Uuid>,
+) -> diesel::QueryResult<std::collections::HashMap<uuid::Uuid, String>> {
+    use diesel::prelude::*;
+    use diesel::sql_types::{Array, Text, Uuid as SqlUuid};
+
+    #[derive(QueryableByName)]
+    struct Revision {
+        #[diesel(sql_type = SqlUuid)]
+        user_id: uuid::Uuid,
+        #[diesel(sql_type = Text)]
+        digest: String,
+    }
+
+    // Leave frame-level activity and accounting out of the revision. The
+    // rail orders by last_messaged_at and gets metrics/spend on separate
+    // channels. A slow fallback refreshes other fields and older servers.
+    let revisions = diesel::sql_query(
+        "SELECT u.user_id,
+                md5(g.generation::text || ':' || COALESCE(
+                    string_agg(md5(ROW(s.id, s.user_id, s.session_name, s.session_key,
+                        s.working_directory, s.status, s.last_messaged_at, s.created_at,
+                        s.git_branch, m.role, s.hostname, s.launcher_id, s.pr_url,
+                        s.repo_url, s.open_prs, s.agent_type, s.client_version,
+                        s.scheduled_task_id, s.paused, s.claude_args, s.last_model,
+                        s.spawned_by, s.spawn_depth, s.forked_from_session_id,
+                        s.fork_point_turn_id)::text), '' ORDER BY s.id)
+                    FILTER (WHERE s.id IS NOT NULL), '')) AS digest
+         FROM unnest($1::uuid[]) AS u(user_id)
+         CROSS JOIN secrets_generation g
+         LEFT JOIN session_members m ON m.user_id = u.user_id
+         LEFT JOIN sessions s ON s.id = m.session_id AND s.status <> $2
+         WHERE g.id = 1
+         GROUP BY u.user_id, g.generation",
+    )
+    .bind::<Array<SqlUuid>, _>(users)
+    .bind::<Text, _>(shared::SessionStatus::Replaced.as_str())
+    .load::<Revision>(conn)?;
+    Ok(revisions
+        .into_iter()
+        .map(|row| (row.user_id, row.digest))
+        .collect())
+}
+
+#[cfg(test)]
+#[test]
+fn session_list_revision_tracks_membership_and_ignores_output_recency() {
+    use crate::schema::{session_members, sessions};
+    use diesel::prelude::*;
+
+    let Some(pool) = crate::test_support::shared_pool() else {
+        return;
+    };
+    pool.get()
+        .unwrap()
+        .test_transaction::<_, diesel::result::Error, _>(|conn| {
+            let owner = crate::test_support::insert_user(conn, "session-list-owner");
+            let viewer = crate::test_support::insert_user(conn, "session-list-viewer");
+            let session = crate::test_support::insert_session(conn, owner.id, "watch list");
+            let revision = |conn: &mut diesel::PgConnection| {
+                session_list_revisions(conn, vec![owner.id, viewer.id]).unwrap()
+            };
+            let before = revision(conn);
+            diesel::insert_into(session_members::table)
+                .values((
+                    session_members::session_id.eq(session.id),
+                    session_members::user_id.eq(viewer.id),
+                    session_members::role.eq("viewer"),
+                ))
+                .execute(conn)?;
+            let joined = revision(conn);
+            assert_eq!(joined[&owner.id], before[&owner.id]);
+            assert_ne!(joined[&viewer.id], before[&viewer.id]);
+
+            diesel::update(sessions::table.find(session.id))
+                .set(sessions::last_activity.eq(diesel::dsl::now))
+                .execute(conn)?;
+            assert_eq!(revision(conn), joined);
+            diesel::update(sessions::table.find(session.id))
+                .set(sessions::session_name.eq("renamed"))
+                .execute(conn)?;
+            assert_ne!(revision(conn)[&viewer.id], joined[&viewer.id]);
+            diesel::delete(
+                session_members::table.filter(session_members::session_id.eq(session.id)),
+            )
+            .execute(conn)?;
+            assert_eq!(revision(conn), before);
+            Ok(())
+        });
+}
+
 /// Purge expired device flow codes from the in-memory store
 pub async fn purge_expired_device_codes(app_state: Arc<AppState>) {
     let Some(store) = &app_state.device_flow_store else {

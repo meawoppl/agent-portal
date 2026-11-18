@@ -240,6 +240,7 @@ pub async fn handle_web_client_socket(
     let mut dashboard_jobs = tokio::task::JoinSet::new();
     let mut dashboard_ids = std::collections::HashSet::new();
     let mut compatibility_checked = false;
+    let mut session_list_updates = false;
     let mut pending_replay: Option<tokio::sync::mpsc::Receiver<std::io::Result<String>>> = None;
     let mut session_key: Option<SessionId> = None;
     let mut verified_session_id: Option<Uuid> = None;
@@ -304,6 +305,13 @@ pub async fn handle_web_client_socket(
             }
             msg = rx.recv_delivery(), if pending_replay.is_none() => {
                 let Some(msg) = msg else { break; };
+                let frame = match &msg {
+                    Delivery::Owned(value) => value,
+                    Delivery::Shared { value, .. } => value.as_ref(),
+                };
+                if matches!(frame, ServerToClient::SessionListChanged) && !session_list_updates {
+                    continue;
+                }
                 if linked.as_ref().is_some_and(|auth| outbound_auth.check(std::time::Instant::now(), false, || auth.authorize(&app_state, shared::api::TokenScope::Read)).is_err()) { break; }
                 let msg = match sanitize_delivery(&db_pool, user_id, verified_session_id, msg) {
                             Ok(msg) => msg,
@@ -323,7 +331,7 @@ pub async fn handle_web_client_socket(
                         // Negotiate inline: a rejection must reach the socket before
                         // closing, and no later pipelined mutation may dispatch.
                         let version = match &client_msg {
-                            ClientToServer::Hello { protocol_version } => Some(Some(*protocol_version)),
+                            ClientToServer::Hello { protocol_version, .. } => Some(Some(*protocol_version)),
                             ClientToServer::Register(fields) => Some(fields.protocol_version),
                             // An old dashboard can start without Register or Hello.
                             // Treat that as v1, never as whichever major is current.
@@ -333,13 +341,17 @@ pub async fn handle_web_client_socket(
                         if let Some(version) = version {
                             let error = shared::protocol::check_protocol_version(version, "browser").err();
                             compatibility_checked = error.is_none();
-                            if matches!(client_msg, ClientToServer::Hello { .. }) {
+                            if let ClientToServer::Hello { capabilities, .. } = &client_msg {
                                 let rejected = error.is_some();
+                                session_list_updates = capabilities.iter().any(|cap| cap == shared::protocol::CLIENT_CAPABILITY_SESSION_LIST);
                                 if ws_sender.send(ServerToClient::HelloAck {
                                     protocol_version: shared::protocol::PROTOCOL_VERSION,
                                     success: !rejected,
                                     error,
                                 }).await.is_err() || rejected { break; }
+                                if session_list_updates && tx.send(ServerToClient::SessionListChanged).is_err() {
+                                    break;
+                                }
                                 continue;
                             }
                             if let Some(message) = error {

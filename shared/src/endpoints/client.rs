@@ -151,7 +151,11 @@ pub enum ClientToServer {
         request: crate::api::DashboardRequest,
     },
     /// Negotiate before exposing any browser mutation sender.
-    Hello { protocol_version: u32 },
+    Hello {
+        protocol_version: u32,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        capabilities: Vec<String>,
+    },
 
     /// Register to receive updates for a session
     Register(RegisterFields),
@@ -321,6 +325,9 @@ pub enum ServerToClient {
     /// evicted). Push signal for the #710 live-dashboard direction: clients
     /// refetch `GET /api/launchers` instead of waiting for a page refresh.
     LaunchersChanged,
+
+    /// The authorized session list for this user should be fetched again.
+    SessionListChanged,
 
     /// Server is shutting down
     ServerShutdown {
