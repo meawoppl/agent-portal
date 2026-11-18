@@ -1,15 +1,17 @@
 use super::permissions::{handle_permission_response, replay_pending_permission};
 use super::replay::replay_history;
-use super::session_manager::{DedupVerdict, EnqueueInput, InputDeliveryState};
+use super::session_manager::{outbound::Delivery, DedupVerdict, EnqueueInput, InputDeliveryState};
 use super::uploads::{handle_file_upload_chunk, handle_file_upload_start, PendingUpload};
 use super::{SessionId, SessionManager, WebClientSender};
 use crate::handlers::session_access::is_session_mutator;
 use crate::AppState;
-use axum::extract::ws::WebSocket;
+use axum::extract::ws::{Message, Utf8Bytes, WebSocket};
 use diesel::prelude::*;
-use shared::{
-    ClientEndpoint, ClientToServer, PortalMessage, SendMode, ServerToClient, ServerToProxy,
+use futures_util::{
+    stream::{SplitSink, SplitStream},
+    SinkExt, StreamExt,
 };
+use shared::{ClientToServer, PortalMessage, SendMode, ServerToClient, ServerToProxy};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{error, info, warn};
@@ -46,18 +48,62 @@ impl OutboundAuthorization {
     }
 }
 
+struct BrowserWriter {
+    sink: SplitSink<WebSocket, Message>,
+    cancel: tokio_util::sync::CancellationToken,
+}
+
+impl BrowserWriter {
+    async fn send(&mut self, frame: ServerToClient) -> Result<(), ()> {
+        let json = serde_json::to_string(&frame).map_err(|_| ())?;
+        self.send_json(json.into()).await
+    }
+
+    async fn send_json(&mut self, json: Utf8Bytes) -> Result<(), ()> {
+        tokio::select! {
+            biased;
+            _ = self.cancel.cancelled() => Err(()),
+            result = tokio::time::timeout(
+                std::time::Duration::from_secs(15),
+                self.sink.send(Message::Text(json)),
+            ) => result.map_err(|_| ())?.map_err(|_| ()),
+        }
+    }
+}
+
+async fn receive_browser_frame(
+    reader: &mut SplitStream<WebSocket>,
+) -> Option<Result<ClientToServer, ws_bridge::DecodeError>> {
+    while let Some(Ok(frame)) = reader.next().await {
+        match frame {
+            Message::Text(text) => {
+                return Some(serde_json::from_str(text.as_str()).map_err(Into::into))
+            }
+            Message::Binary(_) => return Some(Err(ws_bridge::DecodeError::UnexpectedBinary)),
+            Message::Close(_) => return None,
+            Message::Ping(_) | Message::Pong(_) => {}
+        }
+    }
+    None
+}
+
 /// The socket's verified binding and closed typed metadata frames are the
 /// only session authority here. Nested agent JSON IDs must never choose a
 /// different owner's rules. Resolve fresh matchers using a nonwaiting checkout:
 /// the replay producer can hold the last connection while waiting on this sink.
-fn sanitize_outbound(
+type OutboundRules = (
+    crate::secrets::redaction::Redactor,
+    Option<crate::secrets::redaction::Redactor>,
+);
+
+fn outbound_rules(
     pool: &crate::db::DbPool,
     viewer: Uuid,
     verified_session: Option<Uuid>,
-    frame: ServerToClient,
-) -> Result<ServerToClient, crate::errors::AppError> {
+    frame: &ServerToClient,
+) -> Result<Option<OutboundRules>, crate::errors::AppError> {
     use crate::{errors::AppError, schema::sessions, secrets::redaction};
-    let session = match &frame {
+    let session = match frame {
         ServerToClient::SessionUpdate { session_id, .. } => Some(*session_id),
         _ => verified_session,
     };
@@ -77,10 +123,16 @@ fn sanitize_outbound(
     let owner_rules = owner
         .filter(|owner| *owner != viewer)
         .map(|owner| catalog.scoped_for(owner));
-    drop(conn);
-    if viewer_rules.is_empty() && owner_rules.as_ref().is_none_or(|rules| rules.is_empty()) {
-        return Ok(frame);
-    }
+    let has_rules =
+        !viewer_rules.is_empty() || owner_rules.as_ref().is_some_and(|rules| !rules.is_empty());
+    Ok(has_rules.then_some((viewer_rules, owner_rules)))
+}
+
+fn redact_outbound(
+    frame: &ServerToClient,
+    (viewer_rules, owner_rules): OutboundRules,
+) -> Result<ServerToClient, crate::errors::AppError> {
+    use crate::errors::AppError;
     let mut value = serde_json::to_value(frame)
         .map_err(|_| AppError::ServiceUnavailable("Content redaction unavailable"))?;
     viewer_rules.redact_transport_json(&mut value);
@@ -89,6 +141,44 @@ fn sanitize_outbound(
     }
     serde_json::from_value(value)
         .map_err(|_| AppError::ServiceUnavailable("Content redaction unavailable"))
+}
+
+fn sanitize_outbound(
+    pool: &crate::db::DbPool,
+    viewer: Uuid,
+    verified_session: Option<Uuid>,
+    frame: ServerToClient,
+) -> Result<ServerToClient, crate::errors::AppError> {
+    match outbound_rules(pool, viewer, verified_session, &frame)? {
+        Some(rules) => redact_outbound(&frame, rules),
+        None => Ok(frame),
+    }
+}
+
+fn sanitize_delivery(
+    pool: &crate::db::DbPool,
+    viewer: Uuid,
+    verified_session: Option<Uuid>,
+    frame: Delivery<ServerToClient>,
+) -> Result<Utf8Bytes, crate::errors::AppError> {
+    let (frame, json) = match &frame {
+        Delivery::Owned(frame) => (frame, None),
+        Delivery::Shared { value, json } => (value.as_ref(), Some(json)),
+    };
+    let redacted;
+    let frame = match outbound_rules(pool, viewer, verified_session, frame)? {
+        Some(rules) => {
+            redacted = redact_outbound(frame, rules)?;
+            &redacted
+        }
+        None => match json {
+            Some(json) => return Ok(json.clone()),
+            None => frame,
+        },
+    };
+    serde_json::to_string(frame).map(Into::into).map_err(|_| {
+        crate::errors::AppError::ServiceUnavailable("Content serialization unavailable")
+    })
 }
 
 #[tracing::instrument(skip_all, fields(user, user_id = %user_id, session_name, session_id, computer, owner, owner_id))]
@@ -112,13 +202,15 @@ pub async fn handle_web_client_socket(
     let session_manager = app_state.session_manager.clone();
     let db_pool = app_state.db_pool.clone();
     let initial_replay_limit = app_state.message_retention_count;
-    let conn = ws_bridge::server::into_connection::<ClientEndpoint>(socket);
-    let (ws_sender, mut ws_receiver) = conn.split();
-    let mut ws_sender = super::DeadlineSender(ws_sender);
+    let (sink, mut ws_receiver) = socket.split();
     let (tx, mut rx) =
         super::session_manager::conn_channel::<ServerToClient>(super::WEB_CLIENT_CHANNEL_CAPACITY);
 
     let queue_cancel = rx.cancellation_token();
+    let mut ws_sender = BrowserWriter {
+        sink,
+        cancel: queue_cancel.clone(),
+    };
     let mut dashboard_jobs = tokio::task::JoinSet::new();
     let mut dashboard_ids = std::collections::HashSet::new();
     let mut compatibility_checked = false;
@@ -185,16 +277,16 @@ pub async fn handle_web_client_socket(
                     None => pending_replay = None,
                 }
             }
-            msg = rx.recv(), if pending_replay.is_none() => {
+            msg = rx.recv_delivery(), if pending_replay.is_none() => {
                 let Some(msg) = msg else { break; };
                 if linked.as_ref().is_some_and(|auth| outbound_auth.check(std::time::Instant::now(), false, || auth.authorize(&app_state, shared::api::TokenScope::Read)).is_err()) { break; }
-                let msg = match sanitize_outbound(&db_pool, user_id, verified_session_id, msg) {
+                let msg = match sanitize_delivery(&db_pool, user_id, verified_session_id, msg) {
                             Ok(msg) => msg,
                             Err(_) => { warn!("{}: closing client until rules refresh", crate::markers::SECRET_REDACTION_FAILED); break; }
                         };
-                        if ws_sender.send(msg).await.is_err() { break; }
+                        if ws_sender.send_json(msg).await.is_err() { break; }
             }
-            result = ws_receiver.recv() => {
+            result = receive_browser_frame(&mut ws_receiver) => {
                 let Some(result) = result else { break; };
                 match result {
                     Ok(client_msg) => {
