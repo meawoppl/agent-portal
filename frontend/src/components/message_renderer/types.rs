@@ -5,7 +5,10 @@
 //! frontend-specific envelope and optimistic user messages synthesized before
 //! the proxy echoes a typed Claude user frame.
 
+use super::grouping::FrameFacts;
 use serde::{Deserialize, Deserializer, Serialize};
+use std::cell::OnceCell;
+use std::rc::Rc;
 
 // Probe the tag without allocating large agent bodies or buffering an
 // internally tagged enum. Serde recognizes escaped tags and arbitrary key order.
@@ -15,13 +18,27 @@ struct NoticeFrameKind {
     kind: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct RenderedMessage {
     /// Replace through the constructors rather than editing in place: logical
     /// transcript identity is cached from this immutable wire frame.
     pub content: String,
     pub meta: Option<shared::PortalMeta>,
     secret_request_id: Option<uuid::Uuid>,
+    /// Lazily parsed [`FrameFacts`], shared by every clone (including the
+    /// copies held in message groups), so a frame is parsed once rather than
+    /// by each grouping helper on every render. Keyed by the agent type it
+    /// was parsed for, since that decides how a frame parses.
+    facts: Rc<OnceCell<(shared::AgentType, Rc<FrameFacts>)>>,
+}
+
+/// Equality is the wire frame and its metadata; the facts cache is derived.
+impl PartialEq for RenderedMessage {
+    fn eq(&self, other: &Self) -> bool {
+        self.content == other.content
+            && self.meta == other.meta
+            && self.secret_request_id == other.secret_request_id
+    }
 }
 
 impl RenderedMessage {
@@ -48,6 +65,22 @@ impl RenderedMessage {
             content,
             meta,
             secret_request_id,
+            facts: Rc::default(),
+        }
+    }
+
+    /// Everything grouping derives from this frame, parsed once for
+    /// `agent_type` and cached. A request for another agent type (only test
+    /// and demo paths mix them) is computed without replacing the cache.
+    pub(super) fn facts(&self, agent_type: shared::AgentType) -> Rc<FrameFacts> {
+        match self.facts.get() {
+            Some((cached, facts)) if *cached == agent_type => facts.clone(),
+            Some(_) => Rc::new(FrameFacts::of(&self.content, agent_type)),
+            None => {
+                let facts = Rc::new(FrameFacts::of(&self.content, agent_type));
+                let _ = self.facts.set((agent_type, facts.clone()));
+                facts
+            }
         }
     }
 
@@ -60,6 +93,13 @@ impl RenderedMessage {
     /// let `{"type":"error"}` ship from three sites with no renderer at all.
     pub fn local(frame: shared::LocalFrame, meta: Option<shared::PortalMeta>) -> Self {
         Self::new(frame.to_json(), meta)
+    }
+
+    /// Whether this frame counts toward the live transcript's render budget
+    /// (`thinking_tokens` markers and command-lifecycle frames don't), from
+    /// the cached parse.
+    pub fn counts_toward_render_limit(&self, agent_type: shared::AgentType) -> bool {
+        self.facts(agent_type).counts_toward_render_limit
     }
 
     pub(crate) fn secret_request_id(&self) -> Option<uuid::Uuid> {

@@ -4,6 +4,7 @@
 //! component event loop. They mutate only the buffer passed to them, which
 //! makes the invariants easy to unit-test without mounting Yew.
 
+use crate::components::message_renderer::RenderedMessage;
 use shared::TurnMetrics;
 
 use super::types::{MAX_MESSAGES_PER_SESSION, MAX_MESSAGES_WHILE_SCROLLED_BACK};
@@ -14,6 +15,39 @@ use super::types::{MAX_MESSAGES_PER_SESSION, MAX_MESSAGES_WHILE_SCROLLED_BACK};
 /// counted tail without displacing it. Free items older than that tail are
 /// discarded too, preventing detached metadata from growing without bound.
 pub(super) use shared::render_budget::retain_newest_items_by_cost;
+
+/// The live message buffer.
+///
+/// Reads go through `Deref`; the only mutable access is [`Transcript::edit`],
+/// which bumps [`Transcript::revision`]. `SessionView` caches its message
+/// grouping by revision, so a render that doesn't follow a transcript change
+/// (a tool heartbeat, a status line, a parent re-render) reuses it instead of
+/// regrouping every message. There is deliberately no `DerefMut`, so a new
+/// mutation site can't forget to invalidate.
+#[derive(Default)]
+pub(super) struct Transcript {
+    messages: Vec<RenderedMessage>,
+    revision: u64,
+}
+
+impl Transcript {
+    pub(super) fn edit(&mut self) -> &mut Vec<RenderedMessage> {
+        self.revision += 1;
+        &mut self.messages
+    }
+
+    pub(super) fn revision(&self) -> u64 {
+        self.revision
+    }
+}
+
+impl std::ops::Deref for Transcript {
+    type Target = Vec<RenderedMessage>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.messages
+    }
+}
 
 /// Counted-message budget for the live buffer. While tailing, the normal
 /// render budget applies; while scrolled back, eviction is deferred up to a
@@ -89,6 +123,16 @@ pub(super) fn sort_turn_metrics_by_start(metrics: &mut [TurnMetrics]) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn transcript_revision_moves_only_on_edit() {
+        let mut transcript = super::Transcript::default();
+        let start = transcript.revision();
+        assert!(transcript.is_empty());
+        assert_eq!(transcript.revision(), start, "reads don't invalidate");
+        transcript.edit().clear();
+        assert_ne!(transcript.revision(), start);
+    }
+
     use super::*;
     use crate::test_fixtures::TurnMetricsBuilder;
     use uuid::Uuid;
