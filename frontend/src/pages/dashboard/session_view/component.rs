@@ -40,12 +40,13 @@ use super::forward_chips::ForwardChips;
 use super::forward_surface::ForwardSurface;
 use super::helpers::{
     autoscroll_transition, classify_output_msg_type, clear_completed_tools, edit_stack_dispatch,
-    enrich_codex_file_change_permission, ephemeral_summary, format_tool_elapsed, parse_iso_ms_utc,
+    enrich_codex_file_change_permission, ephemeral_summary, parse_iso_ms_utc,
     reconcile_edit_stack_activity, reconcile_pending_sends, running_tool_key,
     update_pending_send_delivery, upsert_tool_progress, ActiveToolProgress, ActivityTag,
     EditStackDispatch, MuseLiveTurn,
 };
 use super::input_bar::{InputBar, InputBarInbound};
+use super::live_status::{LiveStatus, LiveStatusSnapshot};
 use super::outbox::Outbox;
 use super::permission_handler::{
     build_permission_response, PermissionHandler, PermissionResponseKind, PermissionUpdate,
@@ -402,6 +403,10 @@ pub enum SessionViewMsg {
     PermissionAnswered(String, PermissionResponseKind),
     /// Handle WebSocket event from connection
     WsEvent(WsEvent),
+    /// The status strip registered its snapshot dispatcher.
+    LiveStatusRegistered(Callback<LiveStatusSnapshot>),
+    /// The status strip rendered and may have changed the tail height.
+    LiveStatusRendered,
     /// TasksPanel is mounted and handed us its inbound-event dispatcher.
     /// We store it so live `WsEvent::Output` task events and REST replay
     /// task events can be forwarded without the parent owning any task
@@ -583,20 +588,12 @@ pub struct SessionView {
     on_schedule_continuation: Callback<Uuid>,
     on_claude_login: Callback<()>,
     child_callbacks: ChildCallbacks,
-    /// Currently-running tools, fed by the ephemeral `WsEvent::ToolProgress`
-    /// heartbeat side-channel and rendered as a trailing "active tool" status
-    /// strip. Never persisted; pruned when a tool's result arrives or the turn
-    /// ends. Kept out of the memoized message-render props on purpose (see the
-    /// `helpers` tool-progress section).
-    active_tools: Vec<ActiveToolProgress>,
-    permission_checks: Vec<super::helpers::PermissionCheck>,
+    /// Keep the latest snapshot across events processed before registration.
+    live_status: LiveStatusSnapshot,
+    live_status_dispatcher: Option<Callback<LiveStatusSnapshot>>,
     /// Agent-driven progress bars (`agent-portal progress`), replaced wholesale
-    /// by each `WsEvent::AgentProgress` snapshot. Live-only, like `active_tools`.
+    /// by each `WsEvent::AgentProgress` snapshot.
     agent_progress: Vec<shared::api::ProgressBar>,
-    /// Latest non-Muse neutral ephemeral status line, shown as a transient
-    /// transcript-tail strip and cleared by durable output. Muse owns the
-    /// richer turn-local overlay below instead.
-    ephemeral_status: Option<String>,
     /// Muse's current ephemeral turn, replayed over the matching persisted
     /// task tree so live work updates the same card instead of a bottom bar.
     muse_live_turn: MuseLiveTurn,
@@ -756,10 +753,9 @@ impl Component for SessionView {
                 .callback(SessionViewMsg::ScheduleLimitContinuation),
             on_claude_login: ctx.link().callback(|_| SessionViewMsg::ShowClaudeLogin),
             child_callbacks: ChildCallbacks::new(ctx.link()),
-            active_tools: Vec::new(),
-            permission_checks: Vec::new(),
+            live_status: LiveStatusSnapshot::default(),
+            live_status_dispatcher: None,
             agent_progress: Vec::new(),
-            ephemeral_status: None,
             muse_live_turn: MuseLiveTurn::default(),
             forwards_refresh: 0,
             open_forward_on_load: false,
@@ -1028,6 +1024,20 @@ impl Component for SessionView {
                     repo_url,
                     open_prs,
                 ));
+                false
+            }
+            SessionViewMsg::LiveStatusRegistered(dispatcher) => {
+                self.live_status_dispatcher = Some(dispatcher);
+                self.publish_live_status();
+                false
+            }
+            SessionViewMsg::LiveStatusRendered => {
+                // The strip can change the tail height without rendering this view.
+                if self.should_autoscroll {
+                    if let Some(element) = self.messages_ref.cast::<Element>() {
+                        element.set_scroll_top(element.scroll_height());
+                    }
+                }
                 false
             }
             SessionViewMsg::TasksDispatcherRegistered(dispatcher) => {
@@ -1503,26 +1513,9 @@ impl Component for SessionView {
         });
         let on_schedule_continuation = &self.on_schedule_continuation;
 
-        // Per-turn metrics join (PR 2 of N): walk grouped messages in order
-        // and pair the Nth terminator card with `turn_metrics[N]`. The
-        // pairs computed here are passed down to `MessageGroupRenderer` so
-        // the renderer doesn't have to know its own position in the
-        // transcript. See the PR 2 changelog entry for the rationale.
-        let groups = self.groups(ctx);
-        let mut metrics_iter = self.turn_metrics.iter();
-        let group_metrics: Vec<Option<TurnMetrics>> = groups
-            .iter()
-            .map(|g| {
-                if group_is_turn_terminator(g, ctx.props().session.agent_type) {
-                    metrics_iter.next().cloned()
-                } else {
-                    None
-                }
-            })
-            .collect();
-        // Seed each thinking chip's odometer with the prior burst's max in
-        // its turn so tool-call splits don't re-race the count from 0.
-        let thinking_starts = thinking_chip_starts(&groups, ctx.props().session.agent_type);
+        let presentation = self.group_presentation(ctx);
+        let groups = &presentation.groups;
+        let on_claude_login = self.claude_login_callback(ctx);
         let live_muse_group = self.muse_live_turn.causation_id.as_deref().and_then(|id| {
             groups
                 .iter()
@@ -1708,15 +1701,16 @@ impl Component for SessionView {
                                 {
                                     groups.iter().cloned().enumerate().map(|(i, group)| {
                                         let key = group.key(i);
-                                        let metrics = group_metrics.get(i).cloned().flatten();
-                                        let thinking_start = thinking_starts.get(i).copied().unwrap_or(0);
+                                        let metrics = presentation.metric_indices[i]
+                                            .and_then(|index| self.turn_metrics.get(index))
+                                            .cloned();
+                                        let thinking_start = presentation.thinking_starts[i];
                                         let muse_live_events = (live_muse_group == Some(i)).then(|| self.muse_live_turn.events.clone());
-                                        let on_claude_login = self.claude_login_callback(ctx);
-                                        html! { <MessageGroupRenderer {key} group={group} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} model={ctx.props().session.last_model.clone()} current_user_id={ctx.props().current_user_id.clone()} turn_metrics={metrics} {thinking_start} {muse_live_events} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} {on_claude_login} /> }
+                                        html! { <MessageGroupRenderer {key} group={group} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} model={ctx.props().session.last_model.clone()} current_user_id={ctx.props().current_user_id.clone()} turn_metrics={metrics} {thinking_start} {muse_live_events} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} on_claude_login={on_claude_login.clone()} /> }
                                     }).collect::<Html>()
                                 }
                                 { for self.pending_sends.iter().enumerate().map(|(i, message)| {
-                                    html! { <MessageRenderer key={format!("p{}", i)} message={message.clone()} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} on_claude_login={self.claude_login_callback(ctx)} /> }
+                                    html! { <MessageRenderer key={format!("p{}", i)} message={message.clone()} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} on_claude_login={on_claude_login.clone()} /> }
                                 })}
                                 if let Some(tree) = unmatched_muse_tree {
                                     <div class="claude-message muse-message muse-task-card muse-live-card">
@@ -1728,14 +1722,10 @@ impl Component for SessionView {
                                         </div>
                                     </div>
                                 }
-                                { self.render_active_tools() }
-                                { for self.permission_checks.iter().map(|check| html! {
-                                    <div class="ephemeral-status-strip" role="status" title={check.tool_use_id.clone()}>
-                                        <span class="ephemeral-status-spinner" />
-                                        <span class="ephemeral-status-text">{ "Checking tool permission..." }</span>
-                                    </div>
-                                }) }
-                                { self.render_ephemeral_status() }
+                                <LiveStatus
+                                    on_register={self.child_callbacks.live_status_register.clone()}
+                                    on_rendered={self.child_callbacks.live_status_rendered.clone()}
+                                />
                             </div>
                             if !is_tailing {
                                 <button
@@ -2015,10 +2005,11 @@ impl SessionView {
                 // Ephemeral live status: refresh the running-tool strip. Never
                 // touches `messages` (no persistence, no replay watermark).
                 let key = running_tool_key(&tool_use_id, parent_tool_use_id.as_deref());
-                self.permission_checks
+                self.live_status
+                    .permission_checks
                     .retain(|check| check.tool_use_id != key);
                 upsert_tool_progress(
-                    &mut self.active_tools,
+                    &mut self.live_status.active_tools,
                     ActiveToolProgress {
                         key,
                         tool_name,
@@ -2027,7 +2018,8 @@ impl SessionView {
                         subagent_retry,
                     },
                 );
-                true
+                self.publish_live_status();
+                false
             }
             WsEvent::AgentProgress(bars) => {
                 if self.agent_progress == bars {
@@ -2042,10 +2034,11 @@ impl SessionView {
                 {
                     if let Some(status) = system.as_permission_check_status() {
                         super::helpers::update_permission_checks(
-                            &mut self.permission_checks,
+                            &mut self.live_status.permission_checks,
                             &status,
                         );
-                        return true;
+                        self.publish_live_status();
+                        return false;
                     }
                 }
                 if payload.get("type").and_then(|value| value.as_str()) == Some("prompt_suggestion")
@@ -2070,13 +2063,11 @@ impl SessionView {
                 // `messages` (no persistence, no replay watermark). A frame we
                 // can't summarize is ignored rather than clearing a good line.
                 // Muse was routed into its task-tree overlay above.
-                match ephemeral_summary(&payload) {
-                    Some(summary) => {
-                        self.ephemeral_status = Some(summary);
-                        true
-                    }
-                    None => false,
+                if let Some(summary) = ephemeral_summary(&payload) {
+                    self.live_status.ephemeral_status = Some(summary);
+                    self.publish_live_status();
                 }
+                false
             }
         }
     }
@@ -2278,7 +2269,8 @@ impl SessionView {
             self.dispatch_agent_input(serde_json::Value::String(content), None, None);
         self.edit_stack_active = Some((item.id, client_msg_id));
         self.edit_stack_error = None;
-        self.ephemeral_status = Some(format!("Sent edit-stack item: {}", item.title));
+        self.live_status.ephemeral_status = Some(format!("Sent edit-stack item: {}", item.title));
+        self.publish_live_status();
         true
     }
 
@@ -2577,12 +2569,20 @@ impl SessionView {
         // Retire any active-tool strip entries this message completes: a
         // tool_result for the running tool, or a turn `result` that ends the
         // turn entirely. (The live heartbeat side-channel only adds entries.)
-        clear_completed_tools(&mut self.active_tools, output.content());
-        super::helpers::clear_permission_checks(&mut self.permission_checks, output.content());
+        let tools_changed =
+            clear_completed_tools(&mut self.live_status.active_tools, output.content());
+        let check_count = self.live_status.permission_checks.len();
+        super::helpers::clear_permission_checks(
+            &mut self.live_status.permission_checks,
+            output.content(),
+        );
         // Generic status is superseded by any durable message. Muse live
         // records instead stay overlaid on their matching group until the
         // durable terminal record makes the whole turn replayable.
-        self.ephemeral_status = None;
+        let had_status = self.live_status.ephemeral_status.take().is_some();
+        if had_status || tools_changed || check_count != self.live_status.permission_checks.len() {
+            self.publish_live_status();
+        }
         self.muse_live_turn.clear_if_terminal(output.content());
 
         self.messages.edit().push(output);
@@ -2602,48 +2602,6 @@ impl SessionView {
         // when something will actually be trimmed.
         if self.messages.iter().filter(|m| counts(m)).count() > budget {
             retain_newest_items_by_cost(self.messages.edit(), budget, counts);
-        }
-    }
-
-    /// Trailing "active tool" strip: one live pill per currently-running tool,
-    /// showing "{tool} running — {elapsed}" and refreshed by the ephemeral
-    /// `WsEvent::ToolProgress` heartbeats. Renders nothing when idle. Lives at
-    /// the transcript tail rather than mutating historical tool cards so it
-    /// stays outside the memoized message-render pipeline (see the `helpers`
-    /// tool-progress section for the rationale).
-    fn render_active_tools(&self) -> Html {
-        if self.active_tools.is_empty() {
-            return html! {};
-        }
-        html! {
-            <div class="active-tool-strip">
-                { for self.active_tools.iter().map(|tool| {
-                    html! {
-                        <div class="active-tool-pill" key={tool.key.clone()}>
-                            <span class="active-tool-spinner" />
-                            <span class="active-tool-name">{ tool.tool_name.clone() }</span>
-                            // Which Task sub-agent is running (#1474) — a long
-                            // `Task` otherwise reads as an anonymous stall.
-                            if let Some(subagent) = tool.subagent_type.as_deref() {
-                                <span class="active-tool-subagent">{ subagent }</span>
-                            }
-                            <span class="active-tool-status">
-                                { format!("running — {}", format_tool_elapsed(tool.elapsed_seconds)) }
-                            </span>
-                            // Only while the sub-agent is retrying: says the
-                            // turn is flaky-but-progressing, not hung.
-                            if let Some(retry) = tool.subagent_retry.as_ref() {
-                                <span class="active-tool-retry">
-                                    { format!(
-                                        "retrying {}/{} — {}",
-                                        retry.attempt, retry.max_retries, retry.error_category
-                                    ) }
-                                </span>
-                            }
-                        </div>
-                    }
-                }) }
-            </div>
         }
     }
 
@@ -2698,19 +2656,9 @@ impl SessionView {
         }
     }
 
-    /// Transient live-status strip fed by the neutral `WsEvent::Ephemeral`
-    /// channel for agents without a richer live renderer. One line, replaced per
-    /// frame, cleared when a durable message arrives. Renders nothing when
-    /// idle. Deliberately minimal rather than a second transcript model.
-    fn render_ephemeral_status(&self) -> Html {
-        let Some(status) = self.ephemeral_status.as_deref() else {
-            return html! {};
-        };
-        html! {
-            <div class="ephemeral-status-strip">
-                <span class="ephemeral-status-spinner" />
-                <span class="ephemeral-status-text">{ status }</span>
-            </div>
+    fn publish_live_status(&self) {
+        if let Some(dispatcher) = &self.live_status_dispatcher {
+            dispatcher.emit(self.live_status.clone());
         }
     }
 
@@ -3074,23 +3022,26 @@ impl SessionView {
     }
 }
 
-/// What [`SessionView::groups`] was last computed from, and the result.
+/// What [`SessionView::group_presentation`] was last computed from, and the result.
 struct GroupingCache {
     revision: u64,
     agent_type: shared::AgentType,
     current_user_id: Option<String>,
-    groups: Rc<Vec<Rc<MessageGroup>>>,
+    presentation: Rc<GroupPresentation>,
+}
+
+struct GroupPresentation {
+    groups: Vec<Rc<MessageGroup>>,
+    thinking_starts: Vec<i64>,
+    // The Nth terminator is paired with the Nth metric in the current list.
+    // Cache positions so a metrics update can use the same group derivation.
+    metric_indices: Vec<Option<usize>>,
 }
 
 impl SessionView {
-    /// The transcript's message groups, regrouped only when the transcript,
-    /// agent type or viewer changed since the last call.
-    ///
-    /// A regroup reuses the previous `Rc` for every group that came out
-    /// unchanged (matched by its stable key), so only the group that actually
-    /// grew gets a new pointer. `MessageGroupRenderer` compares by pointer
-    /// first, so the untouched groups skip re-rendering without a deep compare.
-    fn groups(&self, ctx: &Context<Self>) -> Rc<Vec<Rc<MessageGroup>>> {
+    /// Reuse groups and their display metadata until the transcript, agent
+    /// type or viewer changes.
+    fn group_presentation(&self, ctx: &Context<Self>) -> Rc<GroupPresentation> {
         let agent_type = ctx.props().session.agent_type;
         let current_user_id = ctx.props().current_user_id.as_deref();
         let revision = self.messages.revision();
@@ -3100,23 +3051,41 @@ impl SessionView {
                 && cached.agent_type == agent_type
                 && cached.current_user_id.as_deref() == current_user_id
         }) {
-            return cached.groups.clone();
+            return cached.presentation.clone();
         }
+        // Reuse unchanged group pointers so their renderer props stay equal.
         let previous = cache
             .as_ref()
-            .map(|cached| cached.groups.as_slice())
+            .map(|cached| cached.presentation.groups.as_slice())
             .unwrap_or_default();
-        let groups = Rc::new(reuse_unchanged_groups(
+        let groups = reuse_unchanged_groups(
             previous,
             group_messages(&self.messages, agent_type, current_user_id),
-        ));
+        );
+        let thinking_starts = thinking_chip_starts(&groups, agent_type);
+        let mut metric_positions = 0..;
+        let metric_indices = groups
+            .iter()
+            .map(|group| {
+                if group_is_turn_terminator(group, agent_type) {
+                    metric_positions.next()
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let presentation = Rc::new(GroupPresentation {
+            groups,
+            thinking_starts,
+            metric_indices,
+        });
         *cache = Some(GroupingCache {
             revision,
             agent_type,
             current_user_id: current_user_id.map(str::to_string),
-            groups: groups.clone(),
+            presentation: presentation.clone(),
         });
-        groups
+        presentation
     }
 }
 
@@ -3141,6 +3110,8 @@ struct ChildCallbacks {
     upload_prompt: Callback<(String, Vec<String>, Option<ReasoningEffort>)>,
     secret_drop: Callback<(String, u64, Option<ReasoningEffort>)>,
     upload_error: Callback<String>,
+    live_status_register: Callback<Callback<LiveStatusSnapshot>>,
+    live_status_rendered: Callback<()>,
     tasks_register: Callback<Callback<TasksInbound>>,
 }
 
@@ -3177,6 +3148,8 @@ impl ChildCallbacks {
                 }
             }),
             upload_error: link.callback(SessionViewMsg::UploadError),
+            live_status_register: link.callback(SessionViewMsg::LiveStatusRegistered),
+            live_status_rendered: link.callback(|_| SessionViewMsg::LiveStatusRendered),
             tasks_register: link.callback(SessionViewMsg::TasksDispatcherRegistered),
         }
     }

@@ -20,6 +20,7 @@ mod forward_surface;
 pub(super) mod helpers;
 mod history;
 mod input_bar;
+mod live_status;
 mod outbox;
 mod permission_handler;
 mod plugin_selector;
