@@ -48,6 +48,7 @@ mod tests {
         message.handback_report = Some(claude_codes::HandbackReport {
             text: "user report".into(),
             warning: Some("Security review warning".into()),
+            tool_use_id: Some("toolu_handback".into()),
         });
         let report = TaskReport::from_notification(&message);
         assert_eq!(report.text, Some("user report"));
@@ -70,6 +71,7 @@ mod tests {
         message.handback_report = Some(claude_codes::HandbackReport {
             text: "must not expose a withheld report".into(),
             warning: Some("Report withheld by review".into()),
+            tool_use_id: None,
         });
         assert_eq!(TaskReport::from_notification(&message).text, None);
         assert_eq!(
