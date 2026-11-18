@@ -14,7 +14,7 @@
   <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2522 · Reset the live status strip when a reconnect replays history</text>
 
   <text x="55" y="100" font-size="34" fill="#e6e9f5">A tool that finished while the browser was offline kept its running pill forever;</text>
-  <text x="55" y="140" font-size="34" fill="#e6e9f5">a reconnect replay now resets the strip, and live tools return on their heartbeat.</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">every reconnect now resets the strip, and live tools return on their heartbeat.</text>
   <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
 
   <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
@@ -48,8 +48,8 @@
   </g>
   <g>
     <rect x="1040" y="410" width="880" height="150" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
-    <text x="1064" y="452" font-size="26" fill="#7aa2f7">Offline, then WsEvent::HistoryBatch</text>
-    <text x="1064" y="492" font-size="23" fill="#a9b1d6">muse_live_turn reset, as before</text>
+    <text x="1064" y="452" font-size="26" fill="#7aa2f7">Offline, then WsEvent::Connected</text>
+    <text x="1064" y="492" font-size="23" fill="#a9b1d6">alongside PermissionUpdate::Reset, before replay</text>
     <text x="1064" y="528" font-size="23" fill="#9ece6a">live_status = LiveStatusSnapshot::default()</text>
   </g>
   <line x1="1480" y1="560" x2="1480" y2="606" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
@@ -59,5 +59,5 @@
     <text x="1064" y="692" font-size="23" fill="#a9b1d6">a still-running tool reappears on ToolProgress</text>
   </g>
 
-  <text x="55" y="1172" font-size="22" fill="#565f89">Trade-off: a tool still running at reconnect disappears until its next heartbeat (a few seconds).</text>
+  <text x="55" y="1172" font-size="22" fill="#565f89">Trade-off: a tool still running at reconnect loses its pill until its next ToolProgress heartbeat.</text>
 </svg>
