@@ -317,6 +317,20 @@ fn use_live_client_websocket() -> UseClientWebSocket {
         });
     }
     let current: std::collections::HashSet<_> = portals.iter().map(|p| p.conn()).collect();
+    // Stable across renders: both are props of every mounted `SessionView`,
+    // and a fresh `Callback` never compares equal.
+    let dismiss_failure = {
+        let dispatcher = live.dispatcher();
+        use_callback((), move |key, ()| {
+            dispatcher.dispatch(client_websocket_events::ClientWsAction::DismissFailure(key))
+        })
+    };
+    let on_agent_auth_changed = {
+        let dispatcher = live.dispatcher();
+        use_callback((), move |(), ()| {
+            dispatcher.dispatch(client_websocket_events::ClientWsAction::AgentAuthChanged)
+        })
+    };
 
     UseClientWebSocket {
         shutdown_reason: (*shutdown_reason).clone(),
@@ -348,12 +362,7 @@ fn use_live_client_websocket() -> UseClientWebSocket {
             .filter(|(key, _)| current.contains(&key.conn))
             .map(|(key, failure)| (*key, failure.clone()))
             .collect(),
-        dismiss_failure: {
-            let live = live.clone();
-            Callback::from(move |key| {
-                live.dispatch(client_websocket_events::ClientWsAction::DismissFailure(key))
-            })
-        },
+        dismiss_failure,
         agent_auth_revision: live.agent_auth_revision,
         session_launches: live
             .session_launches
@@ -361,12 +370,7 @@ fn use_live_client_websocket() -> UseClientWebSocket {
             .filter(|(key, _)| current.contains(&key.conn))
             .map(|(key, count)| (*key, *count))
             .collect(),
-        on_agent_auth_changed: {
-            let live = live.clone();
-            Callback::from(move |()| {
-                live.dispatch(client_websocket_events::ClientWsAction::AgentAuthChanged)
-            })
-        },
+        on_agent_auth_changed,
     }
 }
 

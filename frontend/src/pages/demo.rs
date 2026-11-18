@@ -220,7 +220,7 @@ pub fn demo_page() -> Html {
                                                 agent_type={scenario.session.agent_type}
                                                 model={scenario.session.last_model.clone()}
                                                 current_user_id={Some(current_user_id.clone())}
-                                                continuation_statuses={HashMap::<Uuid, String>::new()}
+                                                continuation_statuses={std::rc::Rc::new(HashMap::<Uuid, String>::new())}
                                                 on_schedule_continuation={Callback::from(|_: Uuid| {})}
                                                 {thinking_start}
                                             />

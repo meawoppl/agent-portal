@@ -501,14 +501,22 @@ pub fn dashboard_page() -> Html {
     };
 
     // Session state callbacks
+    // `on_connected_change`, `on_activity`, `on_agent_message` and
+    // `on_branch_change` are props of every mounted `SessionView`. A fresh
+    // `Callback` never compares equal, so building them per render made every
+    // dashboard render (one per message, via `on_activity`'s consumers)
+    // re-render every open session. Memoize them on what they capture.
     let on_connected_change = {
-        let session_state = session_state.clone();
-        Callback::from(move |(session_id, connected): (SessionKey, bool)| {
-            session_state.dispatch(DashboardSessionAction::SetConnected {
-                session_id,
-                connected,
-            });
-        })
+        let dispatcher = session_state.dispatcher();
+        use_callback(
+            (),
+            move |(session_id, connected): (SessionKey, bool), ()| {
+                dispatcher.dispatch(DashboardSessionAction::SetConnected {
+                    session_id,
+                    connected,
+                });
+            },
+        )
     };
 
     let on_stop = {
@@ -593,54 +601,50 @@ pub fn dashboard_page() -> Html {
         })
     };
 
-    let on_activity = {
-        let activity_timestamps = (*activity_timestamps).clone();
-        Callback::from(
-            move |(session_id, tag, timestamp): (
-                SessionKey,
-                crate::pages::dashboard::session_view::ActivityTag,
-                f64,
-            )| {
-                activity_timestamps.push(session_id, tag, timestamp);
-            },
-        )
-    };
+    let on_activity = use_callback(
+        (*activity_timestamps).clone(),
+        move |(session_id, tag, timestamp): (
+            SessionKey,
+            crate::pages::dashboard::session_view::ActivityTag,
+            f64,
+        ),
+              activity_timestamps| {
+            activity_timestamps.push(session_id, tag, timestamp);
+        },
+    );
 
-    let on_agent_message = {
-        let broadcasts = (*agent_message_broadcasts).clone();
-        Callback::from(
-            move |(from_session_id, to_session_id, timestamp): (SessionKey, SessionKey, f64)| {
-                broadcasts.push(AgentMessageBroadcast {
-                    from_session_id,
-                    to_session_id,
-                    timestamp,
-                });
-            },
-        )
-    };
+    let on_agent_message = use_callback(
+        (*agent_message_broadcasts).clone(),
+        move |(from_session_id, to_session_id, timestamp): (SessionKey, SessionKey, f64),
+              broadcasts| {
+            broadcasts.push(AgentMessageBroadcast {
+                from_session_id,
+                to_session_id,
+                timestamp,
+            });
+        },
+    );
 
-    let on_branch_change = {
-        let set_sessions = sessions_hook.set_sessions.clone();
-        let sessions = sessions.clone();
-        Callback::from(
-            move |(session_id, branch, pr_url, repo_url, open_prs): (
-                SessionKey,
-                Option<String>,
-                Option<String>,
-                Option<String>,
-                Vec<shared::PrRef>,
-            )| {
-                let mut updated = sessions.clone();
-                if let Some(session) = updated.iter_mut().find(|s| s.key == session_id) {
-                    session.info.git_branch = branch;
-                    session.info.pr_url = pr_url;
-                    session.info.repo_url = repo_url;
-                    session.info.open_prs = open_prs;
-                }
-                set_sessions.emit(updated);
-            },
-        )
-    };
+    let on_branch_change = use_callback(
+        (sessions_hook.set_sessions.clone(), sessions.clone()),
+        move |(session_id, branch, pr_url, repo_url, open_prs): (
+            SessionKey,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Vec<shared::PrRef>,
+        ),
+              (set_sessions, sessions)| {
+            let mut updated = sessions.clone();
+            if let Some(session) = updated.iter_mut().find(|s| s.key == session_id) {
+                session.info.git_branch = branch;
+                session.info.pr_url = pr_url;
+                session.info.repo_url = repo_url;
+                session.info.open_prs = open_prs;
+            }
+            set_sessions.emit(updated);
+        },
+    );
 
     let attention = super::attention::use_attention(
         distinct_portals(home_portal.clone(), &sessions),

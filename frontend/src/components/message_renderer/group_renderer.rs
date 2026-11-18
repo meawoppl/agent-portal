@@ -4,6 +4,7 @@ use super::grouping::{
 };
 use super::local_timestamp;
 use std::collections::HashMap;
+use std::rc::Rc;
 use uuid::Uuid;
 use yew::prelude::*;
 
@@ -23,7 +24,7 @@ pub struct MessageGroupRendererProps {
     #[prop_or_default]
     pub turn_metrics: Option<shared::TurnMetrics>,
     #[prop_or_default]
-    pub continuation_statuses: HashMap<Uuid, String>,
+    pub continuation_statuses: Rc<HashMap<Uuid, String>>,
     #[prop_or_default]
     pub on_schedule_continuation: Callback<Uuid>,
     #[prop_or_default]
