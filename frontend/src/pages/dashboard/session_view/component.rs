@@ -1877,7 +1877,7 @@ impl SessionView {
             }
             WsEvent::HistoryBatch(messages, last_created_at, truncated) => {
                 if truncated {
-                    self.messages.clear();
+                    self.messages.edit().clear();
                     self.last_message_timestamp = None;
                 }
                 // A reconnect batch is the authoritative state since the last
