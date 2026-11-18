@@ -1463,9 +1463,9 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "claude-codes"
-version = "2.1.327"
+version = "2.1.328"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04bd41295bdc95b0f5fb7c6070bdcc2ee35a4cf0088ca5df07b21b8d13b1cb49"
+checksum = "165081151c3088ebd126f6610c80eb02d75b82337c0cb56320e29980ee290ff7"
 dependencies = [
  "base64 0.22.1",
  "chrono",
