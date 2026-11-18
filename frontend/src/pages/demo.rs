@@ -215,7 +215,7 @@ pub fn demo_page() -> Html {
                                         html! {
                                             <MessageGroupRenderer
                                                 {key}
-                                                group={group}
+                                                group={std::rc::Rc::new(group)}
                                                 session_id={scenario.session.id}
                                                 agent_type={scenario.session.agent_type}
                                                 model={scenario.session.last_model.clone()}

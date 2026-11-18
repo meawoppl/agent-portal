@@ -1,6 +1,8 @@
 use crate::components::agent_frame::{AgentFrame, AgentFrameKind, AgentFrameRegistry};
 use crate::components::codex_renderer::codex_event_item_id;
 
+use std::rc::Rc;
+
 use super::renderers::assistant_label;
 use super::types::{ClaudeMessage, RenderedMessage};
 
@@ -51,7 +53,10 @@ impl GroupCategory {
 }
 
 /// A group of messages to render together.
-#[derive(Debug, Clone, PartialEq)]
+/// `Eq` matters beyond tidiness: it lets `Rc<MessageGroup>` compare by
+/// pointer before comparing contents, which is what keeps an unchanged
+/// group's props comparison O(1) when the transcript re-renders.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MessageGroup {
     /// A single message that doesn't classify into any group category.
     /// Kept as a distinct variant (rather than a one-element `Grouped`) so
@@ -537,11 +542,14 @@ pub fn group_is_turn_terminator(group: &MessageGroup, agent_type: shared::AgentT
 /// starts from 0 again. Callers clamp the seed to the chip's own target,
 /// so a marker stream that ever restarts low degrades to a static display
 /// rather than a backwards animation.
-pub fn thinking_chip_starts(groups: &[MessageGroup], agent_type: shared::AgentType) -> Vec<i64> {
+pub fn thinking_chip_starts<G: std::borrow::Borrow<MessageGroup>>(
+    groups: &[G],
+    agent_type: shared::AgentType,
+) -> Vec<i64> {
     let mut running_max = 0i64;
     groups
         .iter()
-        .map(|group| match group {
+        .map(|group| match group.borrow() {
             MessageGroup::IdentityGroup {
                 category: GroupCategory::Thinking,
                 messages,
@@ -552,7 +560,7 @@ pub fn thinking_chip_starts(groups: &[MessageGroup], agent_type: shared::AgentTy
                 start
             }
             _ => {
-                if group_is_turn_terminator(group, agent_type) {
+                if group_is_turn_terminator(group.borrow(), agent_type) {
                     running_max = 0;
                 }
                 0
@@ -571,6 +579,30 @@ fn is_transcript_noise(frame: &AgentFrame) -> bool {
         }
         _ => false,
     }
+}
+
+/// Share each freshly grouped `MessageGroup` that is unchanged from the
+/// previous grouping, matched by its stable key, by reusing the previous `Rc`.
+/// Renderers compare group props by pointer first, so a regroup after one new
+/// message re-renders only the group that changed (and any new one) instead
+/// of deep-comparing every group.
+pub fn reuse_unchanged_groups(
+    previous: &[Rc<MessageGroup>],
+    fresh: Vec<MessageGroup>,
+) -> Vec<Rc<MessageGroup>> {
+    let previous: std::collections::HashMap<_, _> = previous
+        .iter()
+        .enumerate()
+        .map(|(i, group)| (group.key(i), group))
+        .collect();
+    fresh
+        .into_iter()
+        .enumerate()
+        .map(|(i, group)| match previous.get(&group.key(i)) {
+            Some(old) if ***old == group => Rc::clone(old),
+            _ => Rc::new(group),
+        })
+        .collect()
 }
 
 /// Walk `messages` and collapse consecutive same-category runs into

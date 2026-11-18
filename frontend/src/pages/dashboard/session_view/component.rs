@@ -8,7 +8,9 @@
 //! `helpers.rs`; task-event derivation lives alongside its consumer in
 //! `tasks_panel.rs`.
 
-use crate::components::message_renderer::{MessageGroup, MessageRenderer, RenderedMessage};
+use crate::components::message_renderer::{
+    reuse_unchanged_groups, MessageGroup, MessageRenderer, RenderedMessage,
+};
 use crate::components::{
     group_is_turn_terminator, group_messages, thinking_chip_starts, ForkDialog,
     MessageGroupRenderer,
@@ -3077,13 +3079,18 @@ struct GroupingCache {
     revision: u64,
     agent_type: shared::AgentType,
     current_user_id: Option<String>,
-    groups: Rc<Vec<MessageGroup>>,
+    groups: Rc<Vec<Rc<MessageGroup>>>,
 }
 
 impl SessionView {
     /// The transcript's message groups, regrouped only when the transcript,
     /// agent type or viewer changed since the last call.
-    fn groups(&self, ctx: &Context<Self>) -> Rc<Vec<MessageGroup>> {
+    ///
+    /// A regroup reuses the previous `Rc` for every group that came out
+    /// unchanged (matched by its stable key), so only the group that actually
+    /// grew gets a new pointer. `MessageGroupRenderer` compares by pointer
+    /// first, so the untouched groups skip re-rendering without a deep compare.
+    fn groups(&self, ctx: &Context<Self>) -> Rc<Vec<Rc<MessageGroup>>> {
         let agent_type = ctx.props().session.agent_type;
         let current_user_id = ctx.props().current_user_id.as_deref();
         let revision = self.messages.revision();
@@ -3095,7 +3102,14 @@ impl SessionView {
         }) {
             return cached.groups.clone();
         }
-        let groups = Rc::new(group_messages(&self.messages, agent_type, current_user_id));
+        let previous = cache
+            .as_ref()
+            .map(|cached| cached.groups.as_slice())
+            .unwrap_or_default();
+        let groups = Rc::new(reuse_unchanged_groups(
+            previous,
+            group_messages(&self.messages, agent_type, current_user_id),
+        ));
         *cache = Some(GroupingCache {
             revision,
             agent_type,

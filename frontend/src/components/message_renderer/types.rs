@@ -43,6 +43,8 @@ impl PartialEq for RenderedMessage {
     }
 }
 
+impl Eq for RenderedMessage {}
+
 impl RenderedMessage {
     /// Wrap an already-serialized frame. Use this for **foreign** frames only
     /// — agent JSON off the wire or replayed from the database, which is opaque
