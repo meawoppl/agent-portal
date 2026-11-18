@@ -121,7 +121,6 @@ pub fn use_sessions() -> UseSessions {
                     for portal in portals
                         .iter()
                         .filter(|portal| target.is_none_or(|id| id == portal.conn()))
-                        .cloned()
                     {
                         if busy.borrow_mut().insert(portal.conn(), false).is_some() {
                             busy.borrow_mut().insert(portal.conn(), true);
@@ -133,6 +132,7 @@ pub fn use_sessions() -> UseSessions {
                             lists.clone(),
                             federation.clone(),
                         );
+                        let portal = portal.clone();
                         spawn_local(async move {
                             loop {
                                 let result = portal

@@ -274,6 +274,7 @@ impl Reducible for ClientWsState {
                 next.session_failures.remove(&session);
             }
             ClientWsAction::ForgetConn(conn) => {
+                next.session_list_revisions.remove(&conn);
                 next.session_failures.retain(|key, _| key.conn != conn);
                 next.session_launches.retain(|key, _| key.conn != conn);
             }
