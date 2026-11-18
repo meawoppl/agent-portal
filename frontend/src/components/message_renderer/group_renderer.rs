@@ -46,8 +46,9 @@ pub struct MessageGroupRendererProps {
     /// so the one card advances live without writing token deltas to history.
     /// Shared with `MuseLiveTurn` (and `Value` is `Eq`), so a render that
     /// didn't add a delta compares this by pointer instead of walking it.
+    /// `None` for every group but the live one, so they allocate nothing.
     #[prop_or_default]
-    pub muse_live_events: Rc<Vec<serde_json::Value>>,
+    pub muse_live_events: Option<Rc<Vec<serde_json::Value>>>,
 }
 
 /// Whether a portal message is a proxy reconnect notice. These are hidden from
@@ -144,7 +145,11 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
                 // Durable → persisted messages, Ephemeral → this overlay.
                 // Applying both sets cannot double-count output chunks unless
                 // that classifier invariant changes.
-                for event in props.muse_live_events.iter() {
+                for event in props
+                    .muse_live_events
+                    .iter()
+                    .flat_map(|events| events.iter())
+                {
                     tree.apply(event);
                 }
                 // Nothing structural and nothing to footnote — a group of
