@@ -95,6 +95,9 @@ impl<T> ConnSender<T> {
 }
 impl<T: OutboundMessage> ConnSender<T> {
     pub fn send(&self, value: T) -> Result<(), mpsc::error::SendError<T>> {
+        if self.cancel.is_cancelled() {
+            return Err(mpsc::error::SendError(value));
+        }
         let size = value.outbound_bytes().ok();
         self.enqueue(Delivery::Owned(value), size)
             .map_err(|value| match value {
@@ -104,6 +107,8 @@ impl<T: OutboundMessage> ConnSender<T> {
     }
 
     pub(crate) fn send_shared(&self, value: Arc<T>, json: Utf8Bytes) -> Result<(), ()> {
+        // Count each outstanding delivery even when the backing bytes are
+        // shared. Many stalled viewers can all require redacted copies later.
         let size = json.len();
         self.enqueue(Delivery::Shared { value, json }, Some(size))
             .map_err(|_| ())
