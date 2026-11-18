@@ -15,7 +15,7 @@ use yew::prelude::*;
 
 use dispatch::FrameRenderContext;
 pub use group_renderer::MessageGroupRenderer;
-pub use grouping::{group_is_turn_terminator, group_messages, thinking_chip_starts};
+pub use grouping::{group_is_turn_terminator, group_messages, thinking_chip_starts, MessageGroup};
 
 /// Format the typed sidecar's display clock as local time.
 /// Takes an already-extracted timestamp rather than raw
