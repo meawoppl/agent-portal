@@ -305,7 +305,14 @@ fn archive_one_session(
     conn.transaction(|conn| {
         crate::secrets::expunge::archive_session_lock(conn, session.id)
             .map_err(|_| anyhow::anyhow!("Archive fencing unavailable"))?;
-        archive_one_session_inner(conn, runtime, session)
+        archive_one_session_inner(conn, runtime, session)?;
+        // Publish the archive watermark before releasing its per-session fence.
+        use diesel::prelude::*;
+        use schema::sessions;
+        diesel::update(sessions::table.find(session.id))
+            .set(sessions::archived_at.eq(session.last_activity))
+            .execute(conn)?;
+        Ok(())
     })
 }
 
@@ -791,12 +798,7 @@ pub(crate) fn ensure_session_archived(
         return true;
     }
     match archive_one_session(conn, runtime, &session) {
-        Ok(()) => {
-            let _ = diesel::update(sessions::table.find(session.id))
-                .set(sessions::archived_at.eq(session.last_activity))
-                .execute(conn);
-            true
-        }
+        Ok(()) => true,
         Err(e) => {
             runtime.stats.record_failure(&e.to_string());
             tracing::error!("{SESSION_ARCHIVE_FAILED} session={}: {e}", session.id);

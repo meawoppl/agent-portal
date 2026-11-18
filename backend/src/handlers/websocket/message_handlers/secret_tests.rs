@@ -52,6 +52,7 @@ fn publish(
             session_manager: &state.session_manager,
             session_key: &Some(session.session_key.clone().into()),
             db_session_id: Some(session.id),
+            owner_id: Some(session.user_id),
             db_pool: &state.db_pool,
             notifications,
             tx,
@@ -384,4 +385,50 @@ async fn rolled_back_task_notification_does_not_double_count_subagent_usage_on_r
     );
     assert_eq!(state.session_manager.subagent_tokens(session.id), 11);
     assert_eq!(count(&state, session.id), 1);
+}
+
+#[tokio::test]
+async fn recent_output_preserves_activity_until_an_archive_covers_it() {
+    use crate::schema::sessions;
+
+    let Some((_db, state, session)) = fixture().await else {
+        return;
+    };
+    let (tx, _proxy) = super::super::conn_channel(16);
+    let (notifications, _pushes) = crate::push::channel();
+    let recent = chrono::Utc::now().naive_utc() - chrono::Duration::seconds(1);
+    let activity = || {
+        sessions::table
+            .find(session.id)
+            .select(sessions::last_activity)
+            .first::<chrono::NaiveDateTime>(&mut state.conn().unwrap())
+            .unwrap()
+    };
+    diesel::update(sessions::table.find(session.id))
+        .set(sessions::last_activity.eq(recent))
+        .execute(&mut state.conn().unwrap())
+        .unwrap();
+    let before = activity();
+    let publish_frame = |seq| {
+        publish(
+            &state,
+            &session,
+            &tx,
+            &notifications,
+            seq,
+            AgentType::Codex,
+            serde_json::json!({"type":"item.updated"}),
+        );
+    };
+    publish_frame(1);
+    assert_eq!(activity(), before);
+    assert_eq!(count(&state, session.id), 1);
+
+    diesel::update(sessions::table.find(session.id))
+        .set(sessions::archived_at.eq(Some(before)))
+        .execute(&mut state.conn().unwrap())
+        .unwrap();
+    publish_frame(2);
+    assert!(activity() > before);
+    assert_eq!(count(&state, session.id), 2);
 }
