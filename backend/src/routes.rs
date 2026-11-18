@@ -22,6 +22,41 @@ use tower_http::cors::{Any, CorsLayer};
 use crate::handlers;
 use crate::AppState;
 
+/// Compress ordinary JSON reads once the response has passed redaction.
+async fn compress_json_reads(request: Request, next: Next) -> Response {
+    use axum::http::{Extensions, HeaderMap, Method, StatusCode, Version};
+    use tower::{Layer, ServiceExt};
+    use tower_http::compression::predicate::{Predicate, SizeAbove};
+
+    let path = request.uri().path();
+    if request.method() != Method::GET
+        || !path.starts_with("/api/")
+        || ["/api/secrets", "/api/auth/", "/api/agent/"]
+            .iter()
+            .any(|prefix| path.starts_with(prefix))
+    {
+        return next.run(request).await;
+    }
+    let json = |_: StatusCode, _: Version, headers: &HeaderMap, _: &Extensions| {
+        headers
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| {
+                matches!(
+                    value.split(';').next(),
+                    Some("application/json" | "application/problem+json")
+                )
+            })
+    };
+    let service = tower_http::compression::CompressionLayer::new()
+        .compress_when(SizeAbove::new(1024).and(json))
+        .layer(next);
+    match service.oneshot(request).await {
+        Ok(response) => response.map(axum::body::Body::new),
+        Err(never) => match never {},
+    }
+}
+
 pub const ROOT: &str = "/";
 pub const DASHBOARD: &str = "/dashboard";
 pub const BANNED: &str = "/banned";
@@ -666,6 +701,7 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
             app_state_for_redaction,
             crate::secrets::redaction::http_middleware,
         ))
+        .layer(axum::middleware::from_fn(compress_json_reads))
         .layer(CookieManagerLayer::new())
         .layer(cors)
         // Outermost: requests for `{port}--{session}.{forward domain}` hosts
@@ -694,6 +730,43 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
 #[cfg(test)]
 mod tests {
     use super::is_content_hashed_asset;
+
+    #[tokio::test]
+    async fn compression_negotiates_only_for_ordinary_json_reads() {
+        use super::*;
+        use axum::body::Body;
+        use tower::ServiceExt;
+
+        let app = Router::new()
+            .route("/api/sessions", get(|| async { Json("x".repeat(8192)) }))
+            .route("/api/secrets", get(|| async { Json("x".repeat(8192)) }))
+            .layer(axum::middleware::from_fn(compress_json_reads));
+        for (path, accept, expected) in [
+            ("/api/sessions", "gzip", Some("gzip")),
+            ("/api/sessions", "br", Some("br")),
+            ("/api/sessions", "identity", None),
+            ("/api/secrets", "gzip", None),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(path)
+                        .header(header::ACCEPT_ENCODING, accept)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response
+                    .headers()
+                    .get(header::CONTENT_ENCODING)
+                    .map(|value| value.to_str().unwrap()),
+                expected
+            );
+        }
+    }
 
     #[test]
     fn trunk_hashed_assets_are_hashed() {

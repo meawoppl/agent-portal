@@ -311,6 +311,7 @@ pub async fn run() -> anyhow::Result<()> {
         app_state.clone(),
         service_stats::broadcast_service_stats,
     );
+    tokio::spawn(background::watch_session_lists(app_state.clone()));
     background::spawn_periodic(
         "user spend broadcast task (every 30 seconds)",
         Duration::from_secs(30),

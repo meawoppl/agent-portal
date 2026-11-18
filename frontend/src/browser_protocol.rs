@@ -47,6 +47,7 @@ pub(crate) async fn connect(
     socket
         .send(ClientToServer::Hello {
             protocol_version: shared::protocol::PROTOCOL_VERSION,
+            capabilities: vec![shared::protocol::CLIENT_CAPABILITY_SESSION_LIST.to_string()],
         })
         .await
         .map_err(|e| {

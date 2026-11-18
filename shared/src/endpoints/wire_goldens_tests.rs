@@ -1093,6 +1093,7 @@ fn browser_hello_wire_contract() {
     assert_golden(
         &ClientToServer::Hello {
             protocol_version: 1,
+            capabilities: Vec::new(),
         },
         json!({"type":"Hello","protocol_version":1}),
     );

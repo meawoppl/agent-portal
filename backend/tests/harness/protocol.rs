@@ -684,6 +684,7 @@ async fn incompatible_browser_cannot_register_or_send_pipelined_input() {
     browser
         .send(ClientToServer::Hello {
             protocol_version: u32::MAX,
+            capabilities: Vec::new(),
         })
         .await
         .unwrap();
@@ -752,6 +753,7 @@ async fn browser_hello_accepts_current_and_then_registration() {
     browser
         .send(ClientToServer::Hello {
             protocol_version: shared::protocol::PROTOCOL_VERSION,
+            capabilities: vec![shared::protocol::CLIENT_CAPABILITY_SESSION_LIST.to_string()],
         })
         .await
         .unwrap();
@@ -767,6 +769,10 @@ async fn browser_hello_accepts_current_and_then_registration() {
             ..
         }
     ));
+    receive::<ClientEndpoint>(&mut browser, |f| {
+        matches!(f, ServerToClient::SessionListChanged)
+    })
+    .await;
     browser
         .send(ClientToServer::Register(fields))
         .await
