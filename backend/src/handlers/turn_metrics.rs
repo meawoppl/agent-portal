@@ -107,21 +107,26 @@ pub async fn list_recent_user_turn_metrics(
     // traffic in one session cannot make quiet sessions lose their gauges.
     // Inner-joining sessions excludes archived/orphaned metric rows and limits
     // this overlay to sessions the dashboard can actually render.
-    use crate::schema::sessions;
-    let latest_rows: Vec<TurnMetric> = turn_metrics::table
-        .inner_join(sessions::table)
-        .filter(turn_metrics::user_id.eq(current_user_id))
-        // Return the newest row that can plausibly drive context/model status,
-        // not a newer bookkeeping row with no model or reported window.
-        .filter(
-            turn_metrics::model_context_window
-                .gt(0)
-                .or(turn_metrics::model.is_not_null()),
-        )
-        .distinct_on(turn_metrics::session_id)
-        .order((turn_metrics::session_id, turn_metrics::started_at.desc()))
-        .select(TurnMetric::as_select())
-        .load(&mut conn)?;
+    // The session keys come from the covering index. Fetching each latest
+    // eligible row separately avoids sorting the full historical payload.
+    let latest_rows = diesel::sql_query(
+        "SELECT latest.*
+         FROM (
+             SELECT DISTINCT session_id FROM turn_metrics
+             WHERE user_id = $1 AND session_id IS NOT NULL
+         ) AS seen
+         JOIN sessions ON sessions.id = seen.session_id
+         CROSS JOIN LATERAL (
+             SELECT turn_metrics.* FROM turn_metrics
+             WHERE user_id = $1 AND session_id = seen.session_id
+               AND (model_context_window > 0 OR model IS NOT NULL)
+             ORDER BY started_at DESC
+             LIMIT 1
+         ) AS latest
+         ORDER BY seen.session_id",
+    )
+    .bind::<diesel::sql_types::Uuid, _>(current_user_id)
+    .load::<TurnMetric>(&mut conn)?;
     let latest_by_session = latest_rows.into_iter().map(TurnMetric::into_wire).collect();
 
     Ok(Json(TurnMetricsResponse {
