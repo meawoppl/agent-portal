@@ -27,7 +27,7 @@ pub enum WsEvent {
     /// of the latest message in the batch (`None` if the batch is empty or
     /// the backend is pre-#784). Used to set the reconnect watermark on
     /// initial load.
-    HistoryBatch(Vec<RenderedMessage>, Option<String>),
+    HistoryBatch(Vec<RenderedMessage>, Option<String>, bool),
     Permission(PendingPermission),
     PermissionCancelled(String),
     BranchChanged(
@@ -227,12 +227,13 @@ fn handle_proxy_message(msg: ServerToClient, on_event: &Callback<WsEvent>) {
         ServerToClient::HistoryBatch {
             entries,
             last_created_at,
+            truncated,
         } => {
             let rendered: Vec<RenderedMessage> = entries
                 .into_iter()
                 .map(|entry| RenderedMessage::new(entry.content.to_string(), entry.meta))
                 .collect();
-            on_event.emit(WsEvent::HistoryBatch(rendered, last_created_at));
+            on_event.emit(WsEvent::HistoryBatch(rendered, last_created_at, truncated));
         }
         ServerToClient::PermissionRequest {
             request_id,
@@ -634,6 +635,7 @@ mod tests {
                 }),
             }],
             last_created_at: Some(ts.clone()),
+            truncated: false,
         };
 
         handle_proxy_message(msg, &cb);
@@ -641,7 +643,7 @@ mod tests {
         let events = sink.borrow();
         assert_eq!(events.len(), 1);
         match &events[0] {
-            WsEvent::HistoryBatch(batch, last) => {
+            WsEvent::HistoryBatch(batch, last, _) => {
                 assert_eq!(batch.len(), 1);
                 assert_eq!(last.as_deref(), Some(ts.as_str()));
                 assert_eq!(
@@ -662,6 +664,7 @@ mod tests {
         let msg = ServerToClient::HistoryBatch {
             entries: vec![],
             last_created_at: None,
+            truncated: false,
         };
 
         handle_proxy_message(msg, &cb);
@@ -669,7 +672,7 @@ mod tests {
         let events = sink.borrow();
         assert_eq!(events.len(), 1);
         match &events[0] {
-            WsEvent::HistoryBatch(_, last) => assert!(last.is_none()),
+            WsEvent::HistoryBatch(_, last, _) => assert!(last.is_none()),
             other => panic!("expected HistoryBatch, got {:?}", debug_event(other)),
         }
     }
@@ -740,7 +743,7 @@ mod tests {
             WsEvent::Error(_) => "Error",
             WsEvent::Incompatible(_) => "Incompatible",
             WsEvent::Output(_) => "Output",
-            WsEvent::HistoryBatch(_, _) => "HistoryBatch",
+            WsEvent::HistoryBatch(_, _, _) => "HistoryBatch",
             WsEvent::Permission(_) => "Permission",
             WsEvent::PermissionCancelled(_) => "PermissionCancelled",
             WsEvent::BranchChanged(_, _, _, _) => "BranchChanged",
