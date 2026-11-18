@@ -163,6 +163,7 @@ pub struct AgentOutputContext<'a> {
     pub session_manager: &'a SessionManager,
     pub session_key: &'a Option<SessionId>,
     pub db_session_id: Option<Uuid>,
+    pub owner_id: Option<Uuid>,
     pub db_pool: &'a DbPool,
     pub notifications: &'a crate::push::NotificationSender,
     pub tx: &'a ProxySender,
@@ -323,6 +324,7 @@ fn handle_agent_output_inner(
         session_manager,
         session_key: _,
         db_session_id,
+        owner_id,
         db_pool: _,
         notifications: _,
         tx,
@@ -353,16 +355,7 @@ fn handle_agent_output_inner(
 
     // Sanitize before diagnostic parsing, media extraction, storage or fanout.
     // Failure leaves sequenced output unacknowledged for replay after recovery.
-    use crate::schema::sessions;
-    let owner = db_session_id
-        .map(|sid| {
-            sessions::table
-                .find(sid)
-                .select(sessions::user_id)
-                .first::<Uuid>(conn)
-        })
-        .transpose()?;
-    let content = if let Some(owner) = owner {
+    let content = if let Some(owner) = owner_id {
         let rules = crate::secrets::redaction::snapshot_for_user(conn, owner)?;
         let mut value = content;
         rules.redact_agent_json(&mut value);
@@ -434,12 +427,6 @@ fn handle_agent_output_inner(
         Some(Ok(_)) | None => {}
     }
 
-    // Resolve the session owner ONCE for both consumers below: image
-    // extraction (auth check on `/api/images/{id}`, #786) and the message
-    // insert (fallback `user_id`). A single cheap owner-only `.select`
-    // replaces the previous pair of per-message session lookups (#977).
-    let session_user_id = owner;
-
     // Extract base64 images from portal messages and replace with URLs.
     // This keeps WebSocket messages small — browsers fetch images via HTTP.
     //
@@ -447,7 +434,7 @@ fn handle_agent_output_inner(
     // than silently drop ownership: the original base64 just stays inline
     // in the broadcast (slower but correct), and nothing un-owned ever
     // lands in the cache.
-    let content = match session_user_id {
+    let content = match owner_id {
         Some(uid) => extract_portal_images(content, image_store, uid, db_session_id),
         None => content,
     };
@@ -466,70 +453,88 @@ fn handle_agent_output_inner(
     // Server timestamp of the just-inserted row, used by the overload
     // auto-retry to detect whether a human has responded since a failed turn.
     let mut inserted_created_at: Option<chrono::NaiveDateTime> = None;
-    if let Some(session_id) = db_session_id {
+    if let Some((session_id, owner_user_id)) = db_session_id.zip(owner_id) {
         use crate::schema::{messages, sessions};
 
-        // Only insert when the owner lookup above resolved — same gating the
-        // previous per-insert `Session` load provided (no row, no insert).
-        if let Some(owner_user_id) = session_user_id {
-            let role = shared::MessageRole::from_type_str(
-                content
-                    .get("type")
-                    .and_then(|t| t.as_str())
-                    .unwrap_or("assistant"),
-            );
+        let role = shared::MessageRole::from_type_str(
+            content
+                .get("type")
+                .and_then(|t| t.as_str())
+                .unwrap_or("assistant"),
+        );
 
-            // Use actual sender's user_id for user messages, fall back to session owner
-            let actual_user_id = sender_info
-                .as_ref()
-                .map(|(id, _)| *id)
-                .unwrap_or(owner_user_id);
+        // Use actual sender's user_id for user messages, fall back to session owner
+        let actual_user_id = sender_info
+            .as_ref()
+            .map(|(id, _)| *id)
+            .unwrap_or(owner_user_id);
 
-            let new_message = crate::models::NewMessage {
-                session_id,
-                role: role.to_string(),
-                content: content.to_string(),
-                user_id: actual_user_id,
-                agent_type: agent_type.as_str().to_string(),
-                provenance_kind: normalized.provenance_kind.clone(),
-                provenance_session_id: normalized.provenance_session_id,
-                provenance_agent_type: normalized.provenance_agent_type.clone(),
-            };
+        let new_message = crate::models::NewMessage {
+            session_id,
+            role: role.to_string(),
+            content: content.to_string(),
+            user_id: actual_user_id,
+            agent_type: agent_type.as_str().to_string(),
+            provenance_kind: normalized.provenance_kind.clone(),
+            provenance_session_id: normalized.provenance_session_id,
+            provenance_agent_type: normalized.provenance_agent_type.clone(),
+        };
 
-            let inserted = diesel::insert_into(messages::table)
-                .values(&new_message)
-                .get_result::<crate::models::Message>(conn)?;
-            inserted_created_at = Some(inserted.created_at);
-            if crate::handlers::session_activity::activity_signal(
-                agent_type.as_str(),
-                &inserted.role,
-                &inserted.content,
-            ) == Some(shared::api::SessionActivityState::Idle)
-            {
-                // Attention is part of this fenced transaction: failure must
-                // abort output, rather than log and continue with partial state.
-                notify_reply = crate::handlers::attention::record_reply(conn, &inserted)?;
-            }
-            broadcast_meta =
-                Some(inserted.portal_meta(sender_info.as_ref().map(|(_, name)| name.clone())));
-
-            if role == shared::MessageRole::Result {
-                let subagent_tokens = session_manager.subagent_tokens(session_id);
-                if inserted_created_at.is_some() {
-                    store_result_metadata(conn, session_id, &content, subagent_tokens);
-                }
-            }
+        let inserted = diesel::insert_into(messages::table)
+            .values(&new_message)
+            .get_result::<crate::models::Message>(conn)?;
+        inserted_created_at = Some(inserted.created_at);
+        if crate::handlers::session_activity::activity_signal(
+            agent_type.as_str(),
+            &inserted.role,
+            &inserted.content,
+        ) == Some(shared::api::SessionActivityState::Idle)
+        {
+            // Attention is part of this fenced transaction: failure must
+            // abort output, rather than log and continue with partial state.
+            notify_reply = crate::handlers::attention::record_reply(conn, &inserted)?;
         }
+        broadcast_meta =
+            Some(inserted.portal_meta(sender_info.as_ref().map(|(_, name)| name.clone())));
 
-        // Update last_activity
-        diesel::update(sessions::table.find(session_id))
-            .set(sessions::last_activity.eq(diesel::dsl::now))
-            .execute(conn)?;
+        if role == shared::MessageRole::Result {
+            let subagent_tokens = session_manager.subagent_tokens(session_id);
+            super::claude_cost::record_result_metadata(conn, session_id, &content, subagent_tokens)
+                .inspect_err(|error| {
+                    error!(
+                        "{}: session {}: {}",
+                        crate::markers::COST_ACCOUNTING_PERSIST_FAILED,
+                        session_id,
+                        error
+                    );
+                })?;
+        } else {
+            // An archive in progress may already have selected its messages.
+            // A shared probe against its advisory key lets us skip clock
+            // writes only when the archive has yet to start or has finished.
+            // Never wait for the archive on the output path.
+            use diesel::sql_types::{Bool, Text, Timestamp};
+            let session = sessions::table.find(session_id).filter(
+                diesel::dsl::sql::<Bool>(
+                    "(last_activity <= statement_timestamp() - INTERVAL '15 seconds' \
+                     OR archived_at >= last_activity \
+                     OR NOT pg_try_advisory_xact_lock_shared(hashtextextended(",
+                )
+                .bind::<Text, _>(crate::secrets::expunge::archive_session_lock_key(
+                    session_id,
+                ))
+                .sql(", 0)) OR ")
+                .bind::<Bool, _>(releases_edit_stack)
+                .sql(")"),
+            );
+            diesel::update(session)
+                .set(sessions::last_activity.eq(diesel::dsl::sql::<Timestamp>(
+                    "GREATEST(last_activity, statement_timestamp())",
+                )))
+                .execute(conn)?;
+        }
     }
 
-    // Optional accounting helpers historically log failures. Verify that none
-    // left this transaction aborted before publication can be authorized.
-    diesel::sql_query("SELECT 1").execute(conn)?;
     Ok(Some(OutputPublication {
         content,
         agent_type,
@@ -697,102 +702,6 @@ fn normalize_output_content(content: serde_json::Value) -> NormalizedOutputConte
         provenance_kind: Some("inter_agent".to_string()),
         provenance_session_id: Some(from_session_id),
         provenance_agent_type: Some(from_agent_type.clone()),
-    }
-}
-
-/// Extract and store cost and token usage from result messages.
-/// Tries typed deserialization via `claude_codes::io::ResultMessage` first,
-/// falls back to manual JSON extraction for forward compatibility.
-/// `subagent_tokens` is the session's running total of sub-agent (Task tool)
-/// tokens, folded into `output_tokens` because `result.usage` covers only the
-/// parent conversation. See `SessionManager::subagent_tokens`.
-fn store_result_metadata(
-    conn: &mut diesel::PgConnection,
-    session_id: Uuid,
-    content: &serde_json::Value,
-    subagent_tokens: i64,
-) {
-    use crate::schema::sessions;
-
-    // Try typed deserialization first
-    if let Ok(result) = claude_codes::io::ResultMessage::deserialize(content) {
-        if let Err(e) = super::claude_cost::record_result_cost(conn, session_id, &result) {
-            error!(
-                "{}: session {}: {}",
-                crate::markers::COST_ACCOUNTING_PERSIST_FAILED,
-                session_id,
-                e
-            );
-        }
-
-        if let Some(usage) = &result.usage {
-            if let Err(e) = diesel::update(sessions::table.find(session_id))
-                .set((
-                    sessions::input_tokens.eq(usage.input_tokens as i64),
-                    sessions::output_tokens.eq(usage.output_tokens as i64 + subagent_tokens),
-                    sessions::cache_creation_tokens.eq(usage.cache_creation_input_tokens as i64),
-                    sessions::cache_read_tokens.eq(usage.cache_read_input_tokens as i64),
-                ))
-                .execute(conn)
-            {
-                error!("Failed to update session tokens: {}", e);
-            }
-        }
-        return;
-    }
-
-    // Fallback: manual JSON extraction
-    let cost = content.get("total_cost_usd").and_then(|c| c.as_f64());
-    let usage = content.get("usage");
-    let input_tokens = usage
-        .and_then(|u| u.get("input_tokens"))
-        .and_then(|t| t.as_i64());
-    let output_tokens = usage
-        .and_then(|u| u.get("output_tokens"))
-        .and_then(|t| t.as_i64());
-    let cache_creation = usage
-        .and_then(|u| u.get("cache_creation_input_tokens"))
-        .and_then(|t| t.as_i64());
-    let cache_read = usage
-        .and_then(|u| u.get("cache_read_input_tokens"))
-        .and_then(|t| t.as_i64());
-
-    if let Some(cost_val) = cost {
-        if let Err(e) = diesel::update(sessions::table.find(session_id))
-            .set(
-                sessions::total_cost_usd.eq(diesel::dsl::sql::<diesel::sql_types::Double>(
-                    "GREATEST(total_cost_usd, ",
-                )
-                .bind::<diesel::sql_types::Double, _>(cost_val)
-                .sql(")")),
-            )
-            .execute(conn)
-        {
-            error!(
-                "{}: session {}: {}",
-                crate::markers::COST_ACCOUNTING_PERSIST_FAILED,
-                session_id,
-                e
-            );
-        }
-    }
-
-    if input_tokens.is_some()
-        || output_tokens.is_some()
-        || cache_creation.is_some()
-        || cache_read.is_some()
-    {
-        if let Err(e) = diesel::update(sessions::table.find(session_id))
-            .set((
-                sessions::input_tokens.eq(input_tokens.unwrap_or(0)),
-                sessions::output_tokens.eq(output_tokens.unwrap_or(0) + subagent_tokens),
-                sessions::cache_creation_tokens.eq(cache_creation.unwrap_or(0)),
-                sessions::cache_read_tokens.eq(cache_read.unwrap_or(0)),
-            ))
-            .execute(conn)
-        {
-            error!("Failed to update session tokens: {}", e);
-        }
     }
 }
 
@@ -1078,6 +987,7 @@ mod attention_delivery_tests {
                         session_manager: &state.session_manager,
                         session_key: &Some(session.id.to_string().into()),
                         db_session_id: Some(session.id),
+                        owner_id: Some(session.user_id),
                         db_pool: &pool,
                         notifications: &notifications,
                         tx: &tx,

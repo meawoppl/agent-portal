@@ -31,6 +31,7 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
 
     let mut session_key: Option<SessionId> = None;
     let mut db_session_id: Option<Uuid> = None;
+    let mut owner_id = None;
     let mut connection_gen: Option<u64> = None;
 
     // Server-side kill switch for this connection. Registered with the
@@ -132,6 +133,7 @@ pub async fn handle_session_socket(socket: WebSocket, app_state: Arc<AppState>) 
                         &mut session_key,
                         &mut db_session_id,
                         &mut connection_gen,
+                        &mut owner_id,
                     )
                 });
                 if flow.is_break() {
@@ -280,6 +282,7 @@ fn handle_proxy_message(
     session_key: &mut Option<SessionId>,
     db_session_id: &mut Option<Uuid>,
     connection_gen: &mut Option<u64>,
+    owner_id: &mut Option<Uuid>,
 ) -> ControlFlow<()> {
     let ProxyCtx {
         app_state,
@@ -394,6 +397,7 @@ fn handle_proxy_message(
                 *session_key = Some(key);
                 *connection_gen = Some(gen);
                 *db_session_id = result.session_id;
+                *owner_id = result.owner_id;
             }
 
             let _ = tx.send(ServerToProxy::RegisterAck {
@@ -438,6 +442,7 @@ fn handle_proxy_message(
                     session_manager,
                     session_key,
                     db_session_id: *db_session_id,
+                    owner_id: *owner_id,
                     db_pool,
                     notifications: &app_state.notifications,
                     tx,
@@ -460,6 +465,7 @@ fn handle_proxy_message(
                     session_manager,
                     session_key,
                     db_session_id: *db_session_id,
+                    owner_id: *owner_id,
                     db_pool,
                     notifications: &app_state.notifications,
                     tx,

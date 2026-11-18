@@ -9,6 +9,7 @@ use diesel::sql_types::{BigInt, Double};
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use std::collections::HashMap;
 use std::env;
+use std::time::Duration;
 use uuid::Uuid;
 
 use crate::schema;
@@ -24,7 +25,19 @@ pub fn create_pool() -> Result<DbPool> {
         .map_err(|_| anyhow::anyhow!("DATABASE_URL must be set (PostgreSQL connection string)"))?;
 
     let manager = ConnectionManager::<PgConnection>::new(database_url);
+    let max_size = match env::var("PORTAL_DB_POOL_SIZE") {
+        Ok(value) => value
+            .parse::<u32>()
+            .ok()
+            .filter(|size| *size > 0)
+            .ok_or_else(|| anyhow::anyhow!("PORTAL_DB_POOL_SIZE must be a positive integer"))?,
+        Err(env::VarError::NotPresent) => 32,
+        Err(error) => return Err(error.into()),
+    };
     let pool = r2d2::Pool::builder()
+        .max_size(max_size)
+        .min_idle(Some(1))
+        .connection_timeout(Duration::from_secs(3))
         .build(manager)
         .map_err(|e| anyhow::anyhow!("Failed to create database connection pool: {e}"))?;
 
