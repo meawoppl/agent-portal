@@ -168,7 +168,14 @@ fn app() -> Html {
 
 #[wasm_bindgen::prelude::wasm_bindgen(start)]
 pub fn run_app() {
-    wasm_logger::init(wasm_logger::Config::default());
+    // Release builds log warnings and errors only: info/debug lines are
+    // formatted and sent to the console otherwise, on every user's machine.
+    let level = if cfg!(debug_assertions) {
+        log::Level::Debug
+    } else {
+        log::Level::Warn
+    };
+    wasm_logger::init(wasm_logger::Config::new(level));
     yew::Renderer::<App>::new().render();
 }
 
