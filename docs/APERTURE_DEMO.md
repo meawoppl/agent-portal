@@ -1,7 +1,8 @@
 # Aperture Science Agent Portal exhibit
 
-`/aperture` is a public, narrated, interactive introduction to Agent Portal. It
-uses the normal Yew frontend and needs no backend API, login, or agent processes.
+`/aperture` redirects to the public, narrated introduction to Agent Portal on
+GitHub Pages. The exhibit is a standalone Yew app and needs no backend API,
+login, or agent processes.
 Eight sectors progress from code generation to remote test benches, rich web
 previews, mechanical CAD, electrical design, logic, controls and engineering
 briefings. The narrator is the agent composing the film from inside Portal.
@@ -19,12 +20,12 @@ the recipient to have access to that forward.
 
 ## Try it
 
-Build and serve the frontend using the normal development process, then visit
-`http://localhost:<port>/aperture`. For a frontend-only preview:
+For a local standalone preview, run the exhibit directly and visit
+`http://localhost:8792/`:
 
 ```sh
-cd frontend
-trunk serve --port 8792
+cd aperture-frontend
+APERTURE_PORTAL_URL=https://txcl.io/dashboard trunk serve --port 8792
 ```
 
 The **Watch the orientation film** link opens an original narrated orientation film at
@@ -39,7 +40,8 @@ short-cut exports or offer them in watch/download links. The existing `trailer/`
 asset path is retained for compatibility; its player presents the full film.
 
 The exhibit works without an API server. Its **Exit to Agent Portal** and
-**Open Agent Portal** links lead to `/dashboard`, which requires a normal backend.
+**Open Agent Portal** links use the build-time `APERTURE_PORTAL_URL`
+(default `https://txcl.io/dashboard`), which requires a normal Portal login.
 If your environment defines `NO_COLOR=1` and Trunk rejects it, run Trunk with
 `env -u NO_COLOR`.
 
@@ -50,22 +52,22 @@ keyboard controls, touch, and sound disabled.
 
 ## Implementation
 
-- `frontend/src/pages/aperture/model.rs`: reducer-owned experiment state, bounded
+- `aperture-frontend/src/aperture/model.rs`: reducer-owned experiment state, bounded
   navigation, completion, role changes, and reset.
-- `frontend/src/pages/aperture/mod.rs`: public route, chamber navigation,
+- `aperture-frontend/src/aperture/mod.rs`: public route, chamber navigation,
   captions, invitations, audio controls, and cancellable collaboration timers.
-- `frontend/src/pages/aperture/scenes.rs`: review, transit and web/sharing observations in the first three sectors.
-- `frontend/src/pages/aperture/plugins.rs`: five separate engineering sectors with real recorded evidence,
+- `aperture-frontend/src/aperture/scenes.rs`: review, transit and web/sharing observations in the first three sectors.
+- `aperture-frontend/src/aperture/plugins.rs`: five separate engineering sectors with real recorded evidence,
   with source links and capability boundaries.
-- `frontend/src/pages/aperture/engineering.rs`: software origin, recorded tool panels, making-of and exploration conclusion.
-- `frontend/assets/aperture/evidence/`: compact workbench recordings, sources, results and a browsable provenance page.
-- `frontend/src/pages/aperture/audio.rs`: one opt-in narration channel and a
+- `aperture-frontend/src/aperture/engineering.rs`: software origin, recorded tool panels, making-of and exploration conclusion.
+- `aperture-frontend/assets/aperture/evidence/`: compact workbench recordings, sources, results and a browsable provenance page.
+- `aperture-frontend/src/aperture/audio.rs`: one opt-in narration channel and a
   synthesized transit sound. Audio failure never prevents using the exhibit.
-- `frontend/styles/aperture.css`: scoped visual theme; does not recolor the
+- `aperture-frontend/styles/aperture.css`: scoped visual theme; does not recolor the
   dashboard.
-- `frontend/assets/aperture/`: original signage, fonts and narration. Trunk
+- `aperture-frontend/assets/aperture/`: original signage, fonts and narration. Trunk
   publishes this directory at `/aperture-assets/`.
-- `frontend/assets/aperture-demo/companion.html`: sandboxed interactive sample,
+- `aperture-frontend/assets/aperture-demo/companion.html`: sandboxed interactive sample,
   served at `/aperture-demo/companion.html`.
 
 The captions and audio filenames come from `aperture/lines.json`. Keep narration
@@ -76,31 +78,24 @@ with original artwork and narration, and does not imply Valve affiliation.
 ## Verification
 
 ```sh
-cargo test -p frontend --lib
-cargo clippy -p frontend --target wasm32-unknown-unknown -- -D warnings
+cargo test -p aperture-frontend --lib
+cargo clippy -p aperture-frontend --target wasm32-unknown-unknown -- -D warnings
 cargo fmt --check
-cd frontend && trunk build
+cd aperture-frontend && trunk build
 ```
 
-The browser smoke test uses the existing capture harness's Puppeteer convention:
+Build the standalone distribution at its deployed prefix, then run the browser
+smoke test (Python Playwright and Chromium are required):
 
 ```sh
-npm install --prefix /tmp/readme-demo puppeteer-core
-DEMO_ROOT=/tmp/readme-demo DEMO_URL=http://localhost:8792 \
-  node docs/media/capture/check-aperture.js
-DEMO_ROOT=/tmp/readme-demo DEMO_URL=http://localhost:8792 \
-  node docs/media/capture/check-aperture-film.js
+scripts/build-aperture.sh
+python3 scripts/test-aperture-static.py
 ```
 
-It drives the code prologue, all eight sectors, making-of and mission, interacts with the real sample iframe, opens an
-observer invitation, changes roles, completes and resets the exhibit, checks
-five viewport widths, reduced motion, audio cancellation, clipboard copying and
-its permission-denied fallback, and fails on browser errors. The film check also
-verifies actual playback, every measured caption phrase, stationary closing
-titles, seeking backwards with captions, replay, mobile stage
-bounds, full-size portrait captions/provenance, and asset loading. Screenshots
-are written under `$DEMO_ROOT/aperture-qa/`. It expects Chrome at
-`/usr/bin/google-chrome`, like the other capture scripts.
+This exercises the sectors, narration, media downloads, orientation film,
+sandboxed companion app and observer links without using the Portal API.
+See [standalone deployment](performance/APERTURE_STATIC.md) for deployment and
+public-site verification.
 
 ## Eight sectors and evidence
 

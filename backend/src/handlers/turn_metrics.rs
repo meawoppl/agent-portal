@@ -306,7 +306,7 @@ pub async fn list_aggregated_turn_metrics(
     //   output_tokens / (generation_duration_ms / 1000.0)
     // when generation_duration_ms > 0 and output_tokens > 0; null otherwise so
     // those rows don't pollute the percentile. SUMs are cast to bigint/float8
-    // explicitly so Diesel can decode them per CLAUDE.md's raw-SQL guidance.
+    // explicitly so Diesel can decode them per AGENTS.md's raw-SQL guidance.
     let aggregate_sql = "\
         SELECT \
             date_bin($1::interval, tm.started_at, TIMESTAMPTZ '1970-01-01 00:00:00+00') AS bucket_start, \

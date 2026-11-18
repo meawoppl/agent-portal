@@ -1,4 +1,4 @@
-# CLAUDE.md - AI Assistant Instructions
+# AGENTS.md - AI Assistant Instructions
 
 This file contains instructions for AI assistants (like Claude) working on the agent-portal codebase. It documents the architecture, conventions, and common tasks.
 
@@ -27,15 +27,18 @@ agent-portal/
 ├── shared/              # WASM-compatible common types
 ├── backend/             # Axum server (native only)
 ├── frontend/            # Yew WASM app (WASM target)
+├── aperture-frontend/   # Standalone exhibit, including its media and styles
 ├── proxy/               # CLI wrapper "claude-portal" (native only)
 ├── session-lib/         # Agent-agnostic session core (Agent trait, Session<A>, proxy_session)
 ├── claude-session-lib/  # Claude backend for session-lib (ClaudeAgent, owns claude CLI process)
 ├── codex-session-lib/   # Codex backend for session-lib (CodexAgent, owns codex app-server process)
 ├── muse-session-lib/    # Muse backend for session-lib (spawn-per-turn `muse exec` driver)
+├── antigravity-session-lib/ # Antigravity backend for session-lib
 ├── launcher/            # Persistent daemon "agent-portal" (native only)
 ├── archive-format/      # Session-archive format + stores (shared by backend and viewer)
-├── viewer-frontend/     # Standalone archive viewer (WASM)
 ├── portal-stt/          # Speech-to-text provider integrations
+├── portal-sysmon/       # Host system metrics
+├── build-support/       # Build identity for executable artifacts
 ├── mobile/              # Native mobile shell (Tauri)
 ├── portal-auth/         # Shared OAuth device flow client
 └── portal-update/       # Shared auto-update logic
@@ -856,10 +859,8 @@ and read as `crate::BUILD_INFO.version` (frontend also exposes `crate::VERSION`)
   library work; library code reads `shared::build_info::running()`. Unregistered
   library-only consumers report explicit `unknown`, never a stale dependency version.
 
-The CHANGELOG is no longer kept in lockstep per-PR (you can't know the commit
-count in advance); it's maintained by a periodic sweep. Add notable
-user-facing changes under the `## [Unreleased]` heading if you like, but it's
-not a merge gate.
+Change history lives in merged pull requests and GitHub Releases. Do not
+recreate a checked-in changelog.
 
 ### No `serde_json::json!`
 

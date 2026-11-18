@@ -559,9 +559,8 @@ pub struct SessionView {
     /// Hydrated by `LoadTurnMetrics` on initial REST load and topped up by
     /// `TurnMetricsReceived` on every live WS frame. Joined to terminator
     /// messages in `view()` by ordering: the Nth terminator card pairs
-    /// with the Nth entry. See the PR 2 changelog entry for the rationale
-    /// (the proxy-emit shape doesn't populate `user_message_id` yet, so a
-    /// key-based join would fail on every row). Vec rather than HashMap
+    /// with the Nth entry. The proxy-emit shape does not populate
+    /// `user_message_id` yet, so a key-based join would fail on every row. Vec rather than HashMap
     /// because the join walk is sequential — a HashMap with a positional
     /// counter would buy nothing.
     turn_metrics: Vec<TurnMetrics>,
@@ -1476,7 +1475,7 @@ impl Component for SessionView {
         // and pair the Nth terminator card with `turn_metrics[N]`. The
         // pairs computed here are passed down to `MessageGroupRenderer` so
         // the renderer doesn't have to know its own position in the
-        // transcript. See the PR 2 changelog entry for the rationale.
+        // transcript. See the `turn_metrics` field documentation for the join rationale.
         let groups = group_messages(
             &self.messages,
             ctx.props().session.agent_type,

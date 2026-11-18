@@ -67,7 +67,7 @@ pub const INPUT_REJECTION_PERSIST_FAILED: &str = "INPUT_REJECTION_PERSIST_FAILED
 ///
 /// - **Recurring burst right after a deploy:** almost always schema drift — a
 ///   migration recorded in `__diesel_schema_migrations` but not physically
-///   applied (see CLAUDE.md "Migration hygiene"). Every INSERT fails until the
+///   applied (see AGENTS.md "Migration hygiene"). Every INSERT fails until the
 ///   column is reconciled.
 /// - **One-off:** a transient DB blip (pool exhaustion, failover). Self-heals.
 /// - **Action:** on a burst, diff the live schema against the latest migration

@@ -321,6 +321,29 @@ Pre-built binaries: [GitHub Releases](https://github.com/meawoppl/agent-portal/r
 - **Agent protocols**: [claude-codes](https://crates.io/crates/claude-codes), [codex-codes](https://crates.io/crates/codex-codes), [muse-codes](https://crates.io/crates/muse-codes)
 - **Voice**: Web Speech API, or ten hosted STT providers
 
+## Repository layout
+
+The root contains the Cargo workspace and shared build/deployment configuration.
+
+| Location | Contents |
+| --- | --- |
+| `backend/`, `frontend/`, `mobile/` | Portal server and clients |
+| `launcher/`, `proxy/`, `*-session-lib/`, `session-lib/` | Agent processes and session adapters |
+| `shared/`, `archive-format/`, `portal-*/` | Reusable protocol and service libraries |
+| `aperture-frontend/` | Standalone exhibit, including its assets and styles |
+| `docs/` | Guides and [demo walkthrough](docs/PORTAL_DEMO_SCRIPT.md) |
+| `docs/design/` | Design notes and [historical refactor plan](docs/design/REFACTOR_PLAN.md) |
+| `scripts/`, `build-support/`, `.github/` | Development tools, build identity, and CI |
+| `deploy/`, `Dockerfile`, `docker-compose*.yml` | Deployment and local services |
+| `vendor/` | Patched third-party sources, with their licenses |
+| `.0-pr-viz/` | Versioned PR summaries required by CI |
+
+Put local screenshots, generated reports, and uploaded attachments in `reports/`
+(ignored by Git). Durable documentation media belongs in `docs/media/`; app assets
+belong with the app that uses them. Change history is in
+[merged pull requests](https://github.com/meawoppl/agent-portal/pulls?q=is%3Apr+is%3Amerged)
+and [GitHub Releases](https://github.com/meawoppl/agent-portal/releases).
+
 ## Contributing
 
 Contributions are welcome:
@@ -331,7 +354,7 @@ Contributions are welcome:
 4. Submit a pull request
 
 Please open an issue first to discuss major changes.
-[CLAUDE.md](CLAUDE.md) documents the conventions CI enforces.
+[AGENTS.md](AGENTS.md) documents the conventions CI enforces.
 
 ## Security & Privacy
 

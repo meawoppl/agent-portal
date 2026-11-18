@@ -1,5 +1,8 @@
 # agent-portal Refactor Plan
 
+> Historical planning notes. Ownership assignments and progress below reflect
+> the original planning sessions, not current work allocation or implementation status.
+
 The 10 highest-impact refactor/cleanups, with an agreed work breakdown.
 **Consensus plan — Claude + Codex** (each independently analyzed the repo; the
 findings converged ~1:1, and the breakdown below is mutually agreed).
