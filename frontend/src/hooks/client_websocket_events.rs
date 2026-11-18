@@ -139,6 +139,7 @@ pub(crate) enum ClientWsAction {
     LaunchEvent,
     LauncherEvent,
     SessionListChanged(ConnId),
+    SessionListHint(ConnId),
     SessionListDisconnected(ConnId),
     /// A launch result for a session: success clears its failure.
     LaunchResult {
@@ -252,6 +253,11 @@ impl Reducible for ClientWsState {
             ClientWsAction::SessionListChanged(conn) => {
                 let revision = next.session_list_revisions.entry(conn).or_default();
                 *revision = revision.wrapping_add(1);
+            }
+            ClientWsAction::SessionListHint(conn) => {
+                if let Some(revision) = next.session_list_revisions.get_mut(&conn) {
+                    *revision = revision.wrapping_add(1);
+                }
             }
             ClientWsAction::SessionListDisconnected(conn) => {
                 next.session_list_revisions.remove(&conn);
@@ -395,7 +401,7 @@ pub(crate) fn handle_server_message(
             live.dispatch(ClientWsAction::SessionListChanged(conn));
         }
         ServerToClient::LaunchersChanged => {
-            live.dispatch(ClientWsAction::SessionListChanged(conn));
+            live.dispatch(ClientWsAction::SessionListHint(conn));
             if conn == ConnId::HOME {
                 live.dispatch(ClientWsAction::LauncherEvent);
             }
