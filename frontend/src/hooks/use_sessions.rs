@@ -111,6 +111,7 @@ pub fn use_sessions() -> UseSessions {
         let lists = lists.clone();
         let federation = federation.clone();
         let request_fetch = request_fetch.clone();
+        let seen_revisions = seen_revisions.clone();
         use_effect_with((portals.clone(), refresh_tick.0), move |(portals, _)| {
             let cancelled = Rc::new(Cell::new(false));
             let busy = Rc::new(RefCell::new(HashMap::new()));
@@ -179,7 +180,21 @@ pub fn use_sessions() -> UseSessions {
             };
             fetch.emit(None);
             *request_fetch.borrow_mut() = Some(fetch.clone());
-            let timer = gloo::timers::callback::Interval::new(60_000, move || fetch.emit(None));
+            let connections: Vec<_> = portals.iter().map(|portal| portal.conn()).collect();
+            let mut ticks = 0;
+            let timer = gloo::timers::callback::Interval::new(5_000, move || {
+                ticks = (ticks + 1) % 12;
+                if ticks == 0 {
+                    fetch.emit(None);
+                } else {
+                    let seen = seen_revisions.borrow();
+                    for &conn in &connections {
+                        if !seen.contains_key(&conn) {
+                            fetch.emit(Some(conn));
+                        }
+                    }
+                }
+            });
             move || {
                 cancelled.set(true);
                 request_fetch.borrow_mut().take();

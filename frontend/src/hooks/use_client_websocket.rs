@@ -274,6 +274,7 @@ fn use_live_client_websocket() -> UseClientWebSocket {
                                                     Err(_) => break,
                                                 }
                                             }
+                                            live.dispatch(client_websocket_events::ClientWsAction::SessionListDisconnected(portal.conn()));
                                             if portal.conn() == ConnId::HOME {
                                                 shutdown_reason.set(Some("Connection lost".into()));
                                             }

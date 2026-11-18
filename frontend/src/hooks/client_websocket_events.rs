@@ -139,6 +139,7 @@ pub(crate) enum ClientWsAction {
     LaunchEvent,
     LauncherEvent,
     SessionListChanged(ConnId),
+    SessionListDisconnected(ConnId),
     /// A launch result for a session: success clears its failure.
     LaunchResult {
         session: SessionKey,
@@ -251,6 +252,9 @@ impl Reducible for ClientWsState {
             ClientWsAction::SessionListChanged(conn) => {
                 let revision = next.session_list_revisions.entry(conn).or_default();
                 *revision = revision.wrapping_add(1);
+            }
+            ClientWsAction::SessionListDisconnected(conn) => {
+                next.session_list_revisions.remove(&conn);
             }
             ClientWsAction::LauncherEvent => {
                 next.launcher_event_counter = next.launcher_event_counter.wrapping_add(1);
