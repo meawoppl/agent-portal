@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="arr-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+  </defs>
+
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2508 · Keep dashboard and session props stable across renders</text>
+
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">Fresh callbacks and a 100 ms rail tick re-rendered every open session on each poll;</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">callbacks are now built once and idle ticks skipped, so Yew diffs only what changed.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <!-- ==================== BEFORE ==================== -->
+  <g>
+    <rect x="80" y="240" width="840" height="150" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="282" font-size="26" fill="#7aa2f7">DashboardPage + use_sessions</text>
+    <text x="104" y="322" font-size="23" fill="#f7768e">5 s poll: ListAction::Received always builds a new Rc</text>
+    <text x="104" y="358" font-size="23" fill="#f7768e">on_activity, on_branch_change: Callback::from per render</text>
+  </g>
+  <line x1="500" y1="390" x2="500" y2="436" stroke="#f7768e" stroke-width="1.5" marker-end="url(#arr-red)"/>
+  <text x="520" y="420" font-size="22" fill="#565f89">props never compare equal</text>
+
+  <g>
+    <rect x="80" y="440" width="840" height="150" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="482" font-size="26" fill="#7aa2f7">SessionView::view()</text>
+    <text x="104" y="522" font-size="23" fill="#f7768e">link.callback(ScheduleLimitContinuation) on every view()</text>
+    <text x="104" y="558" font-size="23" fill="#f7768e">continuation_statuses.clone() into every group</text>
+  </g>
+  <line x1="500" y1="590" x2="500" y2="636" stroke="#f7768e" stroke-width="1.5" marker-end="url(#arr-red)"/>
+
+  <g>
+    <rect x="80" y="640" width="840" height="120" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+    <text x="104" y="682" font-size="26" fill="#f7768e">Every MessageGroupRenderer re-renders</text>
+    <text x="104" y="722" font-size="23" fill="#a9b1d6">plus InputBar, PermissionHandler, TasksPanel, ForwardChips</text>
+  </g>
+
+  <g>
+    <rect x="80" y="820" width="840" height="170" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="862" font-size="26" fill="#7aa2f7">SessionRail: Interval::new(100, ..)</text>
+    <text x="104" y="902" font-size="23" fill="#f7768e">render_time.set on every tick: every SessionPill, 10x/s</text>
+    <text x="104" y="940" font-size="22" fill="#565f89">sparkline spans 300 s, so a tick moves it well under 1 px</text>
+  </g>
+
+  <!-- ==================== AFTER ==================== -->
+  <g>
+    <rect x="1040" y="240" width="880" height="150" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1064" y="282" font-size="26" fill="#7aa2f7">DashboardPage + use_sessions</text>
+    <text x="1064" y="322" font-size="23" fill="#9ece6a">unchanged poll: Lists::reduce returns self (same Rc)</text>
+    <text x="1064" y="358" font-size="23" fill="#9ece6a">use_callback for dashboard and websocket-hook callbacks</text>
+  </g>
+  <line x1="1480" y1="390" x2="1480" y2="436" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+  <text x="1500" y="420" font-size="22" fill="#565f89">equal props: changed() skipped</text>
+
+  <g>
+    <rect x="1040" y="440" width="880" height="150" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1064" y="482" font-size="26" fill="#7aa2f7">SessionView: ChildCallbacks built in create()</text>
+    <text x="1064" y="522" font-size="23" fill="#9ece6a">on_schedule_continuation, on_claude_login stored on self</text>
+    <text x="1064" y="558" font-size="23" fill="#9ece6a">continuation_statuses: Rc&lt;HashMap&gt; (pointer compare)</text>
+  </g>
+  <line x1="1480" y1="590" x2="1480" y2="636" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+
+  <g>
+    <rect x="1040" y="640" width="880" height="120" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1064" y="682" font-size="26" fill="#9ece6a">Only groups whose props changed re-render</text>
+    <text x="1064" y="722" font-size="23" fill="#a9b1d6">children with unchanged inputs are skipped by Yew's diff</text>
+  </g>
+
+  <g>
+    <rect x="1040" y="820" width="880" height="170" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1064" y="862" font-size="26" fill="#7aa2f7">SessionRail: polls every RAIL_FRAME_MS, commits less</text>
+    <text x="1064" y="902" font-size="23" fill="#9ece6a">BroadcastRef::is_animating: full rate while an orb flies</text>
+    <text x="1064" y="938" font-size="23" fill="#9ece6a">ActivityRef::revision changed: at most every 250 ms</text>
+    <text x="1064" y="974" font-size="23" fill="#9ece6a">otherwise once per RAIL_IDLE_TICK_MS (1 s)</text>
+  </g>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">Not covered: a SessionView that does re-render still regroups and re-parses every message on each view() (#2489).</text>
+</svg>
