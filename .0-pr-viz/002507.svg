@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="monospace" font-size="24" fill="#a9b1d6">PR #2507 · Reduce database work on hot request and output paths</text>
+<text x="55" y="103" font-family="monospace" font-size="34" fill="#e6e9f5">Request auth moves off Tokio workers, and agent output does fewer database writes.</text>
+<text x="55" y="146" font-family="monospace" font-size="34" fill="#e6e9f5">Archive freshness still forces a recency update when it matters.</text>
+<path d="M55 175H1945 M1000 190V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="55" y="230" font-family="monospace" font-size="22" fill="#f7768e">BEFORE</text>
+<rect x="55" y="300" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="79" y="345" font-family="monospace" font-size="26" fill="#7aa2f7">CurrentUserId</text>
+<text x="79" y="399" font-family="monospace" font-size="23" fill="#c0caf5">Authenticates and waits for a checkout on a Tokio worker.</text>
+<path d="M500 500v70" stroke="#565f89" stroke-width="3"/>
+<rect x="55" y="570" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="79" y="615" font-family="monospace" font-size="26" fill="#7aa2f7">handle_agent_output_inner</text>
+<text x="79" y="669" font-family="monospace" font-size="23" fill="#c0caf5">Looks up sessions.user_id for each agent frame.</text>
+<path d="M500 770v70" stroke="#565f89" stroke-width="3"/>
+<rect x="55" y="840" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="79" y="885" font-family="monospace" font-size="26" fill="#7aa2f7">sessions.last_activity</text>
+<text x="79" y="939" font-family="monospace" font-size="23" fill="#c0caf5">Changes on every frame, including after result updates.</text>
+<text x="1055" y="230" font-family="monospace" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="1055" y="300" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="1079" y="345" font-family="monospace" font-size="26" fill="#7aa2f7">CurrentUserId</text>
+<text x="1079" y="399" font-family="monospace" font-size="23" fill="#c0caf5">Authenticates in spawn_blocking with a shorter pool timeout.</text>
+<path d="M1500 500v70" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="570" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="1079" y="615" font-family="monospace" font-size="26" fill="#7aa2f7">RegistrationResult.owner_id</text>
+<text x="1079" y="669" font-family="monospace" font-size="23" fill="#c0caf5">Reuses the session owner for redaction and persistence.</text>
+<path d="M1500 770v70" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="840" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="1079" y="885" font-family="monospace" font-size="26" fill="#7aa2f7">sessions.last_activity</text>
+<text x="1079" y="939" font-family="monospace" font-size="23" fill="#c0caf5">Coarsens to 15 seconds, with archive and turn exceptions.</text>
+<text x="1079" y="981" font-family="monospace" font-size="23" fill="#c0caf5">Result writes include cost, usage counters and recency.</text>
+<text x="55" y="1172" font-family="monospace" font-size="22" fill="#a9b1d6">The throttle still evaluates a conditional UPDATE per frame. PostgreSQL skips the row rewrite during the window.</text>
+</svg>
