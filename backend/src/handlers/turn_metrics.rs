@@ -109,7 +109,21 @@ pub async fn list_recent_user_turn_metrics(
     // this overlay to sessions the dashboard can actually render.
     // The session keys come from the covering index. Fetching each latest
     // eligible row separately avoids sorting the full historical payload.
-    let latest_rows = diesel::sql_query(
+    let latest_by_session = latest_user_turn_metrics(&mut conn, current_user_id)?
+        .into_iter()
+        .map(TurnMetric::into_wire)
+        .collect();
+    Ok(Json(TurnMetricsResponse {
+        metrics,
+        latest_by_session,
+    }))
+}
+
+fn latest_user_turn_metrics(
+    conn: &mut PgConnection,
+    user_id: uuid::Uuid,
+) -> QueryResult<Vec<TurnMetric>> {
+    diesel::sql_query(
         "SELECT latest.*
          FROM (
              SELECT DISTINCT session_id FROM turn_metrics
@@ -125,14 +139,8 @@ pub async fn list_recent_user_turn_metrics(
          ) AS latest
          ORDER BY seen.session_id",
     )
-    .bind::<diesel::sql_types::Uuid, _>(current_user_id)
-    .load::<TurnMetric>(&mut conn)?;
-    let latest_by_session = latest_rows.into_iter().map(TurnMetric::into_wire).collect();
-
-    Ok(Json(TurnMetricsResponse {
-        metrics,
-        latest_by_session,
-    }))
+    .bind::<diesel::sql_types::Uuid, _>(user_id)
+    .load(conn)
 }
 
 // =============================================================================
@@ -443,6 +451,52 @@ pub async fn list_aggregated_turn_metrics(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn latest_metrics_skip_bookkeeping_and_orphans() {
+        use crate::schema::turn_metrics;
+
+        let Some(pool) = crate::test_support::shared_pool() else {
+            return;
+        };
+        pool.get()
+            .unwrap()
+            .test_transaction::<_, diesel::result::Error, _>(|conn| {
+                let owner = crate::test_support::insert_user(conn, "latest-metrics-owner");
+                let other = crate::test_support::insert_user(conn, "latest-metrics-other");
+                let first = crate::test_support::insert_session(conn, owner.id, "first");
+                let second = crate::test_support::insert_session(conn, owner.id, "second");
+                let instant = chrono::Utc::now();
+                let mut insert = |user, session, offset, model, model_context_window| {
+                    diesel::insert_into(turn_metrics::table)
+                        .values((
+                            turn_metrics::user_id.eq(user),
+                            turn_metrics::session_id.eq(session),
+                            turn_metrics::started_at
+                                .eq(instant + chrono::Duration::seconds(offset)),
+                            turn_metrics::agent_type.eq("claude"),
+                            turn_metrics::model.eq(model),
+                            turn_metrics::model_context_window.eq(model_context_window),
+                        ))
+                        .returning(turn_metrics::id)
+                        .get_result::<uuid::Uuid>(conn)
+                };
+                let first_metric = insert(owner.id, Some(first.id), 0, Some("model"), None)?;
+                let second_metric = insert(owner.id, Some(second.id), 1, None, Some(100_000))?;
+                insert(owner.id, Some(first.id), 2, None, None)?;
+                insert(owner.id, None, 3, Some("orphan"), None)?;
+                insert(other.id, Some(first.id), 4, Some("other"), None)?;
+                let mut selected: Vec<_> = latest_user_turn_metrics(conn, owner.id)?
+                    .into_iter()
+                    .map(|row| row.id)
+                    .collect();
+                let mut expected = vec![first_metric, second_metric];
+                selected.sort_unstable();
+                expected.sort_unstable();
+                assert_eq!(selected, expected);
+                Ok(())
+            });
+    }
+
     use super::*;
 
     #[test]
