@@ -838,8 +838,12 @@ async fn main() -> anyhow::Result<()> {
     {
         Ok(true) => {
             info!("Launcher updated; restarting into the new binary");
-            service::restart_launcher();
-            warn!("Could not restart after updating; continuing with the running version");
+            match service::restart_launcher() {
+                service::RestartOutcome::Requested => service::await_replacement().await,
+                service::RestartOutcome::Failed => {
+                    warn!("Could not restart after updating; continuing with the running version")
+                }
+            }
         }
         Ok(false) => {}
         Err(e) => {

@@ -568,7 +568,9 @@ pub(super) async fn handle_message(
                         error!("Update check failed: {}; restarting anyway", e);
                     }
                 }
-                crate::service::restart_launcher();
+                if crate::service::restart_launcher() == crate::service::RestartOutcome::Requested {
+                    crate::service::await_replacement().await;
+                }
             });
         }
         ServerToLauncher::Restart => {
@@ -577,7 +579,9 @@ pub(super) async fn handle_message(
             // download/replace: the service manager (systemd/launchd) respawns
             // the process, or — when unmanaged — we exit for a supervisor to.
             tokio::spawn(async move {
-                crate::service::restart_launcher();
+                if crate::service::restart_launcher() == crate::service::RestartOutcome::Requested {
+                    crate::service::await_replacement().await;
+                }
             });
         }
         ServerToLauncher::TokenRefresh { auth_token } => {

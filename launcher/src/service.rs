@@ -63,27 +63,100 @@ pub(crate) fn current_exe_path() -> Result<String> {
         .to_string())
 }
 
-/// Restart the launcher process into whatever binary is now on disk. Under a
-/// service manager (systemd/launchd), sync the unit and ask the manager to
-/// restart us; when unmanaged, exit(0) so an external supervisor respawns.
+/// What asking to restart into the binary on disk achieved.
+#[derive(Debug, PartialEq, Eq)]
+#[must_use]
+pub enum RestartOutcome {
+    /// The service manager accepted the restart. It can finish
+    /// asynchronously (launchd's recovery worker returns before acting), so
+    /// this process is still running; the caller must stop working and
+    /// [`await_replacement`].
+    Requested,
+    /// No restart could be requested. The caller keeps running its current
+    /// version: exiting instead would leave a systemd unit down, because
+    /// `Restart=on-failure` does not respawn a clean exit.
+    Failed,
+}
+
+/// How long a process waits for the service manager to replace it after a
+/// requested restart before exiting so the manager starts the new binary.
+const REPLACEMENT_GRACE: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Restart the launcher process into whatever binary is now on disk.
 /// Shared by the startup update, the dashboard's `UpdateAndRestart` and its
 /// `Restart`, so the restart mechanism lives in exactly one place.
 ///
-/// Returns only when a managed restart could not be requested: the caller then
-/// keeps running. Exiting instead would leave a systemd unit down, because its
-/// `Restart=on-failure` does not respawn a clean exit.
-pub fn restart_launcher() {
-    if !is_installed() {
-        tracing::info!("Service not installed; exiting so a supervisor can respawn");
+/// Only a process the service manager itself started restarts the service.
+/// An installed unit is not enough: a launcher run by hand on a machine that
+/// also has the service installed would otherwise restart that service and
+/// keep running its own old process. An unmanaged process exits instead, so
+/// whoever started it can start the new binary.
+pub fn restart_launcher() -> RestartOutcome {
+    if !is_service_managed() {
+        tracing::info!(
+            "Not running under the service manager; exiting so whoever started this launcher can start the new binary"
+        );
         std::process::exit(0);
     }
     if let Err(e) = sync() {
         tracing::error!("Service unit sync failed; leaving launcher running: {}", e);
-        return;
+        return RestartOutcome::Failed;
     }
-    if let Err(e) = restart() {
-        tracing::error!("Service restart failed: {}", e);
+    match restart() {
+        Ok(()) => RestartOutcome::Requested,
+        Err(e) => {
+            tracing::error!("Service restart failed; leaving launcher running: {}", e);
+            RestartOutcome::Failed
+        }
     }
+}
+
+/// After [`RestartOutcome::Requested`], wait for the service manager to stop
+/// this process instead of carrying on with the old binary. If nothing stops
+/// it within [`REPLACEMENT_GRACE`], exit non-zero: systemd
+/// (`Restart=on-failure`) and launchd (`KeepAlive`) both then start the new
+/// binary.
+pub async fn await_replacement() -> ! {
+    tracing::info!("Restart requested; waiting for the service manager to replace this process");
+    tokio::time::sleep(REPLACEMENT_GRACE).await;
+    tracing::warn!(
+        "Service manager did not replace this process within {}s; exiting so it starts the new binary",
+        REPLACEMENT_GRACE.as_secs()
+    );
+    std::process::exit(1);
+}
+
+/// Whether the service manager started this process, as opposed to a unit
+/// merely being installed. Read from the process's own environment, so it
+/// also holds for units written by older versions.
+#[cfg(target_os = "linux")]
+fn is_service_managed() -> bool {
+    std::fs::read_to_string("/proc/self/cgroup")
+        .is_ok_and(|cgroup| cgroup_is_unit(&cgroup, &format!("{SERVICE_NAME}.service")))
+}
+
+/// systemd places a service's processes in a cgroup named after its unit, in
+/// both the unified (`0::/…/agent-portal.service`) and legacy hierarchies.
+#[cfg(any(target_os = "linux", test))]
+fn cgroup_is_unit(cgroup: &str, unit: &str) -> bool {
+    cgroup.lines().any(|line| {
+        line.rsplit(':')
+            .next()
+            .and_then(|path| path.trim_end().rsplit('/').next())
+            == Some(unit)
+    })
+}
+
+/// launchd sets `XPC_SERVICE_NAME` to the job label for processes it starts;
+/// a launcher run from a terminal sees another value or none.
+#[cfg(target_os = "macos")]
+fn is_service_managed() -> bool {
+    std::env::var("XPC_SERVICE_NAME").is_ok_and(|label| label == PLIST_LABEL)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn is_service_managed() -> bool {
+    false
 }
 
 // --- Linux (systemd) ---
@@ -917,6 +990,29 @@ esac
         assert!(service.contains(&"OOMPolicy=continue"), "{unit}");
         assert!(service.contains(&"ManagedOOMPreference=avoid"), "{unit}");
         assert!(service.contains(&"Delegate=memory"), "{unit}");
+    }
+
+    /// Only the service's own cgroup counts as managed: a launcher started
+    /// from a shell or another unit on the same machine does not.
+    #[test]
+    fn managed_means_running_in_the_service_cgroup() {
+        let unit = "agent-portal.service";
+        assert!(super::cgroup_is_unit(
+            "0::/user.slice/user-1004.slice/user@1004.service/app.slice/agent-portal.service\n",
+            unit
+        ));
+        assert!(super::cgroup_is_unit(
+            "12:pids:/user.slice/user-1000.slice/user@1000.service/agent-portal.service\n1:name=systemd:/user.slice/user-1000.slice/user@1000.service/agent-portal.service\n",
+            unit
+        ));
+        for other in [
+            "0::/user.slice/user-1004.slice/session-3.scope\n",
+            "0::/user.slice/user-1004.slice/user@1004.service/app.slice/agent-portal-update-1.service\n",
+            "0::/user.slice/user-1004.slice/user@1004.service/app.slice/campaign-1.service\n",
+            "",
+        ] {
+            assert!(!super::cgroup_is_unit(other, unit), "{other}");
+        }
     }
 
     /// The unit runs the bare binary so every service start checks for an
