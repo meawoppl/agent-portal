@@ -159,6 +159,8 @@ struct CodexIoState {
     /// Per-request approval-response shape, latched when the server→client
     /// approval request arrives and consumed when the user's decision returns.
     pending_approval_kinds: HashMap<String, CodexApprovalResponseKind>,
+    /// Merged rate-limit readings; forwards a warning once per window.
+    rate_limits: crate::rate_limits::RateLimitTracker,
 }
 
 impl CodexIoState {
@@ -694,6 +696,7 @@ pub(crate) async fn codex_io_task(
                                     msg,
                                     &event_tx,
                                     latest_usage_for_msg,
+                                    &mut state.rate_limits,
                                 )
                             };
                             if turn_ended {
@@ -1028,7 +1031,12 @@ pub(crate) async fn codex_io_task(
                             let (ok, turn_ended) = if let Some(output) = generated {
                                 (event_tx.send(IoEvent::Classified(session_lib::AgentOutput::Visible(output))).is_ok(), false)
                             } else {
-                                handle_codex_server_message(msg, &event_tx, None)
+                                handle_codex_server_message(
+                                    msg,
+                                    &event_tx,
+                                    None,
+                                    &mut state.rate_limits,
+                                )
                             };
                             if turn_ended {
                                 state.set_turn_active(false);

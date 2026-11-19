@@ -54,6 +54,19 @@ impl CodexLifecycleFrame {
     }
 }
 
+impl CodexLifecycleFrame {
+    /// The frame reports the account out of usage (not a transient limit).
+    pub fn is_usage_limit(&self) -> bool {
+        let error = match self {
+            Self::Started => None,
+            Self::Completed { error, .. } | Self::Failed { error } => error.as_ref(),
+            Self::Error { error } => Some(error),
+        };
+        error
+            .is_some_and(|e| matches!(e.codex_error_info, Some(CodexErrorInfo::UsageLimitExceeded)))
+    }
+}
+
 impl CodexErrorDetails {
     pub fn from_turn_error(error: &codex_codes::TurnError, will_retry: bool) -> Self {
         Self {

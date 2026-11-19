@@ -42,8 +42,8 @@ use super::helpers::{
     autoscroll_transition, classify_output_msg_type, clear_completed_tools, edit_stack_dispatch,
     enrich_codex_file_change_permission, ephemeral_summary, parse_iso_ms_utc,
     reconcile_edit_stack_activity, reconcile_pending_sends, running_tool_key,
-    update_pending_send_delivery, upsert_tool_progress, ActiveToolProgress, ActivityTag,
-    EditStackDispatch, MuseLiveTurn,
+    update_pending_send_delivery, upsert_tool_progress, usage_limited_since_last_input,
+    ActiveToolProgress, ActivityTag, EditStackDispatch, MuseLiveTurn,
 };
 use super::input_bar::{InputBar, InputBarInbound};
 use super::live_status::{LiveStatus, LiveStatusSnapshot};
@@ -489,7 +489,9 @@ pub enum SessionViewMsg {
     TurnMetricsReceived(Box<TurnMetrics>),
     ScheduleLimitContinuation(Uuid),
     ContinuationStatus(Uuid, String),
-    ShowForkDialog,
+    /// Open the fork dialog with this agent preselected; another agent than
+    /// the session's own makes it a handoff.
+    ShowForkDialog(shared::AgentType),
     HideForkDialog,
     ShowClaudeLogin,
     HideClaudeLogin,
@@ -625,7 +627,8 @@ pub struct SessionView {
     resize_listeners: Vec<EventListener>,
     #[allow(dead_code)]
     surface_escape_listener: Option<EventListener>,
-    show_fork_dialog: bool,
+    /// Open fork/handoff dialog and its preselected agent.
+    fork_dialog_agent: Option<shared::AgentType>,
     show_claude_login: bool,
     /// After a sign-in to Claude from this view: the launch count then, kept
     /// until a later successful launch (or a dismissal), since the running
@@ -776,7 +779,7 @@ impl Component for SessionView {
             body_ref: NodeRef::default(),
             resize_listeners: Vec::new(),
             surface_escape_listener,
-            show_fork_dialog: false,
+            fork_dialog_agent: None,
             show_claude_login: false,
             claude_signin_notice: None,
         }
@@ -895,7 +898,7 @@ impl Component for SessionView {
                     | SessionViewMsg::SendAllEditStack
                     | SessionViewMsg::DismissEditStackItem(..)
                     | SessionViewMsg::ScheduleLimitContinuation(..)
-                    | SessionViewMsg::ShowForkDialog
+                    | SessionViewMsg::ShowForkDialog(..)
             )
         {
             return false;
@@ -912,12 +915,12 @@ impl Component for SessionView {
         }
         match msg {
             SessionViewMsg::WsEvent(event) => self.handle_ws_event(ctx, event),
-            SessionViewMsg::ShowForkDialog => {
-                self.show_fork_dialog = true;
+            SessionViewMsg::ShowForkDialog(agent) => {
+                self.fork_dialog_agent = Some(agent);
                 true
             }
             SessionViewMsg::HideForkDialog => {
-                self.show_fork_dialog = false;
+                self.fork_dialog_agent = None;
                 true
             }
             SessionViewMsg::ShowClaudeLogin => {
@@ -1642,19 +1645,7 @@ impl Component for SessionView {
                         }
                     </button>
                     <span class={status_class}>{ ctx.props().session.status.as_str() }</span>
-                    if ctx.props().portal.can_write() && ctx.props().session.my_role == shared::SessionRole::Owner
-                        && ctx.props().session.launcher_id.is_some()
-                        && !matches!(
-                            ctx.props().session.agent_type,
-                            shared::AgentType::Muse | shared::AgentType::Antigravity
-                        )
-                    {
-                        <button
-                            type="button"
-                            class="session-header-action"
-                            onclick={ctx.link().callback(|_| SessionViewMsg::ShowForkDialog)}
-                        >{ "Fork…" }</button>
-                    }
+                    { self.render_fork_button(ctx) }
                 </div>
                 <div
                     ref={self.body_ref.clone()}
@@ -1745,6 +1736,7 @@ impl Component for SessionView {
                             { render_claude_signin_notice(&ctx.props().session.hostname, ctx.link().callback(|_| SessionViewMsg::DismissClaudeSignInNotice)) }
                         }
                         { self.render_agent_progress() }
+                        { self.render_usage_limit_handoff(ctx) }
                         { self.render_input_bar(ctx) }
                     </div>
                     if let Some(surface) = self.active_surface.clone() {
@@ -1794,9 +1786,10 @@ impl Component for SessionView {
                     }
                 </div>
 
-                if self.show_fork_dialog {
+                if let Some(agent) = self.fork_dialog_agent {
                     <ForkDialog
                         session={ctx.props().session.clone()}
+                        initial_agent={agent}
                         on_close={ctx.link().callback(|_| SessionViewMsg::HideForkDialog)}
                     />
                 }
@@ -1823,6 +1816,58 @@ impl SessionView {
     /// dashboard files per-session state under carries it.
     fn session_key(ctx: &Context<Self>) -> SessionKey {
         ctx.props().portal.session_key(ctx.props().session.id)
+    }
+
+    /// Fork and handoff both launch on the source's launcher as its owner.
+    fn can_fork_or_hand_off(&self, ctx: &Context<Self>) -> bool {
+        ctx.props().portal.can_write()
+            && ctx.props().session.my_role == shared::SessionRole::Owner
+            && ctx.props().session.launcher_id.is_some()
+    }
+
+    /// Header action: fork, or — for agents that can't fork natively (Muse,
+    /// Antigravity) — hand off.
+    fn render_fork_button(&self, ctx: &Context<Self>) -> Html {
+        if !self.can_fork_or_hand_off(ctx) {
+            return html! {};
+        }
+        let own = ctx.props().session.agent_type;
+        let agent = match own {
+            shared::AgentType::Muse | shared::AgentType::Antigravity => shared::AgentType::Claude,
+            other => other,
+        };
+        html! {
+            <button
+                type="button"
+                class="session-header-action"
+                onclick={ctx.link().callback(move |_| SessionViewMsg::ShowForkDialog(agent))}
+            >{ if agent == own { "Fork…" } else { "Hand off…" } }</button>
+        }
+    }
+
+    /// When the agent's latest turn was refused for lack of usage, offer to
+    /// continue the work with another agent instead of waiting for a reset.
+    fn render_usage_limit_handoff(&self, ctx: &Context<Self>) -> Html {
+        let session = &ctx.props().session;
+        if !self.can_fork_or_hand_off(ctx)
+            || !usage_limited_since_last_input(&self.messages, session.agent_type)
+        {
+            return html! {};
+        }
+        let target = match session.agent_type {
+            shared::AgentType::Claude => shared::AgentType::Codex,
+            _ => shared::AgentType::Claude,
+        };
+        html! {
+            <div class="usage-limit-handoff" role="status">
+                <span>{ format!("{} is out of usage.", session.agent_type.display_name()) }</span>
+                <button
+                    type="button"
+                    class="error-recovery-button"
+                    onclick={ctx.link().callback(move |_| SessionViewMsg::ShowForkDialog(target))}
+                >{ format!("Hand off to {}", target.display_name()) }</button>
+            </div>
+        }
     }
 
     fn claude_login_callback(&self, ctx: &Context<Self>) -> Option<Callback<()>> {

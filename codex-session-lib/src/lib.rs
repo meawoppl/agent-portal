@@ -20,6 +20,7 @@ mod helpers;
 pub mod imports;
 mod io_task;
 pub mod login;
+mod rate_limits;
 
 pub use agent::CodexAgent;
 pub use classifier::CodexClassifier;

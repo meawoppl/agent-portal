@@ -613,6 +613,10 @@ pub fn build_router(app_state: Arc<AppState>) -> anyhow::Result<Router> {
             post(handlers::launchers::fork_session),
         )
         .route(
+            "/api/sessions/{session_id}/handoff",
+            post(handlers::session_handoff::handoff_session),
+        )
+        .route(
             "/api/launchers/{launcher_id}/update",
             post(handlers::launchers::update_launcher),
         )
