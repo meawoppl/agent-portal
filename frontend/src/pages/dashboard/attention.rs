@@ -186,7 +186,7 @@ pub(super) fn use_attention(
                         });
                     let report = session
                         .filter(|s| s.portal.can_write())
-                        .and_then(|s| tick_report(active, at_reply).map(|report| (s, report)));
+                        .zip(tick_report(active, at_reply));
                     let new_key = report
                         .as_ref()
                         .filter(|(_, report)| report.present)
