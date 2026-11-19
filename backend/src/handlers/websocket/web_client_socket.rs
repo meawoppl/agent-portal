@@ -94,8 +94,39 @@ type OutboundRules = (
     Option<crate::secrets::redaction::Redactor>,
 );
 
-fn outbound_rules(
+/// Wait briefly for a database slot without stalling other socket tasks.
+/// Replay releases its checkout before sending each batch to this consumer.
+/// Keep checking the database generation at the send boundary, even after a wait.
+fn with_socket_redaction<T>(
     pool: &crate::db::DbPool,
+    sanitize: impl FnOnce(crate::db::DbConnection) -> Result<T, crate::errors::AppError>,
+) -> Option<T> {
+    super::run_blocking(|| {
+        let conn = match pool.get_timeout(std::time::Duration::from_secs(3)) {
+            Ok(conn) => conn,
+            Err(_) => {
+                warn!(
+                    "{}: closing browser socket after waiting for a database connection",
+                    crate::markers::REDACTION_DB_POOL_BUSY
+                );
+                return None;
+            }
+        };
+        match sanitize(conn) {
+            Ok(frame) => Some(frame),
+            Err(_) => {
+                warn!(
+                    "{}: closing browser socket because current content redaction failed",
+                    crate::markers::SECRET_REDACTION_FAILED
+                );
+                None
+            }
+        }
+    })
+}
+
+fn outbound_rules(
+    conn: crate::db::DbConnection,
     viewer: Uuid,
     verified_session: Option<Uuid>,
     frame: &ServerToClient,
@@ -104,18 +135,15 @@ fn outbound_rules(
         ServerToClient::SessionUpdate { session_id, .. } => Some(*session_id),
         _ => verified_session,
     };
-    rules_for_session(pool, viewer, session)
+    rules_for_session(conn, viewer, session)
 }
 
 fn rules_for_session(
-    pool: &crate::db::DbPool,
+    mut conn: crate::db::DbConnection,
     viewer: Uuid,
     session: Option<Uuid>,
 ) -> Result<Option<OutboundRules>, crate::errors::AppError> {
-    use crate::{errors::AppError, schema::sessions, secrets::redaction};
-    let mut conn = pool.try_get().ok_or(AppError::ServiceUnavailable(
-        "Content authorization is busy; reconnect shortly",
-    ))?;
+    use crate::{schema::sessions, secrets::redaction};
     let owner = session
         .map(|id| {
             sessions::table
@@ -156,14 +184,14 @@ fn sanitize_outbound(
     verified_session: Option<Uuid>,
     frame: ServerToClient,
 ) -> Result<ServerToClient, crate::errors::AppError> {
-    match outbound_rules(pool, viewer, verified_session, &frame)? {
+    match outbound_rules(pool.get().unwrap(), viewer, verified_session, &frame)? {
         Some(rules) => redact_outbound(&frame, rules),
         None => Ok(frame),
     }
 }
 
 fn sanitize_delivery(
-    pool: &crate::db::DbPool,
+    conn: crate::db::DbConnection,
     viewer: Uuid,
     verified_session: Option<Uuid>,
     frame: Delivery<ServerToClient>,
@@ -173,7 +201,7 @@ fn sanitize_delivery(
         Delivery::Shared { value, json } => (value.as_ref(), Some(json)),
     };
     let redacted;
-    let frame = match outbound_rules(pool, viewer, verified_session, frame)? {
+    let frame = match outbound_rules(conn, viewer, verified_session, frame)? {
         Some(rules) => {
             redacted = redact_outbound(frame, rules)?;
             &redacted
@@ -189,13 +217,13 @@ fn sanitize_delivery(
 }
 
 pub(super) fn sanitize_history(
-    pool: &crate::db::DbPool,
+    conn: crate::db::DbConnection,
     viewer: Uuid,
     session: Option<Uuid>,
     json: String,
 ) -> Result<String, crate::errors::AppError> {
     use crate::errors::AppError;
-    let Some((viewer_rules, owner_rules)) = rules_for_session(pool, viewer, session)? else {
+    let Some((viewer_rules, owner_rules)) = rules_for_session(conn, viewer, session)? else {
         return Ok(json);
     };
     let error = |_| AppError::ServiceUnavailable("History redaction unavailable");
@@ -293,10 +321,9 @@ pub async fn handle_web_client_socket(
                 match replayed {
                     Some(Ok(msg)) => {
                         if linked.as_ref().is_some_and(|auth| outbound_auth.check(std::time::Instant::now(), false, || auth.authorize(&app_state, shared::api::TokenScope::Read)).is_err()) { break; }
-                        let msg = match sanitize_history(&db_pool, user_id, verified_session_id, msg) {
-                            Ok(msg) => msg,
-                            Err(_) => { warn!("{}: closing client until rules refresh", crate::markers::SECRET_REDACTION_FAILED); break; }
-                        };
+                        let Some(msg) = with_socket_redaction(&db_pool, |conn| {
+                            sanitize_history(conn, user_id, verified_session_id, msg)
+                        }) else { break; };
                         if ws_sender.send_json(msg.into()).await.is_err() { break; }
                     }
                     Some(Err(error)) => { warn!("History replay failed: {error}"); break; }
@@ -313,20 +340,18 @@ pub async fn handle_web_client_socket(
                     continue;
                 }
                 if linked.as_ref().is_some_and(|auth| outbound_auth.check(std::time::Instant::now(), false, || auth.authorize(&app_state, shared::api::TokenScope::Read)).is_err()) { break; }
-                let msg = match sanitize_delivery(&db_pool, user_id, verified_session_id, msg) {
-                            Ok(msg) => msg,
-                            Err(_) => { warn!("{}: closing client until rules refresh", crate::markers::SECRET_REDACTION_FAILED); break; }
-                        };
-                        if ws_sender.send_json(msg).await.is_err() { break; }
+                let Some(msg) = with_socket_redaction(&db_pool, |conn| {
+                    sanitize_delivery(conn, user_id, verified_session_id, msg)
+                }) else { break; };
+                if ws_sender.send_json(msg).await.is_err() { break; }
             }
             result = receive_browser_frame(&mut ws_receiver) => {
                 let Some(result) = result else { break; };
                 match result {
                     Ok(client_msg) => {
-                        let client_msg = match crate::secrets::redaction::sanitize_for_user(&db_pool, user_id, client_msg) {
-                            Ok(msg) => msg,
-                            Err(_) => { warn!("{}: closing client until rules refresh", crate::markers::SECRET_REDACTION_FAILED); break; }
-                        };
+                        let Some(client_msg) = with_socket_redaction(&db_pool, |conn| {
+                            crate::secrets::redaction::sanitize_for_user(conn, user_id, client_msg)
+                        }) else { break; };
                         if linked.as_ref().is_some_and(|auth| auth.authorize(&app_state, crate::handlers::federation::message_scope(&client_msg)).is_err()) { break; }
                         // Negotiate inline: a rejection must reach the socket before
                         // closing, and no later pipelined mutation may dispatch.
@@ -1296,6 +1321,91 @@ mod owner_redaction_tests {
     use crate::secrets::redaction::{RedactionRuntime, MASK};
     use shared::api::SecretValue;
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn browser_redaction_waits_for_pool_and_still_rejects_stale_rules() {
+        use axum::{extract::ws::WebSocketUpgrade, routing::get, Router};
+        use std::time::Duration;
+
+        let Some(db) = Database::new() else {
+            return;
+        };
+        let state = Arc::new(crate::test_support::test_app_state(db.pool.clone()));
+        let viewer = Uuid::new_v4();
+        let socket_state = state.clone();
+        let router = Router::new().route(
+            "/ws",
+            get(move |ws: WebSocketUpgrade| {
+                let state = socket_state.clone();
+                async move {
+                    ws.on_upgrade(move |socket| {
+                        handle_web_client_socket(socket, state, viewer, None)
+                    })
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+        let (mut browser, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/ws"))
+            .await
+            .unwrap();
+
+        let deadline = Duration::from_secs(5);
+        for expected in ["SessionProgressReset", "ServiceStatsUpdate"] {
+            let frame = tokio::time::timeout(deadline, browser.next())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(frame.to_text().unwrap()).unwrap()
+                    ["type"],
+                expected
+            );
+        }
+
+        let held: Vec<_> = (0..db.pool.max_size())
+            .map(|_| db.pool.get().unwrap())
+            .collect();
+        let diagnostic = || ServerToClient::Error {
+            message: "queued during checkout pressure".into(),
+        };
+        state
+            .session_manager
+            .broadcast_to_user(&viewer, diagnostic());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), browser.next())
+                .await
+                .is_err(),
+            "the socket should wait for a checkout"
+        );
+        drop(held);
+
+        let frame = tokio::time::timeout(deadline, browser.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            serde_json::from_str::<ServerToClient>(frame.to_text().unwrap()).unwrap(),
+            ServerToClient::Error { message } if message == "queued during checkout pressure"
+        ));
+
+        use crate::schema::secrets_generation as generation;
+        diesel::update(generation::table.find(1i16))
+            .set(generation::generation.eq(1i64))
+            .execute(&mut db.pool.get().unwrap())
+            .unwrap();
+        state
+            .session_manager
+            .broadcast_to_user(&viewer, diagnostic());
+        let next = tokio::time::timeout(deadline, browser.next())
+            .await
+            .expect("the socket must fail closed without current rules");
+        assert!(!matches!(next, Some(Ok(frame)) if frame.is_text()));
+        server.abort();
+    }
+
     #[test]
     fn outbound_uses_verified_owner_and_viewer_but_never_nested_agent_session_ids() {
         let Some(db) = Database::new() else {
@@ -1392,29 +1502,5 @@ mod owner_redaction_tests {
         assert!(branch.starts_with(MASK));
         assert!(!branch.contains("VIEWER_77"));
         assert!(branch.contains("THIRD_99"));
-    }
-    #[test]
-    fn outbound_pool_checkout_fails_fast_when_replay_producers_hold_every_connection() {
-        let Some(db) = Database::new() else {
-            return;
-        };
-        let held: Vec<_> = (0..db.pool.max_size())
-            .map(|_| db.pool.get().unwrap())
-            .collect();
-        let started = std::time::Instant::now();
-        let result = sanitize_outbound(
-            &db.pool,
-            Uuid::new_v4(),
-            None,
-            ServerToClient::Error {
-                message: "safe diagnostic".into(),
-            },
-        );
-        assert!(matches!(
-            result,
-            Err(crate::errors::AppError::ServiceUnavailable(_))
-        ));
-        assert!(started.elapsed() < std::time::Duration::from_secs(1));
-        drop(held);
     }
 }

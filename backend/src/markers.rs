@@ -29,6 +29,10 @@ pub const AUDIT_PERSIST_FAILED: &str = "AUDIT_PERSIST_FAILED";
 /// key-provider health and verify refresh. Content is rejected/held, not leaked.
 pub const SECRET_REDACTION_FAILED: &str = "SECRET_REDACTION_FAILED";
 
+/// Browser socket redaction reached its checkout deadline. Check database
+/// health and pool pressure. The waiting frame was never sent or dispatched.
+pub const REDACTION_DB_POOL_BUSY: &str = "REDACTION_DB_POOL_BUSY";
+
 /// Proposal expiry worker could not remove staged ciphertext. Recurring failures
 /// mean database trouble; restore DB access and verify overdue proposals clear.
 pub const SECRET_PROPOSAL_EXPIRY_FAILED: &str = "SECRET_PROPOSAL_EXPIRY_FAILED";
@@ -240,6 +244,7 @@ mod tests {
     const ALL_MARKERS: &[&str] = &[
         AUDIT_PERSIST_FAILED,
         SECRET_REDACTION_FAILED,
+        REDACTION_DB_POOL_BUSY,
         SECRET_EXPUNGE_FAILED,
         SECRET_PROPOSAL_EXPIRY_FAILED,
         SECRETS_REDACTION_REFRESH_FAILED,
@@ -323,6 +328,7 @@ mod tests {
             include_str!("handlers/websocket/message_handlers.rs"),
             include_str!("handlers/websocket/turn_metrics.rs"),
             include_str!("handlers/websocket/proxy_socket.rs"),
+            include_str!("handlers/websocket/web_client_socket.rs"),
             include_str!("handlers/websocket/permissions.rs"),
             include_str!("push/dispatcher.rs"),
             include_str!("handlers/websocket/session_manager/input_queue.rs"),
