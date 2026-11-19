@@ -305,7 +305,14 @@ fn archive_one_session(
     conn.transaction(|conn| {
         crate::secrets::expunge::archive_session_lock(conn, session.id)
             .map_err(|_| anyhow::anyhow!("Archive fencing unavailable"))?;
-        archive_one_session_inner(conn, runtime, session)
+        archive_one_session_inner(conn, runtime, session)?;
+        // Publish the archive watermark before releasing its per-session fence.
+        use diesel::prelude::*;
+        use schema::sessions;
+        diesel::update(sessions::table.find(session.id))
+            .set(sessions::archived_at.eq(session.last_activity))
+            .execute(conn)?;
+        Ok(())
     })
 }
 
@@ -688,57 +695,80 @@ fn parse_media_id(data: &str, kind: &str) -> Option<uuid::Uuid> {
 /// coincides with a retention cycle can never lose the unarchived delta — the
 /// trim is retried next cycle once the archive succeeds. Sessions with a
 /// fresh/successful archive are absent from the set and trim normally.
+struct RetentionArchives {
+    held: std::collections::HashSet<uuid::Uuid>,
+    count_candidates: Vec<uuid::Uuid>,
+    age_candidates: Vec<uuid::Uuid>,
+    next_age_cursor: Option<handlers::retention::AgeCursor>,
+}
+
 fn archive_retention_candidates(
     conn: &mut diesel::PgConnection,
     runtime: &crate::archive::ArchiveRuntime,
     config: &handlers::retention::RetentionConfig,
-) -> std::collections::HashSet<uuid::Uuid> {
-    use diesel::dsl::count_star;
+    pending: &[uuid::Uuid],
+    age_cursor: Option<handlers::retention::AgeCursor>,
+) -> diesel::QueryResult<RetentionArchives> {
     use diesel::prelude::*;
     use schema::{messages, sessions};
 
-    let mut affected: std::collections::HashSet<uuid::Uuid> = std::collections::HashSet::new();
+    use handlers::retention::{
+        old_message_candidates, with_cleanup_timeout, MAX_DELETES_PER_CYCLE,
+    };
 
-    if config.retention_days > 0 {
-        let cutoff = chrono::Utc::now().naive_utc()
-            - chrono::Duration::days(i64::from(config.retention_days));
-        match messages::table
-            .filter(messages::created_at.lt(cutoff))
-            .select(messages::session_id)
-            .distinct()
-            .load::<uuid::Uuid>(conn)
-        {
-            Ok(ids) => affected.extend(ids),
-            Err(e) => tracing::error!("Failed to query age-retention candidates: {e}"),
+    let age_rows = with_cleanup_timeout(conn, |conn| {
+        old_message_candidates(
+            conn,
+            *config,
+            MAX_DELETES_PER_CYCLE,
+            &Default::default(),
+            age_cursor,
+        )
+    })
+    .unwrap_or_else(|error| {
+        tracing::error!("Failed to select age-retention candidates: {error}");
+        Vec::new()
+    });
+    // If an old session cannot be archived, advance the scan past it so
+    // unrelated age trims can proceed; the end of the scan wraps to the head.
+    let next_age_cursor = age_rows
+        .last()
+        .filter(|_| age_rows.len() == MAX_DELETES_PER_CYCLE)
+        .map(|(id, _, timestamp)| (*timestamp, *id));
+    let (affected, count_candidates) = with_cleanup_timeout(conn, |conn| {
+        let mut affected: std::collections::HashSet<_> =
+            age_rows.iter().map(|(_, session, _)| *session).collect();
+        let mut count_candidates = Vec::new();
+        for &session in pending {
+            let over_limit = messages::table
+                .filter(messages::session_id.eq(session))
+                .select(messages::id)
+                .offset(config.max_messages_per_session.max(0))
+                .first::<uuid::Uuid>(conn)
+                .optional()?
+                .is_some();
+            if over_limit {
+                affected.insert(session);
+                count_candidates.push(session);
+            }
         }
-    }
-
-    match messages::table
-        .group_by(messages::session_id)
-        .having(count_star().gt(config.max_messages_per_session))
-        .select(messages::session_id)
-        .load::<uuid::Uuid>(conn)
-    {
-        Ok(ids) => affected.extend(ids),
-        Err(e) => tracing::error!("Failed to query count-retention candidates: {e}"),
-    }
+        Ok::<_, diesel::result::Error>((affected, count_candidates))
+    })?;
 
     if affected.is_empty() {
-        return std::collections::HashSet::new();
+        return Ok(RetentionArchives {
+            held: affected,
+            count_candidates,
+            age_candidates: Vec::new(),
+            next_age_cursor,
+        });
     }
 
-    let candidates: Vec<models::Session> = match sessions::table
-        .filter(sessions::id.eq_any(affected.iter().copied().collect::<Vec<_>>()))
-        .load(conn)
-    {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::error!("Failed to load retention-candidate sessions: {e}");
-            // Could not confirm any archive this cycle: hold every candidate
-            // rather than risk trimming an unarchived session.
-            return affected;
-        }
-    };
+    let candidates: Vec<models::Session> = with_cleanup_timeout(conn, |conn| {
+        sessions::table
+            .filter(sessions::id.eq_any(affected.iter().copied().collect::<Vec<_>>()))
+            .load::<models::Session>(conn)
+    })?;
 
     let mut archived = 0;
     let mut failed: std::collections::HashSet<uuid::Uuid> = std::collections::HashSet::new();
@@ -756,7 +786,16 @@ fn archive_retention_candidates(
             candidates.len()
         );
     }
-    failed
+    let age_candidates = age_rows
+        .into_iter()
+        .filter_map(|(id, session, _)| (!failed.contains(&session)).then_some(id))
+        .collect();
+    Ok(RetentionArchives {
+        held: failed,
+        count_candidates,
+        age_candidates,
+        next_age_cursor,
+    })
 }
 
 /// Archive `session` if its archive is missing or stale, updating
@@ -791,12 +830,7 @@ pub(crate) fn ensure_session_archived(
         return true;
     }
     match archive_one_session(conn, runtime, &session) {
-        Ok(()) => {
-            let _ = diesel::update(sessions::table.find(session.id))
-                .set(sessions::archived_at.eq(session.last_activity))
-                .execute(conn);
-            true
-        }
+        Ok(()) => true,
         Err(e) => {
             runtime.stats.record_failure(&e.to_string());
             tracing::error!("{SESSION_ARCHIVE_FAILED} session={}: {e}", session.id);
@@ -931,6 +965,143 @@ pub async fn broadcast_user_spend_updates(app_state: Arc<AppState>) {
     }
 }
 
+/// Check the durable session list once for all connected accounts. Only the
+/// account whose list changed receives an invalidation, and the existing
+/// authorized REST endpoint is the source of the list itself.
+pub async fn watch_session_lists(state: Arc<AppState>) {
+    use std::collections::HashMap;
+
+    let mut previous = HashMap::new();
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        interval.tick().await;
+        let users = state.session_manager.get_all_user_ids();
+        if users.is_empty() {
+            previous.clear();
+            continue;
+        }
+        let pool = state.db_pool.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            let mut conn = pool.get()?;
+            Ok::<_, anyhow::Error>(session_list_revisions(&mut conn, users)?)
+        })
+        .await;
+        match result {
+            Ok(Ok(current)) => {
+                for (user, revision) in &current {
+                    if previous.get(user) != Some(revision) {
+                        state
+                            .session_manager
+                            .broadcast_to_user(user, shared::ServerToClient::SessionListChanged);
+                    }
+                }
+                previous = current;
+            }
+            Ok(Err(error)) => tracing::warn!(
+                "{}: revision query failed: {error}",
+                crate::markers::SESSION_LIST_WATCH_FAILED
+            ),
+            Err(error) => tracing::error!(
+                "{}: worker failed: {error}",
+                crate::markers::SESSION_LIST_WATCH_FAILED
+            ),
+        }
+    }
+}
+
+fn session_list_revisions(
+    conn: &mut diesel::PgConnection,
+    users: Vec<uuid::Uuid>,
+) -> diesel::QueryResult<std::collections::HashMap<uuid::Uuid, String>> {
+    use diesel::prelude::*;
+    use diesel::sql_types::{Array, Text, Uuid as SqlUuid};
+
+    #[derive(QueryableByName)]
+    struct Revision {
+        #[diesel(sql_type = SqlUuid)]
+        user_id: uuid::Uuid,
+        #[diesel(sql_type = Text)]
+        digest: String,
+    }
+
+    // Leave frame-level activity and accounting out of the revision. The
+    // rail orders by last_messaged_at and gets metrics/spend on separate
+    // channels. A slow fallback refreshes other fields and older servers.
+    let revisions = diesel::sql_query(
+        "SELECT u.user_id,
+                md5(g.generation::text || ':' || COALESCE(
+                    string_agg(md5(ROW(s.id, s.user_id, s.session_name, s.session_key,
+                        s.working_directory, s.status, s.last_messaged_at, s.created_at,
+                        s.git_branch, m.role, s.hostname, s.launcher_id, s.pr_url,
+                        s.repo_url, s.open_prs, s.agent_type, s.client_version,
+                        s.scheduled_task_id, s.paused, s.claude_args, s.last_model,
+                        s.spawned_by, s.spawn_depth, s.forked_from_session_id,
+                        s.fork_point_turn_id)::text), '' ORDER BY s.id)
+                    FILTER (WHERE s.id IS NOT NULL), '')) AS digest
+         FROM unnest($1::uuid[]) AS u(user_id)
+         CROSS JOIN secrets_generation g
+         LEFT JOIN session_members m ON m.user_id = u.user_id
+         LEFT JOIN sessions s ON s.id = m.session_id AND s.status <> $2
+         WHERE g.id = 1
+         GROUP BY u.user_id, g.generation",
+    )
+    .bind::<Array<SqlUuid>, _>(users)
+    .bind::<Text, _>(shared::SessionStatus::Replaced.as_str())
+    .load::<Revision>(conn)?;
+    Ok(revisions
+        .into_iter()
+        .map(|row| (row.user_id, row.digest))
+        .collect())
+}
+
+#[cfg(test)]
+#[test]
+fn session_list_revision_tracks_membership_and_ignores_output_recency() {
+    use crate::schema::{session_members, sessions};
+    use diesel::prelude::*;
+
+    let Some(pool) = crate::test_support::shared_pool() else {
+        return;
+    };
+    pool.get()
+        .unwrap()
+        .test_transaction::<_, diesel::result::Error, _>(|conn| {
+            let owner = crate::test_support::insert_user(conn, "session-list-owner");
+            let viewer = crate::test_support::insert_user(conn, "session-list-viewer");
+            let session = crate::test_support::insert_session(conn, owner.id, "watch list");
+            let revision = |conn: &mut diesel::PgConnection| {
+                session_list_revisions(conn, vec![owner.id, viewer.id]).unwrap()
+            };
+            let before = revision(conn);
+            diesel::insert_into(session_members::table)
+                .values((
+                    session_members::session_id.eq(session.id),
+                    session_members::user_id.eq(viewer.id),
+                    session_members::role.eq("viewer"),
+                ))
+                .execute(conn)?;
+            let joined = revision(conn);
+            assert_eq!(joined[&owner.id], before[&owner.id]);
+            assert_ne!(joined[&viewer.id], before[&viewer.id]);
+
+            diesel::update(sessions::table.find(session.id))
+                .set(sessions::last_activity.eq(diesel::dsl::now))
+                .execute(conn)?;
+            assert_eq!(revision(conn), joined);
+            diesel::update(sessions::table.find(session.id))
+                .set(sessions::session_name.eq("renamed"))
+                .execute(conn)?;
+            assert_ne!(revision(conn)[&viewer.id], joined[&viewer.id]);
+            diesel::delete(
+                session_members::table.filter(session_members::session_id.eq(session.id)),
+            )
+            .execute(conn)?;
+            assert_eq!(revision(conn), before);
+            Ok(())
+        });
+}
+
 /// Purge expired device flow codes from the in-memory store
 pub async fn purge_expired_device_codes(app_state: Arc<AppState>) {
     let Some(store) = &app_state.device_flow_store else {
@@ -949,7 +1120,11 @@ pub async fn purge_expired_device_codes(app_state: Arc<AppState>) {
 pub async fn run_retention_cleanup(app_state: Arc<AppState>) {
     use handlers::retention::RetentionConfig;
 
-    let session_ids = app_state.session_manager.drain_pending_truncations();
+    let manager = app_state.session_manager.clone();
+    let age_cursor = manager.retention_age_cursor();
+    let cleanup_manager = manager.clone();
+    let session_ids = manager.drain_pending_truncations();
+    let attempted_ids = session_ids.clone();
     let db_pool = app_state.db_pool.clone();
     let archive = app_state.archive.clone();
     let config = RetentionConfig::new(
@@ -977,9 +1152,19 @@ pub async fn run_retention_cleanup(app_state: Arc<AppState>) {
         // held semantics of run_session_age_cleanup. When archiving is DISABLED
         // the held set is empty and trims run exactly as before — running
         // retention without an archive is the operator's explicit choice.
-        let held_ids: std::collections::HashSet<uuid::Uuid> = match &archive {
-            Some(runtime) => archive_retention_candidates(&mut conn, runtime, &config),
-            None => std::collections::HashSet::new(),
+        let (held_ids, count_candidates, age_candidates) = match &archive {
+            Some(runtime) => {
+                let plan = archive_retention_candidates(
+                    &mut conn,
+                    runtime,
+                    &config,
+                    &session_ids,
+                    age_cursor,
+                )?;
+                cleanup_manager.set_retention_age_cursor(plan.next_age_cursor);
+                (plan.held, plan.count_candidates, Some(plan.age_candidates))
+            }
+            None => (std::collections::HashSet::new(), session_ids, None),
         };
         if !held_ids.is_empty() {
             // Stable marker aligned with SESSION_ARCHIVE_FAILED: alert on this
@@ -990,14 +1175,21 @@ pub async fn run_retention_cleanup(app_state: Arc<AppState>) {
             );
         }
 
-        let (age_deleted, count_deleted) =
-            handlers::retention::run_retention_cleanup(&mut conn, session_ids, config, &held_ids);
-        Ok::<(usize, usize), anyhow::Error>((age_deleted, count_deleted))
+        Ok::<_, anyhow::Error>(handlers::retention::run_retention_cleanup(
+            &mut conn,
+            count_candidates,
+            config,
+            &held_ids,
+            age_candidates.as_deref(),
+        ))
     })
     .await;
 
     match result {
-        Ok(Ok((age_deleted, count_deleted))) => {
+        Ok(Ok((age_deleted, count_deleted, retry))) => {
+            for id in retry {
+                manager.queue_truncation(id);
+            }
             if age_deleted > 0 || count_deleted > 0 {
                 tracing::info!(
                     "Retention cleanup complete: {} old, {} over-limit",
@@ -1006,8 +1198,16 @@ pub async fn run_retention_cleanup(app_state: Arc<AppState>) {
                 );
             }
         }
-        Ok(Err(e)) => tracing::error!("Failed to get DB connection for retention cleanup: {e}"),
-        Err(e) => tracing::error!("Retention cleanup task panicked: {e}"),
+        failure => {
+            for id in attempted_ids {
+                manager.queue_truncation(id);
+            }
+            match failure {
+                Ok(Err(e)) => tracing::error!("Retention cleanup failed: {e}"),
+                Err(e) => tracing::error!("Retention cleanup task panicked: {e}"),
+                Ok(Ok(_)) => unreachable!(),
+            }
+        }
     }
 }
 
@@ -1027,20 +1227,17 @@ pub async fn run_session_age_cleanup(app_state: Arc<AppState>) {
     // (#1487, the twin of the retention path above).
     let result = tokio::task::spawn_blocking(move || {
         use diesel::prelude::*;
-        use handlers::helpers::delete_session_with_data;
+        use handlers::helpers::delete_session_rows;
 
         let mut conn = db_pool.get()?;
 
-        // Set a 5-second timeout for cleanup queries
-        if let Err(e) = diesel::sql_query("SET LOCAL statement_timeout = '5000'").execute(&mut conn)
-        {
-            tracing::warn!("Failed to set statement_timeout for session age cleanup: {e}");
-        }
-
         let cutoff = chrono::Utc::now().naive_utc() - chrono::Duration::days(i64::from(max_days));
-        let old_sessions: Vec<models::Session> = schema::sessions::table
-            .filter(schema::sessions::last_activity.lt(cutoff))
-            .load(&mut conn)?;
+        let old_sessions: Vec<models::Session> =
+            handlers::retention::with_cleanup_timeout(&mut conn, |conn| {
+                schema::sessions::table
+                    .filter(schema::sessions::last_activity.lt(cutoff))
+                    .load::<models::Session>(conn)
+            })?;
 
         let mut deleted = 0;
         let mut held = 0;
@@ -1055,8 +1252,13 @@ pub async fn run_session_age_cleanup(app_state: Arc<AppState>) {
                     continue;
                 }
             }
-            match delete_session_with_data(&mut conn, session, true, &manager) {
-                Ok(_) => deleted += 1,
+            match handlers::retention::with_cleanup_timeout(&mut conn, |conn| {
+                delete_session_rows(conn, session, true)
+            }) {
+                Ok(_) => {
+                    manager.forget_deleted_session(session.id, &session.session_key);
+                    deleted += 1;
+                }
                 Err(e) => tracing::error!("Failed to delete old session {}: {:?}", session.id, e),
             }
         }
@@ -1086,35 +1288,29 @@ pub async fn run_session_age_cleanup(app_state: Arc<AppState>) {
 
 /// Delete proxy auth tokens whose expiration is more than 7 days in the past.
 pub async fn run_expired_token_cleanup(app_state: Arc<AppState>) {
+    let db_pool = app_state.db_pool.clone();
+    match tokio::task::spawn_blocking(move || {
+        let mut conn = db_pool.get()?;
+        handlers::retention::with_cleanup_timeout(&mut conn, delete_expired_tokens)?;
+        Ok::<_, anyhow::Error>(())
+    })
+    .await
+    {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => tracing::error!("Token cleanup failed: {error}"),
+        Err(error) => tracing::error!("Token cleanup task panicked: {error}"),
+    }
+}
+
+fn delete_expired_tokens(conn: &mut diesel::PgConnection) -> diesel::QueryResult<()> {
     use diesel::prelude::*;
 
-    let Ok(mut conn) = app_state.db_pool.get() else {
-        tracing::error!("Failed to get DB connection for expired token cleanup");
-        return;
-    };
-
-    if let Err(e) = diesel::sql_query("SET LOCAL statement_timeout = '5000'").execute(&mut conn) {
-        tracing::warn!(
-            "Failed to set statement_timeout for expired token cleanup: {}",
-            e
-        );
-    }
-
     let token_cutoff = chrono::Utc::now().naive_utc() - chrono::Duration::days(7);
-    match diesel::delete(
+    let expired = diesel::delete(
         schema::proxy_auth_tokens::table
             .filter(schema::proxy_auth_tokens::expires_at.lt(token_cutoff)),
     )
-    .execute(&mut conn)
-    {
-        Ok(0) => {}
-        Ok(count) => {
-            tracing::info!("Expired token cleanup: deleted {} tokens", count);
-        }
-        Err(e) => {
-            tracing::error!("Failed to delete expired tokens: {}", e);
-        }
-    }
+    .execute(conn)?;
 
     // Delete revoked credentials past the same window. Neither pass around this
     // one collects them: launcher-spawned tokens carry no expiry, and
@@ -1128,21 +1324,12 @@ pub async fn run_expired_token_cleanup(app_state: Arc<AppState>) {
     // days, which is harmless for a credential that can no longer be used — and
     // `created_at` is NOT NULL, so this cannot repeat the NULL-comparison bug it
     // exists to fix.
-    match diesel::delete(
+    let revoked = diesel::delete(
         schema::proxy_auth_tokens::table
             .filter(schema::proxy_auth_tokens::revoked.eq(true))
             .filter(schema::proxy_auth_tokens::created_at.lt(token_cutoff)),
     )
-    .execute(&mut conn)
-    {
-        Ok(0) => {}
-        Ok(count) => {
-            tracing::info!("Revoked token cleanup: deleted {} tokens", count);
-        }
-        Err(e) => {
-            tracing::error!("Failed to delete revoked tokens: {}", e);
-        }
-    }
+    .execute(conn)?;
 
     // Delete leaked launcher-spawned tokens (#1045). These are minted per
     // launch and only ever bound to a session on a *successful* proxy
@@ -1151,7 +1338,7 @@ pub async fn run_expired_token_cleanup(app_state: Arc<AppState>) {
     // launch token is bound within seconds, so any still unbound an hour after
     // creation belongs to a failed launch and is safe to delete.
     let leak_cutoff = chrono::Utc::now().naive_utc() - chrono::Duration::hours(1);
-    match diesel::delete(
+    let leaked = diesel::delete(
         schema::proxy_auth_tokens::table
             .filter(
                 schema::proxy_auth_tokens::name
@@ -1160,16 +1347,11 @@ pub async fn run_expired_token_cleanup(app_state: Arc<AppState>) {
             .filter(schema::proxy_auth_tokens::session_id.is_null())
             .filter(schema::proxy_auth_tokens::created_at.lt(leak_cutoff)),
     )
-    .execute(&mut conn)
-    {
-        Ok(0) => {}
-        Ok(count) => {
-            tracing::info!("Leaked launch-token cleanup: deleted {} tokens", count);
-        }
-        Err(e) => {
-            tracing::error!("Failed to delete leaked launch tokens: {}", e);
-        }
+    .execute(conn)?;
+    if expired + revoked + leaked > 0 {
+        tracing::info!("Token cleanup: {expired} expired, {revoked} revoked, {leaked} leaked");
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1374,7 +1556,13 @@ mod retention_archive_hold_tests {
             let held: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
             // Verify the candidate would be trimmed if not held. The global
             // count includes other tests' rows, so check this session's own.
-            crate::handlers::retention::run_retention_cleanup(&mut *conn, vec![], config, &held);
+            crate::handlers::retention::run_retention_cleanup(
+                &mut *conn,
+                vec![],
+                config,
+                &held,
+                None,
+            );
             let remaining: i64 = messages::table
                 .filter(messages::session_id.eq(sid))
                 .count()
@@ -1411,8 +1599,15 @@ mod retention_archive_hold_tests {
             let runtime = ArchiveRuntime::new(cfg).expect("runtime");
 
             let config = RetentionConfig::new(100, 30);
-            let held =
-                crate::background::archive_retention_candidates(&mut *conn, &runtime, &config);
+            let held = crate::background::archive_retention_candidates(
+                &mut *conn,
+                &runtime,
+                &config,
+                &[],
+                None,
+            )
+            .unwrap()
+            .held;
             assert!(
                 held.is_empty(),
                 "successful local archive should not hold trim, got {held:?}"
@@ -1460,15 +1655,28 @@ mod retention_archive_hold_tests {
             };
 
             let config = RetentionConfig::new(100, 30);
-            let held =
-                crate::background::archive_retention_candidates(&mut *conn, &runtime, &config);
+            let held = crate::background::archive_retention_candidates(
+                &mut *conn,
+                &runtime,
+                &config,
+                &[],
+                None,
+            )
+            .unwrap()
+            .held;
             // File-as-dir fails ENOTDIR for any user including root (not a permission check),
             // unlike chmod which root bypasses — so this holds reliably.
             assert!(held.contains(&sid), "failed archive should hold {sid}");
             // The cleanup is global, so its counts include other tests' rows
             // that this transaction can see; judge only this session's own
             // seeded row. The transaction rolls back whatever it deletes.
-            crate::handlers::retention::run_retention_cleanup(&mut *conn, vec![], config, &held);
+            crate::handlers::retention::run_retention_cleanup(
+                &mut *conn,
+                vec![],
+                config,
+                &held,
+                None,
+            );
             let remaining: Vec<(Uuid, String)> = messages::table
                 .filter(messages::session_id.eq(sid))
                 .select((messages::id, messages::content))

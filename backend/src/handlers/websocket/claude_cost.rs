@@ -2,7 +2,7 @@
 
 use claude_codes::io::ResultMessage;
 use diesel::prelude::*;
-use diesel::sql_types::{Double, Text, Uuid as SqlUuid};
+use diesel::sql_types::{BigInt, Bool, Double, Nullable, Text, Uuid as SqlUuid};
 use shared::claude_cost::ClaudeResultCost;
 use uuid::Uuid;
 
@@ -13,52 +13,115 @@ use uuid::Uuid;
 /// Legacy results (or modern results without a stable UUID) cannot safely be
 /// added: a cumulative snapshot has no CLI process identity. Preserve a
 /// nondecreasing compatibility estimate instead of overwriting resumed totals.
-pub(super) fn record_result_cost(
+pub(super) fn record_result_metadata(
+    conn: &mut PgConnection,
+    session_id: Uuid,
+    content: &serde_json::Value,
+    subagent_tokens: i64,
+) -> QueryResult<()> {
+    if let Ok(result) = serde::Deserialize::deserialize(content) {
+        return record_typed_result(conn, session_id, &result, subagent_tokens);
+    }
+
+    // Preserve compatibility with result payloads the typed SDK cannot parse.
+    let usage = |key: &str| content.get("usage")?.get(key)?.as_i64();
+    let counters = [
+        usage("input_tokens"),
+        usage("output_tokens"),
+        usage("cache_creation_input_tokens"),
+        usage("cache_read_input_tokens"),
+    ];
+    let tokens = counters.iter().any(Option::is_some).then(|| {
+        let [input, output, creation, read] = counters.map(|value| value.unwrap_or_default());
+        [input, output + subagent_tokens, creation, read]
+    });
+    let cost = content
+        .get("total_cost_usd")
+        .and_then(serde_json::Value::as_f64);
+    update_session(conn, session_id, cost, false, tokens)
+}
+
+fn record_typed_result(
     conn: &mut PgConnection,
     session_id: Uuid,
     result: &ResultMessage,
+    subagent_tokens: i64,
 ) -> QueryResult<()> {
+    let tokens = result.usage.as_ref().map(|usage| {
+        [
+            usage.input_tokens as i64,
+            usage.output_tokens as i64 + subagent_tokens,
+            usage.cache_creation_input_tokens as i64,
+            usage.cache_read_input_tokens as i64,
+        ]
+    });
+    conn.transaction(|conn| {
+        let (cost, additive) = claim_result_cost(conn, session_id, result)?;
+        update_session(conn, session_id, cost, additive, tokens)
+    })
+}
+
+fn claim_result_cost(
+    conn: &mut PgConnection,
+    session_id: Uuid,
+    result: &ResultMessage,
+) -> QueryResult<(Option<f64>, bool)> {
     let result_uuid = result.uuid.as_deref().filter(|id| !id.trim().is_empty());
     let cost = ClaudeResultCost::from_result(result);
     if cost == ClaudeResultCost::Unavailable {
-        return Ok(());
+        return Ok((None, false));
     }
-    conn.transaction(|conn| {
-        if let Some(id) = result_uuid {
-            let inserted = diesel::sql_query(
-                "INSERT INTO claude_result_cost_ledger (session_id, result_uuid) \
-                 VALUES ($1, $2) ON CONFLICT DO NOTHING",
-            )
-            .bind::<SqlUuid, _>(session_id)
-            .bind::<Text, _>(id)
-            .execute(conn)?;
-            if inserted == 0 {
-                return Ok(());
-            }
+    if let Some(id) = result_uuid {
+        let inserted = diesel::sql_query(
+            "INSERT INTO claude_result_cost_ledger (session_id, result_uuid) \
+             VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        )
+        .bind::<SqlUuid, _>(session_id)
+        .bind::<Text, _>(id)
+        .execute(conn)?;
+        if inserted == 0 {
+            return Ok((None, false));
         }
-        let (amount, additive) = match cost {
-            ClaudeResultCost::Delta(delta) if result_uuid.is_some() => (delta, true),
-            ClaudeResultCost::Delta(_) | ClaudeResultCost::Cumulative(_) => {
-                // Without identity, keep the cumulative compatibility path.
-                let total = result.total_cost_usd;
-                if !total.is_finite() || total < 0.0 {
-                    return Ok(());
-                }
-                (total, false)
-            }
-            ClaudeResultCost::Unavailable => return Ok(()),
-        };
-        let query = if additive {
-            "UPDATE sessions SET total_cost_usd = total_cost_usd + $2 WHERE id = $1"
-        } else {
-            "UPDATE sessions SET total_cost_usd = GREATEST(total_cost_usd, $2) WHERE id = $1"
-        };
-        diesel::sql_query(query)
-            .bind::<SqlUuid, _>(session_id)
-            .bind::<Double, _>(amount)
-            .execute(conn)?;
-        Ok(())
+    }
+    Ok(match cost {
+        ClaudeResultCost::Delta(delta) if result_uuid.is_some() => (Some(delta), true),
+        ClaudeResultCost::Delta(_) | ClaudeResultCost::Cumulative(_) => {
+            let total = result.total_cost_usd;
+            ((total.is_finite() && total >= 0.0).then_some(total), false)
+        }
+        ClaudeResultCost::Unavailable => (None, false),
     })
+}
+
+// A result advances recency even if its counters are absent or already charged.
+fn update_session(
+    conn: &mut PgConnection,
+    session_id: Uuid,
+    cost: Option<f64>,
+    additive: bool,
+    tokens: Option<[i64; 4]>,
+) -> QueryResult<()> {
+    let [input, output, creation, read] = tokens.map_or([None; 4], |values| values.map(Some));
+    diesel::sql_query(
+        "UPDATE sessions SET \
+         total_cost_usd = CASE WHEN $2 IS NULL THEN total_cost_usd \
+             WHEN $3 THEN total_cost_usd + $2 ELSE GREATEST(total_cost_usd, $2) END, \
+         input_tokens = COALESCE($4, input_tokens), \
+         output_tokens = COALESCE($5, output_tokens), \
+         cache_creation_tokens = COALESCE($6, cache_creation_tokens), \
+         cache_read_tokens = COALESCE($7, cache_read_tokens), \
+         last_activity = GREATEST(last_activity, statement_timestamp()) \
+         WHERE id = $1",
+    )
+    .bind::<SqlUuid, _>(session_id)
+    .bind::<Nullable<Double>, _>(cost)
+    .bind::<Bool, _>(additive)
+    .bind::<Nullable<BigInt>, _>(input)
+    .bind::<Nullable<BigInt>, _>(output)
+    .bind::<Nullable<BigInt>, _>(creation)
+    .bind::<Nullable<BigInt>, _>(read)
+    .execute(conn)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -69,6 +132,14 @@ mod tests {
     use claude_codes::io::ModelUsageEntry;
     use diesel::connection::SimpleConnection;
     use std::collections::BTreeMap;
+
+    fn record_result_cost(
+        conn: &mut PgConnection,
+        id: Uuid,
+        result: &ResultMessage,
+    ) -> QueryResult<()> {
+        record_typed_result(conn, id, result, 0)
+    }
 
     fn result(id: &str, cumulative: f64, delta: Option<f64>) -> ResultMessage {
         let mut result: ResultMessage = serde_json::from_str(

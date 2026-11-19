@@ -9,12 +9,16 @@ pub mod types;
 pub use types::RenderedMessage;
 
 use std::collections::HashMap;
+use std::rc::Rc;
 use uuid::Uuid;
 use yew::prelude::*;
 
 use dispatch::FrameRenderContext;
 pub use group_renderer::MessageGroupRenderer;
-pub use grouping::{group_is_turn_terminator, group_messages, thinking_chip_starts};
+pub use grouping::{
+    group_is_turn_terminator, group_messages, reuse_unchanged_groups, thinking_chip_starts,
+    MessageGroup,
+};
 
 /// Format the typed sidecar's display clock as local time.
 /// Takes an already-extracted timestamp rather than raw
@@ -50,7 +54,7 @@ pub struct MessageRendererProps {
     #[prop_or_default]
     pub turn_metrics: Option<shared::TurnMetrics>,
     #[prop_or_default]
-    pub continuation_statuses: HashMap<Uuid, String>,
+    pub continuation_statuses: Rc<HashMap<Uuid, String>>,
     #[prop_or_default]
     pub on_schedule_continuation: Callback<Uuid>,
     /// Starts the launcher-mediated Claude sign-in flow when an authentication

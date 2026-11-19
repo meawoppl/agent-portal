@@ -1,15 +1,17 @@
 use super::permissions::{handle_permission_response, replay_pending_permission};
 use super::replay::replay_history;
-use super::session_manager::{DedupVerdict, EnqueueInput, InputDeliveryState};
+use super::session_manager::{outbound::Delivery, DedupVerdict, EnqueueInput, InputDeliveryState};
 use super::uploads::{handle_file_upload_chunk, handle_file_upload_start, PendingUpload};
 use super::{SessionId, SessionManager, WebClientSender};
 use crate::handlers::session_access::is_session_mutator;
 use crate::AppState;
-use axum::extract::ws::WebSocket;
+use axum::extract::ws::{Message, Utf8Bytes, WebSocket};
 use diesel::prelude::*;
-use shared::{
-    ClientEndpoint, ClientToServer, PortalMessage, SendMode, ServerToClient, ServerToProxy,
+use futures_util::{
+    stream::{SplitSink, SplitStream},
+    SinkExt, StreamExt,
 };
+use shared::{ClientToServer, PortalMessage, SendMode, ServerToClient, ServerToProxy};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{error, info, warn};
@@ -46,24 +48,102 @@ impl OutboundAuthorization {
     }
 }
 
-/// The socket's verified binding and closed typed metadata frames are the
-/// only session authority here. Nested agent JSON IDs must never choose a
-/// different owner's rules. Resolve fresh matchers using a nonwaiting checkout:
-/// the replay producer can hold the last connection while waiting on this sink.
-fn sanitize_outbound(
+struct BrowserWriter {
+    sink: SplitSink<WebSocket, Message>,
+    cancel: tokio_util::sync::CancellationToken,
+}
+
+impl BrowserWriter {
+    async fn send(&mut self, frame: ServerToClient) -> Result<(), ()> {
+        let json = serde_json::to_string(&frame).map_err(|_| ())?;
+        self.send_json(json.into()).await
+    }
+
+    async fn send_json(&mut self, json: Utf8Bytes) -> Result<(), ()> {
+        tokio::select! {
+            biased;
+            _ = self.cancel.cancelled() => Err(()),
+            result = tokio::time::timeout(
+                std::time::Duration::from_secs(15),
+                self.sink.send(Message::Text(json)),
+            ) => result.map_err(|_| ())?.map_err(|_| ()),
+        }
+    }
+}
+
+async fn receive_browser_frame(
+    reader: &mut SplitStream<WebSocket>,
+) -> Option<Result<ClientToServer, ws_bridge::DecodeError>> {
+    while let Some(Ok(frame)) = reader.next().await {
+        match frame {
+            Message::Text(text) => {
+                return Some(serde_json::from_str(text.as_str()).map_err(Into::into))
+            }
+            Message::Binary(_) => return Some(Err(ws_bridge::DecodeError::UnexpectedBinary)),
+            Message::Close(_) => return None,
+            Message::Ping(_) | Message::Pong(_) => {}
+        }
+    }
+    None
+}
+
+/// The verified socket binding and typed metadata determine the owner.
+/// Raw agent content never chooses whose rules apply.
+type OutboundRules = (
+    crate::secrets::redaction::Redactor,
+    Option<crate::secrets::redaction::Redactor>,
+);
+
+/// Wait briefly for a database slot without stalling other socket tasks.
+/// Replay releases its checkout before sending each batch to this consumer.
+/// Keep checking the database generation at the send boundary, even after a wait.
+fn with_socket_redaction<T>(
     pool: &crate::db::DbPool,
+    sanitize: impl FnOnce(crate::db::DbConnection) -> Result<T, crate::errors::AppError>,
+) -> Option<T> {
+    super::run_blocking(|| {
+        let conn = match pool.get_timeout(std::time::Duration::from_secs(3)) {
+            Ok(conn) => conn,
+            Err(_) => {
+                warn!(
+                    "{}: closing browser socket after waiting for a database connection",
+                    crate::markers::REDACTION_DB_POOL_BUSY
+                );
+                return None;
+            }
+        };
+        match sanitize(conn) {
+            Ok(frame) => Some(frame),
+            Err(_) => {
+                warn!(
+                    "{}: closing browser socket because current content redaction failed",
+                    crate::markers::SECRET_REDACTION_FAILED
+                );
+                None
+            }
+        }
+    })
+}
+
+fn outbound_rules(
+    conn: crate::db::DbConnection,
     viewer: Uuid,
     verified_session: Option<Uuid>,
-    frame: ServerToClient,
-) -> Result<ServerToClient, crate::errors::AppError> {
-    use crate::{errors::AppError, schema::sessions, secrets::redaction};
-    let session = match &frame {
+    frame: &ServerToClient,
+) -> Result<Option<OutboundRules>, crate::errors::AppError> {
+    let session = match frame {
         ServerToClient::SessionUpdate { session_id, .. } => Some(*session_id),
         _ => verified_session,
     };
-    let mut conn = pool.try_get().ok_or(AppError::ServiceUnavailable(
-        "Content authorization is busy; reconnect shortly",
-    ))?;
+    rules_for_session(conn, viewer, session)
+}
+
+fn rules_for_session(
+    mut conn: crate::db::DbConnection,
+    viewer: Uuid,
+    session: Option<Uuid>,
+) -> Result<Option<OutboundRules>, crate::errors::AppError> {
+    use crate::{schema::sessions, secrets::redaction};
     let owner = session
         .map(|id| {
             sessions::table
@@ -77,10 +157,16 @@ fn sanitize_outbound(
     let owner_rules = owner
         .filter(|owner| *owner != viewer)
         .map(|owner| catalog.scoped_for(owner));
-    drop(conn);
-    if viewer_rules.is_empty() && owner_rules.as_ref().is_none_or(|rules| rules.is_empty()) {
-        return Ok(frame);
-    }
+    let has_rules =
+        !viewer_rules.is_empty() || owner_rules.as_ref().is_some_and(|rules| !rules.is_empty());
+    Ok(has_rules.then_some((viewer_rules, owner_rules)))
+}
+
+fn redact_outbound(
+    frame: &ServerToClient,
+    (viewer_rules, owner_rules): OutboundRules,
+) -> Result<ServerToClient, crate::errors::AppError> {
+    use crate::errors::AppError;
     let mut value = serde_json::to_value(frame)
         .map_err(|_| AppError::ServiceUnavailable("Content redaction unavailable"))?;
     viewer_rules.redact_transport_json(&mut value);
@@ -91,6 +177,64 @@ fn sanitize_outbound(
         .map_err(|_| AppError::ServiceUnavailable("Content redaction unavailable"))
 }
 
+#[cfg(test)]
+fn sanitize_outbound(
+    pool: &crate::db::DbPool,
+    viewer: Uuid,
+    verified_session: Option<Uuid>,
+    frame: ServerToClient,
+) -> Result<ServerToClient, crate::errors::AppError> {
+    match outbound_rules(pool.get().unwrap(), viewer, verified_session, &frame)? {
+        Some(rules) => redact_outbound(&frame, rules),
+        None => Ok(frame),
+    }
+}
+
+fn sanitize_delivery(
+    conn: crate::db::DbConnection,
+    viewer: Uuid,
+    verified_session: Option<Uuid>,
+    frame: Delivery<ServerToClient>,
+) -> Result<Utf8Bytes, crate::errors::AppError> {
+    let (frame, json) = match &frame {
+        Delivery::Owned(frame) => (frame, None),
+        Delivery::Shared { value, json } => (value.as_ref(), Some(json)),
+    };
+    let redacted;
+    let frame = match outbound_rules(conn, viewer, verified_session, frame)? {
+        Some(rules) => {
+            redacted = redact_outbound(frame, rules)?;
+            &redacted
+        }
+        None => match json {
+            Some(json) => return Ok(json.clone()),
+            None => frame,
+        },
+    };
+    serde_json::to_string(frame).map(Into::into).map_err(|_| {
+        crate::errors::AppError::ServiceUnavailable("Content serialization unavailable")
+    })
+}
+
+pub(super) fn sanitize_history(
+    conn: crate::db::DbConnection,
+    viewer: Uuid,
+    session: Option<Uuid>,
+    json: String,
+) -> Result<String, crate::errors::AppError> {
+    use crate::errors::AppError;
+    let Some((viewer_rules, owner_rules)) = rules_for_session(conn, viewer, session)? else {
+        return Ok(json);
+    };
+    let error = |_| AppError::ServiceUnavailable("History redaction unavailable");
+    let mut value = serde_json::from_str(&json).map_err(error)?;
+    viewer_rules.redact_transport_json(&mut value);
+    if let Some(rules) = owner_rules {
+        rules.redact_transport_json(&mut value);
+    }
+    serde_json::to_string(&value).map_err(error)
+}
+
 #[tracing::instrument(skip_all, fields(user, user_id = %user_id, session_name, session_id, computer, owner, owner_id))]
 pub async fn handle_web_client_socket(
     socket: WebSocket,
@@ -98,30 +242,34 @@ pub async fn handle_web_client_socket(
     user_id: Uuid,
     linked: Option<crate::handlers::federation::LinkedAuth>,
 ) {
-    if let Ok(mut conn) = app_state.db_pool.get() {
-        use crate::schema::users;
-        if let Ok(user) = users::table
-            .find(user_id)
-            .first::<crate::models::User>(&mut conn)
-        {
-            crate::log_context::record_user(&user);
+    super::run_blocking(|| {
+        if let Ok(mut conn) = app_state.db_pool.get() {
+            use crate::schema::users;
+            if let Ok(user) = users::table
+                .find(user_id)
+                .first::<crate::models::User>(&mut conn)
+            {
+                crate::log_context::record_user(&user);
+            }
         }
-    }
+    });
     let session_manager = app_state.session_manager.clone();
     let db_pool = app_state.db_pool.clone();
     let initial_replay_limit = app_state.message_retention_count;
-    let conn = ws_bridge::server::into_connection::<ClientEndpoint>(socket);
-    let (ws_sender, mut ws_receiver) = conn.split();
-    let mut ws_sender = super::DeadlineSender(ws_sender);
+    let (sink, mut ws_receiver) = socket.split();
     let (tx, mut rx) =
         super::session_manager::conn_channel::<ServerToClient>(super::WEB_CLIENT_CHANNEL_CAPACITY);
 
     let queue_cancel = rx.cancellation_token();
+    let mut ws_sender = BrowserWriter {
+        sink,
+        cancel: queue_cancel.clone(),
+    };
     let mut dashboard_jobs = tokio::task::JoinSet::new();
     let mut dashboard_ids = std::collections::HashSet::new();
     let mut compatibility_checked = false;
-    let mut pending_replay: Option<tokio::sync::mpsc::Receiver<std::io::Result<ServerToClient>>> =
-        None;
+    let mut session_list_updates = false;
+    let mut pending_replay: Option<tokio::sync::mpsc::Receiver<std::io::Result<String>>> = None;
     let mut session_key: Option<SessionId> = None;
     let mut verified_session_id: Option<Uuid> = None;
     let mut pending_uploads: HashMap<String, PendingUpload> = HashMap::new();
@@ -173,38 +321,42 @@ pub async fn handle_web_client_socket(
                 match replayed {
                     Some(Ok(msg)) => {
                         if linked.as_ref().is_some_and(|auth| outbound_auth.check(std::time::Instant::now(), false, || auth.authorize(&app_state, shared::api::TokenScope::Read)).is_err()) { break; }
-                        let msg = match sanitize_outbound(&db_pool, user_id, verified_session_id, msg) {
-                            Ok(msg) => msg,
-                            Err(_) => { warn!("{}: closing client until rules refresh", crate::markers::SECRET_REDACTION_FAILED); break; }
-                        };
-                        if ws_sender.send(msg).await.is_err() { break; }
+                        let Some(msg) = with_socket_redaction(&db_pool, |conn| {
+                            sanitize_history(conn, user_id, verified_session_id, msg)
+                        }) else { break; };
+                        if ws_sender.send_json(msg.into()).await.is_err() { break; }
                     }
                     Some(Err(error)) => { warn!("History replay failed: {error}"); break; }
                     None => pending_replay = None,
                 }
             }
-            msg = rx.recv(), if pending_replay.is_none() => {
+            msg = rx.recv_delivery(), if pending_replay.is_none() => {
                 let Some(msg) = msg else { break; };
+                let frame = match &msg {
+                    Delivery::Owned(value) => value,
+                    Delivery::Shared { value, .. } => value.as_ref(),
+                };
+                if matches!(frame, ServerToClient::SessionListChanged) && !session_list_updates {
+                    continue;
+                }
                 if linked.as_ref().is_some_and(|auth| outbound_auth.check(std::time::Instant::now(), false, || auth.authorize(&app_state, shared::api::TokenScope::Read)).is_err()) { break; }
-                let msg = match sanitize_outbound(&db_pool, user_id, verified_session_id, msg) {
-                            Ok(msg) => msg,
-                            Err(_) => { warn!("{}: closing client until rules refresh", crate::markers::SECRET_REDACTION_FAILED); break; }
-                        };
-                        if ws_sender.send(msg).await.is_err() { break; }
+                let Some(msg) = with_socket_redaction(&db_pool, |conn| {
+                    sanitize_delivery(conn, user_id, verified_session_id, msg)
+                }) else { break; };
+                if ws_sender.send_json(msg).await.is_err() { break; }
             }
-            result = ws_receiver.recv() => {
+            result = receive_browser_frame(&mut ws_receiver) => {
                 let Some(result) = result else { break; };
                 match result {
                     Ok(client_msg) => {
-                        let client_msg = match crate::secrets::redaction::sanitize_for_user(&db_pool, user_id, client_msg) {
-                            Ok(msg) => msg,
-                            Err(_) => { warn!("{}: closing client until rules refresh", crate::markers::SECRET_REDACTION_FAILED); break; }
-                        };
+                        let Some(client_msg) = with_socket_redaction(&db_pool, |conn| {
+                            crate::secrets::redaction::sanitize_for_user(conn, user_id, client_msg)
+                        }) else { break; };
                         if linked.as_ref().is_some_and(|auth| auth.authorize(&app_state, crate::handlers::federation::message_scope(&client_msg)).is_err()) { break; }
                         // Negotiate inline: a rejection must reach the socket before
                         // closing, and no later pipelined mutation may dispatch.
                         let version = match &client_msg {
-                            ClientToServer::Hello { protocol_version } => Some(Some(*protocol_version)),
+                            ClientToServer::Hello { protocol_version, .. } => Some(Some(*protocol_version)),
                             ClientToServer::Register(fields) => Some(fields.protocol_version),
                             // An old dashboard can start without Register or Hello.
                             // Treat that as v1, never as whichever major is current.
@@ -214,13 +366,17 @@ pub async fn handle_web_client_socket(
                         if let Some(version) = version {
                             let error = shared::protocol::check_protocol_version(version, "browser").err();
                             compatibility_checked = error.is_none();
-                            if matches!(client_msg, ClientToServer::Hello { .. }) {
+                            if let ClientToServer::Hello { capabilities, .. } = &client_msg {
                                 let rejected = error.is_some();
+                                session_list_updates = capabilities.iter().any(|cap| cap == shared::protocol::CLIENT_CAPABILITY_SESSION_LIST);
                                 if ws_sender.send(ServerToClient::HelloAck {
                                     protocol_version: shared::protocol::PROTOCOL_VERSION,
                                     success: !rejected,
                                     error,
                                 }).await.is_err() || rejected { break; }
+                                if session_list_updates && tx.send(ServerToClient::SessionListChanged).is_err() {
+                                    break;
+                                }
                                 continue;
                             }
                             if let Some(message) = error {
@@ -252,7 +408,8 @@ pub async fn handle_web_client_socket(
                             }
                             continue;
                         }
-                        if handle_web_client_message(client_msg, ctx, &mut session_key, &mut verified_session_id, &mut pending_uploads, &mut pending_replay) { break; }
+                        // Message handling checks out pooled connections; see `run_blocking`.
+                        if super::run_blocking(|| handle_web_client_message(client_msg, ctx, &mut session_key, &mut verified_session_id, &mut pending_uploads, &mut pending_replay)) { break; }
                     }
                     Err(e) => { warn!("WebSocket decode error: {}", e); }
                 }
@@ -304,7 +461,7 @@ fn handle_web_client_message(
     session_key: &mut Option<SessionId>,
     verified_session_id: &mut Option<Uuid>,
     pending_uploads: &mut HashMap<String, PendingUpload>,
-    pending_replay: &mut Option<tokio::sync::mpsc::Receiver<std::io::Result<ServerToClient>>>,
+    pending_replay: &mut Option<tokio::sync::mpsc::Receiver<std::io::Result<String>>>,
 ) -> bool {
     let WebClientCtx {
         app_state,
@@ -562,7 +719,7 @@ fn handle_web_register(
     replay_after: Option<String>,
     session_key: &mut Option<SessionId>,
     verified_session_id: &mut Option<Uuid>,
-    pending_replay: &mut Option<tokio::sync::mpsc::Receiver<std::io::Result<ServerToClient>>>,
+    pending_replay: &mut Option<tokio::sync::mpsc::Receiver<std::io::Result<String>>>,
 ) -> bool {
     // A socket owns exactly one replay/presence registration. Re-registering
     // would orphan the previous subscription and its replay producer.
@@ -1164,6 +1321,91 @@ mod owner_redaction_tests {
     use crate::secrets::redaction::{RedactionRuntime, MASK};
     use shared::api::SecretValue;
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn browser_redaction_waits_for_pool_and_still_rejects_stale_rules() {
+        use axum::{extract::ws::WebSocketUpgrade, routing::get, Router};
+        use std::time::Duration;
+
+        let Some(db) = Database::new() else {
+            return;
+        };
+        let state = Arc::new(crate::test_support::test_app_state(db.pool.clone()));
+        let viewer = Uuid::new_v4();
+        let socket_state = state.clone();
+        let router = Router::new().route(
+            "/ws",
+            get(move |ws: WebSocketUpgrade| {
+                let state = socket_state.clone();
+                async move {
+                    ws.on_upgrade(move |socket| {
+                        handle_web_client_socket(socket, state, viewer, None)
+                    })
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+        let (mut browser, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/ws"))
+            .await
+            .unwrap();
+
+        let deadline = Duration::from_secs(5);
+        for expected in ["SessionProgressReset", "ServiceStatsUpdate"] {
+            let frame = tokio::time::timeout(deadline, browser.next())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(frame.to_text().unwrap()).unwrap()
+                    ["type"],
+                expected
+            );
+        }
+
+        let held: Vec<_> = (0..db.pool.max_size())
+            .map(|_| db.pool.get().unwrap())
+            .collect();
+        let diagnostic = || ServerToClient::Error {
+            message: "queued during checkout pressure".into(),
+        };
+        state
+            .session_manager
+            .broadcast_to_user(&viewer, diagnostic());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), browser.next())
+                .await
+                .is_err(),
+            "the socket should wait for a checkout"
+        );
+        drop(held);
+
+        let frame = tokio::time::timeout(deadline, browser.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            serde_json::from_str::<ServerToClient>(frame.to_text().unwrap()).unwrap(),
+            ServerToClient::Error { message } if message == "queued during checkout pressure"
+        ));
+
+        use crate::schema::secrets_generation as generation;
+        diesel::update(generation::table.find(1i16))
+            .set(generation::generation.eq(1i64))
+            .execute(&mut db.pool.get().unwrap())
+            .unwrap();
+        state
+            .session_manager
+            .broadcast_to_user(&viewer, diagnostic());
+        let next = tokio::time::timeout(deadline, browser.next())
+            .await
+            .expect("the socket must fail closed without current rules");
+        assert!(!matches!(next, Some(Ok(frame)) if frame.is_text()));
+        server.abort();
+    }
+
     #[test]
     fn outbound_uses_verified_owner_and_viewer_but_never_nested_agent_session_ids() {
         let Some(db) = Database::new() else {
@@ -1260,29 +1502,5 @@ mod owner_redaction_tests {
         assert!(branch.starts_with(MASK));
         assert!(!branch.contains("VIEWER_77"));
         assert!(branch.contains("THIRD_99"));
-    }
-    #[test]
-    fn outbound_pool_checkout_fails_fast_when_replay_producers_hold_every_connection() {
-        let Some(db) = Database::new() else {
-            return;
-        };
-        let held: Vec<_> = (0..db.pool.max_size())
-            .map(|_| db.pool.get().unwrap())
-            .collect();
-        let started = std::time::Instant::now();
-        let result = sanitize_outbound(
-            &db.pool,
-            Uuid::new_v4(),
-            None,
-            ServerToClient::Error {
-                message: "safe diagnostic".into(),
-            },
-        );
-        assert!(matches!(
-            result,
-            Err(crate::errors::AppError::ServiceUnavailable(_))
-        ));
-        assert!(started.elapsed() < std::time::Duration::from_secs(1));
-        drop(held);
     }
 }

@@ -27,6 +27,7 @@ GOOGLE_REDIRECT_URI=https://your-domain.com/api/auth/google/callback
 SESSION_SECRET=generate-a-random-32-char-secret-here
 
 # Optional - Server configuration
+# PORTAL_DB_POOL_SIZE=32  # Maximum PostgreSQL connections per backend
 # HOST=0.0.0.0
 # PORT=3000
 # BASE_URL=https://your-domain.com

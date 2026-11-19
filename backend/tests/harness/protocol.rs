@@ -27,7 +27,9 @@ async fn receive<E: WsEndpoint>(
     .expect("expected frame within timeout")
 }
 
-#[tokio::test]
+// Multi-threaded like production, so socket handling takes the real
+// `block_in_place` hand-off in `run_blocking` rather than running inline.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn turn_permission_delivery_and_reconnect_replay() {
     if std::env::var("DATABASE_URL").is_err() {
         return;
@@ -198,6 +200,7 @@ async fn turn_permission_delivery_and_reconnect_replay() {
     let ServerToClient::HistoryBatch {
         entries,
         last_created_at,
+        ..
     } = replay
     else {
         unreachable!()
@@ -681,6 +684,7 @@ async fn incompatible_browser_cannot_register_or_send_pipelined_input() {
     browser
         .send(ClientToServer::Hello {
             protocol_version: u32::MAX,
+            capabilities: Vec::new(),
         })
         .await
         .unwrap();
@@ -749,6 +753,7 @@ async fn browser_hello_accepts_current_and_then_registration() {
     browser
         .send(ClientToServer::Hello {
             protocol_version: shared::protocol::PROTOCOL_VERSION,
+            capabilities: vec![shared::protocol::CLIENT_CAPABILITY_SESSION_LIST.to_string()],
         })
         .await
         .unwrap();
@@ -764,6 +769,10 @@ async fn browser_hello_accepts_current_and_then_registration() {
             ..
         }
     ));
+    receive::<ClientEndpoint>(&mut browser, |f| {
+        matches!(f, ServerToClient::SessionListChanged)
+    })
+    .await;
     browser
         .send(ClientToServer::Register(fields))
         .await

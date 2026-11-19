@@ -58,6 +58,27 @@ pub enum Route {
     AccessDenied,
 }
 
+/// Installed apps open `/`. FederationProvider resolves the browser's account
+/// before mounting routes, so an existing login can go straight to sessions.
+#[function_component(HomeRoute)]
+fn home_route() -> Html {
+    let signed_in = portal_client::use_portal().account_id().is_some();
+    let navigator = use_navigator();
+    use_effect_with((navigator, signed_in), |(navigator, signed_in)| {
+        if *signed_in {
+            if let Some(navigator) = navigator {
+                // Back must not return to the startup page and redirect again.
+                navigator.replace(&Route::Dashboard);
+            }
+        }
+    });
+    if signed_in {
+        Html::default()
+    } else {
+        html! { <SplashPage /> }
+    }
+}
+
 /// Wrapper for /admin route — provides back-navigation on_close callback
 #[function_component(AdminRoute)]
 fn admin_route() -> Html {
@@ -109,7 +130,7 @@ fn legacy_secrets_route(props: &LegacySecretsProps) -> Html {
 
 fn switch(routes: Route) -> Html {
     match routes {
-        Route::Home => html! { <SplashPage /> },
+        Route::Home => html! { <HomeRoute /> },
         Route::Dashboard => html! { <DashboardPage /> },
         Route::Demo => html! { <DemoPage /> },
         Route::Aperture => html! { <pages::aperture::AperturePage /> },
@@ -118,8 +139,11 @@ fn switch(routes: Route) -> Html {
         Route::SecretAuthorize => html! { <LegacySecretsRoute /> },
         Route::SecretJob { id } => html! { <LegacySecretsRoute job_id={Some(id)} /> },
         Route::History => html! { <HistoryBrowserPage /> },
+        // Keyed by the transcript it shows: a route change between sessions
+        // remounts the page, so no state or in-flight fetch from the previous
+        // transcript can render under the new one.
         Route::HistorySession { user, session } => html! {
-            <HistoryTranscriptPage {user} {session} />
+            <HistoryTranscriptPage key={format!("{user}/{session}")} user={user.clone()} session={session.clone()} />
         },
         Route::Admin => html! { <AdminRoute /> },
         Route::Banned => html! { <BannedPage /> },
@@ -144,7 +168,14 @@ fn app() -> Html {
 
 #[wasm_bindgen::prelude::wasm_bindgen(start)]
 pub fn run_app() {
-    wasm_logger::init(wasm_logger::Config::default());
+    // Release builds log warnings and errors only: info/debug lines are
+    // formatted and sent to the console otherwise, on every user's machine.
+    let level = if cfg!(debug_assertions) {
+        log::Level::Debug
+    } else {
+        log::Level::Warn
+    };
+    wasm_logger::init(wasm_logger::Config::new(level));
     yew::Renderer::<App>::new().render();
 }
 

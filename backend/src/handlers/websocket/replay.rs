@@ -2,29 +2,47 @@
 use super::WebClientSender;
 use crate::handlers::helpers::{display_name, parse_iso_cursor};
 use diesel::prelude::*;
-use shared::ServerToClient;
+use serde::Serialize;
+use serde_json::value::RawValue;
 use uuid::Uuid;
 
 const REPLAY_BATCH_BYTES: usize = 1024 * 1024;
 const REPLAY_BATCH_ROWS: usize = 128;
 
-/// A two-frame mailbox isolates blocking SQL from the socket. The consumer
-/// sends history before draining live output, and dropping it cancels production.
+#[derive(Serialize)]
+struct RawHistoryEntry {
+    content: Box<RawValue>,
+    meta: shared::PortalMeta,
+}
+
+#[derive(Serialize)]
+struct ReplayBatch {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    entries: Vec<RawHistoryEntry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_created_at: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    truncated: bool,
+}
+
+/// The mailbox holds only serialized batches. Every checkout is released
+/// before sending, including when the browser falls behind.
 pub(super) fn replay_history(
     db_pool: &crate::db::DbPool,
     session_id: Uuid,
     replay_after: Option<String>,
     initial_replay_limit: i64,
-) -> tokio::sync::mpsc::Receiver<std::io::Result<ServerToClient>> {
+) -> tokio::sync::mpsc::Receiver<std::io::Result<String>> {
     let (tx, rx) = tokio::sync::mpsc::channel(2);
     let pool = db_pool.clone();
     tokio::task::spawn_blocking(move || {
-        let result = stream_history(
+        let result = stream_history_json(
             &pool,
             session_id,
             replay_after,
             initial_replay_limit,
-            |batch| tx.blocking_send(Ok(batch)).map_err(std::io::Error::other),
+            |json| tx.blocking_send(Ok(json)).map_err(std::io::Error::other),
         );
         if let Err(error) = result {
             let _ = tx.blocking_send(Err(error));
@@ -33,120 +51,150 @@ pub(super) fn replay_history(
     rx
 }
 
-/// Stream the complete reconnect delta, or the requested initial tail, with
-/// libpq row-by-row loading. Batches are bounded apart from one individual row.
-fn stream_history(
-    db_pool: &crate::db::DbPool,
+type PlanRow = (Uuid, chrono::NaiveDateTime, i32);
+type ReplayRow = (
+    crate::models::Message,
+    Option<(Option<String>, Option<String>, String)>,
+);
+
+fn stream_history_json(
+    pool: &crate::db::DbPool,
     session_id: Uuid,
     replay_after: Option<String>,
     initial_replay_limit: i64,
-    mut send: impl FnMut(ServerToClient) -> std::io::Result<()>,
+    mut send: impl FnMut(String) -> std::io::Result<()>,
 ) -> std::io::Result<()> {
-    use crate::schema::{messages, sessions, users};
-    let mut conn = db_pool.get().map_err(std::io::Error::other)?;
-    // Resolve the authorized session's owner before opening the streaming
-    // cursor; a row's author or provider-supplied session_id is not authority.
-    let owner = sessions::table
-        .find(session_id)
-        .select(sessions::user_id)
-        .first::<Uuid>(&mut conn)
-        .map_err(std::io::Error::other)?;
-    let owner_rules = crate::secrets::redaction::snapshot_for_user(&mut conn, owner)
-        .map_err(|_| std::io::Error::other("History redaction unavailable"))?;
+    use crate::schema::{messages, users};
     let after = replay_after.as_deref().and_then(parse_iso_cursor);
-    let mut query = messages::table
-        .left_join(users::table.on(messages::user_id.eq(users::id)))
-        .filter(messages::session_id.eq(session_id))
-        .select((
-            messages::all_columns,
-            (users::nickname, users::name, users::email).nullable(),
-        ))
-        .order((messages::created_at.asc(), messages::id.asc()))
-        .into_boxed();
-    if let Some(after) = after {
-        query = query.filter(messages::created_at.gt(after));
-    } else {
-        // Select only ids for the tail; never buffer a page of large bodies.
-        let ids: Vec<Uuid> = messages::table
+    let limit = initial_replay_limit.max(0);
+    let mut plan: Vec<PlanRow> = {
+        let mut conn = pool.get().map_err(std::io::Error::other)?;
+        let size = diesel::dsl::sql::<diesel::sql_types::Integer>("octet_length(messages.content)");
+        let mut query = messages::table
             .filter(messages::session_id.eq(session_id))
+            .select((messages::id, messages::created_at, size))
             .order((messages::created_at.desc(), messages::id.desc()))
-            .limit(initial_replay_limit.max(0))
-            .select(messages::id)
+            .into_boxed();
+        if let Some(after) = after {
+            query = query.filter(messages::created_at.gt(after));
+        }
+        query
+            .limit(limit.saturating_add(i64::from(after.is_some())))
             .load(&mut conn)
-            .map_err(std::io::Error::other)?;
-        query = query.filter(messages::id.eq_any(ids));
+            .map_err(std::io::Error::other)?
+    };
+    let truncated = plan.len() as u64 > limit as u64;
+    if truncated {
+        plan.pop();
     }
-    type ReplayRow = (
-        crate::models::Message,
-        Option<(Option<String>, Option<String>, String)>,
-    );
-    let rows = query
-        .load_iter::<ReplayRow, diesel::pg::PgRowByRowLoadingMode>(&mut conn)
-        .map_err(std::io::Error::other)?;
-    let mut entries = Vec::new();
-    let mut bytes = 0;
-    let mut last_timestamp = None;
-    let mut complete_timestamp = after;
-    for row in rows {
-        let (msg, user) = row.map_err(std::io::Error::other)?;
-        if last_timestamp.is_some_and(|last| last != msg.created_at) {
-            complete_timestamp = last_timestamp;
-        }
-        if !entries.is_empty()
-            && (bytes >= REPLAY_BATCH_BYTES || entries.len() >= REPLAY_BATCH_ROWS)
-        {
-            // A timestamp group may span batches. Only advance past a group
-            // once all its rows have been sent, so reconnect cannot skip ties.
-            send(redact_replay_frame(
-                ServerToClient::HistoryBatch {
-                    entries: std::mem::take(&mut entries),
-                    last_created_at: complete_timestamp
-                        .map(|ts| ts.format("%Y-%m-%dT%H:%M:%S%.6f").to_string()),
-                },
-                &owner_rules,
-            )?)?;
-            bytes = 0;
-        }
-        bytes += msg.content.len();
-        last_timestamp = Some(msg.created_at);
-        let sender = user
-            .filter(|_| msg.role == "user")
-            .map(|(nickname, name, email)| {
-                display_name(nickname.as_deref(), name.as_deref(), &email)
-            });
-        let meta = Some(msg.portal_meta(sender));
-        entries.push(shared::HistoryEntry {
-            content: shared::content_value_or_fallback(&msg.role, &msg.content),
-            meta,
-        });
+    plan.reverse();
+
+    if plan.is_empty() && truncated {
+        return send_batch(&mut send, Vec::new(), None, true);
     }
-    if !entries.is_empty() {
-        send(redact_replay_frame(
-            ServerToClient::HistoryBatch {
-                entries,
-                last_created_at: last_timestamp
-                    .map(|ts| ts.format("%Y-%m-%dT%H:%M:%S%.6f").to_string()),
-            },
-            &owner_rules,
-        )?)?;
+    let mut start = 0;
+    let mut complete = after.filter(|_| !truncated);
+    while start < plan.len() {
+        let mut bytes = 0usize;
+        let mut end = start;
+        while end < plan.len() && end - start < REPLAY_BATCH_ROWS {
+            let next = plan[end].2.max(0) as usize;
+            if end > start && bytes.saturating_add(next) > REPLAY_BATCH_BYTES {
+                break;
+            }
+            bytes = bytes.saturating_add(next);
+            end += 1;
+        }
+        let ids: Vec<_> = plan[start..end].iter().map(|(id, _, _)| *id).collect();
+        let rows: Vec<ReplayRow> = {
+            let mut conn = pool.get().map_err(std::io::Error::other)?;
+            messages::table
+                .left_join(users::table.on(messages::user_id.eq(users::id)))
+                .filter(messages::session_id.eq(session_id))
+                .filter(messages::id.eq_any(ids))
+                .select((
+                    messages::all_columns,
+                    (users::nickname, users::name, users::email).nullable(),
+                ))
+                .order((messages::created_at.asc(), messages::id.asc()))
+                .load(&mut conn)
+                .map_err(std::io::Error::other)?
+        };
+        let mut entries = Vec::with_capacity(rows.len());
+        for (msg, user) in rows {
+            let sender = user
+                .filter(|_| msg.role == "user")
+                .map(|(nickname, name, email)| {
+                    display_name(nickname.as_deref(), name.as_deref(), &email)
+                });
+            let meta = msg.portal_meta(sender);
+            let content = match serde_json::from_str::<&RawValue>(&msg.content) {
+                Ok(raw) => raw.to_owned(),
+                Err(_) => serde_json::value::to_raw_value(&shared::content_value_or_fallback(
+                    &msg.role,
+                    &msg.content,
+                ))
+                .map_err(std::io::Error::other)?,
+            };
+            entries.push(RawHistoryEntry { content, meta });
+        }
+        // Do not advance over only part of an equal-timestamp group.
+        complete = plan[start..end]
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(offset, (_, time, _))| {
+                plan.get(start + offset + 1)
+                    .is_none_or(|next| next.1 != *time)
+            })
+            .map(|(_, (_, time, _))| *time)
+            .or(complete);
+        send_batch(&mut send, entries, complete, truncated && start == 0)?;
+        start = end;
     }
     Ok(())
 }
 
-/// Preserve transport types, UUIDs and replay watermarks even for a one-byte
-/// private value. Only serialized content-bearing fields are redacted.
-fn redact_replay_frame(
-    frame: ServerToClient,
-    rules: &crate::secrets::redaction::Redactor,
-) -> std::io::Result<ServerToClient> {
-    if rules.is_empty() {
-        return Ok(frame);
-    }
-    let mut value = serde_json::to_value(frame)
-        .map_err(|_| std::io::Error::other("Cannot sanitize history transport"))?;
-    rules.redact_transport_json(&mut value);
-    serde_json::from_value(value)
-        .map_err(|_| std::io::Error::other("Cannot sanitize history transport"))
+fn send_batch(
+    send: &mut impl FnMut(String) -> std::io::Result<()>,
+    entries: Vec<RawHistoryEntry>,
+    watermark: Option<chrono::NaiveDateTime>,
+    truncated: bool,
+) -> std::io::Result<()> {
+    let json = serde_json::to_string(&ReplayBatch {
+        kind: "HistoryBatch",
+        entries,
+        last_created_at: watermark.map(|ts| ts.format("%Y-%m-%dT%H:%M:%S%.6f").to_string()),
+        truncated,
+    })
+    .map_err(std::io::Error::other)?;
+    send(json)
+}
+
+#[cfg(test)]
+fn stream_history(
+    pool: &crate::db::DbPool,
+    session_id: Uuid,
+    replay_after: Option<String>,
+    limit: i64,
+    mut send: impl FnMut(shared::ServerToClient) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    use crate::schema::sessions;
+    let owner = sessions::table
+        .find(session_id)
+        .select(sessions::user_id)
+        .first::<Uuid>(&mut pool.get().map_err(std::io::Error::other)?)
+        .map_err(std::io::Error::other)?;
+    stream_history_json(pool, session_id, replay_after, limit, |json| {
+        let sanitized = super::web_client_socket::sanitize_history(
+            pool.get().map_err(std::io::Error::other)?,
+            owner,
+            Some(session_id),
+            json,
+        )
+        .map_err(|_| std::io::Error::other("History redaction unavailable"))?;
+        send(serde_json::from_str(&sanitized).map_err(std::io::Error::other)?)
+    })
 }
 
 // =============================================================================
@@ -215,6 +263,37 @@ mod replay_tests {
     }
 
     #[test]
+    fn reconnect_marks_only_the_first_batch_of_the_latest_window() {
+        let Some(pool) = crate::test_support::shared_pool() else {
+            return;
+        };
+        let (user, session, stamps) = {
+            let mut conn = pool.get().unwrap();
+            let user = crate::test_support::insert_user(&mut conn, "bounded-replay");
+            let session = make_session(&mut conn, user.id);
+            let stamps = seed_messages(&mut conn, session.id, user.id, 170);
+            (user, session, stamps)
+        };
+        let after = stamps[0].format("%Y-%m-%dT%H:%M:%S%.6f").to_string();
+        let mut batches = Vec::new();
+        super::stream_history_json(&pool, session.id, Some(after), 130, |json| {
+            batches.push(serde_json::from_str::<serde_json::Value>(&json).unwrap());
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(batches.len(), 2);
+        assert_eq!(batches[0]["truncated"], true);
+        assert!(batches[1].get("truncated").is_none());
+        assert_eq!(batches[0]["entries"].as_array().unwrap().len(), 128);
+        assert_eq!(batches[1]["entries"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            batches[1]["last_created_at"],
+            stamps[169].format("%Y-%m-%dT%H:%M:%S%.6f").to_string()
+        );
+        cleanup(&mut pool.get().unwrap(), session.id, &[user.id]);
+    }
+
+    #[test]
     fn streaming_batches_keep_timestamp_ties_replayable() {
         let Some(pool) = crate::test_support::shared_pool() else {
             return;
@@ -234,6 +313,7 @@ mod replay_tests {
             if let shared::ServerToClient::HistoryBatch {
                 entries,
                 last_created_at,
+                ..
             } = msg
             {
                 assert!(entries.len() <= super::REPLAY_BATCH_ROWS);
@@ -364,6 +444,7 @@ mod replay_tests {
             shared::ServerToClient::HistoryBatch {
                 entries,
                 last_created_at,
+                ..
             } => (entries, last_created_at),
             other => panic!("expected HistoryBatch, got {:?}", other),
         };
@@ -429,6 +510,7 @@ mod replay_tests {
             shared::ServerToClient::HistoryBatch {
                 entries,
                 last_created_at,
+                ..
             } => (entries, last_created_at),
             other => panic!("expected HistoryBatch, got {:?}", other),
         };
@@ -446,7 +528,7 @@ mod replay_tests {
 mod owner_redaction_tests {
     use super::*;
     #[test]
-    fn legacy_replay_is_redacted_before_mailbox_using_session_owner_not_row_author() {
+    fn legacy_replay_is_redacted_at_send_using_session_owner_not_row_author() {
         let Some(db) = crate::handlers::secrets::tests::Database::new() else {
             return;
         };
@@ -510,9 +592,10 @@ mod owner_redaction_tests {
             Ok(())
         })
         .unwrap();
-        let ServerToClient::HistoryBatch {
+        let shared::ServerToClient::HistoryBatch {
             entries,
             last_created_at,
+            ..
         } = batches.remove(0)
         else {
             panic!("history transport changed");

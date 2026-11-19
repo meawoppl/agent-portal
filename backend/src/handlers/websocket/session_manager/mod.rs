@@ -117,7 +117,7 @@ impl std::ops::Deref for SessionId {
 pub type ProxySender = ConnSender<ServerToProxy>;
 pub type WebClientSender = ConnSender<ServerToClient>;
 
-mod outbound;
+pub(super) mod outbound;
 pub use outbound::{conn_channel, ConnReceiver, ConnSender};
 
 /// Proxy outbound capacity. Sized so a full maximum-size file upload
@@ -175,6 +175,7 @@ pub struct SessionManager {
     last_ack_seq: Arc<DashMap<Uuid, u64>>,
     pending_messages: Arc<DashMap<SessionId, VecDeque<PendingMessage>>>,
     pending_truncations: Arc<DashSet<Uuid>>,
+    retention_age_cursor: Arc<std::sync::Mutex<Option<crate::handlers::retention::AgeCursor>>>,
     launchers: Arc<DashMap<Uuid, LauncherConnection>>,
     /// Dedup index: `(user_id, hostname)` → `launcher_id`. Used to atomically
     /// reject a second launcher connection from the same host for the same
@@ -248,6 +249,7 @@ impl Default for SessionManager {
             last_ack_seq: Arc::new(DashMap::new()),
             pending_messages: Arc::new(DashMap::new()),
             pending_truncations: Arc::new(DashSet::new()),
+            retention_age_cursor: Arc::default(),
             launchers: Arc::new(DashMap::new()),
             launcher_dedup: Arc::new(DashMap::new()),
             pending_launcher_requests: Arc::new(DashMap::new()),
@@ -282,11 +284,29 @@ impl SessionManager {
         self.pending_truncations.insert(session_id);
     }
 
+    pub(crate) fn retention_age_cursor(&self) -> Option<crate::handlers::retention::AgeCursor> {
+        *self
+            .retention_age_cursor
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    pub(crate) fn set_retention_age_cursor(
+        &self,
+        cursor: Option<crate::handlers::retention::AgeCursor>,
+    ) {
+        *self
+            .retention_age_cursor
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = cursor;
+    }
+
     pub fn drain_pending_truncations(&self) -> Vec<Uuid> {
-        let ids: Vec<Uuid> = self.pending_truncations.iter().map(|r| *r).collect();
-        for id in &ids {
-            self.pending_truncations.remove(id);
-        }
+        let mut ids = Vec::new();
+        self.pending_truncations.retain(|id| {
+            ids.push(*id);
+            false
+        });
         ids
     }
 

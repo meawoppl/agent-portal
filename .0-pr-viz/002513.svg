@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="arr-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+  </defs>
+
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2513 · Speed-optimize native release builds, keep WASM size-optimized</text>
+
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">One workspace-wide opt-level = "z" made the backend size-optimized like the WASM bundle;</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">native builds now use opt-level 3, and Trunk builds the frontend with a "z" profile.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <!-- ==================== BEFORE ==================== -->
+  <g>
+    <rect x="80" y="240" width="840" height="150" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+    <text x="104" y="282" font-size="26" fill="#7aa2f7">[profile.release]</text>
+    <text x="104" y="322" font-size="23" fill="#f7768e">opt-level = "z"  (applies to every crate and dependency)</text>
+    <text x="104" y="358" font-size="23" fill="#a9b1d6">lto = true, codegen-units = 1, strip = true</text>
+  </g>
+  <line x1="300" y1="390" x2="300" y2="476" stroke="#f7768e" stroke-width="1.5" marker-end="url(#arr-red)"/>
+  <line x1="700" y1="390" x2="700" y2="476" stroke="#565f89" stroke-width="1.5"/>
+
+  <g>
+    <rect x="80" y="480" width="400" height="150" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+    <text x="104" y="522" font-size="26" fill="#7aa2f7">backend, proxy,</text>
+    <text x="104" y="558" font-size="26" fill="#7aa2f7">launcher</text>
+    <text x="104" y="598" font-size="23" fill="#f7768e">size-optimized code</text>
+  </g>
+  <g>
+    <rect x="520" y="480" width="400" height="150" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="544" y="522" font-size="26" fill="#7aa2f7">frontend (WASM)</text>
+    <text x="544" y="562" font-size="23" fill="#a9b1d6">trunk build --release</text>
+    <text x="544" y="598" font-size="23" fill="#a9b1d6">size-optimized</text>
+  </g>
+
+  <g>
+    <rect x="80" y="700" width="840" height="120" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+    <text x="104" y="742" font-size="26" fill="#7aa2f7">run_app: wasm_logger::Config::default()</text>
+    <text x="104" y="782" font-size="23" fill="#f7768e">release builds format and print info/debug lines too</text>
+  </g>
+
+  <!-- ==================== AFTER ==================== -->
+  <g>
+    <rect x="1040" y="240" width="420" height="150" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1064" y="282" font-size="26" fill="#7aa2f7">[profile.release]</text>
+    <text x="1064" y="322" font-size="23" fill="#9ece6a">opt-level = 3</text>
+    <text x="1064" y="358" font-size="22" fill="#565f89">lto, codegen-units, strip kept</text>
+  </g>
+  <g>
+    <rect x="1500" y="240" width="420" height="150" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1524" y="282" font-size="26" fill="#7aa2f7">[profile.wasm-release]</text>
+    <text x="1524" y="322" font-size="23" fill="#9ece6a">inherits = "release"</text>
+    <text x="1524" y="358" font-size="23" fill="#9ece6a">opt-level = "z"</text>
+  </g>
+  <line x1="1250" y1="390" x2="1250" y2="476" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+  <line x1="1710" y1="390" x2="1710" y2="476" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+
+  <g>
+    <rect x="1040" y="480" width="420" height="150" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1064" y="522" font-size="26" fill="#7aa2f7">backend, proxy,</text>
+    <text x="1064" y="558" font-size="26" fill="#7aa2f7">launcher</text>
+    <text x="1064" y="598" font-size="23" fill="#9ece6a">speed-optimized code</text>
+  </g>
+  <g>
+    <rect x="1500" y="480" width="420" height="150" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1524" y="522" font-size="26" fill="#7aa2f7">frontend (WASM)</text>
+    <text x="1524" y="562" font-size="22" fill="#9ece6a">data-cargo-profile-release</text>
+    <text x="1524" y="598" font-size="22" fill="#9ece6a">= "wasm-release"</text>
+  </g>
+
+  <g>
+    <rect x="1040" y="700" width="880" height="120" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1064" y="742" font-size="26" fill="#7aa2f7">run_app: wasm_logger::Config::new(level)</text>
+    <text x="1064" y="782" font-size="23" fill="#9ece6a">Warn in release, Debug when debug_assertions are on</text>
+  </g>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">Trade-off: proxy and launcher binaries users download get somewhat larger; sizes are not measured in this PR.</text>
+</svg>

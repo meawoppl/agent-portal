@@ -335,5 +335,5 @@ fn scheduled_command_start_has_one_visible_wakeup_marker_without_queue_noise() {
         None,
     );
     assert_eq!(groups.len(), 1);
-    assert!(matches!(&groups[0], MessageGroup::Single(message) if message.content == started));
+    assert!(matches!(&groups[0], MessageGroup::Single(message) if message.content() == started));
 }

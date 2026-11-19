@@ -13,6 +13,7 @@ pub mod config;
 pub mod db;
 pub mod errors;
 pub mod handlers;
+pub mod heap_profile;
 pub mod jwt;
 pub mod log_context;
 pub mod markers;
@@ -162,6 +163,9 @@ pub async fn run() -> anyhow::Result<()> {
     // mode at least one is required, enforced by `from_env`).
     let oauth = config::OAuthProviders::from_env(args.dev_mode)?;
 
+    // Heap-profile capture is opt-in; parsed here so a bad value fails startup.
+    heap_profile::spawn(heap_profile::HeapProfileConfig::from_env()?);
+
     // Speech-to-text is opt-in; `None` leaves voice on the browser path.
     let stt = portal_stt::SttProvider::from_env()?;
     match &stt {
@@ -307,6 +311,7 @@ pub async fn run() -> anyhow::Result<()> {
         app_state.clone(),
         service_stats::broadcast_service_stats,
     );
+    tokio::spawn(background::watch_session_lists(app_state.clone()));
     background::spawn_periodic(
         "user spend broadcast task (every 30 seconds)",
         Duration::from_secs(30),

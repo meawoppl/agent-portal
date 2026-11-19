@@ -55,7 +55,7 @@ tokio-util = "0.7"
 # Web framework
 axum = { version = "0.8", features = ["ws"] }
 tower = "0.5"
-tower-http = { version = "0.6", features = ["cors"] }
+tower-http = { version = "0.6", features = ["cors", "compression-gzip", "compression-br"] }
 
 # Database
 diesel = { version = "2.2", features = ["postgres", "r2d2", "chrono", "uuid", "serde_json", "numeric", "64-column-tables"] }
@@ -79,11 +79,11 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # Claude Code integration
-claude-codes = { version = "2.1.325", default-features = false, features = ["types"] }
+claude-codes = { version = "2.1.328", default-features = false, features = ["types"] }
 
 # Muse CLI integration
-muse-codes = { version = "1.4.15", default-features = false, features = ["types"] }
-codex-codes = { version = "0.169.0", default-features = false, features = ["types"] }
+muse-codes = { version = "1.4.23", default-features = false, features = ["types"] }
+codex-codes = { version = "0.169.4", default-features = false, features = ["types"] }
 antigravity-codes = { version = "0.1.23", default-features = false, features = ["types"] }
 
 # Web Push (VAPID + RFC8291 encryption). `default-features = false` drops the
@@ -123,8 +123,25 @@ ws-bridge = { version = "1.0.0", git = "https://github.com/meawoppl/ws-bridge", 
 [profile.release]
 lto = true
 codegen-units = 1
-opt-level = "z"
+opt-level = 3
 strip = true
+
+# The WASM frontend is downloaded by every browser, so it is optimized for
+# size; native binaries (backend, proxy, launcher) stay speed-optimized. A
+# per-package override can't express this, since it leaves dependencies,
+# which dominate both bundle size and hot paths, at the workspace level.
+# Trunk selects this profile for release builds via `data-cargo-profile-release`
+# in `frontend/index.html`.
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
+
+# The server keeps its symbols and line tables: heap profiles
+# (`backend/src/heap_profile.rs`) are symbolized in-process, so a stripped
+# binary would record only addresses. Distributed binaries stay stripped.
+[profile.release.package.backend]
+debug = "line-tables-only"
+strip = "none"
 
 # Panic/error policy (#1165 item 8). `unwrap`/`expect` in production code hide
 # error context and, in background tasks, die silently. We deny them

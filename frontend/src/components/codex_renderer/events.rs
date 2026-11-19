@@ -350,23 +350,23 @@ pub fn codex_item_id(item: &CodexItem) -> Option<&str> {
     }
 }
 
-/// Extract the `item_id` from a Codex event JSON, if it carries one. Returns
-/// `None` for events without items (turn-level events, deltas, errors) or for
-/// unparseable JSON. The group renderer uses this to dedupe progressive
+/// The `item_id` a Codex event carries, if any. Returns `None` for events
+/// without items (turn-level events, deltas, errors). The group renderer uses this to dedupe progressive
 /// `ItemStarted` / `ItemUpdated` / `ItemCompleted` events for the same item
 /// into a single rendered card (#776).
-pub fn codex_event_item_id(json: &str) -> Option<String> {
-    let event: CodexEvent = serde_json::from_str(json).ok()?;
+pub fn codex_event_item_id(event: &CodexEvent) -> Option<String> {
     match event {
         CodexEvent::ItemStarted { item }
         | CodexEvent::ItemUpdated { item }
-        | CodexEvent::ItemCompleted { item } => codex_item_id(&item?).map(str::to_string),
+        | CodexEvent::ItemCompleted { item } => codex_item_id(item.as_ref()?).map(str::to_string),
         // Per-file patch updates (`item/fileChange/patchUpdated`) are cumulative
         // too — Codex re-sends the full file patch on every tick. Surfacing
         // their `item_id` here lets the group dedup keep only the final patch,
         // and collapses them against the matching `item.*{file_change}`
         // lifecycle events that carry the same id.
-        CodexEvent::FileChangePatchUpdated { params } => params.and_then(|p| p.item_id),
+        CodexEvent::FileChangePatchUpdated { params } => {
+            params.as_ref().and_then(|p| p.item_id.clone())
+        }
         _ => None,
     }
 }

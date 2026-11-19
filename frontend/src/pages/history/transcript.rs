@@ -1,6 +1,7 @@
 //! History transcript view (`/history/{user}/{session}`): manifest header
 //! card plus the archived messages rendered with the real portal renderers.
 
+use std::rc::Rc;
 use std::str::FromStr;
 
 use uuid::Uuid;
@@ -12,7 +13,9 @@ use shared::api::{HistoryManifest, HistoryMessageLine};
 
 use super::fetch::{self, fetch_json, Load};
 use super::media_rewrite::rewrite_media_urls;
-use crate::components::message_renderer::{group_messages, MessageGroupRenderer, RenderedMessage};
+use crate::components::message_renderer::{
+    group_messages, MessageGroup, MessageGroupRenderer, RenderedMessage,
+};
 use crate::Route;
 
 #[derive(Properties, PartialEq)]
@@ -36,7 +39,7 @@ pub struct HistoryTranscriptProps {
 #[function_component(HistoryTranscriptPage)]
 pub fn history_transcript_page(props: &HistoryTranscriptProps) -> Html {
     let manifest = use_state(|| None as Load<HistoryManifest>);
-    let messages = use_state(|| None as Load<Vec<HistoryMessageLine>>);
+    let messages = use_state(|| None as Load<Lines>);
 
     {
         let manifest = manifest.clone();
@@ -54,7 +57,8 @@ pub fn history_transcript_page(props: &HistoryTranscriptProps) -> Html {
             {
                 let (user, session) = (user.clone(), session.clone());
                 spawn_local(async move {
-                    messages.set(Some(fetch::fetch_messages(&user, &session).await));
+                    let lines = fetch::fetch_messages(&user, &session).await;
+                    messages.set(Some(lines.map(|lines| Lines(Rc::new(lines)))));
                 });
             }
             || ()
@@ -67,7 +71,7 @@ pub fn history_transcript_page(props: &HistoryTranscriptProps) -> Html {
     let agent_type = match &*manifest {
         Some(Ok(m)) => shared::AgentType::from_str(&m.agent_type).unwrap_or_default(),
         _ => match &*messages {
-            Some(Ok(lines)) => lines
+            Some(Ok(Lines(lines))) => lines
                 .first()
                 .and_then(|l| shared::AgentType::from_str(&l.agent_type).ok())
                 .unwrap_or_default(),
@@ -75,6 +79,27 @@ pub fn history_transcript_page(props: &HistoryTranscriptProps) -> Html {
         },
     };
     let session_id = Uuid::from_str(&props.session).unwrap_or(Uuid::nil());
+    // Grouping an archived transcript re-serializes and re-parses every line,
+    // so do it once per load rather than on every render of this page.
+    let groups = use_memo(
+        (
+            (*messages).clone(),
+            agent_type,
+            props.user.clone(),
+            props.session.clone(),
+        ),
+        |(messages, agent_type, user, session)| match messages {
+            Some(Ok(Lines(lines))) => {
+                let rendered: Vec<RenderedMessage> = lines
+                    .iter()
+                    .map(|line| to_rendered(line, user, session))
+                    .collect();
+                Some(Ok(group_messages(&rendered, *agent_type, None)))
+            }
+            Some(Err(e)) => Some(Err(e.clone())),
+            None => None,
+        },
+    );
 
     html! {
         <div class="history-root history-transcript">
@@ -94,7 +119,7 @@ pub fn history_transcript_page(props: &HistoryTranscriptProps) -> Html {
               }
             }
 
-            { transcript_body(&messages, &props.user, &props.session, agent_type, session_id) }
+            { transcript_body(&groups, agent_type, session_id) }
         </div>
     }
 }
@@ -176,35 +201,37 @@ fn provenance(label: &str, version: &Option<String>) -> Html {
     }
 }
 
+/// Archived lines, compared by identity so memoizing on them is a pointer
+/// check rather than a walk over the whole transcript.
+#[derive(Clone)]
+struct Lines(Rc<Vec<HistoryMessageLine>>);
+
+impl PartialEq for Lines {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
 fn transcript_body(
-    messages: &Load<Vec<HistoryMessageLine>>,
-    user: &str,
-    session: &str,
+    groups: &Load<Vec<MessageGroup>>,
     agent_type: shared::AgentType,
     session_id: Uuid,
 ) -> Html {
-    match messages {
+    match groups {
         None => html! { <div class="history-loading">{ "Loading transcript…" }</div> },
         Some(Err(e)) => html! {
             <div class="history-error">{ format!("Could not load transcript: {e}") }</div>
         },
-        Some(Ok(lines)) if lines.is_empty() => html! {
+        Some(Ok(groups)) if groups.is_empty() => html! {
             <div class="history-empty">{ "This session has no archived messages." }</div>
         },
-        Some(Ok(lines)) => {
-            let rendered: Vec<RenderedMessage> = lines
-                .iter()
-                .map(|line| to_rendered(line, user, session))
-                .collect();
-            let groups = group_messages(&rendered, agent_type, None);
-            html! {
-                <div class="messages-container">
-                    { for groups.into_iter().map(|group| html! {
-                        <MessageGroupRenderer {group} {session_id} {agent_type} />
-                    }) }
-                </div>
-            }
-        }
+        Some(Ok(groups)) => html! {
+            <div class="messages-container">
+                { for groups.iter().enumerate().map(|(i, group)| html! {
+                    <MessageGroupRenderer key={group.key(i)} group={Rc::new(group.clone())} {session_id} {agent_type} />
+                }) }
+            </div>
+        },
     }
 }
 

@@ -40,6 +40,7 @@ pub(crate) struct ClientWsState {
     pub session_progress: HashMap<SessionKey, f32>,
     pub launch_event_counter: u32,
     pub launcher_event_counter: u32,
+    pub session_list_revisions: HashMap<ConnId, u32>,
     /// Services monitor table from the newest
     /// `ServerToClient::ServiceStatsUpdate`; backend first.
     pub service_stats: Vec<ServiceStats>,
@@ -137,6 +138,9 @@ pub(crate) enum ClientWsAction {
     SessionProgressReset(ConnId),
     LaunchEvent,
     LauncherEvent,
+    SessionListChanged(ConnId),
+    SessionListHint(ConnId),
+    SessionListDisconnected(ConnId),
     /// A launch result for a session: success clears its failure.
     LaunchResult {
         session: SessionKey,
@@ -166,6 +170,7 @@ impl Reducible for ClientWsState {
             session_progress: self.session_progress.clone(),
             launch_event_counter: self.launch_event_counter,
             launcher_event_counter: self.launcher_event_counter,
+            session_list_revisions: self.session_list_revisions.clone(),
             service_stats: self.service_stats.clone(),
             service_cpu_history: self.service_cpu_history.clone(),
             session_failures: self.session_failures.clone(),
@@ -245,6 +250,18 @@ impl Reducible for ClientWsState {
             ClientWsAction::LaunchEvent => {
                 next.launch_event_counter = next.launch_event_counter.wrapping_add(1);
             }
+            ClientWsAction::SessionListChanged(conn) => {
+                let revision = next.session_list_revisions.entry(conn).or_default();
+                *revision = revision.wrapping_add(1);
+            }
+            ClientWsAction::SessionListHint(conn) => {
+                if let Some(revision) = next.session_list_revisions.get_mut(&conn) {
+                    *revision = revision.wrapping_add(1);
+                }
+            }
+            ClientWsAction::SessionListDisconnected(conn) => {
+                next.session_list_revisions.remove(&conn);
+            }
             ClientWsAction::LauncherEvent => {
                 next.launcher_event_counter = next.launcher_event_counter.wrapping_add(1);
             }
@@ -267,6 +284,7 @@ impl Reducible for ClientWsState {
                 next.session_failures.remove(&session);
             }
             ClientWsAction::ForgetConn(conn) => {
+                next.session_list_revisions.remove(&conn);
                 next.session_failures.retain(|key, _| key.conn != conn);
                 next.session_launches.retain(|key, _| key.conn != conn);
             }
@@ -379,10 +397,14 @@ pub(crate) fn handle_server_message(
             // Refetch so the list stops showing the session as running.
             live.dispatch(ClientWsAction::LaunchEvent);
         }
-        ServerToClient::LaunchersChanged if conn == ConnId::HOME => {
-            // A launcher connected, dropped, or was evicted: tick so open
-            // launcher lists refetch at the moment the change is visible.
-            live.dispatch(ClientWsAction::LauncherEvent);
+        ServerToClient::SessionListChanged => {
+            live.dispatch(ClientWsAction::SessionListChanged(conn));
+        }
+        ServerToClient::LaunchersChanged => {
+            live.dispatch(ClientWsAction::SessionListHint(conn));
+            if conn == ConnId::HOME {
+                live.dispatch(ClientWsAction::LauncherEvent);
+            }
         }
         _ => {}
     }

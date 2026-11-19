@@ -4,7 +4,10 @@
 //! component event loop. They mutate only the buffer passed to them, which
 //! makes the invariants easy to unit-test without mounting Yew.
 
+use crate::components::message_renderer::RenderedMessage;
 use shared::TurnMetrics;
+
+use super::types::{MAX_MESSAGES_PER_SESSION, MAX_MESSAGES_WHILE_SCROLLED_BACK};
 
 /// Trim a chronological buffer to at most `max_cost` counted items.
 ///
@@ -13,16 +16,48 @@ use shared::TurnMetrics;
 /// discarded too, preventing detached metadata from growing without bound.
 pub(super) use shared::render_budget::retain_newest_items_by_cost;
 
-/// Append one live message and apply the same retention rule as history
-/// hydration and replay batches.
-pub(super) fn push_message_with_cost_limit<T>(
-    messages: &mut Vec<T>,
-    message: T,
-    max_cost: usize,
-    counts_toward_limit: impl Fn(&T) -> bool,
-) {
-    messages.push(message);
-    retain_newest_items_by_cost(messages, max_cost, counts_toward_limit);
+/// The live message buffer.
+///
+/// Reads go through `Deref`; the only mutable access is [`Transcript::edit`],
+/// which bumps [`Transcript::revision`]. `SessionView` caches its message
+/// grouping by revision, so a render that doesn't follow a transcript change
+/// (a tool heartbeat, a status line, a parent re-render) reuses it instead of
+/// regrouping every message. There is deliberately no `DerefMut`, so a new
+/// mutation site can't forget to invalidate.
+#[derive(Default)]
+pub(super) struct Transcript {
+    messages: Vec<RenderedMessage>,
+    revision: u64,
+}
+
+impl Transcript {
+    pub(super) fn edit(&mut self) -> &mut Vec<RenderedMessage> {
+        self.revision += 1;
+        &mut self.messages
+    }
+
+    pub(super) fn revision(&self) -> u64 {
+        self.revision
+    }
+}
+
+impl std::ops::Deref for Transcript {
+    type Target = Vec<RenderedMessage>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.messages
+    }
+}
+
+/// Counted-message budget for the live buffer. While tailing, the normal
+/// render budget applies; while scrolled back, eviction is deferred up to a
+/// larger ceiling so trimming the top never moves the text being read.
+pub(super) fn live_render_budget(tailing: bool) -> usize {
+    if tailing {
+        MAX_MESSAGES_PER_SESSION
+    } else {
+        MAX_MESSAGES_WHILE_SCROLLED_BACK
+    }
 }
 
 /// Re-delivery is a status notification, not a second transcript event. Keep
@@ -40,12 +75,13 @@ pub(super) fn advance_replay_watermark(watermark: &mut Option<String>, candidate
     let Some(candidate) = candidate else {
         return;
     };
-    let Ok(next) = chrono::DateTime::parse_from_rfc3339(candidate) else {
+    let parse = |value: &str| {
+        chrono::DateTime::parse_from_rfc3339(&shared::time::normalize_iso_utc(value)).ok()
+    };
+    let Some(next) = parse(candidate) else {
         return;
     };
-    let previous = watermark
-        .as_deref()
-        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok());
+    let previous = watermark.as_deref().and_then(parse);
     if previous.is_none_or(|previous| next > previous) {
         *watermark = Some(candidate.to_owned());
     }
@@ -87,6 +123,16 @@ pub(super) fn sort_turn_metrics_by_start(metrics: &mut [TurnMetrics]) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn transcript_revision_moves_only_on_edit() {
+        let mut transcript = super::Transcript::default();
+        let start = transcript.revision();
+        assert!(transcript.is_empty());
+        assert_eq!(transcript.revision(), start, "reads don't invalidate");
+        transcript.edit().clear();
+        assert_ne!(transcript.revision(), start);
+    }
+
     use super::*;
     use crate::test_fixtures::TurnMetricsBuilder;
     use uuid::Uuid;
@@ -185,6 +231,15 @@ mod tests {
     }
 
     #[test]
+    fn server_microsecond_timestamps_seed_and_advance_reconnect_watermark() {
+        let mut watermark = None;
+        advance_replay_watermark(&mut watermark, Some("2026-11-12T00:08:01.000001"));
+        advance_replay_watermark(&mut watermark, Some("2026-11-12T00:08:01.000002"));
+        advance_replay_watermark(&mut watermark, Some("2026-11-12T00:08:01.000001Z"));
+        assert_eq!(watermark.as_deref(), Some("2026-11-12T00:08:01.000002"));
+    }
+
+    #[test]
     fn retain_newest_items_keeps_counted_tail() {
         let mut messages = vec!["old".to_string(), "middle".to_string(), "new".to_string()];
 
@@ -203,12 +258,9 @@ mod tests {
     }
 
     #[test]
-    fn push_message_with_limit_appends_then_trims_oldest() {
-        let mut messages = vec!["one".to_string(), "two".to_string()];
-
-        push_message_with_cost_limit(&mut messages, "three".to_string(), 2, |_| true);
-
-        assert_eq!(messages, vec!["two", "three"]);
+    fn scrolled_back_budget_defers_eviction() {
+        assert_eq!(live_render_budget(true), MAX_MESSAGES_PER_SESSION);
+        assert!(live_render_budget(false) > live_render_budget(true));
     }
 
     #[test]

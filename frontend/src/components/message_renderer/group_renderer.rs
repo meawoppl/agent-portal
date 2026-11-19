@@ -4,12 +4,16 @@ use super::grouping::{
 };
 use super::local_timestamp;
 use std::collections::HashMap;
+use std::rc::Rc;
 use uuid::Uuid;
 use yew::prelude::*;
 
 #[derive(Properties, PartialEq)]
 pub struct MessageGroupRendererProps {
-    pub group: MessageGroup,
+    /// Shared with the caller's cached grouping. `MessageGroup` is `Eq`, so
+    /// comparing an unchanged group is a pointer check; a re-render that
+    /// didn't regroup (a heartbeat, a status line) never walks its messages.
+    pub group: Rc<MessageGroup>,
     pub session_id: Uuid,
     #[prop_or_default]
     pub agent_type: shared::AgentType,
@@ -23,7 +27,7 @@ pub struct MessageGroupRendererProps {
     #[prop_or_default]
     pub turn_metrics: Option<shared::TurnMetrics>,
     #[prop_or_default]
-    pub continuation_statuses: HashMap<Uuid, String>,
+    pub continuation_statuses: Rc<HashMap<Uuid, String>>,
     #[prop_or_default]
     pub on_schedule_continuation: Callback<Uuid>,
     #[prop_or_default]
@@ -40,8 +44,11 @@ pub struct MessageGroupRendererProps {
     pub thinking_start: i64,
     /// Ephemeral records for this Muse turn. Replayed after persisted records
     /// so the one card advances live without writing token deltas to history.
+    /// Shared with `MuseLiveTurn` (and `Value` is `Eq`), so a render that
+    /// didn't add a delta compares this by pointer instead of walking it.
+    /// `None` for every group but the live one, so they allocate nothing.
     #[prop_or_default]
-    pub muse_live_events: Vec<serde_json::Value>,
+    pub muse_live_events: Option<Rc<Vec<serde_json::Value>>>,
 }
 
 /// Whether a portal message is a proxy reconnect notice. These are hidden from
@@ -62,7 +69,27 @@ pub(super) fn is_reconnect_notice(portal: &shared::PortalMessage) -> bool {
 
 #[function_component(MessageGroupRenderer)]
 pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
-    match &props.group {
+    // The task tree of a Muse group's persisted records, rebuilt only when the
+    // group itself changes. Live deltas arrive many times a second during a
+    // turn, and each one used to re-parse and replay every persisted record;
+    // now only the live events are replayed on top of this.
+    let persisted_muse_tree = use_memo(props.group.clone(), |group| match &**group {
+        MessageGroup::IdentityGroup {
+            category: GroupCategory::Muse,
+            messages,
+            ..
+        } => {
+            let mut tree = crate::components::muse_renderer::TaskTree::default();
+            for message in messages {
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(message.content()) {
+                    tree.apply(&value);
+                }
+            }
+            Some(tree)
+        }
+        _ => None,
+    });
+    match &*props.group {
         MessageGroup::Single(json) => {
             html! { <super::MessageRenderer message={json.clone()} session_id={props.session_id} agent_type={props.agent_type} current_user_id={props.current_user_id.clone()} turn_metrics={props.turn_metrics.clone()} continuation_statuses={props.continuation_statuses.clone()} on_schedule_continuation={props.on_schedule_continuation.clone()} on_claude_login={props.on_claude_login.clone()} /> }
         }
@@ -83,7 +110,7 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
             // none. Each marker reports the cumulative estimate, so the chip
             // ticks upward live as more markers stream in.
             if *category == GroupCategory::Thinking {
-                let tokens = thinking_tokens_estimate(messages);
+                let tokens = thinking_tokens_estimate(messages, props.agent_type);
                 // Seed the odometer with the previous burst's max from this
                 // turn so a run split by a tool call continues counting
                 // instead of re-racing from 0 (clamped inside CountUp, so a
@@ -109,17 +136,20 @@ pub fn message_group_renderer(props: &MessageGroupRendererProps) -> Html {
             // also what makes reload work — grouping runs over persisted
             // history, so the tree rebuilds from the transcript itself.
             if *category == GroupCategory::Muse {
-                let mut tree = crate::components::muse_renderer::TaskTree::default();
-                for message in messages {
-                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&message.content) {
-                        tree.apply(&value);
-                    }
-                }
+                let mut tree = persisted_muse_tree
+                    .as_ref()
+                    .as_ref()
+                    .cloned()
+                    .unwrap_or_default();
                 // Muse's classifier routes each record to exactly one side:
                 // Durable → persisted messages, Ephemeral → this overlay.
                 // Applying both sets cannot double-count output chunks unless
                 // that classifier invariant changes.
-                for event in &props.muse_live_events {
+                for event in props
+                    .muse_live_events
+                    .iter()
+                    .flat_map(|events| events.iter())
+                {
                     tree.apply(event);
                 }
                 // Nothing structural and nothing to footnote — a group of

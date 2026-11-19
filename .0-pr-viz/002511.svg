@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="arr-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+  </defs>
+
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2511 · Memoize diff cards and history grouping, skip off-screen archive cards</text>
+
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">Diff cards re-ran a full LCS and the history page regrouped the archive on every render;</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">both now compute once per input, and off-screen archive cards skip layout and paint.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <!-- ==================== BEFORE ==================== -->
+  <g>
+    <rect x="80" y="240" width="840" height="110" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="282" font-size="26" fill="#7aa2f7">DiffCard render (any parent render or expand click)</text>
+    <text x="104" y="320" font-size="23" fill="#a9b1d6">DiffSource::OldNew { old, new }</text>
+  </g>
+  <line x1="500" y1="350" x2="500" y2="396" stroke="#f7768e" stroke-width="1.5" marker-end="url(#arr-red)"/>
+  <g>
+    <rect x="80" y="400" width="840" height="120" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+    <text x="104" y="442" font-size="26" fill="#f7768e">compute_line_diff on every render</text>
+    <text x="104" y="482" font-size="23" fill="#a9b1d6">longest_common_subsequence: full (m+1) x (n+1) table</text>
+  </g>
+
+  <g>
+    <rect x="80" y="580" width="840" height="110" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="622" font-size="26" fill="#7aa2f7">HistoryTranscriptPage render</text>
+    <text x="104" y="660" font-size="23" fill="#a9b1d6">archived lines from fetch_messages</text>
+  </g>
+  <line x1="500" y1="690" x2="500" y2="736" stroke="#f7768e" stroke-width="1.5" marker-end="url(#arr-red)"/>
+  <g>
+    <rect x="80" y="740" width="840" height="230" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+    <text x="104" y="782" font-size="26" fill="#f7768e">transcript_body regroups everything, every render</text>
+    <text x="104" y="822" font-size="23" fill="#a9b1d6">to_rendered + group_messages over every archived line</text>
+    <text x="104" y="860" font-size="23" fill="#f7768e">MessageGroupRenderer rendered with no key</text>
+    <text x="104" y="898" font-size="23" fill="#f7768e">every card laid out and painted, on screen or not</text>
+  </g>
+
+  <!-- ==================== AFTER ==================== -->
+  <g>
+    <rect x="1040" y="240" width="880" height="110" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="1064" y="282" font-size="26" fill="#7aa2f7">DiffCard render (any parent render or expand click)</text>
+    <text x="1064" y="320" font-size="23" fill="#9ece6a">use_memo(props.source): lines reused until it changes</text>
+  </g>
+  <line x1="1480" y1="350" x2="1480" y2="396" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+  <text x="1500" y="380" font-size="22" fill="#565f89">only when the source changes</text>
+  <g>
+    <rect x="1040" y="400" width="880" height="120" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1064" y="442" font-size="26" fill="#9ece6a">compute_line_diff trims common prefix and suffix</text>
+    <text x="1064" y="482" font-size="23" fill="#a9b1d6">LCS table spans only the edited middle region</text>
+  </g>
+
+  <g>
+    <rect x="1040" y="580" width="880" height="110" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="1064" y="622" font-size="26" fill="#7aa2f7">HistoryTranscriptPage render</text>
+    <text x="1064" y="660" font-size="23" fill="#9ece6a">lines held as Lines(Rc), compared by pointer</text>
+  </g>
+  <line x1="1480" y1="690" x2="1480" y2="736" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+  <g>
+    <rect x="1040" y="740" width="880" height="230" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1064" y="782" font-size="26" fill="#9ece6a">use_memo groups once per load and agent type</text>
+    <text x="1064" y="822" font-size="23" fill="#9ece6a">MessageGroupRenderer key={group.key(i)}</text>
+    <text x="1064" y="860" font-size="23" fill="#9ece6a">.history-root .messages-container > .claude-message:</text>
+    <text x="1064" y="898" font-size="23" fill="#9ece6a">content-visibility: auto; contain-intrinsic-size: auto</text>
+    <text x="1064" y="936" font-size="22" fill="#565f89">off-screen cards skip layout and paint</text>
+  </g>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">Not applied to the live view: it is read by scrolling up, so card heights settling at the top edge would jump on Safari.</text>
+</svg>

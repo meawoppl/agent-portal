@@ -940,15 +940,10 @@ mod edge_tests {
 /// A content owner's matcher view; sharing access alone does not register
 /// another person's private values as censorship rules for this user's data.
 pub fn sanitize_for_user<T: serde::Serialize + serde::de::DeserializeOwned>(
-    pool: &crate::db::DbPool,
+    mut conn: crate::db::DbConnection,
     user: Uuid,
     input: T,
 ) -> Result<T, AppError> {
-    // A replay producer can already hold a pooled cursor while awaiting this
-    // consumer. Never wait for that same exhausted pool at the send boundary.
-    let mut conn = pool.try_get().ok_or(AppError::ServiceUnavailable(
-        "Content authorization is busy; reconnect shortly",
-    ))?;
     let rules = snapshot_for_user(&mut conn, user)?;
     drop(conn);
     if rules.is_empty() {
@@ -1789,32 +1784,6 @@ mod context_boundary_tests {
         );
         assert_eq!(rules.redact_str(&secret), MASK);
         assert!(rules.contains_bytes(secret.as_bytes()));
-    }
-}
-
-#[cfg(test)]
-mod send_boundary_tests {
-    use super::*;
-    #[test]
-    fn exhausted_replay_pool_fails_fast_instead_of_waiting_for_its_own_producers() {
-        let Some(db) = crate::handlers::secrets::tests::Database::new() else {
-            return;
-        };
-        let held: Vec<_> = (0..db.pool.max_size())
-            .map(|_| db.pool.get().unwrap())
-            .collect();
-        let started = std::time::Instant::now();
-        let result = sanitize_for_user(
-            &db.pool,
-            Uuid::new_v4(),
-            serde_json::json!({"type":"HelloAck","protocol_version":1,"success":true}),
-        );
-        assert!(matches!(result, Err(AppError::ServiceUnavailable(_))));
-        assert!(
-            started.elapsed() < std::time::Duration::from_secs(1),
-            "send-side checkout cannot wait on blocked replay producers"
-        );
-        drop(held);
     }
 }
 

@@ -703,7 +703,7 @@ pub struct NewCustomSubdomain {
 /// sweep, and `2026-06-04-120001_decouple_turn_metrics_from_sessions` made
 /// `session_id` nullable with `ON DELETE SET NULL` (was `NOT NULL`/`CASCADE`) so
 /// a row survives its session's deletion. Ownership now lives on `user_id`.
-#[derive(Debug, Queryable, Selectable, Serialize, Deserialize, Clone)]
+#[derive(Debug, Queryable, QueryableByName, Selectable, Serialize, Deserialize, Clone)]
 #[diesel(table_name = crate::schema::turn_metrics)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct TurnMetric {

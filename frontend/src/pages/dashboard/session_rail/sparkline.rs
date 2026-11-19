@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -42,10 +42,11 @@ type EventStore = HashMap<SessionKey, Vec<(f64, ActivityTag)>>;
 /// Shared activity event buffer.
 ///
 /// Uses pointer-based `PartialEq` so prop changes to the *contents* never
-/// cause `SessionRail` to re-render — redraws are driven by its own 100 ms
-/// tick timer instead.
+/// cause `SessionRail` to re-render — redraws are driven by its own tick
+/// timer instead, which polls [`ActivityRef::revision`] to redraw promptly
+/// when new events land.
 #[derive(Clone)]
-pub struct ActivityRef(Rc<RefCell<EventStore>>);
+pub struct ActivityRef(Rc<RefCell<EventStore>>, Rc<Cell<u64>>);
 
 impl ActivityRef {
     /// Record a new event, evicting any entries that have fallen outside the
@@ -56,6 +57,13 @@ impl ActivityRef {
         let events = map.entry(session_id).or_default();
         events.retain(|(t, _)| *t > cutoff);
         events.push((timestamp, tag));
+        self.1.set(self.1.get().wrapping_add(1));
+    }
+
+    /// Bumped on every [`push`](Self::push); lets the rail's ticker skip
+    /// redraws when nothing new has arrived.
+    pub fn revision(&self) -> u64 {
+        self.1.get()
     }
 
     /// True if a compaction event occurred within `window_ms` of `now` for
@@ -119,13 +127,16 @@ impl PartialEq for ActivityRef {
 
 impl Default for ActivityRef {
     fn default() -> Self {
-        ActivityRef(Rc::new(RefCell::new(EventStore::new())))
+        ActivityRef(
+            Rc::new(RefCell::new(EventStore::new())),
+            Rc::new(Cell::new(0)),
+        )
     }
 }
 
 /// Render the activity sparkline for a session pill.
 ///
-/// `render_time` ticks every 100 ms; `view_for` does all the windowing and
+/// `render_time` advances on the rail's ticker (see `SessionRail`); `view_for` does all the windowing and
 /// range-pairing at draw time.
 pub fn render_activity_sparkline(
     activity_timestamps: &ActivityRef,

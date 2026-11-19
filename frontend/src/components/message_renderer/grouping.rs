@@ -1,4 +1,7 @@
 use crate::components::agent_frame::{AgentFrame, AgentFrameKind, AgentFrameRegistry};
+use crate::components::codex_renderer::codex_event_item_id;
+
+use std::rc::Rc;
 
 use super::renderers::assistant_label;
 use super::types::{ClaudeMessage, RenderedMessage};
@@ -50,7 +53,10 @@ impl GroupCategory {
 }
 
 /// A group of messages to render together.
-#[derive(Debug, Clone, PartialEq)]
+/// `Eq` matters beyond tidiness: it lets `Rc<MessageGroup>` compare by
+/// pointer before comparing contents, which is what keeps an unchanged
+/// group's props comparison O(1) when the transcript re-renders.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MessageGroup {
     /// A single message that doesn't classify into any group category.
     /// Kept as a distinct variant (rather than a one-element `Grouped`) so
@@ -77,14 +83,10 @@ impl MessageGroup {
             return None;
         };
         messages.iter().find_map(|message| {
-            serde_json::from_str::<serde_json::Value>(&message.content)
-                .ok()
-                .and_then(|value| {
-                    value
-                        .get("causation_id")
-                        .and_then(|id| id.as_str())
-                        .map(str::to_string)
-                })
+            message
+                .facts(shared::AgentType::Muse)
+                .muse_causation_id
+                .clone()
         })
     }
 
@@ -244,11 +246,133 @@ fn optimistic_user_is_inter_agent(msg: &shared::UserFrame) -> bool {
 /// Classify a single wire message into the display identity it belongs to,
 /// or `None` if it shouldn't roll into any group (renders as `Single`).
 ///
-/// Sole entry point for "which identity group does this message belong to"
-/// across the codebase — add new categories here, not at the `group_messages`
-/// loop level. The wire JSON is parsed through `AgentFrameRegistry`, which
-/// preserves the renderer dispatch order: shared Claude-shaped frames first,
-/// then Codex protocol events only for Codex sessions.
+/// Messages sent by another agent or by the portal take their sender's
+/// identity. Everything else follows the frame's cached [`IdentityRule`]
+/// (see [`identity_rule`] for the dispatch order), resolved against the
+/// message's source and the current user.
+pub(super) fn classify(
+    message: &RenderedMessage,
+    agent_type: shared::AgentType,
+    current_user_id: Option<&str>,
+) -> Option<MessageIdentity> {
+    let source = message.source();
+    if let Some(source @ (shared::MessageSource::Agent { .. } | shared::MessageSource::Portal)) =
+        source
+    {
+        return Some(source_identity(source, current_user_id));
+    }
+    match &message.facts(agent_type).identity {
+        IdentityRule::Fixed(identity) => Some(identity.clone()),
+        IdentityRule::SourceOrYou => Some(source.map_or_else(
+            || MessageIdentity {
+                category: GroupCategory::User,
+                label: "You".to_string(),
+                badge_class: "user".to_string(),
+            },
+            |source| source_identity(source, current_user_id),
+        )),
+        IdentityRule::SourceOnly => source.map(|source| source_identity(source, current_user_id)),
+        IdentityRule::Never => None,
+    }
+}
+
+/// How a frame's display identity is decided, independent of who is
+/// viewing: the current user only changes a sender's label ("You" or their
+/// name), so that last step is resolved in [`classify`] against the message's
+/// own source rather than cached.
+#[derive(Debug, Clone)]
+pub(super) enum IdentityRule {
+    /// The frame's shape alone decides its identity.
+    Fixed(MessageIdentity),
+    /// A human prompt: the sender's identity, or "You" with no source.
+    SourceOrYou,
+    /// No identity of its own; the sender's identity when there is one.
+    SourceOnly,
+    /// Always renders on its own (inter-agent echoes).
+    Never,
+}
+
+/// Everything grouping and the transcript view derive from one wire frame,
+/// computed from a single parse and cached on the [`RenderedMessage`] (see
+/// [`RenderedMessage::facts`]). Every helper here used to re-parse the JSON,
+/// several times per message on every render.
+#[derive(Debug)]
+pub(super) struct FrameFacts {
+    pub(crate) kind: AgentFrameKind,
+    pub(crate) identity: IdentityRule,
+    /// Header label for a Claude assistant frame, from its model.
+    pub(crate) assistant_label: Option<String>,
+    /// `estimated_tokens` of a `thinking_tokens` marker.
+    pub(crate) thinking_tokens: Option<i64>,
+    /// Codex item id, for collapsing an item's lifecycle frames.
+    pub(crate) codex_item_id: Option<String>,
+    /// Muse `causation_id`, which joins live records to a turn.
+    pub(crate) muse_causation_id: Option<String>,
+    /// Whether the frame counts toward the live transcript's render budget
+    /// (same rule as `shared::render_budget::counts_toward_render_limit`).
+    pub(crate) counts_toward_render_limit: bool,
+    /// Transport churn the transcript drops (see [`is_transcript_noise`]).
+    pub(crate) transcript_noise: bool,
+    /// What a command-lifecycle frame contributes to the transcript:
+    /// `Some(command_uuid)` for a started scheduler wakeup (shown once per
+    /// command), `None` for the plain acknowledgements that are hidden.
+    pub(crate) lifecycle_wakeup: Option<Option<String>>,
+}
+
+impl FrameFacts {
+    pub(crate) fn of(json: &str, agent_type: shared::AgentType) -> Self {
+        let frame = AgentFrameRegistry::parse(json, agent_type);
+        let kind = frame.kind();
+        let thinking_tokens = match &frame {
+            AgentFrame::Claude(ClaudeMessage::System(msg)) => msg
+                .as_thinking_tokens()
+                .map(|tokens| tokens.estimated_tokens.min(i64::MAX as u64) as i64),
+            _ => None,
+        };
+        let is_thinking_marker = matches!(
+            &frame,
+            AgentFrame::Claude(ClaudeMessage::System(msg)) if msg.is_thinking_tokens()
+        );
+        Self {
+            kind,
+            identity: identity_rule(&frame, agent_type),
+            assistant_label: match &frame {
+                AgentFrame::Claude(ClaudeMessage::Assistant(msg)) => {
+                    Some(assistant_label(&msg.message.model))
+                }
+                _ => None,
+            },
+            thinking_tokens,
+            codex_item_id: match &frame {
+                AgentFrame::Codex(event) => codex_event_item_id(event),
+                _ => None,
+            },
+            muse_causation_id: match &frame {
+                AgentFrame::Muse(value) => value
+                    .get("causation_id")
+                    .and_then(|id| id.as_str())
+                    .map(str::to_string),
+                _ => None,
+            },
+            counts_toward_render_limit: !is_thinking_marker
+                && kind != AgentFrameKind::ClaudeCommandLifecycle,
+            transcript_noise: is_transcript_noise(&frame),
+            lifecycle_wakeup: match &frame {
+                AgentFrame::Claude(ClaudeMessage::CommandLifecycle(message)) => Some(
+                    super::renderers::command_wakeup_label(message)
+                        .map(|_| message.command_uuid.clone()),
+                ),
+                _ => None,
+            },
+        }
+    }
+}
+
+/// The identity rule for a parsed frame. Sole place that decides "which
+/// identity group does this message belong to"; add new categories here, not
+/// at the `group_messages` loop level. Messages from another agent or the
+/// portal itself are decided by their source before this runs (see
+/// [`classify`]).
 ///
 /// **Variant ordering matters**:
 ///   1. **User-as-tool-result** runs first because user-tool-result envelopes
@@ -266,136 +390,83 @@ fn optimistic_user_is_inter_agent(msg: &shared::UserFrame) -> bool {
 ///      collapse under the current user's "You" header.
 ///   5. **Codex** runs last — Codex events parse via a different enum and
 ///      only the messages that don't match any Claude shape get here.
-pub(super) fn classify(
-    message: &RenderedMessage,
-    agent_type: shared::AgentType,
-    current_user_id: Option<&str>,
-) -> Option<MessageIdentity> {
-    let json = message.content.as_str();
-    let source = message.source();
-    if let Some(source @ (shared::MessageSource::Agent { .. } | shared::MessageSource::Portal)) =
-        source
-    {
-        return Some(source_identity(source, current_user_id));
-    }
-
-    let assistant_identity_label = match agent_type {
-        shared::AgentType::Codex => "Codex",
-        shared::AgentType::Muse => "Muse",
-        shared::AgentType::Antigravity => "Antigravity",
-        shared::AgentType::Claude => "Claude",
-    };
-
-    match AgentFrameRegistry::parse(json, agent_type) {
-        AgentFrame::Claude(ClaudeMessage::Assistant(_)) => {
-            return Some(MessageIdentity {
-                category: GroupCategory::Assistant,
-                label: assistant_identity_label.to_string(),
-                badge_class: "assistant".to_string(),
-            });
-        }
-        AgentFrame::Claude(ClaudeMessage::User(msg)) => {
-            if user_is_tool_result_envelope(&msg) {
-                return Some(MessageIdentity {
-                    category: GroupCategory::Assistant,
-                    label: assistant_identity_label.to_string(),
-                    badge_class: "assistant".to_string(),
-                });
+fn identity_rule(frame: &AgentFrame, agent_type: shared::AgentType) -> IdentityRule {
+    let assistant = || {
+        IdentityRule::Fixed(MessageIdentity {
+            category: GroupCategory::Assistant,
+            label: match agent_type {
+                shared::AgentType::Codex => "Codex",
+                shared::AgentType::Muse => "Muse",
+                shared::AgentType::Antigravity => "Antigravity",
+                shared::AgentType::Claude => "Claude",
             }
-            if user_is_plain_text(&msg) {
+            .to_string(),
+            badge_class: "assistant".to_string(),
+        })
+    };
+    let fixed = |category, label: &str, badge_class: &str| {
+        IdentityRule::Fixed(MessageIdentity {
+            category,
+            label: label.to_string(),
+            badge_class: badge_class.to_string(),
+        })
+    };
+    match frame {
+        AgentFrame::Claude(ClaudeMessage::Assistant(_)) => assistant(),
+        AgentFrame::Claude(ClaudeMessage::User(msg)) => {
+            if user_is_tool_result_envelope(msg) {
+                assistant()
+            } else if user_is_plain_text(msg) {
                 // A claude-echoed inter-agent message (`[message from …]`) must
                 // render as its own "Message from …" card, not merge into the
                 // "You" group and show its raw `[message from …]` / system-
-                // reminder wrapper. Returning `None` renders it as a `Single`,
-                // where the single-card path detects and cards it.
+                // reminder wrapper, so it never groups.
                 //
-                // Deliberately NOT gated on `source.is_none()`: the backend
-                // stamps every role="user" row with `meta.source = User(owner)`
-                // — including claude's echo of an injected inter-agent message
-                // — so a source-gated check silently skips exactly the
-                // claude→claude case. (Codex echoes only dodged this because
-                // their `user_echo` wire type maps to role "unknown" and never
-                // gets a source.) If the text parses as an inter-agent wrapper,
-                // the raw form is never the right render, whatever the source.
-                if user_message_is_inter_agent(&msg) {
-                    return None;
+                // Deliberately NOT gated on the message having no source: the
+                // backend stamps every role="user" row with `meta.source =
+                // User(owner)` — including claude's echo of an injected
+                // inter-agent message — so a source-gated check silently skips
+                // exactly the claude→claude case. If the text parses as an
+                // inter-agent wrapper, the raw form is never the right render,
+                // whatever the source.
+                if user_message_is_inter_agent(msg) {
+                    IdentityRule::Never
+                } else {
+                    IdentityRule::SourceOrYou
                 }
-                return Some(source.map_or_else(
-                    || MessageIdentity {
-                        category: GroupCategory::User,
-                        label: "You".to_string(),
-                        badge_class: "user".to_string(),
-                    },
-                    |source| source_identity(source, current_user_id),
-                ));
+            } else {
+                IdentityRule::SourceOnly
             }
         }
+        // A synthetic user echo carrying an inter-agent `[message from …]`
+        // payload must render as its own provenance card, mirroring the
+        // `ClaudeMessage::User` arm above. This shape is how Codex's
+        // `UserEchoEvent` (top-level `content` string, no `session_id`) and
+        // older proxies' echoes parse, so the `User`-arm detection alone
+        // missed them.
         AgentFrame::Claude(ClaudeMessage::OptimisticUser(msg)) => {
-            // A synthetic user echo carrying an inter-agent `[message from …]`
-            // payload must render as its own provenance card, not fold into
-            // the "You" group and expose its raw wrapper — mirroring the
-            // `ClaudeMessage::User` arm above (including its ungated source
-            // rationale). This shape is how Codex's `UserEchoEvent` (top-level
-            // `content` string, no `session_id`) and older proxies' echoes
-            // parse, so the `User`-arm detection alone missed them.
-            if optimistic_user_is_inter_agent(&msg) {
-                return None;
+            if optimistic_user_is_inter_agent(msg) {
+                IdentityRule::Never
+            } else {
+                IdentityRule::SourceOrYou
             }
-            return Some(source.map_or_else(
-                || MessageIdentity {
-                    category: GroupCategory::User,
-                    label: "You".to_string(),
-                    badge_class: "user".to_string(),
-                },
-                |source| source_identity(source, current_user_id),
-            ));
         }
         AgentFrame::Claude(ClaudeMessage::Portal(_)) => {
-            return Some(MessageIdentity {
-                category: GroupCategory::Portal,
-                label: "Portal".to_string(),
-                badge_class: "portal".to_string(),
-            });
+            fixed(GroupCategory::Portal, "Portal", "portal")
         }
         // The Claude CLI emits a bodyless `system`/`thinking_tokens` marker per
         // reasoning step; a long turn produces a wall of them. Fold a run into
         // one `Thinking` group so the renderer can show a single counted chip.
         AgentFrame::Claude(ClaudeMessage::System(msg)) if msg.is_thinking_tokens() => {
-            return Some(MessageIdentity {
-                category: GroupCategory::Thinking,
-                label: "thinking".to_string(),
-                badge_class: "thinking".to_string(),
-            });
+            fixed(GroupCategory::Thinking, "thinking", "thinking")
         }
-        AgentFrame::Codex(_) => {
-            return Some(MessageIdentity {
-                category: GroupCategory::Codex,
-                label: "Codex".to_string(),
-                badge_class: "assistant".to_string(),
-            });
-        }
-        AgentFrame::Muse(_) => {
-            return Some(MessageIdentity {
-                category: GroupCategory::Muse,
-                label: "Muse".to_string(),
-                badge_class: "assistant".to_string(),
-            });
-        }
+        AgentFrame::Codex(_) => fixed(GroupCategory::Codex, "Codex", "assistant"),
+        AgentFrame::Muse(_) => fixed(GroupCategory::Muse, "Muse", "assistant"),
         AgentFrame::Antigravity(_) => {
-            return Some(MessageIdentity {
-                category: GroupCategory::Antigravity,
-                label: "Antigravity".to_string(),
-                badge_class: "antigravity".to_string(),
-            });
+            fixed(GroupCategory::Antigravity, "Antigravity", "antigravity")
         }
-        _ => {}
+        _ => IdentityRule::SourceOnly,
     }
-
-    if let Some(source) = source {
-        return Some(source_identity(source, current_user_id));
-    }
-
-    None
 }
 
 /// Peak `estimated_tokens` across a run of `thinking_tokens` markers — the
@@ -405,17 +476,13 @@ pub(super) fn classify(
 ///
 /// Reads through `claude-codes`' typed `ThinkingTokensMessage` accessor so the
 /// portal follows the SDK's schema instead of poking at flattened JSON fields.
-pub(super) fn thinking_tokens_estimate(messages: &[RenderedMessage]) -> i64 {
+pub(super) fn thinking_tokens_estimate(
+    messages: &[RenderedMessage],
+    agent_type: shared::AgentType,
+) -> i64 {
     messages
         .iter()
-        .filter_map(|message| {
-            match AgentFrameRegistry::parse(&message.content, shared::AgentType::Claude) {
-                AgentFrame::Claude(ClaudeMessage::System(msg)) => msg
-                    .as_thinking_tokens()
-                    .map(|tokens| tokens.estimated_tokens.min(i64::MAX as u64) as i64),
-                _ => None,
-            }
-        })
+        .filter_map(|message| message.facts(agent_type).thinking_tokens)
         .max()
         .unwrap_or(0)
 }
@@ -431,16 +498,7 @@ fn group_label(
 
     messages
         .iter()
-        .filter_map(
-            |message| match AgentFrameRegistry::parse(&message.content, agent_type) {
-                AgentFrame::Claude(message) => Some(message),
-                _ => None,
-            },
-        )
-        .find_map(|msg| match msg {
-            ClaudeMessage::Assistant(msg) => Some(assistant_label(&msg.message.model)),
-            _ => None,
-        })
+        .find_map(|message| message.facts(agent_type).assistant_label.clone())
         .unwrap_or_else(|| identity.label.clone())
 }
 
@@ -455,9 +513,7 @@ fn group_label(
 /// stays `None` on the proxy-emit side until a future PR wires up the
 /// per-turn linkage, so a key-based join would fail on every row today.
 pub fn is_turn_terminator(message: &RenderedMessage, agent_type: shared::AgentType) -> bool {
-    AgentFrameRegistry::parse(&message.content, agent_type)
-        .kind()
-        .is_terminator()
+    message.facts(agent_type).kind.is_terminator()
 }
 
 /// True iff the group is a `Single` carrying a turn terminator. Identity
@@ -486,22 +542,25 @@ pub fn group_is_turn_terminator(group: &MessageGroup, agent_type: shared::AgentT
 /// starts from 0 again. Callers clamp the seed to the chip's own target,
 /// so a marker stream that ever restarts low degrades to a static display
 /// rather than a backwards animation.
-pub fn thinking_chip_starts(groups: &[MessageGroup], agent_type: shared::AgentType) -> Vec<i64> {
+pub fn thinking_chip_starts<G: std::borrow::Borrow<MessageGroup>>(
+    groups: &[G],
+    agent_type: shared::AgentType,
+) -> Vec<i64> {
     let mut running_max = 0i64;
     groups
         .iter()
-        .map(|group| match group {
+        .map(|group| match group.borrow() {
             MessageGroup::IdentityGroup {
                 category: GroupCategory::Thinking,
                 messages,
                 ..
             } => {
                 let start = running_max;
-                running_max = running_max.max(thinking_tokens_estimate(messages));
+                running_max = running_max.max(thinking_tokens_estimate(messages, agent_type));
                 start
             }
             _ => {
-                if group_is_turn_terminator(group, agent_type) {
+                if group_is_turn_terminator(group.borrow(), agent_type) {
                     running_max = 0;
                 }
                 0
@@ -520,6 +579,30 @@ fn is_transcript_noise(frame: &AgentFrame) -> bool {
         }
         _ => false,
     }
+}
+
+/// Share each freshly grouped `MessageGroup` that is unchanged from the
+/// previous grouping, matched by its stable key, by reusing the previous `Rc`.
+/// Renderers compare group props by pointer first, so a regroup after one new
+/// message re-renders only the group that changed (and any new one) instead
+/// of deep-comparing every group.
+pub fn reuse_unchanged_groups(
+    previous: &[Rc<MessageGroup>],
+    fresh: Vec<MessageGroup>,
+) -> Vec<Rc<MessageGroup>> {
+    let previous: std::collections::HashMap<_, _> = previous
+        .iter()
+        .enumerate()
+        .map(|(i, group)| (group.key(i), group))
+        .collect();
+    fresh
+        .into_iter()
+        .enumerate()
+        .map(|(i, group)| match previous.get(&group.key(i)) {
+            Some(old) if ***old == group => Rc::clone(old),
+            _ => Rc::new(group),
+        })
+        .collect()
 }
 
 /// Walk `messages` and collapse consecutive same-category runs into
@@ -561,24 +644,23 @@ pub fn group_messages(
             }
             continue;
         }
-        let frame = AgentFrameRegistry::parse(&message.content, agent_type);
+        let facts = message.facts(agent_type);
 
         // Transport churn with nothing for the reader: reconnect notices and
         // Claude's `commands_changed` marker (re-sent on every reconnect).
         // Dropping them here, not in `classify`, keeps the surrounding run in
         // one group instead of splitting it around each hidden frame.
-        if is_transcript_noise(&frame) {
+        if facts.transcript_noise {
             continue;
         }
-        let kind = frame.kind();
+        let kind = facts.kind;
 
         // Show exactly one started scheduler fire per command; ordinary
         // lifecycle acknowledgements neither create nor split transcript rows.
-        if let AgentFrame::Claude(ClaudeMessage::CommandLifecycle(message)) = &frame {
-            if super::renderers::command_wakeup_label(message).is_none()
-                || !seen_wakeups.insert(message.command_uuid.clone())
-            {
-                continue;
+        if let Some(wakeup) = &facts.lifecycle_wakeup {
+            match wakeup {
+                Some(command_uuid) if seen_wakeups.insert(command_uuid.clone()) => {}
+                _ => continue,
             }
         }
 
@@ -641,14 +723,17 @@ pub(super) fn visible_group_indices(
     if !matches!(category, GroupCategory::Codex) {
         return (0..messages.len()).map(|i| (i, None)).collect();
     }
-    use crate::components::codex_renderer::codex_event_item_id;
     use std::collections::HashMap;
-    // Parse each message's item_id once, then resolve the last index per id
-    // from the cached vector — parsing twice per message doubled the JSON
-    // work on the hot render path (#967).
+    // Codex groups only form in Codex sessions, so the frames' cached facts
+    // are keyed by that agent type.
     let ids: Vec<Option<String>> = messages
         .iter()
-        .map(|message| codex_event_item_id(&message.content))
+        .map(|message| {
+            message
+                .facts(shared::AgentType::Codex)
+                .codex_item_id
+                .clone()
+        })
         .collect();
     let mut last_idx: HashMap<&str, usize> = HashMap::new();
     for (i, id) in ids.iter().enumerate() {

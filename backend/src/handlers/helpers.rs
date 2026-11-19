@@ -19,13 +19,9 @@ use uuid::Uuid;
 /// backend's own `NaiveDateTime` serializer respectively. Shared by the REST
 /// `list_messages` pagination cursors and the WebSocket replay watermark.
 pub fn parse_iso_cursor(s: &str) -> Option<NaiveDateTime> {
-    // Trim trailing `Z` if present — `js_sys::Date::to_iso_string` emits
-    // `2026-05-17T12:34:56.789Z`, but `NaiveDateTime::parse_from_str` rejects
-    // the timezone marker on a naive timestamp.
-    let trimmed = s.strip_suffix('Z').unwrap_or(s);
-    NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M:%S%.f")
-        .or_else(|_| NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M:%S"))
+    chrono::DateTime::parse_from_rfc3339(&shared::time::normalize_iso_utc(s))
         .ok()
+        .map(|timestamp| timestamp.naive_utc())
 }
 
 /// The label to attribute a user by, preferring their chosen nickname (#1485).
@@ -146,10 +142,20 @@ impl From<diesel::result::Error> for DeleteSessionError {
 ///
 /// Returns the number of deleted messages.
 pub fn delete_session_with_data(
-    conn: &mut PooledConnection<ConnectionManager<PgConnection>>,
+    conn: &mut PgConnection,
     session: &Session,
     record_costs: bool,
     manager: &crate::handlers::websocket::SessionManager,
+) -> Result<usize, DeleteSessionError> {
+    let deleted_messages = delete_session_rows(conn, session, record_costs)?;
+    manager.forget_deleted_session(session.id, &session.session_key);
+    Ok(deleted_messages)
+}
+
+pub(crate) fn delete_session_rows(
+    conn: &mut PgConnection,
+    session: &Session,
+    record_costs: bool,
 ) -> Result<usize, DeleteSessionError> {
     let session_id = session.id;
 
@@ -213,15 +219,15 @@ pub fn delete_session_with_data(
         })?;
 
     // Delete pending_inputs
-    let _ = diesel::delete(pending_inputs::table.filter(pending_inputs::session_id.eq(session_id)))
-        .execute(conn);
+    diesel::delete(pending_inputs::table.filter(pending_inputs::session_id.eq(session_id)))
+        .execute(conn)?;
 
     // Delete pending_permission_requests
-    let _ = diesel::delete(
+    diesel::delete(
         pending_permission_requests::table
             .filter(pending_permission_requests::session_id.eq(session_id)),
     )
-    .execute(conn);
+    .execute(conn)?;
 
     // Revoke any (non-expiring) launch tokens bound to this session so they
     // don't outlive the session row. See #932.
@@ -235,7 +241,6 @@ pub fn delete_session_with_data(
             DeleteSessionError(format!("Failed to delete session: {}", e))
         })?;
 
-    manager.forget_deleted_session(session_id, &session.session_key);
     Ok(deleted_messages)
 }
 

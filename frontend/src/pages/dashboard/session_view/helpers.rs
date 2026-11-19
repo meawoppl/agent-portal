@@ -14,6 +14,7 @@ use crate::pages::dashboard::types::PendingPermission;
 use crate::utils::non_empty;
 use codex_codes::io::items::{FileUpdateChange, ThreadItem};
 use std::collections::HashSet;
+use std::rc::Rc;
 
 /// Cross-agent activity classification used by the session-rail sparkline and
 /// the pending-send reconciler. The same enum bridges Claude wire shapes
@@ -105,7 +106,7 @@ fn codex_file_change_paths_for_item(messages: &[RenderedMessage], item_id: &str)
     let mut paths = Vec::new();
     let mut seen = HashSet::new();
     for message in messages {
-        let Ok(event) = serde_json::from_str::<CodexEvent>(&message.content) else {
+        let Ok(event) = serde_json::from_str::<CodexEvent>(message.content()) else {
             continue;
         };
         match event {
@@ -732,7 +733,7 @@ pub(super) fn reconcile_pending_sends(
                     if pending_has_client_msg_id(pending) {
                         return false;
                     }
-                    ClaudeMessage::parse(&pending.content)
+                    ClaudeMessage::parse(pending.content())
                         .ok()
                         .as_ref()
                         .and_then(extract_user_text)
@@ -1059,7 +1060,10 @@ pub(crate) fn ephemeral_summary(payload: &serde_json::Value) -> Option<String> {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct MuseLiveTurn {
     pub(crate) causation_id: Option<String>,
-    pub(crate) events: Vec<serde_json::Value>,
+    /// Shared with the live group's `MessageGroupRenderer` props, so a render
+    /// that didn't add a delta passes and compares it by pointer. Writes go
+    /// through `Rc::make_mut`, which copies only while a render holds it.
+    pub(crate) events: Rc<Vec<serde_json::Value>>,
 }
 
 impl MuseLiveTurn {
@@ -1071,16 +1075,17 @@ impl MuseLiveTurn {
             .and_then(|value| value.as_str())
             .map(str::to_string);
         if causation_id.is_some() && causation_id != self.causation_id {
-            self.events.clear();
+            self.events = Rc::default();
             self.causation_id = causation_id;
         }
+        let events = Rc::make_mut(&mut self.events);
 
         let payload_type = event.get("payload_type").and_then(|value| value.as_str());
         // Status is replacement state, not history. Keeping only the newest
         // line per task avoids a heartbeat-heavy turn growing without bound.
         if payload_type == Some("task.lifecycle.status") {
             let task_id = muse_task_id(&event);
-            if let Some(existing) = self.events.iter_mut().rev().find(|candidate| {
+            if let Some(existing) = events.iter_mut().rev().find(|candidate| {
                 candidate
                     .get("payload_type")
                     .and_then(|value| value.as_str())
@@ -1100,7 +1105,7 @@ impl MuseLiveTurn {
                     .get("payload")
                     .and_then(|payload| payload.get("text"))
                     .and_then(|value| value.as_str()),
-                self.events.last_mut(),
+                events.last_mut(),
             ) {
                 if previous
                     .get("payload_type")
@@ -1121,9 +1126,9 @@ impl MuseLiveTurn {
             }
         }
 
-        self.events.push(event);
-        if self.events.len() > Self::MAX_EVENTS {
-            self.events.remove(0);
+        events.push(event);
+        if events.len() > Self::MAX_EVENTS {
+            events.remove(0);
         }
     }
 
@@ -1138,7 +1143,7 @@ impl MuseLiveTurn {
         let same_turn = value.get("causation_id").and_then(|value| value.as_str())
             == self.causation_id.as_deref();
         if terminal && same_turn {
-            self.events.clear();
+            self.events = Rc::default();
             self.causation_id = None;
         }
     }
@@ -1243,6 +1248,37 @@ mod tests {
         assert_eq!(live.events.len(), 2);
         assert_eq!(live.events[0]["payload"]["event"]["message"], "running");
         assert_eq!(live.events[1]["payload"]["text"], "hello world");
+    }
+
+    #[test]
+    fn muse_live_turn_shares_until_a_delta_lands() {
+        let mut live = MuseLiveTurn::default();
+        live.push(json!({
+            "payload_type": "run.output.delta",
+            "causation_id": "turn-1",
+            "payload": {"text": "a"}
+        }));
+        // What a render hands to the live group's props.
+        let rendered = live.events.clone();
+        assert!(
+            Rc::ptr_eq(&rendered, &live.events),
+            "no delta: same pointer"
+        );
+
+        live.push(json!({
+            "payload_type": "run.output.delta",
+            "causation_id": "turn-1",
+            "payload": {"text": "b"}
+        }));
+        assert!(
+            !Rc::ptr_eq(&rendered, &live.events),
+            "a delta gets a new pointer"
+        );
+        assert_eq!(
+            rendered[0]["payload"]["text"], "a",
+            "the rendered snapshot is untouched"
+        );
+        assert_eq!(live.events[0]["payload"]["text"], "ab");
     }
 
     #[test]
@@ -1653,7 +1689,7 @@ mod tests {
             r#"{"type":"user","content":"hello"}"#,
         );
         assert_eq!(pending.len(), 1);
-        assert!(pending[0].content.contains("world"));
+        assert!(pending[0].content().contains("world"));
     }
 
     #[test]

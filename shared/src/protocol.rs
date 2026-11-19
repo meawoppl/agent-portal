@@ -3,6 +3,9 @@
 /// peer cannot safely use the base contract. Missing metadata is legacy v1.
 pub const PROTOCOL_VERSION: u32 = 1;
 
+/// Browser understands user-channel session list invalidations.
+pub const CLIENT_CAPABILITY_SESSION_LIST: &str = "session-list.invalidate.v1";
+
 /// Reject incompatible peers before registering them or accepting mutations.
 /// Old clients deliberately remain supported: absence means the original v1
 /// contract, not "latest" (which would silently accept incompatible clients

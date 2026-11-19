@@ -204,6 +204,21 @@ class PublicationTests(unittest.TestCase):
                         m.legacy("owner/repo", source, Path("unused"))
                 advance.assert_not_called()
 
+    def test_run_sends_stdin_bytes_verbatim(self):
+        # Text-mode stdin rewrites "\n" as "\r\n" on Windows, which once named
+        # the readiness tree entry "readiness.json\r". Input must go as bytes.
+        with patch.object(
+            m.subprocess, "check_output", return_value=b"abc123\n"
+        ) as check_output:
+            self.assertEqual(
+                m.run("git", "mktree", input="100644 blob x\treadiness.json\n"),
+                "abc123",
+            )
+        args, kwargs = check_output.call_args
+        self.assertEqual(args, (("git", "mktree"),))
+        self.assertEqual(kwargs["input"], b"100644 blob x\treadiness.json\n")
+        self.assertNotIn("text", kwargs)
+
     def test_pointer_validation_rejects_schema_channel_and_source(self):
         valid = {"schema": 1, "channel": "linux-x86_64", "source": "a" * 40}
         self.assertEqual(m.pointer_source(valid, "linux-x86_64"), "a" * 40)

@@ -51,6 +51,7 @@ pub struct UseClientWebSocket {
     /// launcher connected, disconnected, or was evicted. Consumers hang a
     /// `use_effect_with` on it to refetch `/api/launchers` (#710).
     pub launcher_event_counter: u32,
+    pub session_list_revisions: HashMap<ConnId, u32>,
     /// Services monitor table (backend plus the user's launchers), from the
     /// newest `ServerToClient::ServiceStatsUpdate`.
     pub service_stats: Vec<ServiceStats>,
@@ -221,7 +222,7 @@ fn use_live_client_websocket() -> UseClientWebSocket {
                                     }
                                 }
                                 if portal.conn() == ConnId::HOME { shutdown_reason.set(Some("Connecting to server".into())); }
-                                match crate::browser_protocol::connect(&portal, |msg| {
+                                match crate::browser_protocol::connect(&portal, &[shared::protocol::CLIENT_CAPABILITY_SESSION_LIST], |msg| {
                                     handle_server_message(portal.conn(), msg, &shutdown_reason, &live);
                                 }).await {
                                         Ok((conn, config)) => {
@@ -273,6 +274,7 @@ fn use_live_client_websocket() -> UseClientWebSocket {
                                                     Err(_) => break,
                                                 }
                                             }
+                                            live.dispatch(client_websocket_events::ClientWsAction::SessionListDisconnected(portal.conn()));
                                             if portal.conn() == ConnId::HOME {
                                                 shutdown_reason.set(Some("Connection lost".into()));
                                             }
@@ -317,6 +319,20 @@ fn use_live_client_websocket() -> UseClientWebSocket {
         });
     }
     let current: std::collections::HashSet<_> = portals.iter().map(|p| p.conn()).collect();
+    // Stable across renders: both are props of every mounted `SessionView`,
+    // and a fresh `Callback` never compares equal.
+    let dismiss_failure = {
+        let dispatcher = live.dispatcher();
+        use_callback((), move |key, ()| {
+            dispatcher.dispatch(client_websocket_events::ClientWsAction::DismissFailure(key))
+        })
+    };
+    let on_agent_auth_changed = {
+        let dispatcher = live.dispatcher();
+        use_callback((), move |(), ()| {
+            dispatcher.dispatch(client_websocket_events::ClientWsAction::AgentAuthChanged)
+        })
+    };
 
     UseClientWebSocket {
         shutdown_reason: (*shutdown_reason).clone(),
@@ -336,6 +352,12 @@ fn use_live_client_websocket() -> UseClientWebSocket {
             .collect(),
         launch_event_counter: live.launch_event_counter,
         launcher_event_counter: live.launcher_event_counter,
+        session_list_revisions: live
+            .session_list_revisions
+            .iter()
+            .filter(|(conn, _)| current.contains(conn))
+            .map(|(conn, rev)| (*conn, *rev))
+            .collect(),
         service_stats: live.service_stats.clone(),
         service_cpu_history: live
             .service_cpu_history
@@ -348,12 +370,7 @@ fn use_live_client_websocket() -> UseClientWebSocket {
             .filter(|(key, _)| current.contains(&key.conn))
             .map(|(key, failure)| (*key, failure.clone()))
             .collect(),
-        dismiss_failure: {
-            let live = live.clone();
-            Callback::from(move |key| {
-                live.dispatch(client_websocket_events::ClientWsAction::DismissFailure(key))
-            })
-        },
+        dismiss_failure,
         agent_auth_revision: live.agent_auth_revision,
         session_launches: live
             .session_launches
@@ -361,12 +378,7 @@ fn use_live_client_websocket() -> UseClientWebSocket {
             .filter(|(key, _)| current.contains(&key.conn))
             .map(|(key, count)| (*key, *count))
             .collect(),
-        on_agent_auth_changed: {
-            let live = live.clone();
-            Callback::from(move |()| {
-                live.dispatch(client_websocket_events::ClientWsAction::AgentAuthChanged)
-            })
-        },
+        on_agent_auth_changed,
     }
 }
 

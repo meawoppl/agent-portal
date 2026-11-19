@@ -7,6 +7,7 @@ use web_sys::Element;
 use yew::prelude::*;
 
 const BROADCAST_WINDOW_MS: f64 = 2_400.0;
+const BROADCAST_CLEAR_GRACE_MS: f64 = 200.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AgentMessageBroadcast {
@@ -71,6 +72,14 @@ impl BroadcastRef {
         let mut events = self.0.borrow_mut();
         events.retain(|e| e.timestamp > cutoff);
         events.push(event);
+    }
+
+    /// True while any orb is in flight, plus a short grace so the frame that
+    /// clears a finished orb is drawn at full rate too. The rail ticks at its
+    /// smooth rate only while this holds.
+    pub(super) fn is_animating(&self, now: f64) -> bool {
+        let cutoff = now - BROADCAST_WINDOW_MS - BROADCAST_CLEAR_GRACE_MS;
+        self.0.borrow().iter().any(|e| e.timestamp > cutoff)
     }
 
     pub(super) fn active_session_ids(&self, now: f64) -> (Vec<SessionKey>, Vec<SessionKey>) {

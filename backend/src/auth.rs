@@ -164,9 +164,19 @@ impl FromRequestParts<Arc<AppState>> for CurrentUserId {
         let cookies = Cookies::from_request_parts(parts, state)
             .await
             .map_err(|rejection| rejection.into_response())?;
-        extract_user_id(state, Some(&parts.headers), &cookies)
-            .map(CurrentUserId)
-            .map_err(|e| e.into_response())
+        let state = state.clone();
+        let headers = parts.headers.clone();
+        let span = tracing::Span::current();
+        tokio::task::spawn_blocking(move || {
+            span.in_scope(|| extract_user_id(&state, Some(&headers), &cookies))
+        })
+        .await
+        .map_err(|error| {
+            tracing::error!("Authentication worker failed: {error}");
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        })?
+        .map(CurrentUserId)
+        .map_err(|error| error.into_response())
     }
 }
 

@@ -44,11 +44,14 @@ fn thinking_tokens_estimate_returns_peak() {
         thinking_tokens_message(250),
     ];
     assert_eq!(
-        grouping::thinking_tokens_estimate(&rendered_vec(&messages)),
+        grouping::thinking_tokens_estimate(&rendered_vec(&messages), shared::AgentType::Claude),
         250
     );
     // No markers / unparseable input yields 0 (chip hides).
-    assert_eq!(grouping::thinking_tokens_estimate(&[]), 0);
+    assert_eq!(
+        grouping::thinking_tokens_estimate(&[], shared::AgentType::Claude),
+        0
+    );
 }
 
 /// When a tool call splits a thinking run, the later chip's odometer is

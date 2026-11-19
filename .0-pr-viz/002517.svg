@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="monospace" font-size="24" fill="#a9b1d6">PR #2517 · Redundant lookup indexes</text>
+<text x="55" y="103" font-family="monospace" font-size="34" fill="#e6e9f5">Drop four redundant indexes.</text>
+<text x="55" y="146" font-family="monospace" font-size="34" fill="#e6e9f5">Keep the smaller session index used by whole-transcript reads.</text>
+<path d="M55 175H1945 M1000 190V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="55" y="230" font-family="monospace" font-size="22" fill="#f7768e">BEFORE</text>
+<rect x="55" y="300" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="79" y="345" font-family="monospace" font-size="26" fill="#7aa2f7">messages</text>
+<text x="79" y="399" font-family="monospace" font-size="23" fill="#c0caf5">Separate indexes on user_id and session_id.</text>
+<text x="79" y="441" font-family="monospace" font-size="23" fill="#c0caf5">Both also lead timestamp composites.</text>
+<path d="M500 500v70" stroke="#565f89" stroke-width="3"/>
+<rect x="55" y="570" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="79" y="615" font-family="monospace" font-size="26" fill="#7aa2f7">pending_inputs</text>
+<text x="79" y="669" font-family="monospace" font-size="23" fill="#c0caf5">Two non-unique indexes overlap the unique key.</text>
+<path d="M500 770v70" stroke="#565f89" stroke-width="3"/>
+<rect x="55" y="840" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="79" y="885" font-family="monospace" font-size="26" fill="#7aa2f7">session_members</text>
+<text x="79" y="939" font-family="monospace" font-size="23" fill="#c0caf5">The session index overlaps the member unique key.</text>
+<text x="1055" y="230" font-family="monospace" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="1055" y="300" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="1079" y="345" font-family="monospace" font-size="26" fill="#7aa2f7">messages</text>
+<text x="1079" y="399" font-family="monospace" font-size="23" fill="#c0caf5">Drop the unused idx_messages_user_id.</text>
+<text x="1079" y="441" font-family="monospace" font-size="23" fill="#c0caf5">Keep idx_messages_session_id and both composites.</text>
+<path d="M1500 500v70" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="570" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="1079" y="615" font-family="monospace" font-size="26" fill="#7aa2f7">pending_inputs</text>
+<text x="1079" y="669" font-family="monospace" font-size="23" fill="#c0caf5">Keep UNIQUE (session_id, seq_num).</text>
+<path d="M1500 770v70" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="840" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="1079" y="885" font-family="monospace" font-size="26" fill="#7aa2f7">session_members</text>
+<text x="1079" y="939" font-family="monospace" font-size="23" fill="#c0caf5">Use UNIQUE (session_id, user_id) for lookups.</text>
+<text x="55" y="1172" font-family="monospace" font-size="22" fill="#a9b1d6">The reverse migration recreates the four original definitions.</text>
+</svg>

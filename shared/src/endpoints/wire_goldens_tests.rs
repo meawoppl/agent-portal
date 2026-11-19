@@ -219,6 +219,7 @@ fn server_to_client_history_batch_golden() {
             meta: None,
         }],
         last_created_at: Some("2026-05-18T00:00:00.000000".to_string()),
+        truncated: false,
     };
     assert_golden(
         &msg,
@@ -236,6 +237,7 @@ fn server_to_client_history_batch_golden() {
         ServerToClient::HistoryBatch {
             entries,
             last_created_at,
+            ..
         } => {
             assert!(entries.is_empty());
             assert!(last_created_at.is_none());
@@ -1091,6 +1093,7 @@ fn browser_hello_wire_contract() {
     assert_golden(
         &ClientToServer::Hello {
             protocol_version: 1,
+            capabilities: Vec::new(),
         },
         json!({"type":"Hello","protocol_version":1}),
     );

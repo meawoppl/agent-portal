@@ -29,6 +29,10 @@ pub const AUDIT_PERSIST_FAILED: &str = "AUDIT_PERSIST_FAILED";
 /// key-provider health and verify refresh. Content is rejected/held, not leaked.
 pub const SECRET_REDACTION_FAILED: &str = "SECRET_REDACTION_FAILED";
 
+/// Browser socket redaction reached its checkout deadline. Check database
+/// health and pool pressure. The waiting frame was never sent or dispatched.
+pub const REDACTION_DB_POOL_BUSY: &str = "REDACTION_DB_POOL_BUSY";
+
 /// Proposal expiry worker could not remove staged ciphertext. Recurring failures
 /// mean database trouble; restore DB access and verify overdue proposals clear.
 pub const SECRET_PROPOSAL_EXPIRY_FAILED: &str = "SECRET_PROPOSAL_EXPIRY_FAILED";
@@ -42,11 +46,8 @@ pub const SECRET_EXPUNGE_FAILED: &str = "SECRET_EXPUNGE_FAILED";
 /// refresh. Protected content is held while a current snapshot is unavailable.
 pub const SECRETS_REDACTION_REFRESH_FAILED: &str = "SECRETS_REDACTION_REFRESH_FAILED";
 
-/// A persisted Claude result could not update its durable cost ledger/total.
-/// A burst indicates database or migration failure; inspect the ledger schema
-/// and reconcile affected result UUIDs from retained transcripts before retrying.
-/// A one-off can be transient, but transport acknowledgement does not retry
-/// this accounting transaction automatically.
+/// Claude result accounting failed. The output transaction rolls back and
+/// the proxy retries the result on reconnect after database recovery.
 pub const COST_ACCOUNTING_PERSIST_FAILED: &str = "COST_ACCOUNTING_PERSIST_FAILED";
 
 /// A turn metric and its optional native Codex cost could not commit. Bursts
@@ -223,6 +224,16 @@ pub const MEMBER_STATUS_FANOUT_FAILED: &str = "MEMBER_STATUS_FANOUT_FAILED";
 ///   the session, plugin command and line that ran.
 pub const PLUGIN_COMMAND_RECORD_FAILED: &str = "PLUGIN_COMMAND_RECORD_FAILED";
 
+/// The backend's live heap reached the heap-profile threshold and the watchdog
+/// (`heap_profile.rs`) tried to write a profile to `PORTAL_HEAP_PROFILE_DIR`; the
+/// line says whether it was written. A burst at rising sizes is a memory spike
+/// in progress. Collect the profiles and read them with `go tool pprof -top`.
+pub const HEAP_PROFILE_CAPTURED: &str = "HEAP_PROFILE_CAPTURED";
+
+/// The session list revision query or worker failed. Clients fall back to
+/// timed REST refresh until the next successful invalidation sweep.
+pub const SESSION_LIST_WATCH_FAILED: &str = "SESSION_LIST_WATCH_FAILED";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -233,6 +244,7 @@ mod tests {
     const ALL_MARKERS: &[&str] = &[
         AUDIT_PERSIST_FAILED,
         SECRET_REDACTION_FAILED,
+        REDACTION_DB_POOL_BUSY,
         SECRET_EXPUNGE_FAILED,
         SECRET_PROPOSAL_EXPIRY_FAILED,
         SECRETS_REDACTION_REFRESH_FAILED,
@@ -252,6 +264,8 @@ mod tests {
         PERMISSION_CANCEL_PERSIST_FAILED,
         PLUGIN_COMMAND_RECORD_FAILED,
         MEMBER_STATUS_FANOUT_FAILED,
+        SESSION_LIST_WATCH_FAILED,
+        HEAP_PROFILE_CAPTURED,
     ];
 
     #[test]
@@ -306,6 +320,7 @@ mod tests {
         let sources: &[&str] = &[
             include_str!("audit.rs"),
             include_str!("background.rs"),
+            include_str!("heap_profile.rs"),
             include_str!("lib.rs"),
             include_str!("secrets/mod.rs"),
             include_str!("secrets/redaction.rs"),
@@ -313,6 +328,7 @@ mod tests {
             include_str!("handlers/websocket/message_handlers.rs"),
             include_str!("handlers/websocket/turn_metrics.rs"),
             include_str!("handlers/websocket/proxy_socket.rs"),
+            include_str!("handlers/websocket/web_client_socket.rs"),
             include_str!("handlers/websocket/permissions.rs"),
             include_str!("push/dispatcher.rs"),
             include_str!("handlers/websocket/session_manager/input_queue.rs"),

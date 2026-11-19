@@ -8,7 +8,9 @@
 //! `helpers.rs`; task-event derivation lives alongside its consumer in
 //! `tasks_panel.rs`.
 
-use crate::components::message_renderer::{MessageRenderer, RenderedMessage};
+use crate::components::message_renderer::{
+    reuse_unchanged_groups, MessageGroup, MessageRenderer, RenderedMessage,
+};
 use crate::components::{
     group_is_turn_terminator, group_messages, thinking_chip_starts, ForkDialog,
     MessageGroupRenderer,
@@ -25,7 +27,9 @@ use shared::strings::truncate_with_ellipsis;
 use shared::{
     ClientToServer, DeliveryMeta, PortalMeta, ReasoningEffort, SendMode, SessionInfo, TurnMetrics,
 };
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 use uuid::Uuid;
 use wasm_bindgen::{closure::Closure, JsCast};
 use wasm_bindgen_futures::spawn_local;
@@ -36,12 +40,13 @@ use super::forward_chips::ForwardChips;
 use super::forward_surface::ForwardSurface;
 use super::helpers::{
     autoscroll_transition, classify_output_msg_type, clear_completed_tools, edit_stack_dispatch,
-    enrich_codex_file_change_permission, ephemeral_summary, format_tool_elapsed, parse_iso_ms_utc,
+    enrich_codex_file_change_permission, ephemeral_summary, parse_iso_ms_utc,
     reconcile_edit_stack_activity, reconcile_pending_sends, running_tool_key,
     update_pending_send_delivery, upsert_tool_progress, usage_limited_since_last_input,
     ActiveToolProgress, ActivityTag, EditStackDispatch, MuseLiveTurn,
 };
 use super::input_bar::{InputBar, InputBarInbound};
+use super::live_status::{LiveStatus, LiveStatusSnapshot};
 use super::outbox::Outbox;
 use super::permission_handler::{
     build_permission_response, PermissionHandler, PermissionResponseKind, PermissionUpdate,
@@ -55,8 +60,8 @@ use super::session_surface::{
 };
 use super::state::{
     advance_replay_watermark, counts_toward_render_limit, deduplicate_secret_notices,
-    insert_turn_metrics_sorted, push_message_with_cost_limit, retain_newest_items_by_cost,
-    sort_turn_metrics_by_start,
+    insert_turn_metrics_sorted, live_render_budget, retain_newest_items_by_cost,
+    sort_turn_metrics_by_start, Transcript,
 };
 use super::tasks_panel::{derive_task_events, TasksInbound, TasksPanel};
 use super::types::{PendingPermission, WsSender, MAX_MESSAGES_PER_SESSION};
@@ -372,6 +377,9 @@ fn save_plugin_notice_expanded(session_id: Uuid, expanded: bool, portal: &Portal
 
 /// Messages for the SessionView component
 pub enum SessionViewMsg {
+    /// A permission answer was given; hand focus back to the textarea via
+    /// the `InputBar`'s dispatcher.
+    RefocusInput,
     LoadHistory(Vec<MessageData>, Option<String>),
     ReceivedOutput(RenderedMessage),
     WebSocketConnected(WsSender),
@@ -395,6 +403,10 @@ pub enum SessionViewMsg {
     PermissionAnswered(String, PermissionResponseKind),
     /// Handle WebSocket event from connection
     WsEvent(WsEvent),
+    /// The status strip registered its snapshot dispatcher.
+    LiveStatusRegistered(Callback<LiveStatusSnapshot>),
+    /// The status strip rendered and may have changed the tail height.
+    LiveStatusRendered,
     /// TasksPanel is mounted and handed us its inbound-event dispatcher.
     /// We store it so live `WsEvent::Output` task events and REST replay
     /// task events can be forwarded without the parent owning any task
@@ -509,7 +521,10 @@ struct PendingSecretDrop {
 
 pub struct SessionView {
     socket_lifetime: SocketLifetime,
-    messages: Vec<RenderedMessage>,
+    messages: Transcript,
+    /// Message grouping for `messages`, reused until the transcript, agent
+    /// type or viewer changes (see [`Transcript`]).
+    grouped: RefCell<Option<GroupingCache>>,
     ws_connected: bool,
     ws_sender: Option<WsSender>,
     /// Unacked `AgentInput` frames, resent on reconnect so inputs typed while
@@ -567,21 +582,20 @@ pub struct SessionView {
     /// because the join walk is sequential — a HashMap with a positional
     /// counter would buy nothing.
     turn_metrics: Vec<TurnMetrics>,
-    continuation_statuses: HashMap<Uuid, String>,
-    /// Currently-running tools, fed by the ephemeral `WsEvent::ToolProgress`
-    /// heartbeat side-channel and rendered as a trailing "active tool" status
-    /// strip. Never persisted; pruned when a tool's result arrives or the turn
-    /// ends. Kept out of the memoized message-render props on purpose (see the
-    /// `helpers` tool-progress section).
-    active_tools: Vec<ActiveToolProgress>,
-    permission_checks: Vec<super::helpers::PermissionCheck>,
+    /// Shared with every message group by `Rc`, so prop comparison is a
+    /// pointer check and only a real status change re-renders the groups.
+    continuation_statuses: Rc<HashMap<Uuid, String>>,
+    /// Built once: a `Callback` compares by identity, so one rebuilt per
+    /// `view()` made every message group's props unequal on every render.
+    on_schedule_continuation: Callback<Uuid>,
+    on_claude_login: Callback<()>,
+    child_callbacks: ChildCallbacks,
+    /// Keep the latest snapshot across events processed before registration.
+    live_status: LiveStatusSnapshot,
+    live_status_dispatcher: Option<Callback<LiveStatusSnapshot>>,
     /// Agent-driven progress bars (`agent-portal progress`), replaced wholesale
-    /// by each `WsEvent::AgentProgress` snapshot. Live-only, like `active_tools`.
+    /// by each `WsEvent::AgentProgress` snapshot.
     agent_progress: Vec<shared::api::ProgressBar>,
-    /// Latest non-Muse neutral ephemeral status line, shown as a transient
-    /// transcript-tail strip and cleared by durable output. Muse owns the
-    /// richer turn-local overlay below instead.
-    ephemeral_status: Option<String>,
     /// Muse's current ephemeral turn, replayed over the matching persisted
     /// task tree so live work updates the same card instead of a bottom bar.
     muse_live_turn: MuseLiveTurn,
@@ -714,7 +728,8 @@ impl Component for SessionView {
 
         Self {
             socket_lifetime,
-            messages: vec![],
+            messages: Transcript::default(),
+            grouped: RefCell::default(),
             ws_connected: false,
             ws_sender: None,
             outbox: Outbox::default(),
@@ -735,11 +750,15 @@ impl Component for SessionView {
             claude_effort: Default::default(),
             pending_sends: Vec::new(),
             turn_metrics: Vec::new(),
-            continuation_statuses: HashMap::new(),
-            active_tools: Vec::new(),
-            permission_checks: Vec::new(),
+            continuation_statuses: Rc::default(),
+            on_schedule_continuation: ctx
+                .link()
+                .callback(SessionViewMsg::ScheduleLimitContinuation),
+            on_claude_login: ctx.link().callback(|_| SessionViewMsg::ShowClaudeLogin),
+            child_callbacks: ChildCallbacks::new(ctx.link()),
+            live_status: LiveStatusSnapshot::default(),
+            live_status_dispatcher: None,
             agent_progress: Vec::new(),
-            ephemeral_status: None,
             muse_live_turn: MuseLiveTurn::default(),
             forwards_refresh: 0,
             open_forward_on_load: false,
@@ -1008,6 +1027,20 @@ impl Component for SessionView {
                     repo_url,
                     open_prs,
                 ));
+                false
+            }
+            SessionViewMsg::LiveStatusRegistered(dispatcher) => {
+                self.live_status_dispatcher = Some(dispatcher);
+                self.publish_live_status();
+                false
+            }
+            SessionViewMsg::LiveStatusRendered => {
+                // The strip can change the tail height without rendering this view.
+                if self.should_autoscroll {
+                    if let Some(element) = self.messages_ref.cast::<Element>() {
+                        element.set_scroll_top(element.scroll_height());
+                    }
+                }
                 false
             }
             SessionViewMsg::TasksDispatcherRegistered(dispatcher) => {
@@ -1420,13 +1453,21 @@ impl Component for SessionView {
                 match autoscroll_transition(self.should_autoscroll, at_bottom) {
                     Some(next) => {
                         self.should_autoscroll = next;
+                        self.enforce_render_budget(ctx.props().session.agent_type);
                         true
                     }
                     None => false,
                 }
             }
+            SessionViewMsg::RefocusInput => {
+                if let Some(dispatcher) = &self.input_bar_dispatcher {
+                    dispatcher.emit(InputBarInbound::FocusTextarea);
+                }
+                false
+            }
             SessionViewMsg::JumpToLive => {
                 self.should_autoscroll = true;
+                self.enforce_render_budget(ctx.props().session.agent_type);
                 // rendered() will see the flag and snap to bottom on the
                 // next paint.
                 true
@@ -1445,7 +1486,7 @@ impl Component for SessionView {
                 true
             }
             SessionViewMsg::ScheduleLimitContinuation(continuation_id) => {
-                self.continuation_statuses
+                Rc::make_mut(&mut self.continuation_statuses)
                     .insert(continuation_id, "scheduling".to_string());
                 if let Some(ref sender) = self.ws_sender {
                     send_message(
@@ -1456,7 +1497,7 @@ impl Component for SessionView {
                 true
             }
             SessionViewMsg::ContinuationStatus(continuation_id, status) => {
-                self.continuation_statuses.insert(continuation_id, status);
+                Rc::make_mut(&mut self.continuation_statuses).insert(continuation_id, status);
                 true
             }
         }
@@ -1473,32 +1514,11 @@ impl Component for SessionView {
             e.stop_propagation();
             SessionViewMsg::JumpToLive
         });
-        let on_schedule_continuation = link.callback(SessionViewMsg::ScheduleLimitContinuation);
+        let on_schedule_continuation = &self.on_schedule_continuation;
 
-        // Per-turn metrics join (PR 2 of N): walk grouped messages in order
-        // and pair the Nth terminator card with `turn_metrics[N]`. The
-        // pairs computed here are passed down to `MessageGroupRenderer` so
-        // the renderer doesn't have to know its own position in the
-        // transcript. See the PR 2 changelog entry for the rationale.
-        let groups = group_messages(
-            &self.messages,
-            ctx.props().session.agent_type,
-            ctx.props().current_user_id.as_deref(),
-        );
-        let mut metrics_iter = self.turn_metrics.iter();
-        let group_metrics: Vec<Option<TurnMetrics>> = groups
-            .iter()
-            .map(|g| {
-                if group_is_turn_terminator(g, ctx.props().session.agent_type) {
-                    metrics_iter.next().cloned()
-                } else {
-                    None
-                }
-            })
-            .collect();
-        // Seed each thinking chip's odometer with the prior burst's max in
-        // its turn so tool-call splits don't re-race the count from 0.
-        let thinking_starts = thinking_chip_starts(&groups, ctx.props().session.agent_type);
+        let presentation = self.group_presentation(ctx);
+        let groups = &presentation.groups;
+        let on_claude_login = self.claude_login_callback(ctx);
         let live_muse_group = self.muse_live_turn.causation_id.as_deref().and_then(|id| {
             groups
                 .iter()
@@ -1509,7 +1529,7 @@ impl Component for SessionView {
             && live_muse_group.is_none()
         {
             let mut tree = crate::components::muse_renderer::TaskTree::default();
-            for event in &self.muse_live_turn.events {
+            for event in self.muse_live_turn.events.iter() {
                 tree.apply(event);
             }
             Some(tree)
@@ -1591,16 +1611,16 @@ impl Component for SessionView {
                             key={ctx.props().session.id.to_string()}
                             session_id={ctx.props().session.id}
                             is_owner={is_forward_owner}
-                            on_loaded={ctx.link().callback(SessionViewMsg::PluginInventoryLoaded)}
-                            on_details={ctx.link().callback(|_| SessionViewMsg::TogglePluginsPanel)}
+                            on_loaded={self.child_callbacks.plugin_inventory_loaded.clone()}
+                            on_details={self.child_callbacks.toggle_plugins_panel.clone()}
                         />
                     }
                     if !ctx.props().portal.is_linked() { <ForwardChips
                         session_id={ctx.props().session.id}
                         is_owner={is_forward_owner}
                         refresh={self.forwards_refresh}
-                        on_open={ctx.link().callback(SessionViewMsg::OpenForwardSurface)}
-                        on_loaded={ctx.link().callback(SessionViewMsg::ForwardsLoaded)}
+                        on_open={self.child_callbacks.open_forward.clone()}
+                        on_loaded={self.child_callbacks.forwards_loaded.clone()}
                     /> }
                     <button
                         type="button"
@@ -1670,17 +1690,18 @@ impl Component for SessionView {
                                     working_directory={ctx.props().session.working_directory.clone()}
                                 />
                                 {
-                                    groups.into_iter().enumerate().map(|(i, group)| {
+                                    groups.iter().cloned().enumerate().map(|(i, group)| {
                                         let key = group.key(i);
-                                        let metrics = group_metrics.get(i).cloned().flatten();
-                                        let thinking_start = thinking_starts.get(i).copied().unwrap_or(0);
-                                        let muse_live_events = if live_muse_group == Some(i) { self.muse_live_turn.events.clone() } else { Vec::new() };
-                                        let on_claude_login = self.claude_login_callback(ctx);
-                                        html! { <MessageGroupRenderer {key} group={group} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} model={ctx.props().session.last_model.clone()} current_user_id={ctx.props().current_user_id.clone()} turn_metrics={metrics} {thinking_start} {muse_live_events} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} {on_claude_login} /> }
+                                        let metrics = presentation.metric_indices[i]
+                                            .and_then(|index| self.turn_metrics.get(index))
+                                            .cloned();
+                                        let thinking_start = presentation.thinking_starts[i];
+                                        let muse_live_events = (live_muse_group == Some(i)).then(|| self.muse_live_turn.events.clone());
+                                        html! { <MessageGroupRenderer {key} group={group} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} model={ctx.props().session.last_model.clone()} current_user_id={ctx.props().current_user_id.clone()} turn_metrics={metrics} {thinking_start} {muse_live_events} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} on_claude_login={on_claude_login.clone()} /> }
                                     }).collect::<Html>()
                                 }
                                 { for self.pending_sends.iter().enumerate().map(|(i, message)| {
-                                    html! { <MessageRenderer key={format!("p{}", i)} message={message.clone()} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} on_claude_login={self.claude_login_callback(ctx)} /> }
+                                    html! { <MessageRenderer key={format!("p{}", i)} message={message.clone()} session_id={ctx.props().session.id} agent_type={ctx.props().session.agent_type} current_user_id={ctx.props().current_user_id.clone()} continuation_statuses={self.continuation_statuses.clone()} on_schedule_continuation={on_schedule_continuation.clone()} on_claude_login={on_claude_login.clone()} /> }
                                 })}
                                 if let Some(tree) = unmatched_muse_tree {
                                     <div class="claude-message muse-message muse-task-card muse-live-card">
@@ -1692,14 +1713,10 @@ impl Component for SessionView {
                                         </div>
                                     </div>
                                 }
-                                { self.render_active_tools() }
-                                { for self.permission_checks.iter().map(|check| html! {
-                                    <div class="ephemeral-status-strip" role="status" title={check.tool_use_id.clone()}>
-                                        <span class="ephemeral-status-spinner" />
-                                        <span class="ephemeral-status-text">{ "Checking tool permission..." }</span>
-                                    </div>
-                                }) }
-                                { self.render_ephemeral_status() }
+                                <LiveStatus
+                                    on_register={self.child_callbacks.live_status_register.clone()}
+                                    on_rendered={self.child_callbacks.live_status_rendered.clone()}
+                                />
                             </div>
                             if !is_tailing {
                                 <button
@@ -1710,7 +1727,7 @@ impl Component for SessionView {
                                     { "Jump to live ↓" }
                                 </button>
                             }
-                            { self.render_tasks_panel(ctx) }
+                            { self.render_tasks_panel() }
                         </div>
 
                         { self.render_permission_handler(ctx) }
@@ -1858,7 +1875,7 @@ impl SessionView {
             && ctx.props().session.agent_type == shared::AgentType::Claude
             && ctx.props().session.my_role == shared::SessionRole::Owner
             && ctx.props().session.launcher_id.is_some())
-        .then(|| ctx.link().callback(|_| SessionViewMsg::ShowClaudeLogin))
+        .then(|| self.on_claude_login.clone())
     }
 
     fn handle_ws_event(&mut self, ctx: &Context<Self>, event: WsEvent) -> bool {
@@ -1869,6 +1886,15 @@ impl SessionView {
                 self.last_permission_request = None;
                 if let Some(dispatcher) = &self.permission_dispatcher {
                     dispatcher.emit(PermissionUpdate::Reset);
+                }
+                // Same for the live status strip. A tool_result or result that
+                // landed while offline arrives through replay (or not at all,
+                // when there's nothing new), never through
+                // `handle_received_output`, so its pill would never retire. A
+                // tool still running re-adds itself on its next heartbeat.
+                if self.live_status != LiveStatusSnapshot::default() {
+                    self.live_status = LiveStatusSnapshot::default();
+                    self.publish_live_status();
                 }
                 ctx.link()
                     .send_message(SessionViewMsg::WebSocketConnected(sender));
@@ -1895,7 +1921,11 @@ impl SessionView {
                     .send_message(SessionViewMsg::ReceivedOutput(message));
                 false
             }
-            WsEvent::HistoryBatch(messages, last_created_at) => {
+            WsEvent::HistoryBatch(messages, last_created_at, truncated) => {
+                if truncated {
+                    self.messages.edit().clear();
+                    self.last_message_timestamp = None;
+                }
                 // A reconnect batch is the authoritative state since the last
                 // watermark. Discard pre-disconnect Muse ephemera before
                 // replaying it; a terminal record may have landed while this
@@ -1904,18 +1934,15 @@ impl SessionView {
                 self.muse_live_turn = MuseLiveTurn::default();
                 for message in &messages {
                     if let Ok(output) =
-                        serde_json::from_str::<shared::ClaudeOutput>(&message.content)
+                        serde_json::from_str::<shared::ClaudeOutput>(message.content())
                     {
-                        self.observe_claude_effort(&message.content, &output);
+                        self.observe_claude_effort(message.content(), &output);
                     }
                 }
-                self.messages.extend(messages);
-                deduplicate_secret_notices(&mut self.messages);
-                retain_newest_items_by_cost(
-                    &mut self.messages,
-                    MAX_MESSAGES_PER_SESSION,
-                    |message| counts_toward_render_limit(&message.content),
-                );
+                let buffer = self.messages.edit();
+                buffer.extend(messages);
+                deduplicate_secret_notices(buffer);
+                self.enforce_render_budget(ctx.props().session.agent_type);
                 // Set the reconnect-replay watermark to the server-assigned
                 // timestamp of the latest message in the batch (closes
                 // #784). Empty batches (or a pre-#784 backend that didn't
@@ -2032,10 +2059,11 @@ impl SessionView {
                 // Ephemeral live status: refresh the running-tool strip. Never
                 // touches `messages` (no persistence, no replay watermark).
                 let key = running_tool_key(&tool_use_id, parent_tool_use_id.as_deref());
-                self.permission_checks
+                self.live_status
+                    .permission_checks
                     .retain(|check| check.tool_use_id != key);
                 upsert_tool_progress(
-                    &mut self.active_tools,
+                    &mut self.live_status.active_tools,
                     ActiveToolProgress {
                         key,
                         tool_name,
@@ -2044,7 +2072,8 @@ impl SessionView {
                         subagent_retry,
                     },
                 );
-                true
+                self.publish_live_status();
+                false
             }
             WsEvent::AgentProgress(bars) => {
                 if self.agent_progress == bars {
@@ -2059,10 +2088,11 @@ impl SessionView {
                 {
                     if let Some(status) = system.as_permission_check_status() {
                         super::helpers::update_permission_checks(
-                            &mut self.permission_checks,
+                            &mut self.live_status.permission_checks,
                             &status,
                         );
-                        return true;
+                        self.publish_live_status();
+                        return false;
                     }
                 }
                 if payload.get("type").and_then(|value| value.as_str()) == Some("prompt_suggestion")
@@ -2087,13 +2117,11 @@ impl SessionView {
                 // `messages` (no persistence, no replay watermark). A frame we
                 // can't summarize is ignored rather than clearing a good line.
                 // Muse was routed into its task-tree overlay above.
-                match ephemeral_summary(&payload) {
-                    Some(summary) => {
-                        self.ephemeral_status = Some(summary);
-                        true
-                    }
-                    None => false,
+                if let Some(summary) = ephemeral_summary(&payload) {
+                    self.live_status.ephemeral_status = Some(summary);
+                    self.publish_live_status();
                 }
+                false
             }
         }
     }
@@ -2231,7 +2259,7 @@ impl SessionView {
     /// referencing the file is deliberately NOT sent — the agent must never
     /// be told about a file that isn't fully on disk.
     fn push_upload_error(&mut self, err: &str) {
-        self.messages.push(RenderedMessage::local(
+        self.messages.edit().push(RenderedMessage::local(
             shared::LocalFrame::error(format!(
                 "File upload failed: {err} — your message was not sent"
             )),
@@ -2268,11 +2296,12 @@ impl SessionView {
                 ctx.props().on_activity.emit((session_key, tag, ts_ms));
             }
         }
-        self.messages = messages
+        let buffer = self.messages.edit();
+        *buffer = messages
             .into_iter()
             .map(|m| RenderedMessage::new(m.content, m.meta))
             .collect();
-        deduplicate_secret_notices(&mut self.messages);
+        deduplicate_secret_notices(buffer);
         self.last_message_timestamp = last_timestamp;
     }
 
@@ -2294,7 +2323,8 @@ impl SessionView {
             self.dispatch_agent_input(serde_json::Value::String(content), None, None);
         self.edit_stack_active = Some((item.id, client_msg_id));
         self.edit_stack_error = None;
-        self.ephemeral_status = Some(format!("Sent edit-stack item: {}", item.title));
+        self.live_status.ephemeral_status = Some(format!("Sent edit-stack item: {}", item.title));
+        self.publish_live_status();
         true
     }
 
@@ -2303,7 +2333,7 @@ impl SessionView {
             return;
         }
         match edit_stack_dispatch(
-            self.messages.iter().map(|message| &message.content),
+            self.messages.iter().map(|message| message.content()),
             ctx.props().session.agent_type,
             &self.edit_stack_items,
             self.edit_stack_active.is_some(),
@@ -2554,7 +2584,7 @@ impl SessionView {
         }) {
             return false;
         }
-        let tag = classify_output_msg_type(&output.content);
+        let tag = classify_output_msg_type(output.content());
         if let Some(shared::MessageSource::Agent { session_id, .. }) = output.source() {
             ctx.props().on_agent_message.emit((
                 ctx.props().portal.session_key(*session_id),
@@ -2562,8 +2592,8 @@ impl SessionView {
                 js_sys::Date::now(),
             ));
         }
-        if let Ok(claude_msg) = serde_json::from_str::<shared::ClaudeOutput>(&output.content) {
-            self.observe_claude_effort(&output.content, &claude_msg);
+        if let Ok(claude_msg) = serde_json::from_str::<shared::ClaudeOutput>(output.content()) {
+            self.observe_claude_effort(output.content(), &claude_msg);
             // Live task events use the server-assigned row timestamp when the
             // backend supplied it, falling back to browser time only for
             // pre-metadata/error frames.
@@ -2581,7 +2611,7 @@ impl SessionView {
                 .on_activity
                 .emit((Self::session_key(ctx), tag, activity_ts));
         }
-        reconcile_pending_sends(&mut self.pending_sends, tag, &output.content);
+        reconcile_pending_sends(&mut self.pending_sends, tag, output.content());
         if let Some((item_id, status)) = reconcile_edit_stack_activity(
             &mut self.edit_stack_active,
             &mut self.edit_stack_send_all,
@@ -2593,63 +2623,39 @@ impl SessionView {
         // Retire any active-tool strip entries this message completes: a
         // tool_result for the running tool, or a turn `result` that ends the
         // turn entirely. (The live heartbeat side-channel only adds entries.)
-        clear_completed_tools(&mut self.active_tools, &output.content);
-        super::helpers::clear_permission_checks(&mut self.permission_checks, &output.content);
+        let tools_changed =
+            clear_completed_tools(&mut self.live_status.active_tools, output.content());
+        let check_count = self.live_status.permission_checks.len();
+        super::helpers::clear_permission_checks(
+            &mut self.live_status.permission_checks,
+            output.content(),
+        );
         // Generic status is superseded by any durable message. Muse live
         // records instead stay overlaid on their matching group until the
         // durable terminal record makes the whole turn replayable.
-        self.ephemeral_status = None;
-        self.muse_live_turn.clear_if_terminal(&output.content);
+        let had_status = self.live_status.ephemeral_status.take().is_some();
+        if had_status || tools_changed || check_count != self.live_status.permission_checks.len() {
+            self.publish_live_status();
+        }
+        self.muse_live_turn.clear_if_terminal(output.content());
 
-        push_message_with_cost_limit(
-            &mut self.messages,
-            output,
-            MAX_MESSAGES_PER_SESSION,
-            |message| counts_toward_render_limit(&message.content),
-        );
+        self.messages.edit().push(output);
+        self.enforce_render_budget(ctx.props().session.agent_type);
         self.drain_edit_stack_queue_if_idle(ctx);
         true
     }
 
-    /// Trailing "active tool" strip: one live pill per currently-running tool,
-    /// showing "{tool} running — {elapsed}" and refreshed by the ephemeral
-    /// `WsEvent::ToolProgress` heartbeats. Renders nothing when idle. Lives at
-    /// the transcript tail rather than mutating historical tool cards so it
-    /// stays outside the memoized message-render pipeline (see the `helpers`
-    /// tool-progress section for the rationale).
-    fn render_active_tools(&self) -> Html {
-        if self.active_tools.is_empty() {
-            return html! {};
-        }
-        html! {
-            <div class="active-tool-strip">
-                { for self.active_tools.iter().map(|tool| {
-                    html! {
-                        <div class="active-tool-pill" key={tool.key.clone()}>
-                            <span class="active-tool-spinner" />
-                            <span class="active-tool-name">{ tool.tool_name.clone() }</span>
-                            // Which Task sub-agent is running (#1474) — a long
-                            // `Task` otherwise reads as an anonymous stall.
-                            if let Some(subagent) = tool.subagent_type.as_deref() {
-                                <span class="active-tool-subagent">{ subagent }</span>
-                            }
-                            <span class="active-tool-status">
-                                { format!("running — {}", format_tool_elapsed(tool.elapsed_seconds)) }
-                            </span>
-                            // Only while the sub-agent is retrying: says the
-                            // turn is flaky-but-progressing, not hung.
-                            if let Some(retry) = tool.subagent_retry.as_ref() {
-                                <span class="active-tool-retry">
-                                    { format!(
-                                        "retrying {}/{} — {}",
-                                        retry.attempt, retry.max_retries, retry.error_category
-                                    ) }
-                                </span>
-                            }
-                        </div>
-                    }
-                }) }
-            </div>
+    /// Trim the live buffer to the budget for the current scroll state (see
+    /// [`live_render_budget`]). Called again when tailing resumes, so the
+    /// backlog deferred while scrolled back is dropped while the view is
+    /// pinned to the bottom, where the eviction can't be seen.
+    fn enforce_render_budget(&mut self, agent_type: shared::AgentType) {
+        let budget = live_render_budget(self.should_autoscroll);
+        let counts = |message: &RenderedMessage| message.counts_toward_render_limit(agent_type);
+        // Only take the mutable path (which invalidates the cached grouping)
+        // when something will actually be trimmed.
+        if self.messages.iter().filter(|m| counts(m)).count() > budget {
+            retain_newest_items_by_cost(self.messages.edit(), budget, counts);
         }
     }
 
@@ -2704,19 +2710,9 @@ impl SessionView {
         }
     }
 
-    /// Transient live-status strip fed by the neutral `WsEvent::Ephemeral`
-    /// channel for agents without a richer live renderer. One line, replaced per
-    /// frame, cleared when a durable message arrives. Renders nothing when
-    /// idle. Deliberately minimal rather than a second transcript model.
-    fn render_ephemeral_status(&self) -> Html {
-        let Some(status) = self.ephemeral_status.as_deref() else {
-            return html! {};
-        };
-        html! {
-            <div class="ephemeral-status-strip">
-                <span class="ephemeral-status-spinner" />
-                <span class="ephemeral-status-text">{ status }</span>
-            </div>
+    fn publish_live_status(&self) {
+        if let Some(dispatcher) = &self.live_status_dispatcher {
+            dispatcher.emit(self.live_status.clone());
         }
     }
 
@@ -2743,7 +2739,7 @@ impl SessionView {
                 link.send_message(SessionViewMsg::AttemptReconnect);
             }));
         } else {
-            self.messages.push(RenderedMessage::local(
+            self.messages.edit().push(RenderedMessage::local(
                 shared::LocalFrame::error(format!("Connection lost: {}", err)),
                 None,
             ));
@@ -2864,7 +2860,7 @@ impl SessionView {
         let show_creator = creator_count > 1;
         let busy = matches!(
             edit_stack_dispatch(
-                self.messages.iter().map(|message| &message.content),
+                self.messages.iter().map(|message| message.content()),
                 ctx.props().session.agent_type,
                 &self.edit_stack_items,
                 self.edit_stack_active.is_some(),
@@ -3031,27 +3027,14 @@ impl SessionView {
         if !ctx.props().portal.can_write() || !ctx.props().session.my_role.can_mutate() {
             return html! {};
         }
-        let link = ctx.link();
-        let on_register = link.callback(SessionViewMsg::PermissionDispatcherRegistered);
-        let on_pending_changed = link.callback(SessionViewMsg::PermissionPendingChanged);
-        let on_response =
-            link.callback(|(rid, kind)| SessionViewMsg::PermissionAnswered(rid, kind));
-        // Re-focus the textarea after an answer by forwarding through the
-        // `InputBar`'s dispatcher (which we got at the bar's `create` time).
-        // Snapshot the `Option` once so the callback doesn't capture `&self`.
-        let input_bar = self.input_bar_dispatcher.clone();
-        let on_refocus_input = Callback::from(move |_| {
-            if let Some(ref dispatcher) = input_bar {
-                dispatcher.emit(InputBarInbound::FocusTextarea);
-            }
-        });
+        let cb = &self.child_callbacks;
         html! {
             <PermissionHandler
                 focused={ctx.props().focused}
-                {on_register}
-                {on_pending_changed}
-                {on_response}
-                {on_refocus_input}
+                on_register={cb.permission_register.clone()}
+                on_pending_changed={cb.permission_pending_changed.clone()}
+                on_response={cb.permission_response.clone()}
+                on_refocus_input={cb.refocus_input.clone()}
             />
         }
     }
@@ -3060,38 +3043,7 @@ impl SessionView {
         if !ctx.props().portal.can_write() || !ctx.props().session.my_role.can_mutate() {
             return html! { <div class="linked-read-only">{"Read-only connection — commands and permission responses are disabled"}</div> };
         }
-        let link = ctx.link();
-        let on_register = link.callback(SessionViewMsg::InputBarDispatcherRegistered);
-        let on_send_text = link.callback(
-            |(text, mode, reasoning_effort): (String, SendMode, Option<ReasoningEffort>)| {
-                SessionViewMsg::SendText(text, mode, reasoning_effort)
-            },
-        );
-        let on_send_frame = link.callback(SessionViewMsg::SendFrame);
-        let on_queued = link.callback(SessionViewMsg::EditStackLoaded);
-        let on_upload_prompt = link.callback(
-            |(content, upload_ids, reasoning_effort): (
-                String,
-                Vec<String>,
-                Option<ReasoningEffort>,
-            )| {
-                SessionViewMsg::UploadPrompt {
-                    content,
-                    upload_ids,
-                    reasoning_effort,
-                }
-            },
-        );
-        let on_secret_drop = link.callback(
-            |(upload_id, file_size, reasoning_effort): (String, u64, Option<ReasoningEffort>)| {
-                SessionViewMsg::SecretDrop {
-                    upload_id,
-                    file_size,
-                    reasoning_effort,
-                }
-            },
-        );
-        let on_upload_error = link.callback(SessionViewMsg::UploadError);
+        let cb = &self.child_callbacks;
         html! {
             <InputBar
                 session_id={ctx.props().session.id}
@@ -3100,29 +3052,159 @@ impl SessionView {
                 focused={ctx.props().focused}
                 ws_connected={self.ws_connected}
                 stt_enabled={ctx.props().stt_enabled}
-                {on_register}
-                {on_send_text}
-                {on_queued}
-                {on_send_frame}
-                {on_upload_prompt}
-                {on_secret_drop}
-                {on_upload_error}
+                on_register={cb.input_bar_register.clone()}
+                on_send_text={cb.send_text.clone()}
+                on_queued={cb.queued.clone()}
+                on_send_frame={cb.send_frame.clone()}
+                on_upload_prompt={cb.upload_prompt.clone()}
+                on_secret_drop={cb.secret_drop.clone()}
+                on_upload_error={cb.upload_error.clone()}
             />
         }
     }
 
-    fn render_tasks_panel(&self, ctx: &Context<Self>) -> Html {
-        let on_register = ctx
-            .link()
-            .callback(SessionViewMsg::TasksDispatcherRegistered);
+    fn render_tasks_panel(&self) -> Html {
         html! {
-            <TasksPanel {on_register} />
+            <TasksPanel on_register={self.child_callbacks.tasks_register.clone()} />
         }
     }
 
     fn dispatch_tasks(&self, msg: TasksInbound) {
         if let Some(ref dispatcher) = self.tasks_dispatcher {
             dispatcher.emit(msg);
+        }
+    }
+}
+
+/// What [`SessionView::group_presentation`] was last computed from, and the result.
+struct GroupingCache {
+    revision: u64,
+    agent_type: shared::AgentType,
+    current_user_id: Option<String>,
+    presentation: Rc<GroupPresentation>,
+}
+
+struct GroupPresentation {
+    groups: Vec<Rc<MessageGroup>>,
+    thinking_starts: Vec<i64>,
+    // The Nth terminator is paired with the Nth metric in the current list.
+    // Cache positions so a metrics update can use the same group derivation.
+    metric_indices: Vec<Option<usize>>,
+}
+
+impl SessionView {
+    /// Reuse groups and their display metadata until the transcript, agent
+    /// type or viewer changes.
+    fn group_presentation(&self, ctx: &Context<Self>) -> Rc<GroupPresentation> {
+        let agent_type = ctx.props().session.agent_type;
+        let current_user_id = ctx.props().current_user_id.as_deref();
+        let revision = self.messages.revision();
+        let mut cache = self.grouped.borrow_mut();
+        if let Some(cached) = cache.as_ref().filter(|cached| {
+            cached.revision == revision
+                && cached.agent_type == agent_type
+                && cached.current_user_id.as_deref() == current_user_id
+        }) {
+            return cached.presentation.clone();
+        }
+        // Reuse unchanged group pointers so their renderer props stay equal.
+        let previous = cache
+            .as_ref()
+            .map(|cached| cached.presentation.groups.as_slice())
+            .unwrap_or_default();
+        let groups = reuse_unchanged_groups(
+            previous,
+            group_messages(&self.messages, agent_type, current_user_id),
+        );
+        let thinking_starts = thinking_chip_starts(&groups, agent_type);
+        let mut metric_positions = 0..;
+        let metric_indices = groups
+            .iter()
+            .map(|group| {
+                if group_is_turn_terminator(group, agent_type) {
+                    metric_positions.next()
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let presentation = Rc::new(GroupPresentation {
+            groups,
+            thinking_starts,
+            metric_indices,
+        });
+        *cache = Some(GroupingCache {
+            revision,
+            agent_type,
+            current_user_id: current_user_id.map(str::to_string),
+            presentation: presentation.clone(),
+        });
+        presentation
+    }
+}
+
+/// Callbacks handed to `SessionView`'s child components, built once in
+/// `create()`. A `Callback` compares by identity, so building these per
+/// `view()` made every child's props unequal and re-rendered `InputBar`,
+/// `PermissionHandler`, `TasksPanel`, `PluginSelector` and `ForwardChips` on
+/// every session render.
+struct ChildCallbacks {
+    plugin_inventory_loaded: Callback<(Uuid, PluginInventoryResponse)>,
+    toggle_plugins_panel: Callback<MouseEvent>,
+    open_forward: Callback<ForwardInfo>,
+    forwards_loaded: Callback<Vec<ForwardInfo>>,
+    permission_register: Callback<Callback<PermissionUpdate>>,
+    permission_pending_changed: Callback<bool>,
+    permission_response: Callback<(String, PermissionResponseKind)>,
+    refocus_input: Callback<()>,
+    input_bar_register: Callback<Callback<InputBarInbound>>,
+    send_text: Callback<(String, SendMode, Option<ReasoningEffort>)>,
+    send_frame: Callback<ClientToServer>,
+    queued: Callback<Vec<EditStackItem>>,
+    upload_prompt: Callback<(String, Vec<String>, Option<ReasoningEffort>)>,
+    secret_drop: Callback<(String, u64, Option<ReasoningEffort>)>,
+    upload_error: Callback<String>,
+    live_status_register: Callback<Callback<LiveStatusSnapshot>>,
+    live_status_rendered: Callback<()>,
+    tasks_register: Callback<Callback<TasksInbound>>,
+}
+
+impl ChildCallbacks {
+    fn new(link: &yew::html::Scope<SessionView>) -> Self {
+        Self {
+            plugin_inventory_loaded: link.callback(SessionViewMsg::PluginInventoryLoaded),
+            toggle_plugins_panel: link.callback(|_| SessionViewMsg::TogglePluginsPanel),
+            open_forward: link.callback(SessionViewMsg::OpenForwardSurface),
+            forwards_loaded: link.callback(SessionViewMsg::ForwardsLoaded),
+            permission_register: link.callback(SessionViewMsg::PermissionDispatcherRegistered),
+            permission_pending_changed: link.callback(SessionViewMsg::PermissionPendingChanged),
+            permission_response: link
+                .callback(|(rid, kind)| SessionViewMsg::PermissionAnswered(rid, kind)),
+            refocus_input: link.callback(|_| SessionViewMsg::RefocusInput),
+            input_bar_register: link.callback(SessionViewMsg::InputBarDispatcherRegistered),
+            send_text: link.callback(|(text, mode, reasoning_effort)| {
+                SessionViewMsg::SendText(text, mode, reasoning_effort)
+            }),
+            send_frame: link.callback(SessionViewMsg::SendFrame),
+            queued: link.callback(SessionViewMsg::EditStackLoaded),
+            upload_prompt: link.callback(|(content, upload_ids, reasoning_effort)| {
+                SessionViewMsg::UploadPrompt {
+                    content,
+                    upload_ids,
+                    reasoning_effort,
+                }
+            }),
+            secret_drop: link.callback(|(upload_id, file_size, reasoning_effort)| {
+                SessionViewMsg::SecretDrop {
+                    upload_id,
+                    file_size,
+                    reasoning_effort,
+                }
+            }),
+            upload_error: link.callback(SessionViewMsg::UploadError),
+            live_status_register: link.callback(SessionViewMsg::LiveStatusRegistered),
+            live_status_rendered: link.callback(|_| SessionViewMsg::LiveStatusRendered),
+            tasks_register: link.callback(SessionViewMsg::TasksDispatcherRegistered),
         }
     }
 }

@@ -457,9 +457,13 @@ fn cleanup(
     Ok(())
 }
 
+pub(crate) fn archive_session_lock_key(session: Uuid) -> String {
+    format!("portal-archive-{session}")
+}
+
 pub fn archive_session_lock(conn: &mut PgConnection, session: Uuid) -> Result<(), AppError> {
     diesel::sql_query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
-        .bind::<diesel::sql_types::Text, _>(format!("portal-archive-{session}"))
+        .bind::<diesel::sql_types::Text, _>(archive_session_lock_key(session))
         .execute(conn)?;
     Ok(())
 }

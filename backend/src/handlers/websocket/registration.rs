@@ -21,6 +21,7 @@ const TRANSIENT_REGISTRATION_ERROR: &str = "Server temporarily unavailable - ret
 pub struct RegistrationResult {
     pub success: bool,
     pub session_id: Option<Uuid>,
+    pub owner_id: Option<Uuid>,
     pub error: Option<String>,
     /// Whether a failed registration is worth retrying with backoff.
     ///
@@ -70,6 +71,7 @@ pub fn register_or_update_session(
             return RegistrationResult {
                 success: false,
                 session_id: None,
+                owner_id: None,
                 error: Some(TRANSIENT_REGISTRATION_ERROR.to_string()),
                 retryable: true,
             };
@@ -95,6 +97,7 @@ pub fn register_or_update_session(
             return RegistrationResult {
                 success: false,
                 session_id: None,
+                owner_id: None,
                 error: Some(TRANSIENT_REGISTRATION_ERROR.to_string()),
                 retryable: true,
             };
@@ -107,6 +110,7 @@ pub fn register_or_update_session(
             return RegistrationResult {
                 success: false,
                 session_id: None,
+                owner_id: None,
                 error: Some("Authentication failed - please re-authenticate".to_string()),
                 retryable: false,
             };
@@ -155,6 +159,7 @@ pub fn register_or_update_session(
             return RegistrationResult {
                 success: false,
                 session_id: None,
+                owner_id: None,
                 error: Some("Session is paused; resume it through the owner dashboard".into()),
                 retryable: false,
             };
@@ -170,6 +175,7 @@ pub fn register_or_update_session(
             return RegistrationResult {
                 success: false,
                 session_id: None,
+                owner_id: None,
                 error: Some(SESSION_NOT_FOUND_ERROR.to_string()),
                 retryable: false,
             };
@@ -212,6 +218,7 @@ pub fn register_or_update_session(
             Ok(0) => RegistrationResult {
                 success: false,
                 session_id: None,
+                owner_id: None,
                 error: Some("Session is paused or no longer exists".into()),
                 retryable: false,
             },
@@ -234,6 +241,7 @@ pub fn register_or_update_session(
                 RegistrationResult {
                     success: true,
                     session_id: Some(existing_session.id),
+                    owner_id: Some(existing_session.user_id),
                     error: None,
                     retryable: false,
                 }
@@ -243,6 +251,7 @@ pub fn register_or_update_session(
                 RegistrationResult {
                     success: false,
                     session_id: None,
+                    owner_id: None,
                     error: Some("Failed to reactivate session".to_string()),
                     retryable: true,
                 }
@@ -365,6 +374,7 @@ fn create_new_session(
             RegistrationResult {
                 success: true,
                 session_id: Some(session.id),
+                owner_id: Some(session.user_id),
                 error: None,
                 retryable: false,
             }
@@ -374,6 +384,7 @@ fn create_new_session(
             RegistrationResult {
                 success: false,
                 session_id: None,
+                owner_id: None,
                 error: Some("Failed to persist session".to_string()),
                 retryable: true,
             }
@@ -596,6 +607,7 @@ mod tests {
         RegistrationResult {
             success: false,
             session_id: None,
+            owner_id: None,
             error: Some(SESSION_NOT_FOUND_ERROR.to_string()),
             retryable: false,
         }
@@ -614,6 +626,7 @@ mod tests {
         RegistrationResult {
             success: false,
             session_id: None,
+            owner_id: None,
             error: Some(SESSION_NOT_FOUND_ERROR.to_string()),
             retryable: false,
         }
@@ -652,6 +665,7 @@ mod tests {
         let r = RegistrationResult {
             success: true,
             session_id: Some(session_id),
+            owner_id: Some(Uuid::new_v4()),
             error: None,
             retryable: false,
         };
