@@ -14,9 +14,8 @@
 //!   the session store usable and the next turn ran clean. So `Interrupt`
 //!   aborts the child and the session simply continues.
 //! - **The session id is ours.** The portal mints a v4 uuid and the CLI
-//!   adopts it verbatim as `stream.id`. That is what makes the
-//!   `(stream_id, record_id)` identity composite safe — record ids repeat
-//!   across sessions.
+//!   adopts it verbatim as `stream.id`. Pairing it with `record_id`
+//!   disambiguates repeated IDs in journals from older CLI builds.
 
 use muse_codes::{ExecRun, MuseExecBuilder, MusePayload, MuseRecord, Provider, RunUsage};
 use session_lib::adapter::AgentOutputClassifier;

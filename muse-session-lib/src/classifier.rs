@@ -13,10 +13,10 @@
 //!   on the envelope's own `durability` field rather than a list of payload
 //!   types, so a NEW ephemeral type muse introduces routes correctly
 //!   automatically instead of silently landing in the transcript.
-//! - **Identity is `(stream_id, id)`.** The record `id` is a UUID-*shaped*
-//!   counter that repeats byte-for-byte across sessions, and `sequence`
-//!   repeats across turns, so neither is a safe handle alone. Treat `id` as
-//!   stream-local **everywhere** — dedup, correlation, and render keys.
+//! - **Identity is `(stream_id, id)`.** Muse 1.4.24 introduced UUIDv7 record
+//!   IDs. Older journals contain counters that repeat across sessions, so
+//!   dedup, correlation, and render keys still use the composite. The
+//!   `sequence` field can repeat across turns.
 //! - **Unknown frames still name themselves.** An unmodeled `payload_type`
 //!   is forwarded with its dotted label plus the raw body, never dropped.
 
@@ -308,9 +308,8 @@ fn to_event_with_counts(
 
 /// One journal record as the frontend receives it.
 ///
-/// The composite identity is spelled out field-by-field so a consumer
-/// cannot accidentally key on `record_id` alone: it repeats across sessions
-/// (UUID-shaped counter), and `sequence` repeats across turns.
+/// Use `(stream_id, record_id)` as the key so older journals with repeated
+/// record IDs remain unambiguous across sessions.
 #[derive(Debug, Serialize)]
 struct MuseWireEvent<'a> {
     #[serde(flatten)]
