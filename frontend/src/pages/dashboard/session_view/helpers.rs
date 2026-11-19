@@ -423,11 +423,11 @@ pub(super) fn usage_limited_since_last_input(
             return false;
         }
         // Checked before the tag: Claude's refusal is itself an assistant frame.
-        if shared::usage_limit::is_usage_limit_refusal(agent, &message.content) {
+        if shared::usage_limit::is_usage_limit_refusal(agent, message.content()) {
             return true;
         }
         if matches!(
-            classify_output_msg_type(&message.content),
+            classify_output_msg_type(message.content()),
             ActivityTag::User | ActivityTag::Assistant
         ) {
             return false;
