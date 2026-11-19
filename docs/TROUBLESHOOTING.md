@@ -449,6 +449,20 @@ If you're still stuck:
    - Full error message
    - Output of `./scripts/install-deps.sh`
 
+### Launcher service updates
+
+The installed service checks GitHub for a newer release each time it starts,
+and on finding one installs it and restarts into it. A reboot, crash, `agent-portal
+service restart` or the dashboard's Restart all pick up the latest release. A
+daemon that never restarts stays on its version; run `agent-portal update` to
+update and restart it immediately. The check gives up on a stalled connection
+(15 s to connect, 30 s without data), so an unreachable GitHub delays startup
+rather than blocking it.
+
+To keep a locally built binary, set `"auto_update": false` in `launcher.json`.
+The unit and plist are regenerated from a fixed template, so a flag added to
+them by hand does not survive.
+
 ### macOS service restart recovery
 
 `agent-portal service restart` reloads the installed plist using a separate

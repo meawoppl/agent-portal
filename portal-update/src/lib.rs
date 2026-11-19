@@ -16,6 +16,8 @@ use tracing::warn;
 
 /// GitHub repository for releases
 const GITHUB_REPO: &str = "meawoppl/agent-portal";
+const UPDATE_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+const UPDATE_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Result of an update check
 #[derive(Debug)]
@@ -144,8 +146,13 @@ pub async fn check_for_update(
     info!("Checking for updates from GitHub releases...");
     info!("Platform: {} {}", platform.os, platform.arch);
 
+    // The launcher service runs this check before it connects on every start,
+    // so a stalled GitHub must fail the check rather than wedge startup. The
+    // read timeout bounds each stall, not the whole multi-MB download.
     let client = reqwest::Client::builder()
         .user_agent("agent-portal")
+        .connect_timeout(UPDATE_CONNECT_TIMEOUT)
+        .read_timeout(UPDATE_READ_TIMEOUT)
         .build()
         .context("Failed to create HTTP client")?;
 

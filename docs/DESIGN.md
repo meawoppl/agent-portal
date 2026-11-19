@@ -473,7 +473,7 @@ Two self-update callers, one library (`portal-update`):
 
 2. **`claude-portal --update`** (proxy flag) — same logic, applied to the proxy binary.
 
-The launcher's startup path also probes for an update if `--no-update` isn't set, so a stale install fixes itself the next time the daemon restarts.
+The launcher's startup path also installs any newer release and restarts into it, including under the installed service, so a stale install fixes itself the next time the daemon restarts. `--no-update` or `"auto_update": false` in `launcher.json` skips it.
 
 `portal-update` is intentionally release-driven, not git-driven: a remote box never pulls source, never compiles. Builds happen in CI, binaries are shipped as GitHub Release assets, and the update is purely a download-and-swap.
 
