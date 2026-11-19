@@ -96,6 +96,26 @@ const ACTIVE_WINDOW_MS: f64 = 3.0 * 60.0 * 1000.0;
 /// Interaction events that mark the device as in use.
 const INPUT_EVENTS: [&str; 4] = ["keydown", "pointerdown", "wheel", "touchstart"];
 
+/// What one tick reports for the focused session. Presence (which holds
+/// pushes) follows recent use; seeing a reply (which clears unread) follows
+/// what is on screen. They are decided separately so someone watching a long
+/// turn without touching anything still has its replies marked read, while a
+/// tab nobody uses stops holding pushes.
+#[derive(Debug, PartialEq, Eq)]
+struct TickReport {
+    /// Renew the presence lease.
+    present: bool,
+    /// Acknowledge the reply rendered at the bottom of the transcript.
+    seen: bool,
+}
+
+fn tick_report(active: bool, at_reply: bool) -> Option<TickReport> {
+    (active || at_reply).then_some(TickReport {
+        present: active,
+        seen: at_reply,
+    })
+}
+
 fn visible() -> bool {
     web_sys::window()
         .and_then(|w| w.document())
@@ -153,19 +173,24 @@ pub(super) fn use_attention(
                             .ok()
                             .flatten()
                     });
-                    // Presence (holds pushes): the device is in use. Seeing a
-                    // reply (clears unread) is stricter: the conversation is
-                    // on screen, unobstructed and scrolled to its end.
+                    // Presence: the device is in use. A seen reply: the
+                    // conversation is on screen, unobstructed and scrolled to
+                    // its end, however long since the last input.
                     let active =
                         visible() && js_sys::Date::now() - last_input.get() < ACTIVE_WINDOW_MS;
-                    let at_reply = active
+                    let at_reply = visible()
                         && !crate::hooks::modal_overlay_open()
                         && element.as_ref().is_some_and(|e| {
                             e.client_height() > 0
                                 && e.scroll_height() - e.scroll_top() - e.client_height() < 50
                         });
-                    let viewed = session.filter(|s| active && s.portal.can_write());
-                    let new_key = viewed.as_ref().map(|s| s.key);
+                    let report = session
+                        .filter(|s| s.portal.can_write())
+                        .and_then(|s| tick_report(active, at_reply).map(|report| (s, report)));
+                    let new_key = report
+                        .as_ref()
+                        .filter(|(_, report)| report.present)
+                        .map(|(s, _)| s.key);
                     let old = previous_view.borrow().clone();
                     if let Some((portal, key)) = old.filter(|(_, key)| Some(*key) != new_key) {
                         let cancelled = cancelled.clone();
@@ -187,10 +212,13 @@ pub(super) fn use_attention(
                         });
                         *previous_view.borrow_mut() = None;
                     }
-                    if let Some(session) = viewed {
-                        *previous_view.borrow_mut() = Some((session.portal.clone(), session.key));
+                    if let Some((session, report)) = report {
+                        if report.present {
+                            *previous_view.borrow_mut() =
+                                Some((session.portal.clone(), session.key));
+                        }
                         let seen_reply_id = element
-                            .filter(|_| at_reply)
+                            .filter(|_| report.seen)
                             .and_then(|e| e.get_attribute("data-rendered-reply"))
                             .and_then(|id| id.parse().ok());
                         let cancelled = cancelled.clone();
@@ -203,7 +231,7 @@ pub(super) fn use_attention(
                                 session.key,
                                 &UpdateSessionAttention {
                                     client_id,
-                                    viewing: true,
+                                    viewing: report.present,
                                     seen_reply_id,
                                     muted: None,
                                 },
@@ -373,5 +401,40 @@ pub(super) fn use_attention(
                 )
             })
         },
+    }
+}
+
+#[cfg(test)]
+mod tick_tests {
+    use super::{tick_report, TickReport};
+
+    #[test]
+    fn presence_follows_use_and_receipts_follow_the_screen() {
+        // In use, at the latest reply: hold pushes and acknowledge it.
+        assert_eq!(
+            tick_report(true, true),
+            Some(TickReport {
+                present: true,
+                seen: true
+            })
+        );
+        // In use but scrolled up or behind a dialog: hold pushes only.
+        assert_eq!(
+            tick_report(true, false),
+            Some(TickReport {
+                present: true,
+                seen: false
+            })
+        );
+        // Watching a long turn without input: no longer holds pushes, but
+        // replies rendered on screen are still marked read.
+        assert_eq!(
+            tick_report(false, true),
+            Some(TickReport {
+                present: false,
+                seen: true
+            })
+        );
+        assert_eq!(tick_report(false, false), None);
     }
 }
