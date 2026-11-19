@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200"><rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="Arial, sans-serif"><text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2483 · Hold phone pushes while any of the user's devices is in use</text>
+<text x="55" y="105" font-size="34" fill="#e6e9f5">Working in one session on a laptop still buzzed the phone for every other one;</text>
+<text x="55" y="149" font-size="34" fill="#e6e9f5">now any device in active use holds pushes, and an unused open tab still does not.</text>
+<path d="M55 177 H1945 M1000 205 V1120" stroke="#3d4666"/>
+<text x="75" y="235" font-size="22" font-weight="bold" letter-spacing="4" fill="#f7768e">BEFORE</text>
+<rect x="75" y="270" width="870" height="230" rx="16" fill="#1e202e" stroke="#3d4666"/>
+<text x="100" y="318" font-size="28" fill="#7aa2f7">Browser lease (session_attention_views)</text>
+<text x="100" y="378" font-size="25" fill="#c0caf5">Renewed only while that conversation is visible,</text>
+<text x="100" y="412" font-size="25" fill="#c0caf5">focused, unobstructed and scrolled to its end.</text>
+<rect x="75" y="560" width="870" height="230" rx="16" fill="#1e202e" stroke="#f7768e"/>
+<text x="100" y="608" font-size="28" fill="#7aa2f7">push_suppressed: same session_id only</text>
+<text x="100" y="668" font-size="25" fill="#c0caf5">Laptop on session A, session B finishes:</text>
+<text x="100" y="730" font-size="23" fill="#f7768e">the phone buzzes although you are at the laptop.</text>
+<rect x="75" y="850" width="870" height="230" rx="16" fill="#1e202e" stroke="#f7768e"/>
+<text x="100" y="898" font-size="28" fill="#7aa2f7">Same session, slightly scrolled up</text>
+<text x="100" y="958" font-size="25" fill="#c0caf5">Or a dialog open, or another window focused:</text>
+<text x="100" y="1020" font-size="23" fill="#f7768e">the lease lapses and the phone buzzes anyway.</text>
+<text x="1055" y="235" font-size="22" font-weight="bold" letter-spacing="4" fill="#9ece6a">AFTER</text>
+<rect x="1055" y="270" width="870" height="230" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="318" font-size="28" fill="#7aa2f7">Presence lease: device in active use</text>
+<text x="1080" y="378" font-size="25" fill="#c0caf5">Visible, focused tab with input in the last</text>
+<text x="1080" y="412" font-size="25" fill="#c0caf5">ACTIVE_WINDOW_MS (3 minutes), any session.</text>
+<rect x="1055" y="560" width="870" height="230" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="608" font-size="28" fill="#7aa2f7">push_suppressed: any live lease for user</text>
+<text x="1080" y="668" font-size="25" fill="#c0caf5">The laptop shows replies in its Ready list.</text>
+<text x="1080" y="730" font-size="23" fill="#9ece6a">Phone stays quiet until you step away.</text>
+<rect x="1055" y="850" width="870" height="230" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="898" font-size="28" fill="#7aa2f7">Unused open tab: no input, lease expires</text>
+<text x="1080" y="958" font-size="25" fill="#c0caf5">Within 15 seconds, so it never silences the phone.</text>
+<text x="1080" y="1020" font-size="23" fill="#a9b1d6">Read receipts still need the reply on screen.</text>
+<text x="55" y="1172" font-size="22" fill="#a9b1d6">The active device gets no desktop notification instead; it relies on its in-page Ready list and banners.</text></g></svg>

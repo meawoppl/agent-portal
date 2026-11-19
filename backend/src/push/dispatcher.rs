@@ -89,7 +89,7 @@ async fn dispatch_one<T: PushTransport>(
     let (user_id, db_name, prefs) = resolved;
 
     // A connected socket is not evidence of attention. Only a short-lived
-    // heartbeat from a visible conversation can suppress a push.
+    // heartbeat from a device in active use can suppress a push.
     match crate::handlers::attention::push_suppressed(
         &mut conn,
         user_id,
