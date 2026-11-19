@@ -27,6 +27,11 @@ specific to each agent and are not carried over.
 overwrite each other's work, and a usage-limited Claude resumes on its own
 when its window resets. Resume the source later if you want it back.
 
+The source is stopped only once the new session's note is durably queued.
+If queuing fails, the new session has still launched, but the source keeps
+running untouched and the dialog says so; retry the handoff or brief the new
+session yourself.
+
 ## Handoff summaries
 
 The transcript records what an agent did, not always why. So when an agent

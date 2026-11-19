@@ -204,12 +204,9 @@ pub fn fork_dialog(props: &ForkDialogProps) -> Html {
                     {
                         Ok(result) => {
                             on_forked.emit(result.session_id);
-                            if result.source_stopped || !body.stop_source {
-                                on_close.emit(());
-                            } else {
-                                error.set(Some(
-                                    "The new session started, but the source could not be stopped. Stop it from the session rail.".into(),
-                                ));
+                            match partial_handoff_message(&result, body.stop_source) {
+                                None => on_close.emit(()),
+                                Some(message) => error.set(Some(message.into())),
                             }
                         }
                         Err(message) => error.set(Some(message)),
@@ -325,6 +322,21 @@ pub fn fork_dialog(props: &ForkDialogProps) -> Html {
     }
 }
 
+/// What to tell the user when a handoff only partly completed. The new
+/// session exists in every case; `None` means everything requested happened.
+fn partial_handoff_message(
+    result: &HandoffSessionResponse,
+    stop_requested: bool,
+) -> Option<&'static str> {
+    if !result.note_queued {
+        Some("The new session started, but its handoff note couldn't be queued, so the source was left running. Retry the handoff, or tell the new session what to pick up.")
+    } else if stop_requested && !result.source_stopped {
+        Some("The new session started with its handoff note, but the source could not be stopped. Stop it from the session rail.")
+    } else {
+        None
+    }
+}
+
 /// POST `body` and decode the success response, or return the user-facing
 /// error (the server's message when it sent one).
 async fn submit_json<B: serde::Serialize, R: serde::de::DeserializeOwned>(
@@ -342,5 +354,31 @@ async fn submit_json<B: serde::Serialize, R: serde::de::DeserializeOwned>(
             .await
             .unwrap_or_else(|_| format!("{action} failed"))),
         Err(e) => Err(format!("{action} request failed: {e}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn result(note_queued: bool, source_stopped: bool) -> HandoffSessionResponse {
+        HandoffSessionResponse {
+            request_id: Uuid::nil(),
+            session_id: Uuid::nil(),
+            note_queued,
+            source_stopped,
+        }
+    }
+
+    #[test]
+    fn partial_handoffs_say_what_did_not_happen() {
+        assert_eq!(partial_handoff_message(&result(true, true), true), None);
+        assert_eq!(partial_handoff_message(&result(true, false), false), None);
+        assert!(partial_handoff_message(&result(false, false), true)
+            .unwrap()
+            .contains("left running"));
+        assert!(partial_handoff_message(&result(true, false), true)
+            .unwrap()
+            .contains("could not be stopped"));
     }
 }

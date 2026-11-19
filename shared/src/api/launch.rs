@@ -138,9 +138,12 @@ fn default_true() -> bool {
 pub struct HandoffSessionResponse {
     pub request_id: uuid::Uuid,
     pub session_id: uuid::Uuid,
-    /// False when `stop_source` was requested but stopping failed; the new
-    /// session still launched, so the caller should tell the user to stop the
-    /// source by hand.
+    /// Whether the handoff note was durably queued for the new session. When
+    /// it wasn't, the new session launched without its brief and the source
+    /// is left running and untouched, so no work is stranded.
+    pub note_queued: bool,
+    /// Whether the source was stopped and paused. False when `stop_source`
+    /// was off, when the note wasn't queued, or when stopping failed.
     pub source_stopped: bool,
 }
 

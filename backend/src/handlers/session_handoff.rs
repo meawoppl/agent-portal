@@ -127,21 +127,34 @@ pub async fn handoff_session(
         user_id,
         "Handoff notice".to_string(),
     );
-    app_state.session_manager.enqueue_input(
-        &app_state.db_pool,
-        &launched.session_id.to_string(),
-        launched.session_id,
-        crate::handlers::websocket::EnqueueInput {
-            content: serde_json::Value::String(note),
-            send_mode: None,
-            reasoning_effort: None,
-            client_msg_id: None,
-        },
-    );
+    let note_queued = app_state
+        .session_manager
+        .enqueue_input(
+            &app_state.db_pool,
+            &launched.session_id.to_string(),
+            launched.session_id,
+            crate::handlers::websocket::EnqueueInput {
+                content: serde_json::Value::String(note),
+                send_mode: None,
+                reasoning_effort: None,
+                client_msg_id: None,
+            },
+        )
+        .durable;
+    if !note_queued {
+        warn!(
+            "Handoff from {source_id}: note for {} was not queued; leaving the source running",
+            launched.session_id
+        );
+    }
 
-    // The new session is already launching, so a failed stop is reported to
-    // the caller rather than failing the request.
-    let source_stopped = req.stop_source
+    // The new session is already launching, so failures from here on are
+    // reported as partial completion rather than failing the request. The
+    // source is only stopped (and its pending summary requests cancelled)
+    // once the new session's note is durably queued: otherwise the work
+    // would be left with a paused source and a target that has no brief.
+    let source_stopped = note_queued
+        && req.stop_source
         && app_state
             .conn()
             .and_then(|mut conn| {
@@ -159,6 +172,7 @@ pub async fn handoff_session(
     Ok(Json(HandoffSessionResponse {
         request_id: launched.request_id,
         session_id: launched.session_id,
+        note_queued,
         source_stopped,
     }))
 }
