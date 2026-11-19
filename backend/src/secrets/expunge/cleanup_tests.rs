@@ -545,8 +545,12 @@ async fn global_policy_refresh_sanitizes_other_owner_stale_buffers_without_using
         fresh.redact_str("admin-global-expunge-target"),
         redaction::MASK
     );
-    let sent: serde_json::Value =
-        redaction::sanitize_for_user(&f.state.db_pool, f.other.id, stale_buffer.clone()).unwrap();
+    let sent: serde_json::Value = redaction::sanitize_for_user(
+        f.state.db_pool.get().unwrap(),
+        f.other.id,
+        stale_buffer.clone(),
+    )
+    .unwrap();
     assert!(!sent.to_string().contains("admin-global-expunge-target"));
     assert!(!sent
         .to_string()

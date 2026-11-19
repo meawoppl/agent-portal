@@ -186,9 +186,13 @@ fn stream_history(
         .first::<Uuid>(&mut pool.get().map_err(std::io::Error::other)?)
         .map_err(std::io::Error::other)?;
     stream_history_json(pool, session_id, replay_after, limit, |json| {
-        let sanitized =
-            super::web_client_socket::sanitize_history(pool, owner, Some(session_id), json)
-                .map_err(|_| std::io::Error::other("History redaction unavailable"))?;
+        let sanitized = super::web_client_socket::sanitize_history(
+            pool.get().map_err(std::io::Error::other)?,
+            owner,
+            Some(session_id),
+            json,
+        )
+        .map_err(|_| std::io::Error::other("History redaction unavailable"))?;
         send(serde_json::from_str(&sanitized).map_err(std::io::Error::other)?)
     })
 }
