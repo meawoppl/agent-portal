@@ -322,11 +322,27 @@ pub(super) struct FrameFacts {
     pub(crate) task: Option<TaskLifecycle>,
 }
 
-/// A Claude background-task frame, by the task it belongs to.
+/// One run of a Claude background task. A resumed task keeps its `task_id`
+/// and gets a new `run_id`, so the pair is what ties a start to its end.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct TaskRun {
+    task_id: String,
+    run_id: Option<String>,
+}
+
+/// A Claude background-task frame that bounds a run.
 #[derive(Debug)]
 pub(crate) enum TaskLifecycle {
-    Started(String),
-    Ended(String),
+    Started {
+        run: TaskRun,
+        description: String,
+    },
+    /// A `task_notification` with a terminal status (completed, failed,
+    /// killed, stopped). Progress notifications don't end a run.
+    Ended {
+        run: TaskRun,
+        summary: String,
+    },
 }
 
 impl FrameFacts {
@@ -377,10 +393,31 @@ impl FrameFacts {
             task: match &frame {
                 AgentFrame::Claude(ClaudeMessage::System(msg)) => msg
                     .as_task_started()
-                    .map(|started| TaskLifecycle::Started(started.task_id))
+                    .map(|started| TaskLifecycle::Started {
+                        run: TaskRun {
+                            task_id: started.task_id,
+                            run_id: started.run_id,
+                        },
+                        description: started.description,
+                    })
                     .or_else(|| {
                         msg.as_task_notification()
-                            .map(|ended| TaskLifecycle::Ended(ended.task_id))
+                            .filter(|ended| {
+                                matches!(
+                                    ended.status,
+                                    shared::TaskStatus::Completed
+                                        | shared::TaskStatus::Failed
+                                        | shared::TaskStatus::Killed
+                                        | shared::TaskStatus::Stopped
+                                )
+                            })
+                            .map(|ended| TaskLifecycle::Ended {
+                                run: TaskRun {
+                                    task_id: ended.task_id,
+                                    run_id: ended.run_id,
+                                },
+                                summary: ended.summary,
+                            })
                     }),
                 _ => None,
             },
@@ -388,24 +425,33 @@ impl FrameFacts {
     }
 }
 
-/// Indices of `task_started` frames whose task has a later
-/// `task_notification`. A finished task renders as its completion card
-/// alone, the way a Codex item's started/completed frames collapse to one
-/// card; the started card only stands in while the task runs. A resumed task
-/// keeps its `task_id`, so each start pairs with the next end after it, which
-/// keeps a resumed run visible while an earlier run's completion exists.
+/// Indices of `task_started` frames made redundant by their run's completion,
+/// so a finished task renders as one card, the way a Codex item's
+/// started/completed frames collapse. A start is hidden only when:
+/// - a later terminal `task_notification` closes the same run (`task_id` and
+///   `run_id`), so a late or replayed completion of one run can't hide a
+///   resumed run, and progress notifications never close anything; and
+/// - that completion's summary repeats the start's description, so hiding
+///   the start loses nothing (a differing summary, such as a sub-agent's
+///   report, keeps both cards).
 fn finished_task_starts(
     messages: &[RenderedMessage],
     agent_type: shared::AgentType,
 ) -> std::collections::HashSet<usize> {
-    let mut ended_later = std::collections::HashSet::new();
+    let mut ended_later = std::collections::HashMap::<TaskRun, String>::new();
     let mut finished = std::collections::HashSet::new();
     for (i, message) in messages.iter().enumerate().rev() {
         match &message.facts(agent_type).task {
-            Some(TaskLifecycle::Ended(id)) => {
-                ended_later.insert(id.clone());
+            Some(TaskLifecycle::Ended { run, summary }) => {
+                ended_later.insert(run.clone(), summary.clone());
             }
-            Some(TaskLifecycle::Started(id)) if ended_later.remove(id) => {
+            // The guard always consumes the run's completion, so it pairs
+            // with this start even when the summaries differ.
+            Some(TaskLifecycle::Started { run, description })
+                if ended_later
+                    .remove(run)
+                    .is_some_and(|summary| summary.trim() == description.trim()) =>
+            {
                 finished.insert(i);
             }
             _ => {}

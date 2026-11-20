@@ -37,9 +37,9 @@
   <g>
     <rect x="1040" y="240" width="880" height="190" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
     <text x="1064" y="282" font-size="26" fill="#9ece6a">FrameFacts.task: TaskLifecycle::Started / Ended</text>
-    <text x="1064" y="322" font-size="23" fill="#a9b1d6">from the cached parse, keyed by task_id</text>
-    <text x="1064" y="362" font-size="23" fill="#9ece6a">finished_task_starts: each start pairs with</text>
-    <text x="1064" y="398" font-size="23" fill="#9ece6a">the next end after it (walked newest first)</text>
+    <text x="1064" y="322" font-size="23" fill="#a9b1d6">from the cached parse, keyed by TaskRun (task_id, run_id)</text>
+    <text x="1064" y="362" font-size="23" fill="#9ece6a">Ended only for completed/failed/killed/stopped</text>
+    <text x="1064" y="398" font-size="23" fill="#9ece6a">hide the start only if summary == description</text>
   </g>
   <line x1="1480" y1="430" x2="1480" y2="476" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
   <g>
@@ -48,7 +48,8 @@
     <text x="1064" y="562" font-size="23" fill="#9ece6a">group_messages skips the finished start</text>
     <text x="1064" y="598" font-size="22" fill="#565f89">a still-running task keeps its started card</text>
   </g>
-  <text x="1064" y="680" font-size="23" fill="#a9b1d6">resumed task (same task_id): the new run stays visible</text>
+  <text x="1064" y="680" font-size="23" fill="#a9b1d6">a late completion of run r-1 never hides resumed run r-2</text>
+  <text x="1064" y="716" font-size="23" fill="#a9b1d6">a differing summary (e.g. a report) keeps both cards</text>
 
   <text x="55" y="1172" font-size="22" fill="#565f89">Trade-off: the completion card has no task_type, so the "Background Bash" / "Sub-agent" badge goes with the start.</text>
 </svg>
