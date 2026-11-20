@@ -546,8 +546,7 @@ async fn global_policy_refresh_sanitizes_other_owner_stale_buffers_without_using
         redaction::MASK
     );
     let sent: serde_json::Value = redaction::sanitize_for_user(
-        f.state.db_pool.get().unwrap(),
-        f.other.id,
+        &redaction::snapshot_for_user(&mut f.state.db_pool.get().unwrap(), f.other.id).unwrap(),
         stale_buffer.clone(),
     )
     .unwrap();

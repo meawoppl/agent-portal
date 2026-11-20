@@ -940,12 +940,9 @@ mod edge_tests {
 /// A content owner's matcher view; sharing access alone does not register
 /// another person's private values as censorship rules for this user's data.
 pub fn sanitize_for_user<T: serde::Serialize + serde::de::DeserializeOwned>(
-    mut conn: crate::db::DbConnection,
-    user: Uuid,
+    rules: &Redactor,
     input: T,
 ) -> Result<T, AppError> {
-    let rules = snapshot_for_user(&mut conn, user)?;
-    drop(conn);
     if rules.is_empty() {
         return Ok(input);
     }
