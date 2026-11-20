@@ -1,3 +1,4 @@
+pub(crate) mod browser_redaction;
 mod claude_cost;
 use tracing::Instrument;
 mod continuations;

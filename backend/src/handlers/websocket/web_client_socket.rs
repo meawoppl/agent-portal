@@ -1,3 +1,4 @@
+use super::browser_redaction::{CheckFailed, CheckedRules};
 use super::permissions::{handle_permission_response, replay_pending_permission};
 use super::replay::replay_history;
 use super::session_manager::{outbound::Delivery, DedupVerdict, EnqueueInput, InputDeliveryState};
@@ -94,72 +95,59 @@ type OutboundRules = (
     Option<crate::secrets::redaction::Redactor>,
 );
 
-/// Wait briefly for a database slot without stalling other socket tasks.
-/// Replay releases its checkout before sending each batch to this consumer.
-/// Keep checking the database generation at the send boundary, even after a wait.
-fn with_socket_redaction<T>(
-    pool: &crate::db::DbPool,
-    sanitize: impl FnOnce(crate::db::DbConnection) -> Result<T, crate::errors::AppError>,
+async fn with_socket_redaction<T>(
+    state: &AppState,
+    session: Option<Uuid>,
+    sanitize: impl FnOnce(CheckedRules) -> Result<T, crate::errors::AppError>,
 ) -> Option<T> {
-    super::run_blocking(|| {
-        let conn = match pool.get_timeout(std::time::Duration::from_secs(3)) {
-            Ok(conn) => conn,
-            Err(_) => {
-                warn!(
-                    "{}: closing browser socket after waiting for a database connection",
-                    crate::markers::REDACTION_DB_POOL_BUSY
-                );
-                return None;
-            }
-        };
-        match sanitize(conn) {
-            Ok(frame) => Some(frame),
-            Err(_) => {
-                warn!(
-                    "{}: closing browser socket because current content redaction failed",
-                    crate::markers::SECRET_REDACTION_FAILED
-                );
-                None
-            }
+    let checked = match state.browser_redaction.check(&state.db_pool, session).await {
+        Ok(checked) => checked,
+        Err(CheckFailed::PoolBusy) => {
+            warn!(
+                "{}: closing browser socket after waiting for a database connection",
+                crate::markers::REDACTION_DB_POOL_BUSY
+            );
+            return None;
         }
-    })
+        Err(CheckFailed::RulesUnavailable) => {
+            log_browser_redaction_failure();
+            return None;
+        }
+    };
+    match super::run_blocking(|| sanitize(checked)) {
+        Ok(frame) => Some(frame),
+        Err(_) => {
+            log_browser_redaction_failure();
+            None
+        }
+    }
 }
 
-fn outbound_rules(
-    conn: crate::db::DbConnection,
-    viewer: Uuid,
-    verified_session: Option<Uuid>,
-    frame: &ServerToClient,
-) -> Result<Option<OutboundRules>, crate::errors::AppError> {
-    let session = match frame {
+fn log_browser_redaction_failure() {
+    warn!(
+        "{}: closing browser socket because current content redaction failed",
+        crate::markers::SECRET_REDACTION_FAILED
+    );
+}
+
+fn frame_session(verified_session: Option<Uuid>, frame: &ServerToClient) -> Option<Uuid> {
+    match frame {
         ServerToClient::SessionUpdate { session_id, .. } => Some(*session_id),
         _ => verified_session,
-    };
-    rules_for_session(conn, viewer, session)
+    }
 }
 
-fn rules_for_session(
-    mut conn: crate::db::DbConnection,
+fn scoped_rules(
+    CheckedRules { catalog, owner }: CheckedRules,
     viewer: Uuid,
-    session: Option<Uuid>,
-) -> Result<Option<OutboundRules>, crate::errors::AppError> {
-    use crate::{schema::sessions, secrets::redaction};
-    let owner = session
-        .map(|id| {
-            sessions::table
-                .find(id)
-                .select(sessions::user_id)
-                .first::<Uuid>(&mut conn)
-        })
-        .transpose()?;
-    let catalog = redaction::snapshot(&mut conn)?;
+) -> Option<OutboundRules> {
     let viewer_rules = catalog.scoped_for(viewer);
     let owner_rules = owner
         .filter(|owner| *owner != viewer)
         .map(|owner| catalog.scoped_for(owner));
     let has_rules =
         !viewer_rules.is_empty() || owner_rules.as_ref().is_some_and(|rules| !rules.is_empty());
-    Ok(has_rules.then_some((viewer_rules, owner_rules)))
+    has_rules.then_some((viewer_rules, owner_rules))
 }
 
 fn redact_outbound(
@@ -184,16 +172,19 @@ fn sanitize_outbound(
     verified_session: Option<Uuid>,
     frame: ServerToClient,
 ) -> Result<ServerToClient, crate::errors::AppError> {
-    match outbound_rules(pool.get().unwrap(), viewer, verified_session, &frame)? {
+    let checked = super::browser_redaction::check_single_for_tests(
+        pool,
+        frame_session(verified_session, &frame),
+    )
+    .map_err(|_| crate::errors::AppError::ServiceUnavailable("Content redaction unavailable"))?;
+    match scoped_rules(checked, viewer) {
         Some(rules) => redact_outbound(&frame, rules),
         None => Ok(frame),
     }
 }
 
 fn sanitize_delivery(
-    conn: crate::db::DbConnection,
-    viewer: Uuid,
-    verified_session: Option<Uuid>,
+    rules: Option<OutboundRules>,
     frame: Delivery<ServerToClient>,
 ) -> Result<Utf8Bytes, crate::errors::AppError> {
     let (frame, json) = match &frame {
@@ -201,7 +192,7 @@ fn sanitize_delivery(
         Delivery::Shared { value, json } => (value.as_ref(), Some(json)),
     };
     let redacted;
-    let frame = match outbound_rules(conn, viewer, verified_session, frame)? {
+    let frame = match rules {
         Some(rules) => {
             redacted = redact_outbound(frame, rules)?;
             &redacted
@@ -216,14 +207,26 @@ fn sanitize_delivery(
     })
 }
 
+#[cfg(test)]
 pub(super) fn sanitize_history(
-    conn: crate::db::DbConnection,
+    pool: &crate::db::DbPool,
     viewer: Uuid,
     session: Option<Uuid>,
     json: String,
 ) -> Result<String, crate::errors::AppError> {
+    let checked =
+        super::browser_redaction::check_single_for_tests(pool, session).map_err(|_| {
+            crate::errors::AppError::ServiceUnavailable("History redaction unavailable")
+        })?;
+    redact_history(scoped_rules(checked, viewer), json)
+}
+
+fn redact_history(
+    rules: Option<OutboundRules>,
+    json: String,
+) -> Result<String, crate::errors::AppError> {
     use crate::errors::AppError;
-    let Some((viewer_rules, owner_rules)) = rules_for_session(conn, viewer, session)? else {
+    let Some((viewer_rules, owner_rules)) = rules else {
         return Ok(json);
     };
     let error = |_| AppError::ServiceUnavailable("History redaction unavailable");
@@ -321,9 +324,9 @@ pub async fn handle_web_client_socket(
                 match replayed {
                     Some(Ok(msg)) => {
                         if linked.as_ref().is_some_and(|auth| outbound_auth.check(std::time::Instant::now(), false, || auth.authorize(&app_state, shared::api::TokenScope::Read)).is_err()) { break; }
-                        let Some(msg) = with_socket_redaction(&db_pool, |conn| {
-                            sanitize_history(conn, user_id, verified_session_id, msg)
-                        }) else { break; };
+                        let Some(msg) = with_socket_redaction(&app_state, verified_session_id, |checked| {
+                            redact_history(scoped_rules(checked, user_id), msg)
+                        }).await else { break; };
                         if ws_sender.send_json(msg.into()).await.is_err() { break; }
                     }
                     Some(Err(error)) => { warn!("History replay failed: {error}"); break; }
@@ -340,18 +343,18 @@ pub async fn handle_web_client_socket(
                     continue;
                 }
                 if linked.as_ref().is_some_and(|auth| outbound_auth.check(std::time::Instant::now(), false, || auth.authorize(&app_state, shared::api::TokenScope::Read)).is_err()) { break; }
-                let Some(msg) = with_socket_redaction(&db_pool, |conn| {
-                    sanitize_delivery(conn, user_id, verified_session_id, msg)
-                }) else { break; };
+                let Some(msg) = with_socket_redaction(&app_state, frame_session(verified_session_id, frame), |checked| {
+                    sanitize_delivery(scoped_rules(checked, user_id), msg)
+                }).await else { break; };
                 if ws_sender.send_json(msg).await.is_err() { break; }
             }
             result = receive_browser_frame(&mut ws_receiver) => {
                 let Some(result) = result else { break; };
                 match result {
                     Ok(client_msg) => {
-                        let Some(client_msg) = with_socket_redaction(&db_pool, |conn| {
-                            crate::secrets::redaction::sanitize_for_user(conn, user_id, client_msg)
-                        }) else { break; };
+                        let Some(client_msg) = with_socket_redaction(&app_state, None, |checked| {
+                            crate::secrets::redaction::sanitize_for_user(&checked.catalog.scoped_for(user_id), client_msg)
+                        }).await else { break; };
                         if linked.as_ref().is_some_and(|auth| auth.authorize(&app_state, crate::handlers::federation::message_scope(&client_msg)).is_err()) { break; }
                         // Negotiate inline: a rejection must reach the socket before
                         // closing, and no later pipelined mutation may dispatch.

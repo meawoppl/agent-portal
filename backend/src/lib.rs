@@ -66,6 +66,7 @@ struct Args {
 #[derive(Clone)]
 pub struct AppState {
     pub secrets: Arc<secrets::SecretsService>,
+    pub(crate) browser_redaction: handlers::websocket::browser_redaction::BrowserRedaction,
     pub dev_mode: bool,
     pub db_pool: DbPool,
     pub session_manager: SessionManager,
@@ -213,6 +214,7 @@ pub async fn run() -> anyhow::Result<()> {
         handlers::forward_client::ForwardHttpClient::new(session_manager.clone());
     let app_state = Arc::new(AppState {
         secrets: secrets.clone(),
+        browser_redaction: Default::default(),
         dev_mode: args.dev_mode,
         db_pool: pool,
         session_manager,
