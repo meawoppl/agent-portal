@@ -6,8 +6,12 @@ use crate::{
     secrets::redaction::{self, Redactor},
 };
 use diesel::prelude::*;
-use std::{collections::HashMap, sync::Arc, time::Duration};
-use tokio::sync::{mpsc, oneshot, OnceCell};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
 const MAX_BATCH: usize = 128;
@@ -15,7 +19,7 @@ const CHECKOUT_TIMEOUT: Duration = Duration::from_secs(3);
 
 #[derive(Default, Clone)]
 pub(crate) struct BrowserRedaction {
-    requests: Arc<OnceCell<mpsc::Sender<Request>>>,
+    requests: Arc<Mutex<Option<mpsc::Sender<Request>>>>,
 }
 
 struct Request {
@@ -40,26 +44,32 @@ impl BrowserRedaction {
         pool: &DbPool,
         session_id: Option<Uuid>,
     ) -> Result<CheckedRules, CheckFailed> {
-        let requests = self
-            .requests
-            .get_or_init(|| async {
+        let (reply, result) = oneshot::channel();
+        let queued = {
+            let mut requests = self
+                .requests
+                .lock()
+                .map_err(|_| CheckFailed::RulesUnavailable)?;
+            if requests.as_ref().is_some_and(mpsc::Sender::is_closed) {
+                *requests = None;
+            }
+            let requests = requests.get_or_insert_with(|| {
                 let (tx, rx) = mpsc::channel(MAX_BATCH);
                 tokio::spawn(run_batches(rx, pool.clone()));
                 tx
-            })
-            .await;
-        let (reply, result) = oneshot::channel();
-        match requests.try_send(Request { session_id, reply }) {
-            Ok(()) => result.await.map_err(|_| CheckFailed::RulesUnavailable)?,
-            Err(mpsc::error::TrySendError::Full(_)) => {
-                // A burst that fills the mailbox can still use the normal
-                // bounded pool checkout instead of waiting behind many batches.
-                read_rules(pool.clone(), session_id.into_iter().collect())
-                    .await?
-                    .for_session(session_id)
-            }
-            Err(mpsc::error::TrySendError::Closed(_)) => Err(CheckFailed::RulesUnavailable),
+            });
+            requests.try_send(Request { session_id, reply }).is_ok()
+        };
+        if queued {
+            // The mailbox holds at most one batch behind the active one,
+            // so at most two checkout waits can precede this reply.
+            return result.await.map_err(|_| CheckFailed::RulesUnavailable)?;
         }
+        // A full mailbox (or a worker that closed while we were enqueueing)
+        // uses the normal bounded checkout rather than creating a new queue.
+        read_rules(pool.clone(), session_id.into_iter().collect())
+            .await?
+            .for_session(session_id)
     }
 }
 
@@ -171,6 +181,7 @@ mod tests {
         let unscoped = unscoped.await.unwrap().unwrap();
         assert_eq!(scoped.owner, Some(owner));
         assert!(unscoped.owner.is_none());
+        // At generation zero, separate lookups build separate catalogs.
         assert!(Arc::ptr_eq(&scoped.catalog, &unscoped.catalog));
         assert!(matches!(
             missing.await.unwrap(),
@@ -189,5 +200,22 @@ mod tests {
         ));
         drop(requests);
         worker.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn check_replaces_a_closed_worker() {
+        let Some(db) = Database::new() else { return };
+        let redaction = BrowserRedaction::default();
+        let (sender, receiver) = mpsc::channel(MAX_BATCH);
+        drop(receiver);
+        *redaction.requests.lock().unwrap() = Some(sender);
+        assert!(redaction.check(&db.pool, None).await.is_ok());
+        assert!(!redaction
+            .requests
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .is_closed());
     }
 }
