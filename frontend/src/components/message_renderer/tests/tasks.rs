@@ -86,6 +86,19 @@ fn progress_notification_does_not_close_a_task() {
     assert_eq!(single_contents(&groups), vec![started, progress]);
 }
 
+/// A withheld handback card shows no text, even when its raw summary (harness
+/// notes for the model) happens to repeat the description, so hiding the
+/// start would lose the description: both cards stay.
+#[test]
+fn withheld_handback_keeps_the_start_even_with_a_matching_raw_summary() {
+    let started = task_started("t-1", "r-1");
+    let mut withheld: serde_json::Value = serde_json::from_str(&completed("t-1", "r-1")).unwrap();
+    withheld["handback"] = serde_json::json!("withheld");
+    let withheld = withheld.to_string();
+    let groups = group_for_tests(&[started.clone(), withheld.clone()]);
+    assert_eq!(single_contents(&groups), vec![started, withheld]);
+}
+
 /// When the completion says something different (a sub-agent's report),
 /// hiding the start would lose its description, so both cards stay.
 #[test]

@@ -338,10 +338,13 @@ pub(crate) enum TaskLifecycle {
         description: String,
     },
     /// A `task_notification` with a terminal status (completed, failed,
-    /// killed, stopped). Progress notifications don't end a run.
+    /// killed, stopped). Progress notifications don't end a run. `shown` is
+    /// the text its card displays (`TaskReport::text`): `None` for a withheld
+    /// or unreported handback, the handback report where there is one, and
+    /// the raw summary only without a handback.
     Ended {
         run: TaskRun,
-        summary: String,
+        shown: Option<String>,
     },
 }
 
@@ -412,11 +415,16 @@ impl FrameFacts {
                                 )
                             })
                             .map(|ended| TaskLifecycle::Ended {
+                                shown:
+                                    crate::components::task_report::TaskReport::from_notification(
+                                        &ended,
+                                    )
+                                    .text
+                                    .map(str::to_string),
                                 run: TaskRun {
                                     task_id: ended.task_id,
                                     run_id: ended.run_id,
                                 },
-                                summary: ended.summary,
                             })
                     }),
                 _ => None,
@@ -431,26 +439,27 @@ impl FrameFacts {
 /// - a later terminal `task_notification` closes the same run (`task_id` and
 ///   `run_id`), so a late or replayed completion of one run can't hide a
 ///   resumed run, and progress notifications never close anything; and
-/// - that completion's summary repeats the start's description, so hiding
-///   the start loses nothing (a differing summary, such as a sub-agent's
-///   report, keeps both cards).
+/// - the completion card displays the start's description, so hiding the
+///   start loses nothing. A differing text (a sub-agent's report) or one the
+///   card doesn't show at all (a withheld handback) keeps both cards.
 fn finished_task_starts(
     messages: &[RenderedMessage],
     agent_type: shared::AgentType,
 ) -> std::collections::HashSet<usize> {
-    let mut ended_later = std::collections::HashMap::<TaskRun, String>::new();
+    let mut ended_later = std::collections::HashMap::<TaskRun, Option<String>>::new();
     let mut finished = std::collections::HashSet::new();
     for (i, message) in messages.iter().enumerate().rev() {
         match &message.facts(agent_type).task {
-            Some(TaskLifecycle::Ended { run, summary }) => {
-                ended_later.insert(run.clone(), summary.clone());
+            Some(TaskLifecycle::Ended { run, shown }) => {
+                ended_later.insert(run.clone(), shown.clone());
             }
             // The guard always consumes the run's completion, so it pairs
-            // with this start even when the summaries differ.
+            // with this start even when the texts differ.
             Some(TaskLifecycle::Started { run, description })
                 if ended_later
                     .remove(run)
-                    .is_some_and(|summary| summary.trim() == description.trim()) =>
+                    .flatten()
+                    .is_some_and(|shown| shown.trim() == description.trim()) =>
             {
                 finished.insert(i);
             }
