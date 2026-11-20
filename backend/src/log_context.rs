@@ -112,15 +112,6 @@ pub(crate) mod tests {
     use super::*;
     #[derive(Clone, Default)]
     struct Buffer(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
-    impl std::io::Write for Buffer {
-        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().unwrap().extend_from_slice(bytes);
-            Ok(bytes.len())
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
     std::thread_local! {
         static CAPTURE: std::cell::RefCell<Option<Buffer>> = const { std::cell::RefCell::new(None) };
     }
@@ -142,14 +133,15 @@ pub(crate) mod tests {
         }
     }
 
-    /// Run `f` and return what it logged on this thread.
+    /// Start capturing this thread's log output.
     ///
     /// One global subscriber routes into per-thread buffers, rather than a
-    /// `with_default` subscriber per call. tracing caches each callsite's
-    /// interest process-wide, and scoped dispatchers coming and going on
-    /// parallel test threads could leave a callsite cached as uninterested,
-    /// so a test's own log line silently went missing.
-    pub(crate) fn capture(f: impl FnOnce()) -> String {
+    /// scoped subscriber per test. tracing caches each callsite's interest
+    /// process-wide, and scoped dispatchers coming and going on parallel test
+    /// threads could leave a callsite cached as uninterested, so a test's own
+    /// log line silently went missing. Tests must not install scoped
+    /// subscribers (`with_default`, `with_subscriber`) for the same reason.
+    fn begin_capture() -> Buffer {
         static INSTALL: std::sync::Once = std::sync::Once::new();
         INSTALL.call_once(|| {
             let subscriber = tracing_subscriber::fmt()
@@ -157,14 +149,34 @@ pub(crate) mod tests {
                 .with_ansi(false)
                 .with_writer(|| ThreadCapture)
                 .finish();
-            let _ = tracing::subscriber::set_global_default(subscriber);
+            tracing::subscriber::set_global_default(subscriber)
+                .expect("backend unit tests install no other global subscriber");
         });
         let output = Buffer::default();
         CAPTURE.with(|slot| *slot.borrow_mut() = Some(output.clone()));
-        f();
+        output
+    }
+
+    fn end_capture(output: Buffer) -> String {
         CAPTURE.with(|slot| *slot.borrow_mut() = None);
         let bytes = output.0.lock().unwrap().clone();
         String::from_utf8(bytes).unwrap()
+    }
+
+    /// Run `f` and return what it logged on this thread.
+    pub(crate) fn capture(f: impl FnOnce()) -> String {
+        let output = begin_capture();
+        f();
+        end_capture(output)
+    }
+
+    /// Await `f` and return what it logged on this thread. Only meaningful on
+    /// a current-thread runtime (`#[tokio::test]`'s default), where every poll
+    /// of `f` happens on the capturing thread.
+    pub(crate) async fn capture_async(f: impl std::future::Future<Output = ()>) -> String {
+        let output = begin_capture();
+        f.await;
+        end_capture(output)
     }
 
     #[test]
@@ -204,14 +216,6 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn routed_request_uses_template_instead_of_sensitive_path_segments() {
         use tower::ServiceExt;
-        use tracing::instrument::WithSubscriber;
-        let output = Buffer::default();
-        let writer = output.clone();
-        let subscriber = tracing_subscriber::fmt()
-            .without_time()
-            .with_ansi(false)
-            .with_writer(move || writer.clone())
-            .finish();
         let router = axum::Router::new().route(
             "/api/example/{id}",
             axum::routing::get(|request: Request| async move {
@@ -219,17 +223,18 @@ pub(crate) mod tests {
                 axum::http::StatusCode::OK
             }),
         );
-        router
-            .oneshot(
-                Request::builder()
-                    .uri("/api/example/private-value?token=secret")
-                    .body(axum::body::Body::empty())
-                    .unwrap(),
-            )
-            .with_subscriber(subscriber)
-            .await
-            .unwrap();
-        let logs = String::from_utf8(output.0.lock().unwrap().clone()).unwrap();
+        let logs = capture_async(async {
+            router
+                .oneshot(
+                    Request::builder()
+                        .uri("/api/example/private-value?token=secret")
+                        .body(axum::body::Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+        })
+        .await;
         assert!(logs.contains("/api/example/{id}"), "{logs}");
         assert!(!logs.contains("private-value"));
         assert!(!logs.contains("secret"));
