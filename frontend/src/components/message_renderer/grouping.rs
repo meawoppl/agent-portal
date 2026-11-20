@@ -317,6 +317,16 @@ pub(super) struct FrameFacts {
     /// `Some(command_uuid)` for a started scheduler wakeup (shown once per
     /// command), `None` for the plain acknowledgements that are hidden.
     pub(crate) lifecycle_wakeup: Option<Option<String>>,
+    /// Background-task bookkeeping: a `task_started` or a `task_notification`
+    /// frame, keyed by `task_id` (see [`finished_task_starts`]).
+    pub(crate) task: Option<TaskLifecycle>,
+}
+
+/// A Claude background-task frame, by the task it belongs to.
+#[derive(Debug)]
+pub(crate) enum TaskLifecycle {
+    Started(String),
+    Ended(String),
 }
 
 impl FrameFacts {
@@ -364,8 +374,44 @@ impl FrameFacts {
                 ),
                 _ => None,
             },
+            task: match &frame {
+                AgentFrame::Claude(ClaudeMessage::System(msg)) => msg
+                    .as_task_started()
+                    .map(|started| TaskLifecycle::Started(started.task_id))
+                    .or_else(|| {
+                        msg.as_task_notification()
+                            .map(|ended| TaskLifecycle::Ended(ended.task_id))
+                    }),
+                _ => None,
+            },
         }
     }
+}
+
+/// Indices of `task_started` frames whose task has a later
+/// `task_notification`. A finished task renders as its completion card
+/// alone, the way a Codex item's started/completed frames collapse to one
+/// card; the started card only stands in while the task runs. A resumed task
+/// keeps its `task_id`, so each start pairs with the next end after it, which
+/// keeps a resumed run visible while an earlier run's completion exists.
+fn finished_task_starts(
+    messages: &[RenderedMessage],
+    agent_type: shared::AgentType,
+) -> std::collections::HashSet<usize> {
+    let mut ended_later = std::collections::HashSet::new();
+    let mut finished = std::collections::HashSet::new();
+    for (i, message) in messages.iter().enumerate().rev() {
+        match &message.facts(agent_type).task {
+            Some(TaskLifecycle::Ended(id)) => {
+                ended_later.insert(id.clone());
+            }
+            Some(TaskLifecycle::Started(id)) if ended_later.remove(id) => {
+                finished.insert(i);
+            }
+            _ => {}
+        }
+    }
+    finished
 }
 
 /// The identity rule for a parsed frame. Sole place that decides "which
@@ -634,7 +680,11 @@ pub fn group_messages(
         }
     }
 
-    for message in messages {
+    let finished_starts = finished_task_starts(messages, agent_type);
+    for (index, message) in messages.iter().enumerate() {
+        if finished_starts.contains(&index) {
+            continue;
+        }
         // Approval cards own state and async work. Give each request a stable
         // parent independent of neighboring Portal runs, and tolerate replay.
         if let Some(id) = message.secret_request_id() {
