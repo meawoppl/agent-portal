@@ -1113,18 +1113,6 @@ pub async fn purge_expired_device_codes(app_state: Arc<AppState>) {
     }
 }
 
-/// Longest a session with unprobed messages waits for its count-retention
-/// probe, so a quiet session can't sit over its cap indefinitely.
-const RETENTION_PROBE_MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(600);
-
-/// New messages a session must gain before it is probed again: 5% of the cap.
-/// A session can briefly run that far over its cap before trimming; in
-/// exchange, an active session costs one probe per 5% of growth rather than
-/// one per retention cycle.
-fn retention_probe_min_inserts(max_messages_per_session: i64) -> u32 {
-    u32::try_from((max_messages_per_session / 20).max(1)).unwrap_or(u32::MAX)
-}
-
 /// Run retention cleanup: delete old messages and truncate per-session counts
 pub async fn run_retention_cleanup(app_state: Arc<AppState>) {
     use handlers::retention::RetentionConfig;
@@ -1132,17 +1120,14 @@ pub async fn run_retention_cleanup(app_state: Arc<AppState>) {
     let manager = app_state.session_manager.clone();
     let age_cursor = manager.retention_age_cursor();
     let cleanup_manager = manager.clone();
+    let session_ids = manager.drain_pending_truncations();
+    let attempted_ids = session_ids.clone();
+    let db_pool = app_state.db_pool.clone();
+    let archive = app_state.archive.clone();
     let config = RetentionConfig::new(
         app_state.message_retention_count,
         app_state.message_retention_days,
     );
-    let session_ids = manager.drain_due_truncations(
-        retention_probe_min_inserts(config.max_messages_per_session),
-        RETENTION_PROBE_MAX_WAIT,
-    );
-    let attempted_ids = session_ids.clone();
-    let db_pool = app_state.db_pool.clone();
-    let archive = app_state.archive.clone();
 
     // Everything below is blocking work — synchronous Diesel queries plus, with
     // an object-store archive, `block_on` reads inside
@@ -1200,7 +1185,7 @@ pub async fn run_retention_cleanup(app_state: Arc<AppState>) {
     match result {
         Ok(Ok((age_deleted, count_deleted, retry))) => {
             for id in retry {
-                manager.retry_truncation(id);
+                manager.queue_truncation(id);
             }
             if age_deleted > 0 || count_deleted > 0 {
                 tracing::info!(
@@ -1212,7 +1197,7 @@ pub async fn run_retention_cleanup(app_state: Arc<AppState>) {
         }
         failure => {
             for id in attempted_ids {
-                manager.retry_truncation(id);
+                manager.queue_truncation(id);
             }
             match failure {
                 Ok(Err(e)) => tracing::error!("Retention cleanup failed: {e}"),

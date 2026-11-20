@@ -11,10 +11,10 @@
     </marker>
   </defs>
 
-  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2533 · Probe count retention cheaply and only after enough new messages</text>
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2533 · Probe count retention with a bounded index-only count</text>
 
   <text x="55" y="100" font-size="34" fill="#e6e9f5">Every 60 s, each active session's over-limit probe materialized the whole session;</text>
-  <text x="55" y="140" font-size="34" fill="#e6e9f5">now an index-only bounded count runs after 5% growth or 10 minutes, whichever first.</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">now it is a bounded count over the session_id index that stops at the cap + 1.</text>
   <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
 
   <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
@@ -45,10 +45,10 @@
 
   <!-- AFTER -->
   <g>
-    <rect x="1040" y="240" width="880" height="150" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
-    <text x="1064" y="282" font-size="26" fill="#7aa2f7">PendingTrim { inserts, first_insert, forced }</text>
-    <text x="1064" y="322" font-size="23" fill="#9ece6a">drain_due_truncations: inserts &gt;= cap/20, or 10 min</text>
-    <text x="1064" y="358" font-size="23" fill="#9ece6a">retry_truncation: held / budget / failed go next cycle</text>
+    <rect x="1040" y="240" width="880" height="150" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="1064" y="282" font-size="26" fill="#7aa2f7">queue_truncation(session) on every message</text>
+    <text x="1064" y="322" font-size="23" fill="#a9b1d6">pending_truncations: DashSet&lt;Uuid&gt; (unchanged)</text>
+    <text x="1064" y="358" font-size="23" fill="#a9b1d6">drain_pending_truncations every 60 s (unchanged)</text>
   </g>
   <line x1="1480" y1="390" x2="1480" y2="436" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
   <g>
@@ -56,7 +56,7 @@
     <text x="1064" y="482" font-size="26" fill="#9ece6a">session_over_limit(conn, session, max)</text>
     <text x="1064" y="522" font-size="23" fill="#9ece6a">SELECT count(*) &gt; $2 FROM</text>
     <text x="1064" y="558" font-size="23" fill="#9ece6a">(SELECT 1 ... WHERE session_id = $1 LIMIT $2+1)</text>
-    <text x="1064" y="596" font-size="23" fill="#a9b1d6">index-only, stops at max+1, never touches the heap</text>
+    <text x="1064" y="596" font-size="23" fill="#a9b1d6">stops at max+1; index-only where pages are all-visible</text>
     <text x="1064" y="636" font-size="22" fill="#565f89">same exact answer; DB test pins the boundary</text>
   </g>
   <g>
@@ -65,5 +65,5 @@
     <text x="1064" y="812" font-size="23" fill="#9ece6a">returns early unless session_over_limit</text>
   </g>
 
-  <text x="55" y="1172" font-size="22" fill="#565f89">Trade-off: a session can run up to 5% over its cap (or 10 minutes) before it is trimmed; counters reset on restart.</text>
+  <text x="55" y="1172" font-size="22" fill="#565f89">Not covered: probing less often; that needs durable dirty state and is a separate follow-up.</text>
 </svg>
