@@ -10,5 +10,6 @@ mod fixtures;
 mod model_names;
 mod muse;
 mod portal;
+mod tasks;
 mod thinking;
 mod user;
