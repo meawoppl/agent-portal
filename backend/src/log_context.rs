@@ -121,15 +121,48 @@ pub(crate) mod tests {
             Ok(())
         }
     }
+    std::thread_local! {
+        static CAPTURE: std::cell::RefCell<Option<Buffer>> = const { std::cell::RefCell::new(None) };
+    }
+
+    /// Writes each formatted event into the calling thread's capture buffer,
+    /// if one is active, and discards it otherwise.
+    struct ThreadCapture;
+    impl std::io::Write for ThreadCapture {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            CAPTURE.with(|slot| {
+                if let Some(buffer) = slot.borrow().as_ref() {
+                    buffer.0.lock().unwrap().extend_from_slice(bytes);
+                }
+            });
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// Run `f` and return what it logged on this thread.
+    ///
+    /// One global subscriber routes into per-thread buffers, rather than a
+    /// `with_default` subscriber per call. tracing caches each callsite's
+    /// interest process-wide, and scoped dispatchers coming and going on
+    /// parallel test threads could leave a callsite cached as uninterested,
+    /// so a test's own log line silently went missing.
     pub(crate) fn capture(f: impl FnOnce()) -> String {
+        static INSTALL: std::sync::Once = std::sync::Once::new();
+        INSTALL.call_once(|| {
+            let subscriber = tracing_subscriber::fmt()
+                .without_time()
+                .with_ansi(false)
+                .with_writer(|| ThreadCapture)
+                .finish();
+            let _ = tracing::subscriber::set_global_default(subscriber);
+        });
         let output = Buffer::default();
-        let writer = output.clone();
-        let subscriber = tracing_subscriber::fmt()
-            .without_time()
-            .with_ansi(false)
-            .with_writer(move || writer.clone())
-            .finish();
-        tracing::subscriber::with_default(subscriber, f);
+        CAPTURE.with(|slot| *slot.borrow_mut() = Some(output.clone()));
+        f();
+        CAPTURE.with(|slot| *slot.borrow_mut() = None);
         let bytes = output.0.lock().unwrap().clone();
         String::from_utf8(bytes).unwrap()
     }
