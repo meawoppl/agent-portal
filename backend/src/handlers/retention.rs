@@ -29,6 +29,37 @@ impl RetentionConfig {
     }
 }
 
+/// Whether `session_id` holds more than `max` messages.
+///
+/// Bounded: `LIMIT max + 1` stops the count at the first row past the cap, and
+/// selecting no columns lets the planner answer from the `session_id` index
+/// (heap pages are still visited for visibility where they aren't all-visible).
+/// A bare `SELECT id ... OFFSET max LIMIT 1` with no `ORDER BY` planned as a
+/// bitmap heap scan that materialized the whole session, every cycle, for
+/// every session with new messages.
+pub(crate) fn session_over_limit(
+    conn: &mut diesel::pg::PgConnection,
+    session_id: Uuid,
+    max: i64,
+) -> QueryResult<bool> {
+    use diesel::sql_types::{BigInt, Bool, Uuid as SqlUuid};
+    #[derive(diesel::QueryableByName)]
+    struct Probe {
+        #[diesel(sql_type = Bool)]
+        over: bool,
+    }
+    let max = max.max(0);
+    diesel::sql_query(
+        "SELECT count(*) > $2 AS over
+         FROM (SELECT 1 FROM messages WHERE session_id = $1 LIMIT $3) AS bounded",
+    )
+    .bind::<SqlUuid, _>(session_id)
+    .bind::<BigInt, _>(max)
+    .bind::<BigInt, _>(max.saturating_add(1))
+    .get_result::<Probe>(conn)
+    .map(|probe| probe.over)
+}
+
 /// Truncate messages for a single session to the configured maximum.
 /// Deletes at most `budget` messages. Returns the number of deleted messages.
 pub fn truncate_session_messages(
@@ -38,6 +69,11 @@ pub fn truncate_session_messages(
     budget: usize,
 ) -> Result<usize, diesel::result::Error> {
     if budget == 0 {
+        return Ok(0);
+    }
+    // The seek below walks the retained tail through the ordered index and
+    // fetches each row; skip it for the common case of a session under its cap.
+    if !session_over_limit(conn, session_id, config.max_messages_per_session)? {
         return Ok(0);
     }
 
@@ -195,4 +231,46 @@ pub fn run_retention_cleanup(
     }
 
     (age_deleted, count_deleted, retry)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{insert_session, insert_user, shared_pool};
+
+    /// The bounded probe answers "more than `max`" exactly at the boundary:
+    /// a session holding the cap is not over it; one more message is.
+    #[test]
+    fn over_limit_probe_is_exact_at_the_cap() {
+        let Some(pool) = shared_pool() else { return };
+        let mut conn = pool.get().unwrap();
+        conn.test_transaction::<_, diesel::result::Error, _>(|conn| {
+            let user = insert_user(conn, "retention-probe");
+            let session = insert_session(conn, user.id, "retention-probe");
+            let add = |conn: &mut diesel::pg::PgConnection, n: i32| {
+                diesel::sql_query(
+                    "INSERT INTO messages (session_id, user_id, role, content, agent_type)
+                     SELECT $1, $2, 'assistant', '{}', 'claude' FROM generate_series(1, $3)",
+                )
+                .bind::<diesel::sql_types::Uuid, _>(session.id)
+                .bind::<diesel::sql_types::Uuid, _>(user.id)
+                .bind::<diesel::sql_types::Integer, _>(n)
+                .execute(conn)
+            };
+
+            assert!(!session_over_limit(conn, session.id, 3)?, "empty");
+            add(conn, 3)?;
+            assert!(
+                !session_over_limit(conn, session.id, 3)?,
+                "exactly at the cap"
+            );
+            add(conn, 1)?;
+            assert!(session_over_limit(conn, session.id, 3)?, "one over the cap");
+            assert!(
+                session_over_limit(conn, session.id, 0)?,
+                "a zero cap with rows"
+            );
+            Ok(())
+        });
+    }
 }

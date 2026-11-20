@@ -710,7 +710,7 @@ fn archive_retention_candidates(
     age_cursor: Option<handlers::retention::AgeCursor>,
 ) -> diesel::QueryResult<RetentionArchives> {
     use diesel::prelude::*;
-    use schema::{messages, sessions};
+    use schema::sessions;
 
     use handlers::retention::{
         old_message_candidates, with_cleanup_timeout, MAX_DELETES_PER_CYCLE,
@@ -740,14 +740,11 @@ fn archive_retention_candidates(
             age_rows.iter().map(|(_, session, _)| *session).collect();
         let mut count_candidates = Vec::new();
         for &session in pending {
-            let over_limit = messages::table
-                .filter(messages::session_id.eq(session))
-                .select(messages::id)
-                .offset(config.max_messages_per_session.max(0))
-                .first::<uuid::Uuid>(conn)
-                .optional()?
-                .is_some();
-            if over_limit {
+            if handlers::retention::session_over_limit(
+                conn,
+                session,
+                config.max_messages_per_session,
+            )? {
                 affected.insert(session);
                 count_candidates.push(session);
             }
