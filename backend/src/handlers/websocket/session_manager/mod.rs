@@ -20,6 +20,26 @@ use shared::{FileDownloadResponseFields, ForwardStatusFields, ServerToClient, Se
 use std::collections::VecDeque;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+/// A session with messages added since its last count-retention probe.
+#[derive(Debug)]
+pub(crate) struct PendingTrim {
+    inserts: u32,
+    first_insert: Instant,
+    /// Retry next cycle regardless of inserts or age.
+    forced: bool,
+}
+
+impl PendingTrim {
+    fn new() -> Self {
+        Self {
+            inserts: 0,
+            first_insert: Instant::now(),
+            forced: false,
+        }
+    }
+}
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
@@ -174,7 +194,7 @@ pub struct SessionManager {
     user_clients: Arc<DashMap<Uuid, Vec<WebClientSender>>>,
     last_ack_seq: Arc<DashMap<Uuid, u64>>,
     pending_messages: Arc<DashMap<SessionId, VecDeque<PendingMessage>>>,
-    pending_truncations: Arc<DashSet<Uuid>>,
+    pending_truncations: Arc<DashMap<Uuid, PendingTrim>>,
     retention_age_cursor: Arc<std::sync::Mutex<Option<crate::handlers::retention::AgeCursor>>>,
     launchers: Arc<DashMap<Uuid, LauncherConnection>>,
     /// Dedup index: `(user_id, hostname)` → `launcher_id`. Used to atomically
@@ -248,7 +268,7 @@ impl Default for SessionManager {
             user_clients: Arc::new(DashMap::new()),
             last_ack_seq: Arc::new(DashMap::new()),
             pending_messages: Arc::new(DashMap::new()),
-            pending_truncations: Arc::new(DashSet::new()),
+            pending_truncations: Arc::new(DashMap::new()),
             retention_age_cursor: Arc::default(),
             launchers: Arc::new(DashMap::new()),
             launcher_dedup: Arc::new(DashMap::new()),
@@ -280,8 +300,24 @@ impl SessionManager {
         Self::default()
     }
 
+    /// Record a new message for count retention. The session is probed once
+    /// enough inserts accumulate or it has waited long enough; see
+    /// [`Self::drain_due_truncations`].
     pub fn queue_truncation(&self, session_id: Uuid) {
-        self.pending_truncations.insert(session_id);
+        self.pending_truncations
+            .entry(session_id)
+            .or_insert_with(PendingTrim::new)
+            .inserts += 1;
+    }
+
+    /// Put a session back for the very next retention cycle: its trim was
+    /// held by a failed pre-trim archive, cut short by the delete budget, or
+    /// failed outright.
+    pub fn retry_truncation(&self, session_id: Uuid) {
+        self.pending_truncations
+            .entry(session_id)
+            .or_insert_with(PendingTrim::new)
+            .forced = true;
     }
 
     pub(crate) fn retention_age_cursor(&self) -> Option<crate::handlers::retention::AgeCursor> {
@@ -301,11 +337,24 @@ impl SessionManager {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = cursor;
     }
 
-    pub fn drain_pending_truncations(&self) -> Vec<Uuid> {
+    /// Take the sessions due for a count-retention probe: retries, sessions
+    /// with at least `min_inserts` new messages since their last probe, and
+    /// sessions whose first unprobed insert is older than `max_wait`. The
+    /// rest stay queued and keep counting.
+    ///
+    /// Only an insert count is kept, never a probe result, so deletions or a
+    /// changed retention cap can't leave a stale answer; `max_wait` bounds how
+    /// long a quiet session can sit over its cap.
+    pub fn drain_due_truncations(&self, min_inserts: u32, max_wait: Duration) -> Vec<Uuid> {
         let mut ids = Vec::new();
-        self.pending_truncations.retain(|id| {
-            ids.push(*id);
-            false
+        self.pending_truncations.retain(|id, pending| {
+            let due = pending.forced
+                || pending.inserts >= min_inserts
+                || pending.first_insert.elapsed() >= max_wait;
+            if due {
+                ids.push(*id);
+            }
+            !due
         });
         ids
     }
@@ -366,15 +415,36 @@ mod tests {
 
         mgr.queue_truncation(id1);
         mgr.queue_truncation(id2);
-        mgr.queue_truncation(id1); // duplicate should be idempotent
+        mgr.queue_truncation(id1); // a repeat counts, but still drains once
 
-        let drained = mgr.drain_pending_truncations();
+        let drained = mgr.drain_due_truncations(1, Duration::from_secs(600));
         assert_eq!(drained.len(), 2);
         assert!(drained.contains(&id1));
         assert!(drained.contains(&id2));
 
-        let drained2 = mgr.drain_pending_truncations();
+        let drained2 = mgr.drain_due_truncations(1, Duration::from_secs(600));
         assert!(drained2.is_empty());
+    }
+
+    /// A session is probed once it gains `min_inserts`, once its oldest
+    /// unprobed insert is `max_wait` old, or straight away when retried.
+    #[test]
+    fn truncation_probes_wait_for_inserts_age_or_retry() {
+        let mgr = SessionManager::new();
+        let (busy, quiet, retried) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+        for _ in 0..3 {
+            mgr.queue_truncation(busy);
+        }
+        mgr.queue_truncation(quiet);
+        mgr.retry_truncation(retried);
+
+        let due = mgr.drain_due_truncations(3, Duration::from_secs(600));
+        assert!(due.contains(&busy), "reached the insert threshold");
+        assert!(due.contains(&retried), "retries never wait");
+        assert!(!due.contains(&quiet), "below threshold and recent");
+
+        let due = mgr.drain_due_truncations(3, Duration::ZERO);
+        assert_eq!(due, vec![quiet], "max wait releases a quiet session");
     }
 
     #[test]
