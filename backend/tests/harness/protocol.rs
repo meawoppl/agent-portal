@@ -456,6 +456,14 @@ async fn failure_reason_reaches_the_matching_input() {
         .send(ClientToServer::Register(fields.clone()))
         .await
         .unwrap();
+    // The progress snapshot is sent after the server joins this browser to
+    // the session. Sending Register only queues a frame on the browser socket;
+    // an acknowledgment on the separate proxy socket could otherwise win.
+    receive::<ClientEndpoint>(&mut browser, |f| {
+        matches!(f, ServerToClient::AgentProgress { .. })
+    })
+    .await;
+
     let (with_reason, without_reason) = (uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
     let failed =
         |session_id, client_msg_id, message: Option<&str>| ProxyToServer::InputProgressAck {
