@@ -2682,7 +2682,7 @@ impl SessionView {
         self.reconnect_timer = None;
         if retryable && self.reconnect_attempt < MAX_ATTEMPTS {
             self.reconnect_attempt += 1;
-            let delay_ms = calculate_backoff(self.reconnect_attempt - 1);
+            let delay_ms = calculate_backoff(self.reconnect_attempt - 1, js_sys::Math::random());
             log::info!(
                 "WebSocket disconnected, reconnecting in {}ms (attempt {})",
                 delay_ms,

@@ -304,7 +304,7 @@ fn use_live_client_websocket() -> UseClientWebSocket {
                                     live.dispatch(client_websocket_events::ClientWsAction::SessionProgressReset(portal.conn()));
                                     break;
                                 }
-                                let delay = calculate_backoff(attempt);
+                                let delay = calculate_backoff(attempt, js_sys::Math::random());
                                 attempt += 1;
                                 gloo::timers::future::TimeoutFuture::new(delay).await;
                             }

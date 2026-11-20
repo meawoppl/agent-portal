@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200">
+<rect width="2000" height="1200" fill="#1a1b26"/>
+<text x="55" y="52" font-family="monospace" font-size="24" fill="#a9b1d6">PR #2530 · Browser reconnect delays</text>
+<text x="55" y="103" font-family="monospace" font-size="34" fill="#e6e9f5">Spread browser reconnects after a shared interruption.</text>
+<text x="55" y="146" font-family="monospace" font-size="34" fill="#e6e9f5">Both dashboard and session sockets sample each retry.</text>
+<path d="M55 175H1945 M1000 190V1140" stroke="#565f89" stroke-dasharray="8 8"/>
+<text x="55" y="230" font-family="monospace" font-size="22" fill="#f7768e">BEFORE</text>
+<rect x="55" y="300" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="79" y="345" font-family="monospace" font-size="26" fill="#7aa2f7">Shared interruption</text>
+<text x="79" y="399" font-family="monospace" font-size="23" fill="#c0caf5">Many sockets start retrying at the same time.</text>
+<path d="M500 500v70" stroke="#565f89" stroke-width="3"/>
+<rect x="55" y="570" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="79" y="615" font-family="monospace" font-size="26" fill="#7aa2f7">calculate_backoff</text>
+<text x="79" y="669" font-family="monospace" font-size="23" fill="#c0caf5">Every first retry waits exactly one second.</text>
+<path d="M500 770v70" stroke="#565f89" stroke-width="3"/>
+<rect x="55" y="840" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="79" y="885" font-family="monospace" font-size="26" fill="#7aa2f7">Replay bursts</text>
+<text x="79" y="939" font-family="monospace" font-size="23" fill="#c0caf5">History and live reads compete for the same pool.</text>
+<text x="1055" y="230" font-family="monospace" font-size="22" fill="#9ece6a">AFTER</text>
+<rect x="1055" y="300" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="1079" y="345" font-family="monospace" font-size="26" fill="#7aa2f7">Shared interruption</text>
+<text x="1079" y="399" font-family="monospace" font-size="23" fill="#c0caf5">Each socket draws its own random sample.</text>
+<path d="M1500 500v70" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="570" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="1079" y="615" font-family="monospace" font-size="26" fill="#7aa2f7">calculate_backoff</text>
+<text x="1079" y="669" font-family="monospace" font-size="23" fill="#c0caf5">The first delay varies from 500 to 999 ms.</text>
+<path d="M1500 770v70" stroke="#565f89" stroke-width="3"/>
+<rect x="1055" y="840" width="890" height="200" rx="14" fill="#1e202e" stroke="#565f89"/>
+<text x="1079" y="885" font-family="monospace" font-size="26" fill="#7aa2f7">Later retries</text>
+<text x="1079" y="939" font-family="monospace" font-size="23" fill="#c0caf5">New samples spread retries up to the 30 s ceiling.</text>
+<text x="55" y="1172" font-family="monospace" font-size="22" fill="#a9b1d6">The backoff ceiling doubles to 30 seconds. The delay stays in the upper half of its window.</text>
+</svg>

@@ -202,13 +202,16 @@ pub fn parse_version(s: &str) -> Option<(u64, u64, u64)> {
     Some((major, minor, patch))
 }
 
-/// Calculate exponential backoff delay for reconnection attempts.
-pub fn calculate_backoff(attempt: u32) -> u32 {
+/// Exponential reconnect delay with jitter in the upper half of each window.
+/// Pass a fresh uniform sample in `[0, 1)` for every attempt.
+pub fn calculate_backoff(attempt: u32, sample: f64) -> u32 {
     const INITIAL_MS: u32 = 1000;
     const MAX_MS: u32 = 30000;
-    INITIAL_MS
+    let ceiling = INITIAL_MS
         .saturating_mul(2u32.saturating_pow(attempt.min(5)))
-        .min(MAX_MS)
+        .min(MAX_MS);
+    let floor = ceiling / 2;
+    floor + (f64::from(ceiling - floor) * sample) as u32
 }
 
 /// Access browser localStorage, returning `None` when unavailable (no
@@ -316,12 +319,18 @@ mod tests {
     }
 
     #[test]
-    fn backoff_doubles_then_caps_at_30s() {
-        assert_eq!(calculate_backoff(0), 1000);
-        assert_eq!(calculate_backoff(1), 2000);
-        assert_eq!(calculate_backoff(2), 4000);
-        assert_eq!(calculate_backoff(5), 30000);
-        assert_eq!(calculate_backoff(99), 30000);
+    fn backoff_windows_double_then_cap_at_30s() {
+        for (attempt, floor, ceiling) in [
+            (0, 500, 1_000),
+            (1, 1_000, 2_000),
+            (2, 2_000, 4_000),
+            (5, 15_000, 30_000),
+            (u32::MAX, 15_000, 30_000),
+        ] {
+            assert_eq!(calculate_backoff(attempt, 0.0), floor);
+            assert_eq!(calculate_backoff(attempt, 0.5), (floor + ceiling) / 2);
+            assert_eq!(calculate_backoff(attempt, 0.99999), ceiling - 1);
+        }
     }
 
     #[test]
