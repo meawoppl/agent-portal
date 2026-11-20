@@ -672,6 +672,7 @@ mod tests {
             stopped_by_permission_check: None,
             stop_reason: None,
             terminal_reason: None,
+            message_undelivered: None,
             fast_mode_state: None,
             model_usage: None,
             model_usage_since_last_result: None,
