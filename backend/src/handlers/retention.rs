@@ -31,11 +31,12 @@ impl RetentionConfig {
 
 /// Whether `session_id` holds more than `max` messages.
 ///
-/// Bounded and index-only: it counts at most `max + 1` entries of the
-/// `session_id` index and never visits the table. A bare
-/// `SELECT id ... OFFSET max LIMIT 1` with no `ORDER BY` planned as a bitmap
-/// heap scan that materialized the whole session, every cycle, for every
-/// session with new messages.
+/// Bounded: `LIMIT max + 1` stops the count at the first row past the cap, and
+/// selecting no columns lets the planner answer from the `session_id` index
+/// (heap pages are still visited for visibility where they aren't all-visible).
+/// A bare `SELECT id ... OFFSET max LIMIT 1` with no `ORDER BY` planned as a
+/// bitmap heap scan that materialized the whole session, every cycle, for
+/// every session with new messages.
 pub(crate) fn session_over_limit(
     conn: &mut diesel::pg::PgConnection,
     session_id: Uuid,
