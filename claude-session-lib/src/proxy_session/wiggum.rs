@@ -698,6 +698,7 @@ mod tests {
             result_index: None,
             local_command: None,
             fast_mode_disabled_reason: None,
+            begun_message_ids: None,
         }
     }
 
