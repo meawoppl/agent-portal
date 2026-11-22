@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200"><rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="Arial, sans-serif"><text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2539 · Add the session menu to the mobile Sessions sheet</text>
+<text x="55" y="105" font-size="34" fill="#e6e9f5">Phones render no session rail, so stop, pause, leave and close were unreachable;</text>
+<text x="55" y="149" font-size="34" fill="#e6e9f5">now each Sessions sheet row opens the rail's own menu as a bottom action sheet.</text>
+<path d="M55 177 H1945 M1000 205 V1120" stroke="#3d4666"/>
+<text x="75" y="235" font-size="22" font-weight="bold" letter-spacing="4" fill="#f7768e">BEFORE</text>
+<rect x="75" y="270" width="870" height="230" rx="16" fill="#1e202e" stroke="#3d4666"/>
+<text x="100" y="318" font-size="28" fill="#7aa2f7">SessionRail (desktop only)</text>
+<text x="100" y="378" font-size="25" fill="#c0caf5">Owns the menu state and its four dialogs:</text>
+<text x="100" y="412" font-size="25" fill="#c0caf5">rename, share, schedule, fork.</text>
+<rect x="75" y="560" width="870" height="230" rx="16" fill="#1e202e" stroke="#f7768e"/>
+<text x="100" y="608" font-size="28" fill="#7aa2f7">page.rs: if !is_mobile_dashboard</text>
+<text x="100" y="668" font-size="25" fill="#c0caf5">At 768 px and below the rail is not rendered.</text>
+<text x="100" y="730" font-size="23" fill="#f7768e">Its menu, and every action in it, goes with it.</text>
+<rect x="75" y="850" width="870" height="230" rx="16" fill="#1e202e" stroke="#f7768e"/>
+<text x="100" y="898" font-size="28" fill="#7aa2f7">MobileReady Sessions sheet</text>
+<text x="100" y="958" font-size="25" fill="#c0caf5">Rows offer Open, Mark read and Mute only.</text>
+<text x="100" y="1020" font-size="23" fill="#f7768e">No stop, pause, hide, leave, share or close.</text>
+<text x="1055" y="235" font-size="22" font-weight="bold" letter-spacing="4" fill="#9ece6a">AFTER</text>
+<rect x="1055" y="270" width="870" height="230" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="318" font-size="28" fill="#7aa2f7">use_session_menu (menu_host.rs)</text>
+<text x="1080" y="378" font-size="25" fill="#c0caf5">One hook owns the menu state and dialogs;</text>
+<text x="1080" y="412" font-size="25" fill="#c0caf5">SessionRail and MobileReady both call it.</text>
+<rect x="1055" y="560" width="870" height="230" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="608" font-size="28" fill="#7aa2f7">Row button: Session actions (ready-menu)</text>
+<text x="1080" y="668" font-size="25" fill="#c0caf5">Same SessionRailMenu, same two-tap confirms.</text>
+<text x="1080" y="730" font-size="23" fill="#9ece6a">Close sends DELETE only on the second tap.</text>
+<rect x="1055" y="850" width="870" height="230" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="898" font-size="28" fill="#7aa2f7">Bottom action sheet inside the sheet</text>
+<text x="1080" y="958" font-size="25" fill="#c0caf5">Full width, scrolls; stacks above the sheet.</text>
+<text x="1080" y="1020" font-size="23" fill="#a9b1d6">A tap outside closes only the menu.</text>
+<text x="55" y="1172" font-size="22" fill="#a9b1d6">The rail's own dropdown placement on desktop is unchanged; WebKit/iPhone was not exercised locally (Chromium only).</text></g></svg>
