@@ -2,6 +2,6 @@
 [[exceptions]]
 id = "RUSTSEC-2023-0071"
 owner = "@meawoppl"
-reviewed_on = 2026-10-21
-review_by = 2026-11-21
+reviewed_on = 2026-11-22
+review_by = 2026-12-22
 reason = "VAPID uses only ES256KeyPair; the transitive rsa private-key path is not called. See docs/DEPENDENCY_SECURITY.md."

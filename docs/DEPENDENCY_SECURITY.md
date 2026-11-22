@@ -144,13 +144,14 @@ full-lock gate even when the server and WASM artifacts do not contain them.
 ## Specific RSA exposure exception
 
 [RUSTSEC-2023-0071](https://rustsec.org/advisories/RUSTSEC-2023-0071.html) affects
-RSA private-key operations and has no patched release. The locked `rsa` crate
-arrives through `backend -> web-push -> jwt-simple -> superboring -> rsa`.
-The exception is based on the call path, not on severity or the absence of a
-patch:
+RSA private-key operations. The locked `rsa` 0.9.10 arrives through
+`backend -> web-push -> jwt-simple -> superboring -> rsa`. RustSec lists 0.10.0
+as patched. The locked superboring 0.1.17 requires rsa 0.9, so taking the fix
+requires updating or replacing that dependency path. The exposure review
+verified these signing paths:
 
 - `backend/src/push/webpush.rs` uses `VapidSignatureBuilder` to sign VAPID.
-- In web-push 0.11.0, `src/vapid/key.rs` wraps `ES256KeyPair` and
+- In the vendored web-push 0.11.0, `src/vapid/key.rs` wraps `ES256KeyPair` and
   `src/vapid/builder.rs` parses only EC keys. Portal does not select an RSA
   algorithm or call RSA private-key operations through that chain.
 - FCM's separate RSA service-account signing uses `jsonwebtoken` 9/ring, not
@@ -158,7 +159,7 @@ patch:
 
 Sources: [web-push's VAPID key type](https://docs.rs/crate/web-push/0.11.0/source/src/vapid/key.rs)
 and [VAPID builder](https://docs.rs/crate/web-push/0.11.0/source/src/vapid/builder.rs).
-Owner: @meawoppl. Reviewed 2026-10-21; review again by **2026-11-21**, and whenever
+Owner: @meawoppl. Reviewed 2026-11-22. Review again by **2026-12-22** and whenever
 web-push, jwt-simple, their features or signing call sites change. Remove the
 exception when the dependency is patched/removed. If an RSA private-key path
 is introduced, this rationale no longer holds: remove the exception and fix
