@@ -166,6 +166,7 @@
     background: transparent;
     border: 0;
 }
+
 /* Opens the same session menu as the desktop rail's pill ⋯: the phone
    layout has no rail. A comfortable tap target for a one-glyph button. */
 .ready-row .ready-menu {
@@ -178,6 +179,7 @@
     border: 0;
     color: var(--text-secondary);
 }
+
 /* Inside the sheet the rail's dropdown becomes a bottom action sheet: on a
    phone the menu is taller than the space under a row's ⋯, so positioning it
    at the button (as the rail does) pushed Stop and Close off-screen. The
