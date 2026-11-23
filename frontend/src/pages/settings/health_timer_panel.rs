@@ -116,7 +116,7 @@ struct MessageInputProps {
 ///
 /// Binding `value` straight to parent state round-trips every keystroke through
 /// a re-render, which tears down and rebuilds the DOM node and bounces the caret
-/// out — see the focus-stable input note in CLAUDE.md. Re-seed only when the
+/// out — see the focus-stable input note in AGENTS.md. Re-seed only when the
 /// stored value changes from outside (another tab), which is a no-op while typing.
 #[function_component(MessageInput)]
 fn message_input(props: &MessageInputProps) -> Html {

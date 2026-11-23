@@ -5,24 +5,18 @@ on:
     branches: [main]
     paths:
       - aperture-frontend/**
-      - frontend/src/pages/aperture/**
-      - frontend/assets/aperture/**
-      - frontend/assets/aperture-demo/**
-      - frontend/styles/aperture.css
       - scripts/build-aperture.sh
       - .github/workflows/aperture-pages.yml
+      - Cargo.toml
       - Cargo.lock
       - rust-toolchain.toml
   pull_request:
     branches: [main]
     paths:
       - aperture-frontend/**
-      - frontend/src/pages/aperture/**
-      - frontend/assets/aperture/**
-      - frontend/assets/aperture-demo/**
-      - frontend/styles/aperture.css
       - scripts/build-aperture.sh
       - .github/workflows/aperture-pages.yml
+      - Cargo.toml
       - Cargo.lock
       - rust-toolchain.toml
 permissions:

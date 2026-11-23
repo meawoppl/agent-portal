@@ -40,8 +40,8 @@ First Article*.zip
 
 # Terminal capture and local scratch artifacts
 screenlog.*
-/test-*.png
-/test-*.svg
+/*.png
+/*.svg
 /*.patch
 parsing-dump/
 /image.png
@@ -52,3 +52,9 @@ deploy/backups/
 deploy/.restore.lock
 
 aperture-frontend/dist/
+
+# Local agent artifacts and generated CI inputs (not source)
+/reports/
+/portal_pasted_image_*
+/.worktrees/
+/build-output/
