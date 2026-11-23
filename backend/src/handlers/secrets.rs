@@ -336,6 +336,76 @@ async fn list(
         can_manage_organization: store::curator(&mut conn, principal.user)?,
     }))
 }
+#[derive(serde::Deserialize)]
+struct AgentCatalogQuery {
+    after: Option<Uuid>,
+}
+
+async fn agent_catalog(
+    State(state): State<Arc<AppState>>,
+    Path(session_id): Path<Uuid>,
+    Query(query): Query<AgentCatalogQuery>,
+    headers: HeaderMap,
+) -> Result<Json<AgentSecretListPage>, AppError> {
+    use diesel::sql_types::{Nullable, Text, Uuid as SqlUuid};
+
+    #[derive(diesel::QueryableByName)]
+    struct Entry {
+        #[diesel(sql_type = SqlUuid)]
+        id: Uuid,
+        #[diesel(sql_type = Text)]
+        reference: String,
+        #[diesel(sql_type = Text)]
+        description: String,
+    }
+
+    let mut conn = state.conn()?;
+    let process = bindings::authenticated_process(&state, &mut conn, &headers)?;
+    if process.session != session_id {
+        return Err(AppError::Forbidden);
+    }
+    // Mirror request eligibility: an active owner's personal or organization
+    // keys, plus explicit unexpired grants with both read and use rights.
+    let mut rows = diesel::sql_query(
+        "SELECT s.id, s.description,
+             CASE WHEN s.namespace = 'organization' THEN 'org/' || s.name
+                  WHEN s.owner_user_id = $1 THEN 'personal/' || s.name
+                  ELSE 'id/' || s.id::text END AS reference
+         FROM secrets s
+         WHERE ($2 IS NULL OR s.id > $2)
+           AND s.deleted_at IS NULL
+           AND s.current_version_id IS NOT NULL
+           AND NOT COALESCE('deleted' = ANY(s.system_tags), false)
+           AND (s.namespace = 'organization' OR s.owner_user_id = $1 OR EXISTS (
+               SELECT 1 FROM secret_grants g
+               WHERE g.secret_id = s.id AND g.grantee_user_id = $1
+                 AND g.can_read AND g.can_use
+                 AND (g.expires_at IS NULL OR g.expires_at > statement_timestamp())
+           ))
+         ORDER BY s.id LIMIT 101",
+    )
+    .bind::<SqlUuid, _>(process.user)
+    .bind::<Nullable<SqlUuid>, _>(query.after)
+    .load::<Entry>(&mut conn)?;
+
+    let next = if rows.len() > 100 {
+        rows.truncate(100);
+        rows.last().map(|row| row.id)
+    } else {
+        None
+    };
+    Ok(Json(AgentSecretListPage {
+        secrets: rows
+            .into_iter()
+            .map(|row| AgentSecretDescription {
+                reference: row.reference,
+                description: row.description,
+            })
+            .collect(),
+        next,
+    }))
+}
+
 async fn info(
     State(state): State<Arc<AppState>>,
     SecretPrincipal(principal): SecretPrincipal,
@@ -935,6 +1005,10 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
     idempotency::layer(
         Router::new()
             .route("/api/secrets", get(list).post(create))
+            .route(
+                "/api/secrets/agent-catalog/{session_id}",
+                get(agent_catalog),
+            )
             .route(
                 "/api/secrets/bindings",
                 get(bindings::list).post(bindings::create),

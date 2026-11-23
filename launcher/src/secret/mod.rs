@@ -13,6 +13,8 @@ use std::ffi::OsString;
 
 #[derive(Debug, Subcommand)]
 pub enum Action {
+    /// List references and descriptions for secrets this session can request.
+    List,
     /// Create or update secrets through one owner-approved, write-only batch.
     #[command(alias = "propose")]
     Set(proposals::SetArgs),
@@ -42,11 +44,38 @@ pub async fn run(action: Action, backend: Option<String>, dev: bool) -> anyhow::
     // These paths require the injected session identity. Never load launcher
     // login/config credentials or a human vault token as a fallback.
     match action {
+        Action::List => list(dev).await,
         Action::Set(args) => proposals::run(&args, dev).await,
         Action::Request(args) => requests::run(&args, dev).await,
         Action::Run { binding, command } => bindings::execute(&binding, &command, dev).await,
         Action::Inject(args) => inject::bound(&args, dev).await,
     }
+}
+
+async fn list(dev: bool) -> anyhow::Result<()> {
+    use shared::api::AgentSecretListPage;
+
+    let agent = bindings::BoundAgent::from_env(dev)?;
+    let mut secrets = Vec::new();
+    let mut after = None;
+    loop {
+        let mut path = format!("/agent-catalog/{}", agent.session_id);
+        if let Some(cursor) = after {
+            path.push_str(&format!("?after={cursor}"));
+        }
+        let page: AgentSecretListPage = agent
+            .client
+            .request::<_, ()>(reqwest::Method::GET, &path, None)
+            .await?;
+        secrets.extend(page.secrets);
+        let Some(next) = page.next else { break };
+        if after.is_some_and(|previous| next <= previous) {
+            bail!("Secret catalog returned an invalid continuation");
+        }
+        after = Some(next);
+    }
+    secrets.sort_by(|a, b| a.reference.cmp(&b.reference));
+    output(&secrets)
 }
 
 fn run_child(command: &[OsString], values: Vec<(String, SecretString)>) -> anyhow::Result<()> {
@@ -113,7 +142,6 @@ mod tests {
             "authorize",
             "login",
             "rotate",
-            "list",
             "members",
             "info",
             "versions",
@@ -151,16 +179,7 @@ mod tests {
             "tool"
         ])
         .is_err());
-        assert!(crate::Args::try_parse_from([
-            "agent-portal",
-            "secret",
-            "inject",
-            "--in-file",
-            "in",
-            "--out-file",
-            "out"
-        ])
-        .is_err());
+        assert!(crate::Args::try_parse_from(["agent-portal", "secret", "list"]).is_ok());
         let id = "00000000-0000-0000-0000-000000000001";
         assert!(crate::Args::try_parse_from([
             "agent-portal",

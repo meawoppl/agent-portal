@@ -5,8 +5,8 @@ use anyhow::{bail, Context};
 use clap::Args;
 use reqwest::Method;
 use shared::api::{
-    SecretAccessGroupInfo, SecretAccessRequestInfo, SecretAccessState, SecretNamespace,
-    MAX_SECRET_ACCESS_GROUP_ITEMS,
+    SecretAccessGroupCreateRequest, SecretAccessGroupInfo, SecretAccessGroupItem,
+    SecretAccessRequestInfo, SecretAccessState, SecretNamespace, MAX_SECRET_ACCESS_GROUP_ITEMS,
 };
 use std::{
     io::{Read, Write},
@@ -31,9 +31,15 @@ pub struct InjectArgs {
     /// Replace an existing regular destination file atomically.
     #[arg(long)]
     force: bool,
-    /// Approved credential-group request ID, using only the bound agent identity.
+    /// Reuse an approved group instead of requesting the template's references.
+    #[arg(long, conflicts_with_all = ["request_id", "expires_in"])]
+    approval: Option<Uuid>,
+    /// Reuse this UUID when retrying an automatic request for the same template.
     #[arg(long)]
-    pub approval: Uuid,
+    request_id: Option<Uuid>,
+    /// Approved binding lifetime in seconds for a new request.
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..=3600))]
+    expires_in: Option<u64>,
 }
 struct Marker {
     span: Range<usize>,
@@ -236,21 +242,54 @@ fn approved_items<'a>(
         .collect()
 }
 pub(super) async fn bound(args: &InjectArgs, dev: bool) -> anyhow::Result<()> {
-    let approval = args.approval;
     let agent = BoundAgent::from_env(dev)?;
-    bound_with_agent(&agent, args, approval).await
+    bound_with_agent(&agent, args).await
 }
-async fn bound_with_agent(
-    agent: &BoundAgent,
-    args: &InjectArgs,
-    approval: Uuid,
-) -> anyhow::Result<()> {
+
+fn template_request(template: &Template, args: &InjectArgs) -> SecretAccessGroupCreateRequest {
+    SecretAccessGroupCreateRequest {
+        request_id: args.request_id.unwrap_or_else(Uuid::new_v4),
+        expires_in_seconds: args.expires_in.unwrap_or(900),
+        items: template
+            .references
+            .iter()
+            .enumerate()
+            .map(|(index, reference)| SecretAccessGroupItem {
+                reference: reference.to_string(),
+                // The binding protocol requires an environment label. The
+                // template path never sets these in a child process.
+                env_name: format!("PORTAL_TEMPLATE_SECRET_{}", index + 1),
+                version: None,
+            })
+            .collect(),
+    }
+}
+
+async fn bound_with_agent(agent: &BoundAgent, args: &InjectArgs) -> anyhow::Result<()> {
     let template = prepare(args)?;
-    let group: SecretAccessGroupInfo = agent
-        .client
-        .request::<_, ()>(Method::GET, &format!("/request-groups/{approval}"), None)
-        .await?;
-    let items = approved_items(&template, &group, approval, agent.session_id)?;
+    let group;
+    let items = if let Some(approval) = args.approval {
+        group = agent
+            .client
+            .request::<_, ()>(Method::GET, &format!("/request-groups/{approval}"), None)
+            .await?;
+        approved_items(&template, &group, approval, agent.session_id)?
+    } else {
+        if template.references.is_empty() {
+            bail!("Template contains no secret placeholders");
+        }
+        let request = template_request(&template, args);
+        let (approved, timed_out) = super::requests::request_group(agent, &request, true).await?;
+        if timed_out {
+            bail!("Approval still pending; retry with the same --request-id");
+        }
+        if approved.state != SecretAccessState::Approved {
+            bail!("Credential set was denied, expired, or invalidated");
+        }
+        // The request helper validates every item in template order.
+        group = approved;
+        group.items.iter().collect()
+    };
     let mut values = Vec::new();
     for item in items {
         let (env, value) = agent
@@ -279,7 +318,9 @@ mod tests {
             input: dir.join("config.tpl"),
             output: dir.join("config.env"),
             force: false,
-            approval: Uuid::new_v4(),
+            approval: Some(Uuid::new_v4()),
+            request_id: None,
+            expires_in: None,
         }
     }
     #[test]
@@ -374,7 +415,17 @@ mod tests {
         assert_eq!(std::fs::read_to_string(target).unwrap(), "keep");
     }
     #[test]
-    fn cli_requires_approval_and_file_paths_and_accepts_uri_references() {
+    fn cli_accepts_automatic_approval_and_requires_file_paths() {
+        assert!(crate::Args::try_parse_from([
+            "agent-portal",
+            "secret",
+            "inject",
+            "--in-file",
+            "input",
+            "--out-file",
+            "output",
+        ])
+        .is_ok());
         assert!(crate::Args::try_parse_from([
             "agent-portal",
             "secret",
@@ -473,6 +524,59 @@ mod tests {
         assert!(approved_items(&input, &group, group.id, session).is_err());
     }
     #[tokio::test]
+    async fn automatic_injection_requests_unique_references_and_waits_for_approval() {
+        use super::super::requests::tests::mock_server;
+        let dir = tempfile::tempdir().unwrap();
+        let mut args = args(dir.path());
+        args.approval = None;
+        let request_id = Uuid::new_v4();
+        args.request_id = Some(request_id);
+        let source = "first={{secret://org/TOKEN}}\nagain={{ secret://org/TOKEN }}\n";
+        std::fs::write(&args.input, source).unwrap();
+        let mut item = item();
+        item.id = Uuid::new_v5(&request_id, b"secret-access-group:v1:0");
+        item.env_name = "PORTAL_TEMPLATE_SECRET_1".into();
+        item.expires_at = (chrono::Utc::now() + chrono::Duration::minutes(1)).to_rfc3339();
+        let session = item.session_id;
+        let group = SecretAccessGroupInfo {
+            id: request_id,
+            state: SecretAccessState::Approved,
+            items: vec![item],
+        };
+        let mut pending = serde_json::to_value(&group).unwrap();
+        pending["state"] = serde_json::json!("pending");
+        pending["items"][0]["state"] = serde_json::json!("pending");
+        pending["items"][0]["binding_id"] = serde_json::Value::Null;
+
+        let (url, server) = mock_server(vec![
+            pending,
+            serde_json::to_value(&group).unwrap(),
+            serde_json::json!({"ticket":"private-ticket","expires_in":30}),
+            serde_json::json!({"env_name":"PORTAL_TEMPLATE_SECRET_1","version":3,"value":"canary"}),
+        ]);
+        let agent = BoundAgent::from_values(
+            Some(url),
+            Some("session-token".into()),
+            Some(session.to_string()),
+            true,
+        )
+        .unwrap();
+        bound_with_agent(&agent, &args).await.unwrap();
+        let calls = server.join().unwrap();
+        assert_eq!(calls.len(), 4);
+        assert!(calls[0].starts_with("POST /api/secrets/request-groups "));
+        let (_, body) = calls[0].split_once("\r\n\r\n").unwrap();
+        let payload: SecretAccessGroupCreateRequest = serde_json::from_str(body).unwrap();
+        assert_eq!(payload.items.len(), 1);
+        assert_eq!(payload.items[0].reference, "org/TOKEN");
+        assert!(calls[1].starts_with("GET /api/secrets/request-groups/"));
+        assert_eq!(
+            std::fs::read_to_string(&args.output).unwrap(),
+            "first=canary\nagain=canary\n"
+        );
+    }
+
+    #[tokio::test]
     async fn bound_injection_redeems_only_matching_approved_version_and_deduplicates() {
         use super::super::requests::tests::mock_server;
         for wrong_version in [false, true] {
@@ -502,7 +606,9 @@ mod tests {
                 true,
             )
             .unwrap();
-            let result = bound_with_agent(&agent, &args, group.id).await;
+            let mut args = args;
+            args.approval = Some(group.id);
+            let result = bound_with_agent(&agent, &args).await;
             if wrong_version {
                 assert!(result.is_err());
                 assert!(!args.output.exists());

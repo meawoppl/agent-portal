@@ -75,6 +75,15 @@ Deletion uses the same two-click confirmation as closing sessions: click **Delet
 
 Delete adds the exact reserved `deleted` system tag, records the actor/time, and invalidates access bindings. It removes no version and reserves the name. Deleted keys appear alongside active entries when **Show deleted secrets** is checked under the same authorization policy. Normal and historical value reads are denied while deleted. Browser sharing and restore also require the verified OAuth-backed browser session, since they can delegate access to retained values. Restore preserves identity/history, requires explicit confirmation of its sharing audience, and never revives old tickets or process approvals. Creating a previously deleted name fails until it is restored or another name is chosen.
 
+## Discover secrets from an agent session
+
+Run `agent-portal secret list` for a JSON array of references and descriptions.
+The catalog includes active personal and organization secrets and personal
+secrets shared with the session owner with both read and use rights. Shared
+personal secrets use `id/UUID` references. Listing uses the active bound session
+credential and returns metadata only. It does not request approval or grant
+access to any values.
+
 ## Approved session execution
 
 Agents can ask for access directly in the session thread:
@@ -164,24 +173,23 @@ are literal (including spaces); percent-encoding, URI query strings, and field
 selectors are not interpreted. Only `{{ secret://... }}` placeholders expand;
 other template expressions and bare URIs remain unchanged.
 
-First request the credentials together, then supply the resulting
-**group request ID** (not a member binding ID):
+Run injection directly on the template:
 
 ```bash
-agent-portal secret request \
-  --credential DB_PASSWORD=secret://org/database-password \
-  --credential API_TOKEN=secret://personal/api-token \
-  --credential STABLE_KEY=secret://id/01234567-89ab-4cde-8012-3456789abcde --wait
-agent-portal secret inject --approval GROUP_REQUEST_UUID \
-  --in-file config.env.tpl --out-file config.env
+agent-portal secret inject --in-file config.env.tpl --out-file config.env
 ```
 
-Every template reference must match exactly one credential in that approved
-group. The existing process-bound tickets, pinned versions and expiry checks
-still apply. The environment-variable labels used during approval are checked
-against the redeemed bindings; the template selects secrets by reference.
-Injection always requires an active bound agent context and the explicitly
-approved group. There is no human-token or unapproved fallback.
+Injection scans the template once, deduplicates the references, and requests
+them together in one approval card. It waits for the owner's decision before
+retrieving values or writing the output. The approval card uses generated
+`PORTAL_TEMPLATE_SECRET_*` binding labels. Injection does not set those
+environment variables. Use the printed `--request-id` with the same template
+references and options to retry an interrupted wait.
+
+You can also pass `--approval GROUP_REQUEST_UUID` to reuse an approved
+credential group. Every template reference must match exactly one credential
+in that group. Both paths use the active bound agent context, pinned versions,
+and the existing ticket and expiry checks.
 
 Substitution is literal: no shell expansion, recursive interpolation, or
 JSON/YAML/INI escaping occurs. Choose the template syntax appropriately for the

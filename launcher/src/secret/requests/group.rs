@@ -59,13 +59,32 @@ fn validate(
 pub(super) async fn run(args: &RequestArgs, dev: bool) -> anyhow::Result<()> {
     let request = payload(args)?;
     let agent = BoundAgent::from_env(dev)?;
+    let (info, timed_out) = request_group(&agent, &request, args.wait).await?;
+    super::super::output(&info)?;
+    if timed_out {
+        bail!("Approval still pending; retry with the same --request-id");
+    }
+    if !matches!(
+        info.state,
+        SecretAccessState::Pending | SecretAccessState::Approved
+    ) {
+        bail!("Credential set was denied, expired, or invalidated");
+    }
+    Ok(())
+}
+
+pub(in crate::secret) async fn request_group(
+    agent: &BoundAgent,
+    request: &SecretAccessGroupCreateRequest,
+    wait: bool,
+) -> anyhow::Result<(SecretAccessGroupInfo, bool)> {
     eprintln!("Credential set {}: one approval card appears in this session. Reuse --request-id {} with identical arguments after a retry.", request.request_id, request.request_id);
     let mut info: SecretAccessGroupInfo = agent
         .client
-        .request(Method::POST, "/request-groups", Some(&request))
+        .request(Method::POST, "/request-groups", Some(request))
         .await
         .map_err(request_error)?;
-    validate(&agent, &request, &info)?;
+    validate(agent, request, &info)?;
     let expires = info
         .items
         .iter()
@@ -81,7 +100,7 @@ pub(super) async fn run(args: &RequestArgs, dev: bool) -> anyhow::Result<()> {
         .unwrap_or_default();
     let deadline = tokio::time::Instant::now() + remaining.min(MAX_WAIT);
     let mut timed_out = false;
-    while args.wait && info.state == SecretAccessState::Pending {
+    while wait && info.state == SecretAccessState::Pending {
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
         if remaining.is_zero() {
             timed_out = true;
@@ -99,23 +118,13 @@ pub(super) async fn run(args: &RequestArgs, dev: bool) -> anyhow::Result<()> {
                 break;
             }
         };
-        validate(&agent, &request, &next)?;
+        validate(agent, request, &next)?;
         for (previous, next) in info.items.iter().zip(&next.items) {
             validate_pinned_scope(previous, next)?;
         }
         info = next;
     }
-    super::super::output(&info)?;
-    if timed_out {
-        bail!("Approval still pending; retry with the same --request-id");
-    }
-    if !matches!(
-        info.state,
-        SecretAccessState::Pending | SecretAccessState::Approved
-    ) {
-        bail!("Credential set was denied, expired, or invalidated");
-    }
-    Ok(())
+    Ok((info, timed_out))
 }
 
 #[cfg(test)]
