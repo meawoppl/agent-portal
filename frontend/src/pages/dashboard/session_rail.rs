@@ -4,23 +4,21 @@
 //! parent page onclick closes it, toggle button uses stop_propagation.
 
 use super::types::PortalSession;
-use crate::components::{ForkDialog, RenameSessionDialog, ScheduleDialog, ShareDialog};
-use crate::portal_client::{PortalClient, SessionKey};
-use gloo::events::EventListener;
+use crate::portal_client::SessionKey;
 use gloo::timers::callback::Interval;
 use shared::PrRef;
 use std::collections::HashSet;
-use wasm_bindgen::JsCast;
 use web_sys::{Element, HtmlElement, WheelEvent};
 use yew::prelude::*;
 
 mod broadcast;
 mod menu;
+mod menu_host;
 mod pill;
 mod sparkline;
 use broadcast::{render_broadcasts, RailAxis};
 pub use broadcast::{AgentMessageBroadcast, BroadcastRef};
-use menu::SessionRailMenu;
+pub(crate) use menu_host::{use_session_menu, SessionMenuInputs};
 use pill::SessionPill;
 pub use sparkline::ActivityRef;
 
@@ -295,29 +293,22 @@ pub struct SessionRailProps {
     pub on_toggle_pause: Callback<(SessionKey, bool)>,
 }
 
-/// Render a menu dialog against the portal its session lives on, so every
-/// request it makes reaches that portal.
-fn on_session_portal(portal: &PortalClient, dialog: Html) -> Html {
-    html! {
-        <ContextProvider<PortalClient> context={portal.clone()}>
-            { dialog }
-        </ContextProvider<PortalClient>>
-    }
-}
-
 /// SessionRail - Horizontal carousel of session pills
 #[function_component(SessionRail)]
 pub fn session_rail(props: &SessionRailProps) -> Html {
     let rail_ref = use_node_ref();
-    let menu_session = use_state(|| None::<SessionKey>);
-    let menu_pos = use_state(|| (0i32, 0i32));
-    let stop_confirm = use_state(|| false);
-    let delete_confirm = use_state(|| false);
-    let copied_id = use_state(|| false);
-    let share_session = use_state(|| None::<PortalSession>);
-    let schedule_session = use_state(|| None::<PortalSession>);
-    let fork_session = use_state(|| None::<PortalSession>);
-    let rename_session = use_state(|| None::<PortalSession>);
+    let menu = use_session_menu(SessionMenuInputs {
+        sessions: props.sessions.clone(),
+        hidden: props.hidden_sessions.clone(),
+        connected: props.connected_sessions.clone(),
+        archive_enabled: props.archive_enabled,
+        on_stop: props.on_stop.clone(),
+        on_toggle_hidden: props.on_toggle_hidden.clone(),
+        on_toggle_pause: props.on_toggle_pause.clone(),
+        on_leave: props.on_leave.clone(),
+        on_delete: props.on_delete.clone(),
+        on_renamed: props.on_renamed.clone(),
+    });
 
     // Ticker that drives sparkline drift, the compaction flash and the
     // agent-message orbs. Accumulation happens externally via
@@ -414,131 +405,6 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
         })
     };
 
-    // Close dropdown when clicking anywhere outside the rail container
-    {
-        let menu_session = menu_session.clone();
-        let stop_confirm = stop_confirm.clone();
-        let delete_confirm = delete_confirm.clone();
-        let rail_ref = rail_ref.clone();
-        let is_open = (*menu_session).is_some();
-        use_effect_with(is_open, move |is_open| {
-            let listener = if *is_open {
-                let document = gloo::utils::document();
-                Some(EventListener::new(&document, "click", move |e| {
-                    if let Some(rail_el) = rail_ref.cast::<Element>() {
-                        if let Some(container) = rail_el.parent_element() {
-                            if let Some(target) =
-                                e.target().and_then(|t| t.dyn_into::<web_sys::Node>().ok())
-                            {
-                                if !container.contains(Some(&target)) {
-                                    menu_session.set(None);
-                                    stop_confirm.set(false);
-                                    delete_confirm.set(false);
-                                }
-                            }
-                        }
-                    }
-                }))
-            } else {
-                None
-            };
-            move || drop(listener)
-        });
-    }
-
-    let open_session: Option<PortalSession> = (*menu_session)
-        .and_then(|key| props.sessions.iter().find(|s| s.key == key))
-        .cloned();
-    let open_session_key = open_session.as_ref().map(|session| session.key);
-    let is_menu_session_hidden = open_session_key
-        .map(|key| props.hidden_sessions.contains(&key))
-        .unwrap_or(false);
-    let is_menu_session_connected = open_session_key
-        .map(|key| props.connected_sessions.contains(&key))
-        .unwrap_or(false);
-
-    let close_menu = {
-        let menu_session = menu_session.clone();
-        Callback::from(move |()| menu_session.set(None))
-    };
-
-    let set_stop_confirm = {
-        let stop_confirm = stop_confirm.clone();
-        Callback::from(move |value| stop_confirm.set(value))
-    };
-
-    let set_delete_confirm = {
-        let delete_confirm = delete_confirm.clone();
-        Callback::from(move |value| delete_confirm.set(value))
-    };
-
-    let set_copied_id = {
-        let copied_id = copied_id.clone();
-        Callback::from(move |value| copied_id.set(value))
-    };
-
-    let on_share = {
-        let share_session = share_session.clone();
-        Callback::from(move |session| share_session.set(Some(session)))
-    };
-
-    let on_schedule = {
-        let schedule_session = schedule_session.clone();
-        Callback::from(move |session| schedule_session.set(Some(session)))
-    };
-    let on_fork = {
-        let fork_session = fork_session.clone();
-        Callback::from(move |session| fork_session.set(Some(session)))
-    };
-
-    let on_rename = {
-        let rename_session = rename_session.clone();
-        Callback::from(move |session| rename_session.set(Some(session)))
-    };
-
-    let on_toggle_pill_menu = {
-        let menu_session = menu_session.clone();
-        let menu_pos = menu_pos.clone();
-        let stop_confirm = stop_confirm.clone();
-        let delete_confirm = delete_confirm.clone();
-        let copied_id = copied_id.clone();
-        Callback::from(move |(session_key, e): (SessionKey, MouseEvent)| {
-            e.stop_propagation();
-            stop_confirm.set(false);
-            delete_confirm.set(false);
-            copied_id.set(false);
-            if *menu_session == Some(session_key) {
-                menu_session.set(None);
-                return;
-            }
-            if let Some(el) = e.target_dyn_into::<HtmlElement>() {
-                let rect = el.get_bounding_client_rect();
-                let (viewport_width, viewport_height) = web_sys::window()
-                    .map(|window| {
-                        let width = window
-                            .inner_width()
-                            .ok()
-                            .and_then(|v| v.as_f64())
-                            .unwrap_or(800.0) as i32;
-                        let height = window
-                            .inner_height()
-                            .ok()
-                            .and_then(|v| v.as_f64())
-                            .unwrap_or(600.0) as i32;
-                        (width, height)
-                    })
-                    .unwrap_or((800, 600));
-                menu_pos.set(clamped_pill_menu_position(
-                    rect.left() as i32,
-                    rect.bottom() as i32,
-                    viewport_width,
-                    viewport_height,
-                ));
-            }
-            menu_session.set(Some(session_key));
-        })
-    };
-
     // Split sessions into visible vs hidden. Scheduled-task runs get no pill at
     // all; Settings ▸ Schedule lists and links to them.
     let (visible_indices, hidden_indices): (Vec<_>, Vec<_>) = props
@@ -570,25 +436,10 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
         | crate::pages::dashboard::RailPosition::Right => RailAxis::Vertical,
     };
 
-    // Container with position:relative holds the rail + dropdown.
-    // Dropdown uses position:fixed to escape rail overflow clipping.
-    // Dropdown uses display:none/.open pattern (same as send button).
-    // Clicking anywhere in the container closes the dropdown.
-    let on_container_click = {
-        let menu_session = menu_session.clone();
-        let stop_confirm = stop_confirm.clone();
-        let delete_confirm = delete_confirm.clone();
-        Callback::from(move |_: MouseEvent| {
-            if (*menu_session).is_some() {
-                menu_session.set(None);
-                stop_confirm.set(false);
-                delete_confirm.set(false);
-            }
-        })
-    };
-
+    // The container holds the rail and the menu; the dropdown uses
+    // position:fixed to escape the rail's overflow clipping.
     html! {
-        <div class="session-rail-container" onclick={on_container_click}>
+        <div class="session-rail-container">
             <div class="session-rail" ref={rail_ref.clone()} onwheel={on_wheel}>
                 {
                     render_pill_section(
@@ -597,7 +448,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                         0,
                         (&broadcast_senders, &broadcast_receivers),
                         *render_time,
-                        &on_toggle_pill_menu,
+                        &menu.toggle,
                         "visible",
                     )
                 }
@@ -633,7 +484,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                             visible_count,
                             (&broadcast_senders, &broadcast_receivers),
                             *render_time,
-                            &on_toggle_pill_menu,
+                            &menu.toggle,
                             "hidden",
                         )
                     } else {
@@ -642,75 +493,7 @@ pub fn session_rail(props: &SessionRailProps) -> Html {
                 }
             </div>
             { render_broadcasts(&props.broadcasts, &rail_ref, &rendered_sessions, rail_axis, *render_time) }
-            <SessionRailMenu
-                session={open_session}
-                position={*menu_pos}
-                is_hidden={is_menu_session_hidden}
-                is_connected={is_menu_session_connected}
-                confirming_stop={*stop_confirm}
-                confirming_delete={*delete_confirm}
-                archive_enabled={props.archive_enabled}
-                copied_id={*copied_id}
-                on_close={close_menu}
-                on_set_stop_confirm={set_stop_confirm}
-                on_set_delete_confirm={set_delete_confirm}
-                on_set_copied_id={set_copied_id}
-                on_stop={props.on_stop.clone()}
-                on_toggle_hidden={props.on_toggle_hidden.clone()}
-                on_toggle_pause={props.on_toggle_pause.clone()}
-                on_leave={props.on_leave.clone()}
-                on_delete={props.on_delete.clone()}
-                on_share={on_share}
-                on_schedule={on_schedule}
-                on_fork={on_fork}
-                on_rename={on_rename}
-            />
-            {
-                if let Some(ref session) = *rename_session {
-                    let rename_session = rename_session.clone();
-                    let on_close = Callback::from(move |_| rename_session.set(None));
-                    on_session_portal(
-                        &session.portal,
-                        html! { <RenameSessionDialog key={session.key.to_string()} session_id={session.info.id} current_name={session.info.session_name.clone()} {on_close} on_renamed={props.on_renamed.clone()} /> },
-                    )
-                } else { html! {} }
-            }
-            {
-                if let Some(ref session) = *share_session {
-                    let share_session = share_session.clone();
-                    let on_close = Callback::from(move |_| share_session.set(None));
-                    on_session_portal(
-                        &session.portal,
-                        html! { <ShareDialog session_id={session.info.id} {on_close} /> },
-                    )
-                } else {
-                    html! {}
-                }
-            }
-            {
-                if let Some(ref session) = *schedule_session {
-                    let schedule_session = schedule_session.clone();
-                    let on_close = Callback::from(move |_| schedule_session.set(None));
-                    on_session_portal(
-                        &session.portal,
-                        html! { <ScheduleDialog session={Some(session.info.clone())} {on_close} /> },
-                    )
-                } else {
-                    html! {}
-                }
-            }
-            {
-                if let Some(ref session) = *fork_session {
-                    let fork_session = fork_session.clone();
-                    let on_close = Callback::from(move |_| fork_session.set(None));
-                    on_session_portal(
-                        &session.portal,
-                        html! { <ForkDialog session={session.info.clone()} {on_close} /> },
-                    )
-                } else {
-                    html! {}
-                }
-            }
+            { menu.view }
         </div>
     }
 }

@@ -295,6 +295,21 @@ async def exercise(browser, base, device, name):
     # The new row actions fit the narrowest supported phone viewport.
     await page.set_viewport_size(dict(width=320, height=520))
     assert await page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+    # Each row's ⋯ opens the rail's session menu as a bottom action sheet:
+    # it covers the sheet, stays on screen, scrolls to its last action (stop
+    # and close come last) on a short phone, and a tap outside dismisses only
+    # the menu.
+    await dialog.get_by_role('button', name='Session actions for Alignment Tools', exact=True).click()
+    menu = page.locator('.ready-sheet .pill-dropdown.open')
+    await expect(menu).to_be_visible()
+    assert await menu.evaluate('(m) => { const r = m.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth; }')
+    last = menu.locator('.pill-menu-option').last
+    await last.scroll_into_view_if_needed()
+    await expect(last).to_be_in_viewport()
+    assert await menu.evaluate('(m) => { const r = m.getBoundingClientRect(); return m.contains(document.elementFromPoint(r.left + r.width / 2, r.top + 10)); }')
+    await page.mouse.click(10, 10)
+    await expect(menu).to_have_count(0)
+    await expect(dialog).to_be_visible()
     # Real breakpoint changes still replace the controls in both directions.
     await page.keyboard.press('Escape')
     await page.set_viewport_size(dict(width=769, height=900))
@@ -305,7 +320,7 @@ async def exercise(browser, base, device, name):
     await expect(page.locator('.session-rail')).to_have_count(0)
     assert not errors, errors
     await context.close()
-    print(f'PASS {name}: notification routing without reload, overflow-safe mobile layout, breakpoint changes, background completion, queue, approval, mute, precise receipt, draft, reload, narrow viewport, settings releases presence, setup guidance, settings draft, round-robin Next, retained reply acknowledgment, stale acknowledgment, retry')
+    print(f'PASS {name}: notification routing without reload, overflow-safe mobile layout, breakpoint changes, background completion, queue, approval, mute, precise receipt, draft, reload, narrow viewport, settings releases presence, setup guidance, settings draft, round-robin Next, retained reply acknowledgment, stale acknowledgment, retry, session menu')
 
 async def main(selected):
     server = http.server.ThreadingHTTPServer(('127.0.0.1',0),functools.partial(Handler,directory=str(ROOT/'frontend/dist')))

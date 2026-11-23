@@ -1002,7 +1002,12 @@ pub fn dashboard_page() -> Html {
                             unavailable={attention.unavailable}
                             mutation_failed={attention.mutation_failed} toast={attention.toast} on_dismiss={attention.dismiss.clone()}
                             on_select={on_mobile_select} on_mute={attention.mute.clone()}
-                            on_mark_read={attention.mark_read.clone()} on_settings={go_to_settings.clone()} />
+                            on_mark_read={attention.mark_read.clone()} on_settings={go_to_settings.clone()}
+                            connected={session_state.connected_sessions.clone()}
+                            archive_enabled={archive_enabled}
+                            on_stop={on_stop.clone()} on_toggle_hidden={on_toggle_hidden.clone()}
+                            on_toggle_pause={on_toggle_pause.clone()} on_leave={on_leave.clone()}
+                            on_delete={on_delete.clone()} on_renamed={sessions_hook.refresh.clone()} />
                     }
 
                     // Keyboard hints

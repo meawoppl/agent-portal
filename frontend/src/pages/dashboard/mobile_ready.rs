@@ -20,6 +20,16 @@ pub(super) struct Props {
     pub on_mute: Callback<(SessionKey, bool)>,
     pub on_mark_read: Callback<(SessionKey, uuid::Uuid)>,
     pub on_settings: Callback<MouseEvent>,
+    /// Session actions behind each row's ⋯ menu: the same menu the desktop
+    /// rail shows, since the phone layout has no rail.
+    pub connected: HashSet<SessionKey>,
+    pub archive_enabled: bool,
+    pub on_stop: Callback<SessionKey>,
+    pub on_toggle_hidden: Callback<SessionKey>,
+    pub on_toggle_pause: Callback<(SessionKey, bool)>,
+    pub on_leave: Callback<SessionKey>,
+    pub on_delete: Callback<SessionKey>,
+    pub on_renamed: Callback<()>,
 }
 #[function_component(MobileReady)]
 pub(super) fn mobile_ready(props: &Props) -> Html {
@@ -28,6 +38,18 @@ pub(super) fn mobile_ready(props: &Props) -> Html {
     let search = use_state(String::new);
     let trigger = use_node_ref();
     let sheet = use_node_ref();
+    let menu = super::session_rail::use_session_menu(super::session_rail::SessionMenuInputs {
+        sessions: props.sessions.clone(),
+        hidden: props.hidden.clone(),
+        connected: props.connected.clone(),
+        archive_enabled: props.archive_enabled,
+        on_stop: props.on_stop.clone(),
+        on_toggle_hidden: props.on_toggle_hidden.clone(),
+        on_toggle_pause: props.on_toggle_pause.clone(),
+        on_leave: props.on_leave.clone(),
+        on_delete: props.on_delete.clone(),
+        on_renamed: props.on_renamed.clone(),
+    });
     let close = {
         let open = open.clone();
         let trigger = trigger.clone();
@@ -184,8 +206,13 @@ pub(super) fn mobile_ready(props: &Props) -> Html {
                 <button class="ready-next" disabled={next.is_none()} aria-label="Next ready session" onclick={{let select=props.on_select.clone();Callback::from(move |_|{if let Some(i)=next{select.emit(i);}})}}>{"Next"}</button>
             </nav>
             if *open {
-                <div class="ready-backdrop" onclick={close.reform(|_|())}>
-                    <section class="ready-sheet" ref={sheet} role="dialog" aria-modal="true" aria-labelledby="ready-sheet-title" tabindex="-1" onclick={Callback::from(|e:MouseEvent|e.stop_propagation())}>
+                <div class="ready-backdrop" onclick={{
+                    // With a session menu open, a tap outside dismisses only
+                    // the menu, as it does inside the sheet.
+                    let close=close.clone();let close_menu=menu.close.clone();let menu_open=menu.is_open;
+                    Callback::from(move |_|if menu_open {close_menu.emit(())} else {close.emit(())})
+                }}>
+                    <section class="ready-sheet" ref={sheet} role="dialog" aria-modal="true" aria-labelledby="ready-sheet-title" tabindex="-1" onclick={{let close_menu=menu.close.clone();Callback::from(move |e:MouseEvent|{e.stop_propagation();close_menu.emit(());})}}>
                         <header><h2 id="ready-sheet-title">{"Sessions"}</h2><button aria-label="Close sessions" onclick={close.reform(|_|())}>{"Done"}</button></header>
                         <div class="ready-filters">
                             <button aria-pressed={(!*ready_only).to_string()} onclick={{let ready=ready_only.clone();Callback::from(move |_|ready.set(false))}}>{"All"}</button>
@@ -215,10 +242,12 @@ pub(super) fn mobile_ready(props: &Props) -> Html {
                                         <button class="ready-mark-read" disabled={!session.portal.can_write()} aria-label={format!("Mark reply read for {}",session.info.session_name)} onclick={{let mark_read=props.on_mark_read.clone();let key=session.key;Callback::from(move |_|mark_read.emit((key,reply_id)))}}>{"Mark read"}</button>
                                     }
                                     <button class="ready-mute" disabled={!session.portal.can_write()} aria-label={format!("{} notifications for {}",if muted{"Unmute"}else{"Mute"},session.info.session_name)} aria-pressed={muted.to_string()} onclick={{let mute=props.on_mute.clone();let key=session.key;Callback::from(move |_|mute.emit((key,!muted)))}}>{if muted{"Unmute"}else{"Mute"}}</button>
+                                    <button class="ready-menu" aria-haspopup="menu" aria-label={format!("Session actions for {}",session.info.session_name)} onclick={{let toggle=menu.toggle.clone();let key=session.key;Callback::from(move |e:MouseEvent|toggle.emit((key,e)))}}>{"⋯"}</button>
                                     </div>
                                 </article>}
                             })}
                         </div>
+                        { menu.view }
                         <footer><button onclick={{let close=close.clone();let settings=props.on_settings.clone();Callback::from(move |event|{close.emit(());settings.emit(event);})}}>{"Notification settings"}</button><span>{"Unread replies sync across your devices."}</span></footer>
                     </section>
                 </div>
