@@ -209,6 +209,7 @@ fn report(
     }
 }
 mod group;
+pub(super) use group::request_group;
 pub(super) async fn run(args: &RequestArgs, dev: bool) -> anyhow::Result<()> {
     if !args.credentials.is_empty() {
         return group::run(args, dev).await;

@@ -67,6 +67,19 @@ pub struct SecretListResponse {
     pub secrets: Vec<SecretMetadata>,
     pub can_manage_organization: bool,
 }
+/// Minimal catalog for an active bound agent. Values and ACL details are excluded.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AgentSecretDescription {
+    pub reference: String,
+    pub description: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AgentSecretListPage {
+    pub secrets: Vec<AgentSecretDescription>,
+    pub next: Option<Uuid>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecretCreateRequest {
     pub namespace: SecretNamespace,

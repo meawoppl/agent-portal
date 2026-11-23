@@ -695,12 +695,55 @@ mod tests {
             &human,
             "POST",
             "/api/secrets",
-            serde_json::json!({"namespace":"personal","name":"BOUND","value":"bound-value"}),
+            serde_json::json!({"namespace":"personal","name":"BOUND","description":"Deploys the staging service","value":"bound-value"}),
             Uuid::new_v4(),
         )
         .await;
         assert!(status.is_success(), "{secret}");
         let secret_id = secret["id"].as_str().unwrap();
+        let (status, _) = request(
+            &router,
+            &unrelated,
+            "POST",
+            "/api/secrets",
+            serde_json::json!({
+                "namespace":"personal","name":"PRIVATE",
+                "description":"Invisible to other users","value":"other-value"
+            }),
+            Uuid::new_v4(),
+        )
+        .await;
+        assert!(status.is_success());
+        let catalog_path = format!("/api/secrets/agent-catalog/{}", session.id);
+        let (status, catalog) = request(
+            &router,
+            &bound,
+            "GET",
+            &catalog_path,
+            serde_json::Value::Null,
+            Uuid::new_v4(),
+        )
+        .await;
+        assert!(status.is_success(), "{catalog}");
+        assert_eq!(
+            catalog,
+            serde_json::json!({
+                "secrets":[{"reference":"personal/BOUND","description":"Deploys the staging service"}],
+                "next":null
+            })
+        );
+        for token in [&normal, &wrong, &unrelated] {
+            let (status, _) = request(
+                &router,
+                token,
+                "GET",
+                &catalog_path,
+                serde_json::Value::Null,
+                Uuid::new_v4(),
+            )
+            .await;
+            assert!(!status.is_success());
+        }
         let version = secret_versions::table
             .filter(secret_versions::secret_id.eq(Uuid::parse_str(secret_id).unwrap()))
             .select(secret_versions::id)
