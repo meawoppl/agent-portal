@@ -828,17 +828,22 @@ async fn main() -> anyhow::Result<()> {
         eprintln!();
     }
 
-    // Apply pending updates, then auto-update on startup (unless --no-update)
-    match portal_update::startup_auto_update(
-        BINARY_PREFIX,
-        crate::BUILD_INFO.version,
-        !args.no_update,
-    )
-    .await
+    // Apply pending updates, then auto-update on startup unless disabled by
+    // `--no-update` or `"auto_update": false`. The installed service runs this
+    // check too, so any restart (reboot, crash, dashboard Restart) picks up a
+    // newer release.
+    let auto_update = !args.no_update && config.auto_update.unwrap_or(true);
+    match portal_update::startup_auto_update(BINARY_PREFIX, crate::BUILD_INFO.version, auto_update)
+        .await
     {
         Ok(true) => {
-            info!("Launcher updated, please restart");
-            std::process::exit(0);
+            info!("Launcher updated; restarting into the new binary");
+            match service::restart_launcher() {
+                service::RestartOutcome::Requested => service::await_replacement().await,
+                service::RestartOutcome::Failed => {
+                    warn!("Could not restart after updating; continuing with the running version")
+                }
+            }
         }
         Ok(false) => {}
         Err(e) => {
