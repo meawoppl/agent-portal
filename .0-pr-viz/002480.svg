@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200" viewBox="0 0 2000 1200"><rect width="2000" height="1200" fill="#1a1b26"/>
+<g font-family="Arial, sans-serif"><text x="55" y="52" font-size="24" fill="#a9b1d6">PR #2480 · Hand off a session to another agent when it runs out of usage</text>
+<text x="55" y="105" font-size="34" fill="#e6e9f5">Fork only continued the same agent, so work stalled when its usage ran out;</text>
+<text x="55" y="149" font-size="34" fill="#e6e9f5">now handoff starts another agent with the transcript and a summary written in time.</text>
+<path d="M55 177 H1945 M1000 205 V1120" stroke="#3d4666"/>
+<text x="75" y="235" font-size="22" font-weight="bold" letter-spacing="4" fill="#f7768e">BEFORE</text>
+<rect x="75" y="270" width="870" height="230" rx="16" fill="#1e202e" stroke="#3d4666"/>
+<text x="100" y="318" font-size="28" fill="#7aa2f7">POST /api/sessions/{id}/fork</text>
+<text x="100" y="378" font-size="25" fill="#c0caf5">Resumes the agent's native thread.</text>
+<text x="100" y="440" font-size="23" fill="#a9b1d6">The new session must be the source's own agent_type.</text>
+<rect x="75" y="560" width="870" height="230" rx="16" fill="#1e202e" stroke="#f7768e"/>
+<text x="100" y="608" font-size="28" fill="#7aa2f7">Usage limit reached</text>
+<text x="100" y="668" font-size="25" fill="#c0caf5">Claude cannot load a Codex thread, or the reverse.</text>
+<text x="100" y="730" font-size="23" fill="#f7768e">Wait for the reset, or restart the work by hand.</text>
+<rect x="75" y="850" width="870" height="230" rx="16" fill="#1e202e" stroke="#f7768e"/>
+<text x="100" y="898" font-size="28" fill="#7aa2f7">Warnings before the limit</text>
+<text x="100" y="958" font-size="25" fill="#c0caf5">Claude allowed_warning: shown, never acted on.</text>
+<text x="100" y="1020" font-size="23" fill="#f7768e">Codex AccountRateLimitsUpdated: dropped as Noop.</text>
+<text x="1055" y="235" font-size="22" font-weight="bold" letter-spacing="4" fill="#9ece6a">AFTER</text>
+<rect x="1055" y="270" width="870" height="230" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="318" font-size="28" fill="#7aa2f7">usage_warning -> request_handoff_summary</text>
+<text x="1080" y="378" font-size="25" fill="#c0caf5">Once per usage window, via the work queue.</text>
+<text x="1080" y="440" font-size="23" fill="#a9b1d6">Sent after the turn ends; held while throttled.</text>
+<rect x="1055" y="560" width="870" height="230" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="608" font-size="28" fill="#7aa2f7">POST /api/sessions/{id}/handoff</text>
+<text x="1080" y="668" font-size="25" fill="#c0caf5">Launches target_agent; note has the transcript</text>
+<text x="1080" y="702" font-size="25" fill="#c0caf5">commands and the latest ## Handoff summary.</text>
+<text x="1080" y="752" font-size="23" fill="#9ece6a">Source stopped and paused (stop_source).</text>
+<rect x="1055" y="850" width="870" height="230" rx="16" fill="#1e202e" stroke="#9ece6a"/>
+<text x="1080" y="898" font-size="28" fill="#7aa2f7">Hand off to Claude / Codex</text>
+<text x="1080" y="958" font-size="25" fill="#c0caf5">Bar shown by usage_limited_since_last_input.</text>
+<text x="1080" y="1020" font-size="23" fill="#a9b1d6">ForkDialog agent picker keeps the permission preset.</text>
+<text x="55" y="1172" font-size="22" fill="#a9b1d6">Not yet run against a live launcher. Model and permission preset carry over; other agent CLI flags do not.</text></g></svg>
