@@ -221,9 +221,47 @@ fn collapse_carriage_returns(raw: &str) -> std::borrow::Cow<'_, str> {
     std::borrow::Cow::Owned(collapsed)
 }
 
+/// Rewrite caret-notation escapes (`^[[32;1m`, the literal characters `^`
+/// and `[` that `cat -v`, `less` and similar tools print for the ESC byte)
+/// into real ESC sequences, so output that went through one of them still
+/// renders styled. Only a complete CSI shape is rewritten (`^[[`, then digits
+/// and `;`, then a letter), so a literal `^[[` in ordinary text, such as a
+/// regex like `^[[:alpha:]]`, is left alone.
+fn decode_caret_escapes(raw: &str) -> std::borrow::Cow<'_, str> {
+    if !raw.contains("^[[") {
+        return std::borrow::Cow::Borrowed(raw);
+    }
+    let bytes = raw.as_bytes();
+    let mut out = String::with_capacity(raw.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i..].starts_with(b"^[[") {
+            let params_end = i
+                + 3
+                + bytes[i + 3..]
+                    .iter()
+                    .take_while(|b| b.is_ascii_digit() || **b == b';')
+                    .count();
+            if bytes.get(params_end).is_some_and(u8::is_ascii_alphabetic) {
+                out.push_str("\x1b[");
+                out.push_str(&raw[i + 3..=params_end]);
+                i = params_end + 1;
+                continue;
+            }
+        }
+        // Copy one whole character; the sequences matched above are ASCII,
+        // so this never splits a multibyte character.
+        let ch_len = raw[i..].chars().next().map_or(1, char::len_utf8);
+        out.push_str(&raw[i..i + ch_len]);
+        i += ch_len;
+    }
+    std::borrow::Cow::Owned(out)
+}
+
 /// Parse `raw` into styled segments. Pure (no DOM), so it is unit-testable.
 fn parse(raw: &str) -> Vec<Segment> {
-    let raw = collapse_carriage_returns(raw);
+    let raw = decode_caret_escapes(raw);
+    let raw = collapse_carriage_returns(&raw);
     let bytes = raw.as_bytes();
     let len = bytes.len();
     let mut segments: Vec<Segment> = Vec::new();
@@ -322,6 +360,26 @@ mod tests {
 
     fn styled(raw: &str) -> Vec<Segment> {
         parse(raw)
+    }
+
+    /// Output that went through `cat -v` (or similar) carries the escapes as
+    /// the literal characters `^[`. They style the text like real ESC bytes.
+    #[test]
+    fn caret_notation_escapes_style_like_real_ones() {
+        let caret = styled("^[[32;1m    PASS^[[0m [ 0.007s] ^[[35;1mcrate^[[0m done");
+        let real = styled("\x1b[32;1m    PASS\x1b[0m [ 0.007s] \x1b[35;1mcrate\x1b[0m done");
+        assert_eq!(caret, real);
+        assert!(caret.iter().all(|seg| !seg.text.contains("^[")));
+        assert!(!caret[0].style.is_default(), "PASS is styled");
+    }
+
+    /// A literal `^[[` that isn't a complete escape stays as text: a regex
+    /// bracket expression, or a sequence cut off at the end.
+    #[test]
+    fn caret_text_that_is_not_an_escape_is_left_alone() {
+        let segs = styled("grep '^[[:alpha:]]' file ^[[12");
+        assert_eq!(segs.len(), 1);
+        assert_eq!(segs[0].text, "grep '^[[:alpha:]]' file ^[[12");
     }
 
     #[test]
