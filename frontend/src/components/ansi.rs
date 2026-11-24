@@ -224,9 +224,11 @@ fn collapse_carriage_returns(raw: &str) -> std::borrow::Cow<'_, str> {
 /// Rewrite caret-notation escapes (`^[[32;1m`, the literal characters `^`
 /// and `[` that `cat -v`, `less` and similar tools print for the ESC byte)
 /// into real ESC sequences, so output that went through one of them still
-/// renders styled. Only a complete CSI shape is rewritten (`^[[`, then digits
-/// and `;`, then a letter), so a literal `^[[` in ordinary text, such as a
-/// regex like `^[[:alpha:]]`, is left alone.
+/// renders styled. Only a complete SGR sequence is rewritten (`^[[`, then
+/// digits and `;`, then `m`): the parser drops every other CSI, so decoding
+/// one would delete text such as the `^[[a` in a regex like `^[[a-z]`. Text
+/// that happens to read `^[[1m` is still taken as an escape; tool output that
+/// shows caret notation is overwhelmingly `cat -v`-style, so that is accepted.
 fn decode_caret_escapes(raw: &str) -> std::borrow::Cow<'_, str> {
     if !raw.contains("^[[") {
         return std::borrow::Cow::Borrowed(raw);
@@ -242,7 +244,7 @@ fn decode_caret_escapes(raw: &str) -> std::borrow::Cow<'_, str> {
                     .iter()
                     .take_while(|b| b.is_ascii_digit() || **b == b';')
                     .count();
-            if bytes.get(params_end).is_some_and(u8::is_ascii_alphabetic) {
+            if bytes.get(params_end) == Some(&b'm') {
                 out.push_str("\x1b[");
                 out.push_str(&raw[i + 3..=params_end]);
                 i = params_end + 1;
@@ -373,13 +375,15 @@ mod tests {
         assert!(!caret[0].style.is_default(), "PASS is styled");
     }
 
-    /// A literal `^[[` that isn't a complete escape stays as text: a regex
-    /// bracket expression, or a sequence cut off at the end.
+    /// A literal `^[[` that isn't a complete SGR sequence stays as text: regex
+    /// bracket expressions (including `^[[a-z]`, which has a CSI-like shape),
+    /// or a sequence cut off at the end.
     #[test]
     fn caret_text_that_is_not_an_escape_is_left_alone() {
-        let segs = styled("grep '^[[:alpha:]]' file ^[[12");
+        let text = "grep '^[[:alpha:]]' '^[[a-z]' '^[[0-9]' file ^[[12";
+        let segs = styled(text);
         assert_eq!(segs.len(), 1);
-        assert_eq!(segs[0].text, "grep '^[[:alpha:]]' file ^[[12");
+        assert_eq!(segs[0].text, text);
     }
 
     #[test]

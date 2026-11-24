@@ -14,7 +14,7 @@
   <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2545 · Render caret-notation ANSI escapes in tool output</text>
 
   <text x="55" y="100" font-size="34" fill="#e6e9f5">Output that went through cat -v carried escapes as literal "^[" and rendered raw;</text>
-  <text x="55" y="140" font-size="34" fill="#e6e9f5">complete caret CSI sequences now decode to real ESC before ANSI parsing.</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">complete caret SGR sequences now decode to real ESC before ANSI parsing.</text>
   <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
 
   <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
@@ -50,8 +50,8 @@
   <g>
     <rect x="1040" y="410" width="880" height="150" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
     <text x="1064" y="452" font-size="26" fill="#9ece6a">decode_caret_escapes, then ansi::parse</text>
-    <text x="1064" y="492" font-size="23" fill="#9ece6a">"^[[" + digits/";" + letter  becomes  ESC [ ...</text>
-    <text x="1064" y="528" font-size="23" fill="#a9b1d6">"^[[:alpha:]]" or a cut-off "^[[12" stays text</text>
+    <text x="1064" y="492" font-size="23" fill="#9ece6a">"^[[" + digits/";" + "m" (SGR only)  becomes  ESC [ ...</text>
+    <text x="1064" y="528" font-size="23" fill="#a9b1d6">"^[[a-z]", "^[[:alpha:]]" or a cut-off "^[[12" stay text</text>
   </g>
   <line x1="1480" y1="560" x2="1480" y2="606" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
   <g>
