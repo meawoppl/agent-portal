@@ -64,7 +64,7 @@ dependencies = [
 
 [[package]]
 name = "agent-portal"
-version = "2.15.17"
+version = "2.15.18"
 dependencies = [
  "antigravity-session-lib",
  "anyhow",
@@ -105,7 +105,7 @@ dependencies = [
 
 [[package]]
 name = "agent-portal-mobile"
-version = "2.15.17"
+version = "2.15.18"
 dependencies = [
  "agent-portal-mobile-status-notification",
  "plist",
@@ -255,7 +255,7 @@ dependencies = [
 
 [[package]]
 name = "antigravity-session-lib"
-version = "2.15.17"
+version = "2.15.18"
 dependencies = [
  "antigravity-codes",
  "chrono",
@@ -283,7 +283,7 @@ checksum = "d301b3b94cb4b2f23d7917810addbbaff90738e0ca2be692bd027e70d7e0330c"
 
 [[package]]
 name = "aperture-frontend"
-version = "2.15.17"
+version = "2.15.18"
 dependencies = [
  "gloo 0.11.0",
  "js-sys",
@@ -306,7 +306,7 @@ dependencies = [
 
 [[package]]
 name = "archive-format"
-version = "2.15.17"
+version = "2.15.18"
 dependencies = [
  "chrono",
  "futures-util",
@@ -978,7 +978,7 @@ dependencies = [
 
 [[package]]
 name = "backend"
-version = "2.15.17"
+version = "2.15.18"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -1556,7 +1556,7 @@ dependencies = [
 
 [[package]]
 name = "claude-portal"
-version = "2.15.17"
+version = "2.15.18"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1588,7 +1588,7 @@ dependencies = [
 
 [[package]]
 name = "claude-session-lib"
-version = "2.15.17"
+version = "2.15.18"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1641,9 +1641,9 @@ dependencies = [
 
 [[package]]
 name = "codex-codes"
-version = "0.169.10"
+version = "0.169.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "84dc4a95ed1417f8efcb51634259c32ac375ec4e2004589dc78adc087302a8c7"
+checksum = "9a0aff61e826b2d78502e792bfeda67920ce9ca7ab08901b991bf397eaef18e2"
 dependencies = [
  "log",
  "serde",
@@ -1655,7 +1655,7 @@ dependencies = [
 
 [[package]]
 name = "codex-session-lib"
-version = "2.15.17"
+version = "2.15.18"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1782,9 +1782,9 @@ checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
 
 [[package]]
 name = "cookie"
-version = "0.18.1"
+version = "0.18.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ddef33a339a91ea89fb53151bd0a4689cfce27055c291dfa69945475d22c747"
+checksum = "d55f2d6c30eeec7d5c6f98bd4395d4abb1895629eab97ee6522d340623615f8a"
 dependencies = [
  "base64 0.22.1",
  "hmac 0.12.1",
@@ -2882,7 +2882,7 @@ dependencies = [
 
 [[package]]
 name = "frontend"
-version = "2.15.17"
+version = "2.15.18"
 dependencies = [
  "antigravity-codes",
  "base64 0.22.1",
@@ -4950,7 +4950,7 @@ dependencies = [
 
 [[package]]
 name = "muse-session-lib"
-version = "2.15.17"
+version = "2.15.18"
 dependencies = [
  "chrono",
  "claude-codes",
@@ -5199,7 +5199,7 @@ version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "51e219e79014df21a225b1860a479e2dcd7cbd9130f4defd4bd0e191ea31d67d"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.21.7",
  "chrono",
  "getrandom 0.2.17",
  "http 1.5.0",
@@ -5954,7 +5954,7 @@ dependencies = [
 
 [[package]]
 name = "portal-auth"
-version = "2.15.17"
+version = "2.15.18"
 dependencies = [
  "anyhow",
  "colored",
@@ -5969,7 +5969,7 @@ dependencies = [
 
 [[package]]
 name = "portal-stt"
-version = "2.15.17"
+version = "2.15.18"
 dependencies = [
  "anyhow",
  "aws-credential-types",
@@ -5998,7 +5998,7 @@ dependencies = [
 
 [[package]]
 name = "portal-update"
-version = "2.15.17"
+version = "2.15.18"
 dependencies = [
  "anyhow",
  "hex",
@@ -7181,7 +7181,7 @@ dependencies = [
 
 [[package]]
 name = "session-lib"
-version = "2.15.17"
+version = "2.15.18"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -7290,7 +7290,7 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "2.15.17"
+version = "2.15.18"
 dependencies = [
  "base64 0.22.1",
  "chrono",
