@@ -27,7 +27,7 @@ resolver = "2"
 # `major.minor.{git commit count}`, derived at executable boundaries by `build-support/identity.rs`
 # so no PR ever edits a version line (issue #1096). Runtime version =
 # each artifact's `BUILD_INFO.version`.
-version = "2.15.17"
+version = "2.15.18"
 edition = "2021"
 authors = ["Matthew Goodman <d3a6d0cec0c16f3e@inboxnegative.com>"]
 
@@ -79,7 +79,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # Claude Code integration
-claude-codes = { version = "2.1.331", default-features = false, features = ["types"] }
+claude-codes = { version = "2.1.332", default-features = false, features = ["types"] }
 
 # Muse CLI integration
 muse-codes = { version = "1.4.25", default-features = false, features = ["types"] }
