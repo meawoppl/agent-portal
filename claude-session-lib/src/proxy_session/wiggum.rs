@@ -699,6 +699,7 @@ mod tests {
             local_command: None,
             fast_mode_disabled_reason: None,
             begun_message_ids: None,
+            tool_hold_detail: None,
         }
     }
 
