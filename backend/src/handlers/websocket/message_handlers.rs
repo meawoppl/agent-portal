@@ -256,20 +256,6 @@ pub fn handle_agent_output(ctx: AgentOutputContext<'_>, frame: AgentOutputFrame)
                     session_name: String::new(),
                 });
         }
-        if let (Some(window), Some(key)) = (
-            shared::usage_limit::usage_warning(effect.agent_type, &effect.content),
-            ctx.session_key,
-        ) {
-            if let Err(e) = crate::handlers::handoff_summary::request_handoff_summary(
-                ctx.db_pool,
-                ctx.session_manager,
-                key.as_str(),
-                session_id,
-                window,
-            ) {
-                warn!("Could not queue a handoff summary request for {session_id}: {e:?}");
-            }
-        }
         ctx.session_manager.queue_truncation(session_id);
         if let Some(seq) = seq {
             ctx.session_manager.record_ack_seq(session_id, seq);

@@ -606,10 +606,6 @@ fn pretty_json(value: &serde_json::Value) -> Option<String> {
 }
 
 pub(crate) fn edit_stack_prompt_content(item: &EditStackItem) -> String {
-    // Portal's own requests are written for the agent already.
-    if super::handoff_summary::is_summary_request(item.source.as_ref()) {
-        return item.body.clone();
-    }
     let mut content = String::new();
     content.push_str("Portal edit-stack annotation.\n\n");
     content.push_str(&format!("Title: {}\n\n", item.title));

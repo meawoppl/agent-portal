@@ -195,7 +195,15 @@ pub(crate) fn activity_signal(
     }
     if agent == "claude" && kind == "assistant" {
         if let Ok(message) = serde_json::from_str::<shared::AssistantMessage>(content) {
-            if shared::usage_limit::is_claude_usage_refusal(&message) {
+            // Only the top-level assistant's own typed error is a signal.
+            // Subagent limits and quoted content do not throttle this session.
+            if message.parent_tool_use_id.is_none()
+                && message.agent_id.is_none()
+                && matches!(
+                    message.api_error.as_deref(),
+                    Some("usage_limit_reached" | "model_requires_usage_credits")
+                )
+            {
                 return Some(Throttled);
             }
         }

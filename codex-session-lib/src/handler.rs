@@ -21,10 +21,7 @@ use session_lib::{AgentOutput, AgentOutputClassifier};
 use tokio::sync::mpsc;
 
 use crate::classifier::CodexClassifier;
-use crate::events::{
-    to_raw_output, CodexUsageEvent, ErrorEvent, PassthroughEvent, TurnCompletedEvent,
-};
-use crate::rate_limits::RateLimitTracker;
+use crate::events::{to_raw_output, CodexUsageEvent, ErrorEvent, TurnCompletedEvent};
 
 /// Classify a Codex app-server ServerMessage and emit neutral
 /// [`IoEvent::Classified`] decisions. Returns (event_sent_ok, turn_ended).
@@ -32,31 +29,7 @@ pub(crate) fn handle_codex_server_message(
     msg: ServerMessage,
     event_tx: &mpsc::UnboundedSender<IoEvent>,
     latest_token_usage: Option<&CodexUsageEvent>,
-    rate_limits: &mut RateLimitTracker,
 ) -> (bool, bool) {
-    // Rate-limit updates are sparse and arrive with every token count, so
-    // they are merged per limit and forwarded once per warning window.
-    let msg = match msg {
-        ServerMessage::Notification(Notification::AccountRateLimitsUpdated(p)) => {
-            let Some(merged) = rate_limits.observe(p.rate_limits) else {
-                return (true, false);
-            };
-            let params = codex_codes::AccountRateLimitsUpdatedNotification {
-                rate_limits: merged,
-            };
-            let event = PassthroughEvent::new(
-                shared::usage_limit::CODEX_RATE_LIMITS_EVENT,
-                serde_json::to_value(&params).unwrap_or(serde_json::Value::Null),
-            );
-            let sent = event_tx
-                .send(IoEvent::Classified(AgentOutput::Visible(to_raw_output(
-                    &event,
-                ))))
-                .is_ok();
-            return (sent, false);
-        }
-        other => other,
-    };
     // Turn completion stays here: it carries token usage + drives per-turn
     // metrics, which is turn/token orchestration owned by the I/O task.
     // `CodexClassifier` deliberately returns `Noop` for it, so shape the
@@ -129,8 +102,7 @@ mod tests {
         usage: Option<&CodexUsageEvent>,
     ) -> (Vec<AgentOutput>, bool, bool) {
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let (sent, ended) =
-            handle_codex_server_message(msg, &tx, usage, &mut RateLimitTracker::default());
+        let (sent, ended) = handle_codex_server_message(msg, &tx, usage);
         drop(tx);
         let mut out = Vec::new();
         while let Ok(ev) = rx.try_recv() {
@@ -140,39 +112,6 @@ mod tests {
             }
         }
         (out, sent, ended)
-    }
-
-    #[test]
-    fn sparse_rate_limit_updates_reach_the_backend_as_one_complete_warning() {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let mut tracker = RateLimitTracker::default();
-        let update = |value: serde_json::Value| {
-            ServerMessage::Notification(Notification::AccountRateLimitsUpdated(
-                serde_json::from_value(json!({ "rateLimits": value })).unwrap(),
-            ))
-        };
-        for value in [
-            json!({"primary": {"usedPercent": 70, "resetsAt": 7}}),
-            json!({"primary": {"usedPercent": 95}}),
-            json!({"primary": {"usedPercent": 99}}),
-        ] {
-            assert_eq!(
-                handle_codex_server_message(update(value), &tx, None, &mut tracker),
-                (true, false)
-            );
-        }
-        drop(tx);
-        let mut frames = Vec::new();
-        while let Ok(IoEvent::Classified(AgentOutput::Visible(raw))) = rx.try_recv() {
-            frames.push(serde_json::to_value(raw).unwrap());
-        }
-        let [frame] = frames.as_slice() else {
-            panic!("expected exactly one forwarded frame, got {frames:?}");
-        };
-        assert_eq!(
-            shared::usage_limit::usage_warning(shared::AgentType::Codex, frame).as_deref(),
-            Some("codex:codex:primary:7")
-        );
     }
 
     #[test]
