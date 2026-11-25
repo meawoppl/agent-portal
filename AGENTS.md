@@ -567,6 +567,15 @@ PR ready or suppress the advisory just to make CI green.
 
 ## Important Constraints
 
+### No session handoff or injected summary prompts
+
+Don't build features that hand a session to another agent, or that queue
+"write a summary before you run out" prompts into a running session. Both
+were tried (#2480) and removed (#2548) at the owner's request: they interrupt
+sessions, and carrying context forward is what the agent's own compaction is
+for. Usage limits should surface as status (Throttled, reset time), not as
+Portal-authored prompts.
+
 ### WASM Compatibility Checklist
 
 When adding dependencies to `shared/`:

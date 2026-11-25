@@ -407,35 +407,6 @@ pub(super) fn parse_iso_ms_utc(iso: &str) -> f64 {
 /// shared [`ActivityTag`] so non-Claude sessions get colored sparklines
 /// with the same palette as Claude (assistant=blue, result=orange, error=red).
 /// Returns [`ActivityTag::Unknown`] when nothing parses.
-/// The agent's latest turn was refused for lack of usage, and nothing has
-/// happened since: no human or agent input, and no fresh agent output. Scans
-/// newest-first and stops at the first decisive frame, so an old refusal
-/// earlier in the transcript never re-triggers the handoff offer.
-pub(super) fn usage_limited_since_last_input(
-    messages: &[RenderedMessage],
-    agent: shared::AgentType,
-) -> bool {
-    for message in messages.iter().rev() {
-        if matches!(
-            message.meta.as_ref().and_then(|meta| meta.source.as_ref()),
-            Some(shared::MessageSource::Human { .. } | shared::MessageSource::Agent { .. })
-        ) {
-            return false;
-        }
-        // Checked before the tag: Claude's refusal is itself an assistant frame.
-        if shared::usage_limit::is_usage_limit_refusal(agent, message.content()) {
-            return true;
-        }
-        if matches!(
-            classify_output_msg_type(message.content()),
-            ActivityTag::User | ActivityTag::Assistant
-        ) {
-            return false;
-        }
-    }
-    false
-}
-
 pub(super) fn classify_output_msg_type(output: &str) -> ActivityTag {
     if let Ok(claude_msg) = serde_json::from_str::<shared::ClaudeOutput>(output) {
         let mut tag = match claude_msg.message_type().as_str() {
@@ -2434,54 +2405,5 @@ mod edit_stack_dispatch_tests {
                 "an explicit Send next can resume from a stopped turn"
             );
         }
-    }
-}
-
-#[cfg(test)]
-mod usage_limit_handoff_tests {
-    use super::*;
-    use shared::AgentType;
-
-    const CODEX_LIMIT: &str = r#"{"type":"error","message":"You've hit your usage limit","codexErrorInfo":"usageLimitExceeded"}"#;
-    const CODEX_COMPLETED: &str = r#"{"type":"turn.completed","status":"failed","error":{"message":"limit","codexErrorInfo":"usageLimitExceeded"}}"#;
-    const CODEX_REPLY: &str =
-        r#"{"type":"item.completed","item":{"id":"m","type":"agent_message","text":"done"}}"#;
-    const USER: &str = r#"{"type":"user","content":"continue"}"#;
-    const CLAUDE_LIMIT: &str = r#"{"type":"assistant","session_id":"s","api_error":"usage_limit_reached","message":{"id":"m","type":"message","role":"assistant","model":"<synthetic>","content":[]}}"#;
-    const CLAUDE_RESULT: &str = r#"{"type":"result","subtype":"error_during_execution","is_error":true,"duration_ms":1,"duration_api_ms":1,"num_turns":1,"session_id":"s","total_cost_usd":0}"#;
-
-    fn msgs(frames: &[&str]) -> Vec<RenderedMessage> {
-        frames
-            .iter()
-            .map(|f| RenderedMessage::new(f.to_string(), None))
-            .collect()
-    }
-
-    #[test]
-    fn latest_refusal_offers_handoff_through_its_trailing_completion() {
-        assert!(usage_limited_since_last_input(
-            &msgs(&[USER, CODEX_REPLY, USER, CODEX_LIMIT, CODEX_COMPLETED]),
-            AgentType::Codex
-        ));
-        assert!(usage_limited_since_last_input(
-            &msgs(&[USER, CLAUDE_LIMIT, CLAUDE_RESULT]),
-            AgentType::Claude
-        ));
-    }
-
-    #[test]
-    fn new_input_or_output_after_a_refusal_clears_the_offer() {
-        assert!(!usage_limited_since_last_input(
-            &msgs(&[CODEX_LIMIT, USER]),
-            AgentType::Codex
-        ));
-        assert!(!usage_limited_since_last_input(
-            &msgs(&[CODEX_LIMIT, CODEX_REPLY]),
-            AgentType::Codex
-        ));
-        assert!(!usage_limited_since_last_input(
-            &msgs(&[]),
-            AgentType::Codex
-        ));
     }
 }
