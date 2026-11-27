@@ -82,6 +82,57 @@
     color: var(--accent);
 }
 
+.message-type-badge.system.warning {
+    background: rgba(224, 175, 104, 0.2);
+    color: var(--warning);
+}
+
+.message-type-badge.system.error {
+    background: rgba(247, 118, 142, 0.2);
+    color: var(--error);
+}
+
+/* Informational notices from the agent CLI: a headline, then its detail. */
+.system-notice {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+}
+
+.system-notice.warning {
+    border-left: 3px solid var(--warning);
+}
+
+.system-notice.error {
+    border-left: 3px solid var(--error);
+}
+
+.system-notice-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.system-notice-headline {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.system-notice.warning .system-notice-headline {
+    color: var(--warning);
+}
+
+.system-notice.error .system-notice-headline {
+    color: var(--error);
+}
+
+.system-notice-detail {
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+}
+
 .message-type-badge.assistant {
     background: rgba(158, 206, 106, 0.2);
     color: var(--success);
