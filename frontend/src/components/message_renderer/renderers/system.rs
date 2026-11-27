@@ -60,15 +60,21 @@ pub fn render_system_message(msg: &shared::SystemMessage, timestamp: Option<&str
             };
             Some((kind, outcome))
         });
+        let (headline, detail) = split_notice(&info.content);
         return html! {
-            <div class={classes!("claude-message", "system-message", level)} title={timestamp.unwrap_or_default().to_string()}>
-                <span class="message-type-badge system">{ level }</span>
-                if let Some((kind, outcome)) = outcome {
-                    <div>{ kind }</div>
-                    if let Some(reason) = &outcome.reason { <div>{ reason }</div> }
-                    <div>{ if outcome.prompt_kept { "Prompt kept in conversation" } else { "Prompt not kept in conversation" } }</div>
-                }
-                <div>{ info.content }</div>
+            <div class={classes!("claude-message", "system-message", "system-notice", level)} title={timestamp.unwrap_or_default().to_string()}>
+                <span class={classes!("message-type-badge", "system", level)}>{ level }</span>
+                <div class="system-notice-body">
+                    if let Some((kind, outcome)) = outcome {
+                        <div>{ kind }</div>
+                        if let Some(reason) = &outcome.reason { <div>{ reason }</div> }
+                        <div>{ if outcome.prompt_kept { "Prompt kept in conversation" } else { "Prompt not kept in conversation" } }</div>
+                    }
+                    <div class="system-notice-headline">{ headline }</div>
+                    if let Some(detail) = detail {
+                        <div class="system-notice-detail">{ detail }</div>
+                    }
+                </div>
             </div>
         };
     }
@@ -85,6 +91,18 @@ pub fn render_system_message(msg: &shared::SystemMessage, timestamp: Option<&str
         <div class="claude-message system-message compact" title={timestamp.unwrap_or_default().to_string()}>
             <span class="message-type-badge system">{ subtype }</span>
         </div>
+    }
+}
+
+/// The CLI writes a notice as a headline line followed by its detail; split
+/// them so the headline can stand out instead of running into the detail.
+fn split_notice(content: &str) -> (&str, Option<&str>) {
+    match content.trim().split_once('\n') {
+        Some((headline, detail)) => {
+            let detail = detail.trim();
+            (headline.trim(), (!detail.is_empty()).then_some(detail))
+        }
+        None => (content.trim(), None),
     }
 }
 
@@ -458,6 +476,19 @@ mod tests {
         }));
 
         assert!(!is_compaction_beginning(&msg));
+    }
+
+    #[test]
+    fn notice_splits_headline_from_detail() {
+        assert_eq!(
+            split_notice("Claude can't use thinking\nEarlier thinking was written elsewhere.\n"),
+            (
+                "Claude can't use thinking",
+                Some("Earlier thinking was written elsewhere.")
+            )
+        );
+        assert_eq!(split_notice("  one line only \n"), ("one line only", None));
+        assert_eq!(split_notice("headline\n  \n"), ("headline", None));
     }
 
     #[test]

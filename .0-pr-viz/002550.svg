@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200"
+     font-family="'Segoe UI', 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif">
+  <rect x="0" y="0" width="2000" height="1200" fill="#16161e"/>
+
+  <defs>
+    <marker id="arr-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f7768e"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9ece6a"/>
+    </marker>
+  </defs>
+
+  <text x="55" y="52" font-size="24" letter-spacing="1" fill="#565f89">PR #2550 · Colour warning notices and separate their headline</text>
+
+  <text x="55" y="100" font-size="34" fill="#e6e9f5">CLI warning and error notices rendered like info: a blue badge and one run-on line;</text>
+  <text x="55" y="140" font-size="34" fill="#e6e9f5">they now carry their level's colour and show the headline apart from the detail.</text>
+  <line x1="55" y1="165" x2="1945" y2="165" stroke="#3d4666" stroke-width="1"/>
+
+  <text x="55" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#f7768e">BEFORE</text>
+  <text x="1040" y="212" font-size="22" font-weight="700" letter-spacing="4" fill="#9ece6a">AFTER</text>
+  <line x1="1000" y1="190" x2="1000" y2="1135" stroke="#3d4666" stroke-width="1.5" stroke-dasharray="2 6"/>
+
+  <!-- BEFORE -->
+  <g>
+    <rect x="80" y="240" width="840" height="120" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="104" y="282" font-size="26" fill="#7aa2f7">KnownSystemEvent::Informational</text>
+    <text x="104" y="322" font-size="23" fill="#a9b1d6">level "warning", content "headline\ndetail"</text>
+  </g>
+  <line x1="500" y1="360" x2="500" y2="406" stroke="#f7768e" stroke-width="1.5" marker-end="url(#arr-red)"/>
+  <g>
+    <rect x="80" y="410" width="840" height="150" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+    <text x="104" y="452" font-size="26" fill="#7aa2f7">message-type-badge system</text>
+    <text x="104" y="492" font-size="23" fill="#f7768e">same blue badge for info, warning and error</text>
+    <text x="104" y="528" font-size="23" fill="#f7768e">content in one div: newline collapses</text>
+  </g>
+  <line x1="500" y1="560" x2="500" y2="606" stroke="#f7768e" stroke-width="1.5" marker-end="url(#arr-red)"/>
+  <g>
+    <rect x="80" y="610" width="840" height="150" fill="#1e202e" stroke="#f7768e" stroke-width="2"/>
+    <text x="104" y="652" font-size="26" fill="#7aa2f7">WARNING</text>
+    <text x="104" y="692" font-size="23" fill="#a9b1d6">Claude can't use thinking from another</text>
+    <text x="104" y="726" font-size="23" fill="#a9b1d6">organization Claude's earlier thinking was...</text>
+  </g>
+
+  <!-- AFTER -->
+  <g>
+    <rect x="1040" y="240" width="880" height="120" fill="#1e202e" stroke="#3d4666" stroke-width="1.5"/>
+    <text x="1064" y="282" font-size="26" fill="#7aa2f7">KnownSystemEvent::Informational</text>
+    <text x="1064" y="322" font-size="23" fill="#a9b1d6">level "warning", content "headline\ndetail"</text>
+  </g>
+  <line x1="1480" y1="360" x2="1480" y2="406" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+  <g>
+    <rect x="1040" y="410" width="880" height="150" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <text x="1064" y="452" font-size="26" fill="#9ece6a">split_notice, system-notice + level class</text>
+    <text x="1064" y="492" font-size="23" fill="#a9b1d6">badge and left edge: orange warning, red error</text>
+    <text x="1064" y="528" font-size="23" fill="#a9b1d6">first line is the headline, the rest is detail</text>
+  </g>
+  <line x1="1480" y1="560" x2="1480" y2="606" stroke="#9ece6a" stroke-width="1.5" marker-end="url(#arr-green)"/>
+  <g>
+    <rect x="1040" y="610" width="880" height="150" fill="#1e202e" stroke="#9ece6a" stroke-width="2"/>
+    <rect x="1040" y="610" width="6" height="150" fill="#e0af68"/>
+    <text x="1064" y="652" font-size="26" fill="#e0af68">WARNING</text>
+    <text x="1064" y="692" font-size="23" font-weight="700" fill="#e0af68">Claude can't use thinking from another organization</text>
+    <text x="1064" y="726" font-size="23" fill="#565f89">Claude's earlier thinking was written while...</text>
+  </g>
+
+  <text x="55" y="1172" font-size="22" fill="#565f89">Scope: informational system notices only; info-level notices keep the blue badge and neutral headline.</text>
+</svg>
